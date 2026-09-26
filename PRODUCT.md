@@ -41,6 +41,7 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 | Mac and Windows are both in v1 | Install is one pasted command, then a launcher. Pinned images are pulled, not built. Updates happen in the app and can be rolled back. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) |
 | The app repo and images are public; the lab repos are private | No environment-specific details in public code. GitHub sign-in goes through an org GitHub App scoped to the two private repos |
 | One complete v1 release for colleagues | We build in internal milestones and test them ourselves. Colleagues keep using the prototype until v1 is ready |
+| Outside AI tools can connect (MCP server + CLI) | They get full access on the **practice** (synthetic-only) instance and **metadata only** on real data. The app enforces this per token. Used to build, test, and automate DataLab |
 | Export is a user action only | The one exception is a workflow the user approved, which writes to its configured destination |
 | PHI is allowed on local disks | Users' machines are PHI-approved. Cleanup of internal data exists for tidiness, not as a safety control |
 | Exports go to user-chosen local folders | Dated subfolders with a manifest, so no mess is left behind |
@@ -119,6 +120,12 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 - It holds a small **evaluation set** of representative tasks, re-run
   whenever prompts, skills, or the Codex version change.
 - It powers a **practice mode** for new colleagues and PHI-free demos.
+
+**Outside AI connectors**
+- An MCP server and a `datalab` CLI, over the same API as the UI.
+- Scoped tokens: `full` on the practice profile, `metadata` on real data,
+  enforced on every route.
+- A practice profile with its own data folder and the synthetic backend.
 
 **Docs**
 - README (install and run), USER_GUIDE, SAFETY, and ARCHITECTURE.

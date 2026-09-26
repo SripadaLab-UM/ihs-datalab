@@ -68,6 +68,19 @@ returns an answer and is then deleted.
 8. **You can check all of this.**
    The **Safety check** screen tests these promises live and shows the results.
 
+## Outside AI tools
+
+Other AI tools, such as Claude, can connect to DataLab to use and test it.
+They are **not** approved for study data, so what they can reach depends on
+which DataLab they connect to:
+
+- The **practice** DataLab has only synthetic data. Outside tools can do
+  everything there.
+- A **real-data** DataLab gives outside tools metadata only: app health,
+  Safety check results, the knowledge base, and workflow definitions. They
+  never get conversations, query results, or outputs. Connections are off
+  unless you turn them on.
+
 ## What DataLab does *not* promise
 
 - **The AI sees the data you give it.** That is the point, and U-M GPT is the
@@ -174,6 +187,25 @@ access. It never gains it.
   from a data session reaches them only after a person has reviewed and saved
   it.
 
+### Outside AI connectors
+
+- DataLab exposes its features to outside tools through an MCP server and a
+  `datalab` CLI. Both use the same API as the UI, and every request carries a
+  connector token.
+- The host app enforces each token's scope on every request. The client is
+  never trusted to limit itself.
+  - **Practice profile** (synthetic backend only): full scope.
+  - **Real profile:** off by default. It can be enabled with scope
+    `metadata`, which allows health, Safety check results, knowledge-base
+    pages, workflow definitions, and diagnostics. Every endpoint that returns
+    conversation content, query results, outputs, or run files rejects a
+    `metadata` token.
+- The practice and real profiles have separate data folders, and the practice
+  profile can only use the synthetic backend. A practice instance therefore
+  never holds real data.
+- The Safety check verifies that a `metadata` token is refused by every
+  content endpoint.
+
 ### Work preservation and storage
 
 - Conversations, run history, and settings live in one local database in
@@ -207,3 +239,4 @@ Oracle.
 | Helper gets only the approved text | A helper container's mounts and inputs contain only the approved question |
 | Database access is read-only | Account privileges contain no write grants, and the session is read-only |
 | Right agent image | The image digest matches the pinned release |
+| Outside connectors can't read content | A `metadata`-scope token is refused by every content endpoint |

@@ -83,6 +83,7 @@ src/datalab/
   workflows/        workflow file model and validation, runner, run records
   exports/          destinations, manifests, conversation report renderer
   safety/           the Safety check tests
+  connect/          outside-tool connector: tokens, scopes, MCP server
   credentials.py    keychain get/set
 ```
 
@@ -251,6 +252,29 @@ src/datalab/
   templates.
 - CI builds all images and publishes them to the public GitHub Container
   Registry. Each release lists their digests.
+
+### 11. Profiles and outside connectors
+
+- **Profiles.** `datalab` runs with a profile. **real** (the default) uses
+  Oracle. **practice** uses the synthetic backend only. Each profile has its
+  own data folder, port, and keychain namespace, and they never share state.
+  Practice mode for new colleagues is simply the practice profile.
+- **Connectors.** An MCP server (`/connect/mcp`) and a `datalab` CLI let
+  outside AI tools, such as Claude Code or a host-side Codex, drive DataLab
+  through the same API as the UI. Their tools cover:
+  - conversations: start, send, read events, stop;
+  - SQL Playground queries;
+  - workflows: run and read run records;
+  - knowledge pages;
+  - the Safety check and diagnostics.
+- **Scopes.** Connector tokens are created in Settings and carry a scope,
+  `full` or `metadata`. A single dependency on every API route enforces it.
+  `full` is only possible in the practice profile. This is also how we build
+  and test DataLab: an outside agent drives the practice instance end to end,
+  including the UI in a browser.
+- The connector MCP endpoint is distinct from the agent-facing `/mcp`. The
+  agent-facing endpoint is reachable only through a session's gateway. The
+  connector endpoint is reachable only on the host loopback.
 
 ## Repository layout
 
