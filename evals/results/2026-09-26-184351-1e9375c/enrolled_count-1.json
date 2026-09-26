@@ -1,0 +1,45 @@
+{
+  "task": "enrolled_count",
+  "mode": "extraction",
+  "prompt": "How many participants are enrolled in the 2025 cohort?",
+  "tests": "screened-but-not-enrolled rows in STUDYPARTICIPANTS",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled count",
+      "passed": true,
+      "detail": "expected 136 enrolled (122 if withdrawals are excluded, and said so); 150 also counts people screened but never enrolled"
+    }
+  ],
+  "answer": "I understood this as: count enrolled participants in the `IHS_2025` cohort.\n\nAnswer: **136 participants are enrolled** in the 2025 cohort.\n\nI used `IHS_2025.STUDYPARTICIPANTS`. Catalog evidence showed this table has `PARTICIPANTIDENTIFIER`, `PARTICIPANTID`, and `ENROLLMENTDATE`; `describe_table` says `SECONDARYIDENTIFIER` is the \u201cStudy participant ID\u201d and is `NULL` for people screened but never enrolled. So I treated non-null `SECONDARYIDENTIFIER` as enrolled.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS roster_rows,\n  COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_ids,\n  COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers\nFROM IHS_2025.STUDYPARTICIPANTS\n```\n\nResult row count: `1` summary row  \nResult file: `/data/oracle/q_20260926T184411_4d2a31.csv`\n\nKey values: `150` roster rows, `136` distinct study participant IDs. Caveat: this count excludes screened/not-enrolled people per the table comment.",
+  "finished": true,
+  "seconds": 24.18100094795227,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS roster_rows,\n  COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_ids,\n  COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers\nFROM IHS_2025.STUDYPARTICIPANTS"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 78263,
+        "inputTokens": 77094,
+        "cachedInputTokens": 52736,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1169,
+        "reasoningOutputTokens": 351
+      },
+      "last": {
+        "totalTokens": 13929,
+        "inputTokens": 13519,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 410,
+        "reasoningOutputTokens": 117
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_1c6e88e64ac39e50",
+  "attempt": 1
+}

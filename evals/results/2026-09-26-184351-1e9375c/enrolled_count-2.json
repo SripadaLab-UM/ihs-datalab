@@ -1,0 +1,45 @@
+{
+  "task": "enrolled_count",
+  "mode": "extraction",
+  "prompt": "How many participants are enrolled in the 2025 cohort?",
+  "tests": "screened-but-not-enrolled rows in STUDYPARTICIPANTS",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled count",
+      "passed": true,
+      "detail": "expected 136 enrolled (122 if withdrawals are excluded, and said so); 150 also counts people screened but never enrolled"
+    }
+  ],
+  "answer": "The 2025 cohort has **136 enrolled participants**.\n\nI interpreted \u201cenrolled\u201d as participants with a non-null study participant ID, based on the column comment in `IHS_2025.STUDYPARTICIPANTS`: `SECONDARYIDENTIFIER` is \u201cStudy participant ID. NULL for people who were screened but never enrolled.\u201d\n\nCatalog evidence:\n`search_catalog` found `IHS_2025.STUDYPARTICIPANTS` with `PARTICIPANTIDENTIFIER`, `PARTICIPANTID`, `ENROLLMENTDATE`, and `SECONDARYIDENTIFIER`.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants,\n  COUNT(*) - COUNT(SECONDARYIDENTIFIER) AS rows_without_study_participant_id,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers\nFROM IHS_2025.STUDYPARTICIPANTS\n```\n\nResult file: `/data/oracle/q_20260926T184433_6b81ba.csv`\n\nResults: 150 total participant-table rows, 136 distinct enrolled participants, and 14 rows without a study participant ID.",
+  "finished": true,
+  "seconds": 21.158312797546387,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants,\n  COUNT(*) - COUNT(SECONDARYIDENTIFIER) AS rows_without_study_participant_id,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers\nFROM IHS_2025.STUDYPARTICIPANTS"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 67400,
+        "inputTokens": 66221,
+        "cachedInputTokens": 49664,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1179,
+        "reasoningOutputTokens": 265
+      },
+      "last": {
+        "totalTokens": 14243,
+        "inputTokens": 13827,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 416,
+        "reasoningOutputTokens": 139
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_4a40a8e6759adfbf",
+  "attempt": 2
+}

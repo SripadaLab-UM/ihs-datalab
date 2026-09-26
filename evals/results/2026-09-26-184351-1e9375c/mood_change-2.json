@@ -1,0 +1,82 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": true,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Exploratory, following the approved plan: yes, the daily mood score changed. Among 128 enrolled 2025 participants with valid mood data both before and during internship, the average participant-level mood score decreased by **0.71 points** on the 1-10 scale during the intern year versus before internship: **95% CI -0.75 to -0.66**. The paired participant means were **6.63 before** and **5.92 during**.\n\nImportant caveat: the table metadata did not define the scale direction. If higher scores mean better mood, this is a lower/worse mood score during internship; if the source instrument defines it differently, interpret only as a numeric decrease.\n\nDeliverables:\n- Report: `/work/outputs/ihs_2025_daily_mood_pre_during_report.html`\n- Summary table: `/work/outputs/ihs_2025_daily_mood_summary.csv`\n- Query provenance with SQL, row counts, and result files: `/work/outputs/ihs_2025_daily_mood_query_provenance.txt`\n- Analysis source: `/work/outputs/ihs_2025_daily_mood_pre_during.R`\n\nData notes: the full extraction used 22,677 mood records from 129 enrolled participants; 128 contributed both periods. Scores were numeric 1-10, with no nonnumeric scores. Same-day duplicate entries were averaged to participant-day values. This is an observational within-person comparison, not a causal estimate of internship effects.",
+  "finished": true,
+  "seconds": 226.8910529613495,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_7d380e235fac395b",
+      "plan": {
+        "question": "Did daily mood change from before internship to during the intern year among 2025 IHS cohort participants, and by how much?",
+        "estimand": "Primary estimand: the average within-person change in daily mood score, defined as each participant's mean numeric daily mood score during the intern year minus their mean numeric daily mood score before internship, among participants with at least one valid mood observation in both periods. Secondary descriptive estimand: the difference in all observed participant-days' mean mood between periods, reported separately because it is more influenced by participants who contributed many days.",
+        "exposure": "Period relative to internship start: pre-internship versus during intern year. Planned default boundary: pre-internship = mood records before 2025-07-01; during intern year = mood records from 2025-07-01 through 2026-06-30, using the date component of IHS_2025.VW_DAILY_MOOD.MOOD_STARTDATE. I will check observed date coverage before final extraction and flag if this calendar definition appears inconsistent with the 2025 cohort data.",
+        "outcome": "Daily mood from IHS_2025.VW_DAILY_MOOD.MOOD_SCORE, with timing from MOOD_STARTDATE/MOOD_ENDDATE. The catalog shows MOOD_SCORE is stored as text, so I will inspect allowed values after approval, convert valid numeric scores only, and report the observed range and coding direction if it can be inferred from metadata or values. Participant linkage uses PARTICIPANTIDENTIFIER; I will not report identifiers.",
+        "covariates": "No covariate adjustment for the primary analysis, because the question is a within-person before-versus-during contrast rather than a causal effect estimate. I will use participant-level clustering/paired summaries to account for repeated observations. If baseline enrollment/consent filtering is needed, I will use IHS_2025.VW_BASELINE_SURVEY.CONSENTED and STUDY_PARTICIPANT_ID only for cohort construction, not adjustment.",
+        "cohort": "IHS_2025 participants with consent/enrollment evidence and daily mood records in IHS_2025.VW_DAILY_MOOD. Planned primary analytic set: participants with at least one valid numeric daily mood score before 2025-07-01 and at least one valid numeric score during 2025-07-01 to 2026-06-30. I will report total mood observations, participants with any mood, participants eligible for the paired within-person contrast, and participants contributing observations in only one period.",
+        "decisions": "This will be treated as exploratory unless you intend it as a confirmatory test. I will first run a reproducible pilot on a small deterministic subset of participants that includes both periods to test extraction, linkage, score conversion, duplicates, missingness, date coverage, and the paired-change calculation; I will stop before scaling to the full cohort. Planned checks: duplicate participant-date mood records, nonnumeric or out-of-range MOOD_SCORE values, missing dates/scores/identifiers, baseline-to-mood unmatched rows, observation counts by period, and sensitivity of the within-person change to requiring at least 3 valid days per period and to using a mixed model with participant random intercept or clustered uncertainty. Primary uncertainty will be a 95% CI for the mean participant-level paired change; observation-level model results will be clearly secondary."
+      }
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS mood_rows,\n       COUNT(DISTINCT participantidentifier) AS mood_participants,\n       MIN(CAST(mood_startdate AS DATE)) AS min_mood_date,\n       MAX(CAST(mood_startdate AS DATE)) AS max_mood_date,\n       SUM(CASE WHEN participantidentifier IS NULL THEN 1 ELSE 0 END) AS missing_participant_rows,\n       SUM(CASE WHEN mood_startdate IS NULL THEN 1 ELSE 0 END) AS missing_startdate_rows,\n       SUM(CASE WHEN mood_score IS NULL THEN 1 ELSE 0 END) AS missing_score_rows\nFROM IHS_2025.VW_DAILY_MOOD",
+    "SELECT COUNT(*) AS baseline_rows,\n       COUNT(DISTINCT participantidentifier) AS baseline_participants,\n       SUM(CASE WHEN study_participant_id IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_study_participant_id,\n       SUM(CASE WHEN consented = 'Y' THEN 1 ELSE 0 END) AS rows_consented_y,\n       MIN(enrollmentdate) AS min_enrollmentdate,\n       MAX(enrollmentdate) AS max_enrollmentdate\nFROM IHS_2025.VW_BASELINE_SURVEY",
+    "SELECT mood_score, COUNT(*) AS n_rows, COUNT(DISTINCT participantidentifier) AS n_participants\nFROM IHS_2025.VW_DAILY_MOOD\nGROUP BY mood_score\nORDER BY mood_score",
+    "WITH scored AS (\n  SELECT participantidentifier,\n         CAST(mood_startdate AS DATE) AS mood_datetime,\n         TRUNC(CAST(mood_startdate AS DATE)) AS mood_day,\n         mood_score,\n         CASE WHEN REGEXP_LIKE(mood_score, '^\\d+(\\.\\d+)?$') THEN TO_NUMBER(mood_score) END AS mood_score_num,\n         CASE\n           WHEN CAST(mood_startdate AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre'\n           WHEN CAST(mood_startdate AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD')\n            AND CAST(mood_startdate AS DATE) < TO_DATE(:intern_end_excl, 'YYYY-MM-DD') THEN 'during'\n         END AS period\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE participantidentifier IS NOT NULL\n    AND mood_startdate IS NOT NULL\n    AND mood_score IS NOT NULL\n), eligible AS (\n  SELECT participantidentifier\n  FROM scored\n  WHERE period IN ('pre', 'during') AND mood_score_num IS NOT NULL\n  GROUP BY participantidentifier\n  HAVING COUNT(DISTINCT period) = 2\n), pilot_ids AS (\n  SELECT participantidentifier\n  FROM eligible\n  ORDER BY ORA_HASH(participantidentifier)\n  FETCH FIRST 20 ROWS ONLY\n)\nSELECT s.participantidentifier,\n       s.mood_datetime,\n       s.mood_day,\n       s.mood_score,\n       s.mood_score_num,\n       s.period\nFROM scored s\nJOIN pilot_ids p ON s.participantidentifier = p.participantidentifier\nWHERE s.period IN ('pre', 'during')\nORDER BY s.participantidentifier, s.mood_datetime",
+    "WITH mood_people AS (\n  SELECT DISTINCT participantidentifier\n  FROM IHS_2025.VW_DAILY_MOOD\n), base_people AS (\n  SELECT participantidentifier,\n         MAX(CASE WHEN consented = 'Y' THEN 1 ELSE 0 END) AS consented_y,\n         MAX(CASE WHEN study_participant_id IS NOT NULL THEN 1 ELSE 0 END) AS has_study_id\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  GROUP BY participantidentifier\n)\nSELECT COUNT(*) AS mood_participants,\n       SUM(CASE WHEN b.participantidentifier IS NOT NULL THEN 1 ELSE 0 END) AS in_baseline,\n       SUM(CASE WHEN b.consented_y = 1 THEN 1 ELSE 0 END) AS baseline_consented_y,\n       SUM(CASE WHEN b.has_study_id = 1 THEN 1 ELSE 0 END) AS baseline_has_study_id,\n       SUM(CASE WHEN b.participantidentifier IS NULL THEN 1 ELSE 0 END) AS not_in_baseline\nFROM mood_people m\nLEFT JOIN base_people b ON m.participantidentifier = b.participantidentifier",
+    "WITH scored AS (\n  SELECT participantidentifier,\n         CASE WHEN REGEXP_LIKE(mood_score, '^\\d+(\\.\\d+)?$') THEN TO_NUMBER(mood_score) END AS mood_score_num,\n         CASE\n           WHEN CAST(mood_startdate AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre'\n           WHEN CAST(mood_startdate AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD')\n            AND CAST(mood_startdate AS DATE) < TO_DATE(:intern_end_excl, 'YYYY-MM-DD') THEN 'during'\n         END AS period\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE participantidentifier IS NOT NULL\n    AND mood_startdate IS NOT NULL\n    AND mood_score IS NOT NULL\n), base_people AS (\n  SELECT participantidentifier,\n         MAX(CASE WHEN consented = 'Y' THEN 1 ELSE 0 END) AS consented_y,\n         MAX(CASE WHEN study_participant_id IS NOT NULL THEN 1 ELSE 0 END) AS has_study_id\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  GROUP BY participantidentifier\n), person_periods AS (\n  SELECT s.participantidentifier,\n         MAX(CASE WHEN period = 'pre' AND mood_score_num IS NOT NULL THEN 1 ELSE 0 END) AS has_pre,\n         MAX(CASE WHEN period = 'during' AND mood_score_num IS NOT NULL THEN 1 ELSE 0 END) AS has_during\n  FROM scored s\n  JOIN base_people b ON s.participantidentifier = b.participantidentifier\n  WHERE b.consented_y = 1 AND b.has_study_id = 1\n  GROUP BY s.participantidentifier\n)\nSELECT COUNT(*) AS enrolled_mood_participants,\n       SUM(CASE WHEN has_pre = 1 THEN 1 ELSE 0 END) AS participants_with_pre,\n       SUM(CASE WHEN has_during = 1 THEN 1 ELSE 0 END) AS participants_with_during,\n       SUM(CASE WHEN has_pre = 1 AND has_during = 1 THEN 1 ELSE 0 END) AS paired_participants,\n       SUM(CASE WHEN has_pre = 1 AND has_during = 0 THEN 1 ELSE 0 END) AS pre_only_participants,\n       SUM(CASE WHEN has_pre = 0 AND has_during = 1 THEN 1 ELSE 0 END) AS during_only_participants\nFROM person_periods",
+    "WITH base_people AS (\n  SELECT participantidentifier,\n         MAX(CASE WHEN consented = 'Y' THEN 1 ELSE 0 END) AS consented_y,\n         MAX(CASE WHEN study_participant_id IS NOT NULL THEN 1 ELSE 0 END) AS has_study_id\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  GROUP BY participantidentifier\n)\nSELECT m.participantidentifier,\n       CAST(m.mood_startdate AS DATE) AS mood_datetime,\n       TRUNC(CAST(m.mood_startdate AS DATE)) AS mood_day,\n       m.mood_score,\n       CASE WHEN REGEXP_LIKE(m.mood_score, '^\\d+(\\.\\d+)?$') THEN TO_NUMBER(m.mood_score) END AS mood_score_num,\n       CASE\n         WHEN CAST(m.mood_startdate AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre'\n         WHEN CAST(m.mood_startdate AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD')\n          AND CAST(m.mood_startdate AS DATE) < TO_DATE(:intern_end_excl, 'YYYY-MM-DD') THEN 'during'\n       END AS period\nFROM IHS_2025.VW_DAILY_MOOD m\nJOIN base_people b ON m.participantidentifier = b.participantidentifier\nWHERE b.consented_y = 1\n  AND b.has_study_id = 1\n  AND m.participantidentifier IS NOT NULL\n  AND m.mood_startdate IS NOT NULL\n  AND m.mood_score IS NOT NULL\n  AND CAST(m.mood_startdate AS DATE) < TO_DATE(:intern_end_excl, 'YYYY-MM-DD')\nORDER BY m.participantidentifier, CAST(m.mood_startdate AS DATE)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 709881,
+        "inputTokens": 691659,
+        "cachedInputTokens": 436736,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 18222,
+        "reasoningOutputTokens": 4102
+      },
+      "last": {
+        "totalTokens": 41607,
+        "inputTokens": 41167,
+        "cachedInputTokens": 33792,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 440,
+        "reasoningOutputTokens": 124
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_9bb77c7925dbd6c1",
+  "attempt": 2
+}

@@ -1,0 +1,43 @@
+{
+  "task": "oura_2024",
+  "mode": "extraction",
+  "prompt": "How many Oura daily activity records does the 2024 cohort have?",
+  "tests": "a table the cohort doesn't have",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says the table isn't there",
+      "passed": true,
+      "detail": "IHS_2024 has no Oura tables at all: no count to give"
+    }
+  ],
+  "answer": "The 2024 cohort does not have an Oura daily activity table or view in the catalog, so there are **0 queryable Oura daily activity records** for `IHS_2024`.\n\nCatalog evidence:\n- `search_catalog(\"Oura\", cohorts=[\"IHS_2024\"])` returned no matches.\n- Across all cohorts, `OURADAILYACTIVITY` exists only in `IHS_2025` and `IHS_2026`.\n- Direct checks for `IHS_2024.OURADAILYACTIVITY` and `IHS_2024.VOURADAILYACTIVITY` both failed because those objects are not in the catalog.\n\nSQL run: none. Since the 2024 Oura table/view does not exist, there was no valid `SELECT COUNT(*)` to run.\n\nCaveat: this means no Oura daily activity records are available in the 2024 schema under the Oura daily activity table/view naming used in later cohorts.",
+  "finished": true,
+  "seconds": 36.74115014076233,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 114555,
+        "inputTokens": 112783,
+        "cachedInputTokens": 74240,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1772,
+        "reasoningOutputTokens": 715
+      },
+      "last": {
+        "totalTokens": 18406,
+        "inputTokens": 17683,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 723,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_7f3c524d8b55ad80",
+  "attempt": 2
+}

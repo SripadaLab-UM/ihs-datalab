@@ -1,0 +1,64 @@
+{
+  "task": "garmin_steps",
+  "mode": "analysis",
+  "prompt": "What were average daily steps during the intern year (July 2025 to June 2026) for the 2025 cohort's Garmin users? Exploratory is fine: no plan needed.",
+  "tests": "superseded duplicate rows in GARMINDAILYSUMMARY; n and uncertainty",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one row per participant-day",
+      "passed": true,
+      "detail": "expected ~7465 (all) or ~7443 (enrolled) keeping the latest row per day; ~7286 means superseded rows were averaged in"
+    },
+    {
+      "name": "participants reported",
+      "passed": true,
+      "detail": "28 Garmin users (25 enrolled)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or SE: with ~25 people it's wide"
+    }
+  ],
+  "answer": "Exploratory bottom line: among 28 Garmin users in the 2025 cohort, the participant-weighted average was **7,381 steps/day** during July 1, 2025-June 30, 2026. Approximate 95% CI across participant-level means: **6,889 to 7,872 steps/day**.\n\nEvidence from observed Garmin days: **8,024 participant-days**. If each observed day is weighted equally instead of each participant, the mean was **7,465 steps/day**. Participants had a median of **293.5 observed days** (IQR 269-314; range 142-345).\n\nI used `IHS_2025.VGARMINDAILYSUMMARY`, columns `CALENDARDATE` and `STEPS`. There were 552 duplicate participant-days; the primary rule used the latest inserted row per participant-day, which matched the maximum step value for every duplicate day. A duplicate-row averaging sensitivity gave **7,363 steps/day**.\n\nDeliverables:\n- Report: `/work/outputs/garmin_steps_2025_intern_year.html`\n- Source: `/work/outputs/garmin_steps_2025_report.py`\n\nKey limitation: this describes observed Garmin days only; missing days were not imputed, and the result may not represent non-Garmin users or unobserved days. Full SQL provenance and query result file paths are listed in the report.",
+  "finished": true,
+  "seconds": 142.345397233963,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT participantid) AS participant_count,\n  COUNT(DISTINCT participantid || '|' || TO_CHAR(calendardate, 'YYYY-MM-DD')) AS participant_day_count,\n  MIN(calendardate) AS min_date,\n  MAX(calendardate) AS max_date,\n  SUM(CASE WHEN steps IS NULL THEN 1 ELSE 0 END) AS missing_steps_rows,\n  SUM(CASE WHEN steps < 0 THEN 1 ELSE 0 END) AS negative_steps_rows,\n  SUM(CASE WHEN steps > 100000 THEN 1 ELSE 0 END) AS over_100k_steps_rows,\n  MIN(steps) AS min_steps,\n  MAX(steps) AS max_steps,\n  AVG(steps) AS mean_steps_per_row\nFROM IHS_2025.VGARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1",
+    "WITH day_rows AS (\n  SELECT\n    participantid,\n    calendardate,\n    COUNT(*) AS rows_per_day,\n    COUNT(DISTINCT steps) AS distinct_step_values,\n    MIN(steps) AS min_steps,\n    MAX(steps) AS max_steps\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n  GROUP BY participantid, calendardate\n)\nSELECT\n  COUNT(*) AS participant_days,\n  SUM(CASE WHEN rows_per_day = 1 THEN 1 ELSE 0 END) AS single_row_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicate_row_days,\n  MAX(rows_per_day) AS max_rows_for_participant_day,\n  SUM(rows_per_day) AS source_rows,\n  SUM(CASE WHEN rows_per_day > 1 AND min_steps <> max_steps THEN 1 ELSE 0 END) AS duplicate_days_with_different_steps,\n  AVG(rows_per_day) AS mean_rows_per_participant_day\nFROM day_rows",
+    "SELECT\n  SUM(CASE WHEN participantid IS NULL THEN 1 ELSE 0 END) AS missing_participantid_rows,\n  SUM(CASE WHEN participantidentifier IS NULL THEN 1 ELSE 0 END) AS missing_participantidentifier_rows,\n  COUNT(DISTINCT participantid) AS distinct_participantid,\n  COUNT(DISTINCT participantidentifier) AS distinct_participantidentifier,\n  COUNT(DISTINCT participantid || '|' || participantidentifier) AS distinct_id_pairs\nFROM IHS_2025.VGARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1",
+    "WITH day_rows AS (\n  SELECT participantid, calendardate,\n         COUNT(*) AS rows_per_day,\n         MIN(steps) AS min_steps,\n         MAX(steps) AS max_steps,\n         AVG(steps) AS mean_steps\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n  GROUP BY participantid, calendardate\n)\nSELECT\n  COUNT(*) AS duplicate_days,\n  AVG(max_steps - min_steps) AS mean_step_range_on_duplicate_days,\n  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY max_steps - min_steps) AS median_step_range_on_duplicate_days,\n  MAX(max_steps - min_steps) AS max_step_range_on_duplicate_days,\n  AVG(mean_steps) AS mean_of_row_average_duplicate_days,\n  AVG(max_steps) AS mean_of_max_duplicate_days\nFROM day_rows\nWHERE rows_per_day > 1",
+    "WITH person_days AS (\n  SELECT participantid,\n         COUNT(DISTINCT calendardate) AS observed_days,\n         AVG(steps) AS row_weighted_mean_steps,\n         AVG(max_steps) AS mean_of_daily_max_steps\n  FROM (\n    SELECT participantid, calendardate, steps,\n           MAX(steps) OVER (PARTITION BY participantid, calendardate) AS max_steps\n    FROM IHS_2025.VGARMINDAILYSUMMARY\n    WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n      AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n  )\n  GROUP BY participantid\n)\nSELECT\n  COUNT(*) AS participants,\n  MIN(observed_days) AS min_observed_days,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY observed_days) AS q1_observed_days,\n  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY observed_days) AS median_observed_days,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY observed_days) AS q3_observed_days,\n  MAX(observed_days) AS max_observed_days,\n  SUM(CASE WHEN observed_days >= 30 THEN 1 ELSE 0 END) AS participants_ge_30_days,\n  SUM(CASE WHEN observed_days >= 180 THEN 1 ELSE 0 END) AS participants_ge_180_days\nFROM person_days",
+    "SELECT\n  MIN(inserteddate) AS min_inserteddate,\n  MAX(inserteddate) AS max_inserteddate,\n  COUNT(DISTINCT inserteddate) AS distinct_inserteddate_values\nFROM IHS_2025.VGARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1",
+    "WITH ranked_rows AS (\n  SELECT\n    participantid,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantid, calendardate\n      ORDER BY TO_TIMESTAMP_TZ(inserteddate, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') DESC, summaryid DESC\n    ) AS rn_latest,\n    MAX(steps) OVER (PARTITION BY participantid, calendardate) AS max_steps,\n    AVG(steps) OVER (PARTITION BY participantid, calendardate) AS avg_steps,\n    COUNT(*) OVER (PARTITION BY participantid, calendardate) AS rows_per_day\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n), daily AS (\n  SELECT participantid, calendardate,\n         max_steps,\n         avg_steps,\n         MAX(CASE WHEN rn_latest = 1 THEN steps END) AS latest_steps,\n         MAX(rows_per_day) AS rows_per_day\n  FROM ranked_rows\n  GROUP BY participantid, calendardate, max_steps, avg_steps\n)\nSELECT\n  COUNT(*) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicate_days,\n  SUM(CASE WHEN latest_steps = max_steps THEN 1 ELSE 0 END) AS days_latest_equals_max,\n  SUM(CASE WHEN latest_steps <> max_steps THEN 1 ELSE 0 END) AS days_latest_differs_from_max,\n  AVG(max_steps) AS mean_daily_max_steps,\n  AVG(latest_steps) AS mean_latest_steps,\n  AVG(avg_steps) AS mean_within_day_average_steps\nFROM daily",
+    "WITH ranked_rows AS (\n  SELECT\n    participantid,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantid, calendardate\n      ORDER BY inserteddate DESC, summaryid DESC\n    ) AS rn_latest,\n    MAX(steps) OVER (PARTITION BY participantid, calendardate) AS max_steps,\n    AVG(steps) OVER (PARTITION BY participantid, calendardate) AS avg_steps,\n    COUNT(*) OVER (PARTITION BY participantid, calendardate) AS rows_per_day\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n), daily AS (\n  SELECT participantid, calendardate,\n         max_steps,\n         avg_steps,\n         MAX(CASE WHEN rn_latest = 1 THEN steps END) AS latest_steps,\n         MAX(rows_per_day) AS rows_per_day\n  FROM ranked_rows\n  GROUP BY participantid, calendardate, max_steps, avg_steps\n)\nSELECT\n  COUNT(*) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicate_days,\n  SUM(CASE WHEN latest_steps = max_steps THEN 1 ELSE 0 END) AS days_latest_equals_max,\n  SUM(CASE WHEN latest_steps <> max_steps THEN 1 ELSE 0 END) AS days_latest_differs_from_max,\n  AVG(max_steps) AS mean_daily_max_steps,\n  AVG(latest_steps) AS mean_latest_steps,\n  AVG(avg_steps) AS mean_within_day_average_steps\nFROM daily",
+    "WITH ranked_rows AS (\n  SELECT\n    participantid,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantid, calendardate\n      ORDER BY inserteddate DESC, summaryid DESC\n    ) AS rn_latest\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n), daily AS (\n  SELECT participantid, calendardate, steps AS daily_steps\n  FROM ranked_rows\n  WHERE rn_latest = 1\n), person AS (\n  SELECT participantid,\n         COUNT(*) AS observed_days,\n         AVG(daily_steps) AS mean_daily_steps,\n         STDDEV(daily_steps) AS sd_daily_steps\n  FROM daily\n  GROUP BY participantid\n)\nSELECT\n  COUNT(*) AS participants,\n  SUM(observed_days) AS participant_days,\n  AVG(mean_daily_steps) AS participant_weighted_mean_steps,\n  STDDEV(mean_daily_steps) AS sd_participant_mean_steps,\n  AVG(mean_daily_steps) - 2.051830516 * STDDEV(mean_daily_steps) / SQRT(COUNT(*)) AS ci95_low_participant_weighted,\n  AVG(mean_daily_steps) + 2.051830516 * STDDEV(mean_daily_steps) / SQRT(COUNT(*)) AS ci95_high_participant_weighted,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY mean_daily_steps) AS q1_participant_mean_steps,\n  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY mean_daily_steps) AS median_participant_mean_steps,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY mean_daily_steps) AS q3_participant_mean_steps,\n  SUM(mean_daily_steps * observed_days) / SUM(observed_days) AS person_day_weighted_mean_steps,\n  MIN(observed_days) AS min_observed_days,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY observed_days) AS q1_observed_days,\n  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY observed_days) AS median_observed_days,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY observed_days) AS q3_observed_days,\n  MAX(observed_days) AS max_observed_days,\n  SUM(CASE WHEN observed_days >= 30 THEN 1 ELSE 0 END) AS participants_ge_30_days,\n  SUM(CASE WHEN observed_days >= 180 THEN 1 ELSE 0 END) AS participants_ge_180_days\nFROM person",
+    "WITH ranked_rows AS (\n  SELECT\n    participantid,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantid, calendardate\n      ORDER BY inserteddate DESC, summaryid DESC\n    ) AS rn_latest\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD') + 1\n), daily AS (\n  SELECT participantid, calendardate, steps AS daily_steps\n  FROM ranked_rows\n  WHERE rn_latest = 1\n)\nSELECT\n  TO_CHAR(TRUNC(calendardate, 'MM'), 'YYYY-MM') AS month,\n  COUNT(DISTINCT participantid) AS participants,\n  COUNT(*) AS participant_days,\n  AVG(daily_steps) AS person_day_weighted_mean_steps,\n  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY daily_steps) AS median_participant_day_steps\nFROM daily\nGROUP BY TRUNC(calendardate, 'MM')\nORDER BY TRUNC(calendardate, 'MM')"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 407978,
+        "inputTokens": 394009,
+        "cachedInputTokens": 225792,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 13969,
+        "reasoningOutputTokens": 2493
+      },
+      "last": {
+        "totalTokens": 58231,
+        "inputTokens": 57413,
+        "cachedInputTokens": 19456,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 818,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_141f0060de104c79",
+  "attempt": 1
+}

@@ -244,7 +244,10 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
     answer = final[-1]["text"] if final else ""
     checks = task.grade(answer, expected) if answer else []
     # Graded on the first turn, and the answer says it's only a pilot.
-    if not follow_up and re.search(_PILOT_ONLY, answer[:600], re.IGNORECASE):
+    # Still a pilot: on the first turn by any pilot label; after the
+    # follow-up only by an explicit one (full answers mention the pilot).
+    still_pilot = _PILOT_AGAIN if follow_up else _PILOT_ONLY
+    if answer and re.search(still_pilot, answer[:600], re.IGNORECASE):
         checks.append(Check("ran in full", False, "the answer is a pilot or preliminary result"))
     queries = _get(client, f"/api/conversations/{cid}/data-accessed")
     usage = [e for e in events if e["type"] == "usage"]
@@ -285,7 +288,12 @@ _ASKS = (
 # An answer that labels itself a pilot (not one that mentions an earlier pilot).
 _PILOT_ONLY = (
     r"\b(pilot|preliminary) (results?|findings?|estimates?|analysis)\b|\bthis (is|was) (a|the) pilot\b"
-    r"|\bpilot (of|on|with) \d+|\bpilot subset\b"
+    r"|\bpilot (of|on|with) \d+|\bpilot subset\b|\bpilot only\b|\bnot yet the (cohort|full) answer\b"
+)
+
+
+_PILOT_AGAIN = (
+    r"\bpilot only\b|\bnot yet the (cohort|full) answer\b|\bthis (is|was) (a|the) pilot\b"
 )
 
 
@@ -294,7 +302,12 @@ def _asks_to_continue(events: list[dict]) -> bool:
     answers = [e["data"]["text"] for e in events if e["type"] == "answer" and e["data"].get("text")]
     ending = answers[-1][-400:] if answers else ""
     said_pilot = any(re.search(r"\b(pilot|preliminary)\b", a, re.IGNORECASE) for a in answers)
-    return said_pilot and "?" in ending and bool(re.search(_ASKS, ending, re.IGNORECASE))
+    # A pilot answer, whether or not it ends with a question ("I stopped
+    # before the full run"), or a closing question after a pilot.
+    pilot_only = bool(answers) and bool(re.search(_PILOT_ONLY, answers[-1][:600], re.IGNORECASE))
+    return pilot_only or (
+        said_pilot and "?" in ending and bool(re.search(_ASKS, ending, re.IGNORECASE))
+    )
 
 
 def _failed(task, attempt: int, error: str) -> dict:

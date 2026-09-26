@@ -1,0 +1,53 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "I understood this as: estimate how often `RESTINGHEARTRATE` is present among rows in the 2025 cohort Fitbit daily table.\n\n**Answer:** resting heart rate is **95.08% complete** in `IHS_2025.VFITBITDAILYDATA`: **19,619 / 20,634** daily rows have non-missing `RESTINGHEARTRATE`. The data span **2025-04-01 to 2026-06-30** and include **65 participants**. Monthly completeness ranges from **93.94% to 96.65%**.\n\nFiles delivered:\n- [fitbit_2025_rhr_completeness_summary.csv](/work/outputs/fitbit_2025_rhr_completeness_summary.csv)\n- [fitbit_2025_rhr_completeness_data_dictionary.md](/work/outputs/fitbit_2025_rhr_completeness_data_dictionary.md)\n\n**Catalog Evidence**\n`search_catalog(\"fitbit daily resting heart rate\", cohort IHS_2025)` found `IHS_2025.FITBITDAILYDATA` and `IHS_2025.VFITBITDAILYDATA`, both with `RESTINGHEARTRATE`. I used the view. `describe_table` confirmed:\n- `PARTICIPANTIDENTIFIER`: `VARCHAR2(15)`\n- `RECORD_DATE`: `DATE`\n- `RESTINGHEARTRATE`: `NUMBER`\n\n**Assumptions And Caveats**\nCompleteness is among rows present in Fitbit daily data, not among all possible participant-calendar days or expected wear days. The 2025 cohort table includes records into 2026. No missing participant IDs or dates were found, and no duplicate participant-day rows were found.\n\n**SQL Run**\nProfile rows/date span, row count 1:\n```sql\nSELECT COUNT(*) AS total_rows, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\nMIN(RECORD_DATE) AS min_record_date, MAX(RECORD_DATE) AS max_record_date,\nSUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participant_id,\nSUM(CASE WHEN RECORD_DATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_record_date\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nRHR population check, row count 1:\n```sql\nSELECT COUNT(*) AS total_rows,\nSUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS rhr_nonmissing_rows,\nSUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_rows,\nCOUNT(DISTINCT CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN PARTICIPANTIDENTIFIER END) AS participants_with_any_rhr,\nMIN(RESTINGHEARTRATE) AS min_rhr, MAX(RESTINGHEARTRATE) AS max_rhr\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nDuplicate participant-day check, row count 1:\n```sql\nSELECT COUNT(*) AS duplicate_participant_day_groups, SUM(row_count) AS rows_in_duplicate_groups\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)\n```\n\nFinal extraction, row count 16:\n```sql\nSELECT summary_level, period_start, period_label, min_record_date, max_record_date,\ntotal_daily_rows, distinct_participants, rhr_nonmissing_rows, rhr_missing_rows,\nROUND(100 * rhr_nonmissing_rows / NULLIF(total_daily_rows, 0), 2) AS rhr_complete_pct\nFROM (\n  SELECT 'overall' AS summary_level, CAST(NULL AS DATE) AS period_start, 'All dates' AS period_label,\n  MIN(RECORD_DATE) AS min_record_date, MAX(RECORD_DATE) AS max_record_date,\n  COUNT(*) AS total_daily_rows, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS rhr_nonmissing_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_rows\n  FROM IHS_2025.VFITBITDAILYDATA\n  UNION ALL\n  SELECT 'month', TRUNC(RECORD_DATE, 'MM'), TO_CHAR(TRUNC(RECORD_DATE, 'MM'), 'YYYY-MM'),\n  MIN(RECORD_DATE), MAX(RECORD_DATE), COUNT(*), COUNT(DISTINCT PARTICIPANTIDENTIFIER),\n  SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END),\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END)\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY TRUNC(RECORD_DATE, 'MM')\n)\nORDER BY CASE summary_level WHEN 'overall' THEN 0 ELSE 1 END, period_start\n```",
+  "finished": true,
+  "seconds": 63.90246796607971,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participant_id,\n  SUM(CASE WHEN RECORD_DATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_record_date\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS total_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS rhr_nonmissing_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_rows,\n  COUNT(DISTINCT CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN PARTICIPANTIDENTIFIER END) AS participants_with_any_rhr,\n  MIN(RESTINGHEARTRATE) AS min_rhr,\n  MAX(RESTINGHEARTRATE) AS max_rhr\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS duplicate_participant_day_groups,\n  SUM(row_count) AS rows_in_duplicate_groups\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)",
+    "SELECT\n  summary_level,\n  period_start,\n  period_label,\n  min_record_date,\n  max_record_date,\n  total_daily_rows,\n  distinct_participants,\n  rhr_nonmissing_rows,\n  rhr_missing_rows,\n  ROUND(100 * rhr_nonmissing_rows / NULLIF(total_daily_rows, 0), 2) AS rhr_complete_pct\nFROM (\n  SELECT\n    'overall' AS summary_level,\n    CAST(NULL AS DATE) AS period_start,\n    'All dates' AS period_label,\n    MIN(RECORD_DATE) AS min_record_date,\n    MAX(RECORD_DATE) AS max_record_date,\n    COUNT(*) AS total_daily_rows,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS rhr_nonmissing_rows,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_rows\n  FROM IHS_2025.VFITBITDAILYDATA\n  UNION ALL\n  SELECT\n    'month' AS summary_level,\n    TRUNC(RECORD_DATE, 'MM') AS period_start,\n    TO_CHAR(TRUNC(RECORD_DATE, 'MM'), 'YYYY-MM') AS period_label,\n    MIN(RECORD_DATE) AS min_record_date,\n    MAX(RECORD_DATE) AS max_record_date,\n    COUNT(*) AS total_daily_rows,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS rhr_nonmissing_rows,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_rows\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY TRUNC(RECORD_DATE, 'MM')\n)\nORDER BY\n  CASE summary_level WHEN 'overall' THEN 0 ELSE 1 END,\n  period_start"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 132342,
+        "inputTokens": 127469,
+        "cachedInputTokens": 75264,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4873,
+        "reasoningOutputTokens": 1593
+      },
+      "last": {
+        "totalTokens": 21669,
+        "inputTokens": 20040,
+        "cachedInputTokens": 10752,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1629,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_d59b7126ebed6552",
+  "attempt": 2
+}

@@ -1,0 +1,61 @@
+{
+  "task": "garmin_steps",
+  "mode": "analysis",
+  "prompt": "What were average daily steps during the intern year (July 2025 to June 2026) for the 2025 cohort's Garmin users? Exploratory is fine: no plan needed.",
+  "tests": "superseded duplicate rows in GARMINDAILYSUMMARY; n and uncertainty",
+  "passed": false,
+  "checks": [
+    {
+      "name": "one row per participant-day",
+      "passed": true,
+      "detail": "expected ~7465 (all) or ~7443 (enrolled) keeping the latest row per day; ~7286 means superseded rows were averaged in"
+    },
+    {
+      "name": "participants reported",
+      "passed": true,
+      "detail": "28 Garmin users (25 enrolled)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": false,
+      "detail": "a CI or SE: with ~25 people it's wide"
+    }
+  ],
+  "answer": "Exploratory bottom line: for the 2025 cohort\u2019s Garmin users, average daily steps during July 1, 2025 through June 30, 2026 were **7,465 steps per observed participant-day**.\n\nThis used **28 Garmin users**, **8,024 observed participant-days**, and all **365 calendar dates** in the intern-year window. Garmin users were defined as participants with at least one Garmin daily steps record in that window. Because duplicate participant-days existed, I used the latest inserted Garmin daily record per participant-date as the primary estimate.\n\nContext:\n- Median participant-day steps: **7,039**; IQR **5,560 to 8,910**\n- Mean of participant-level average daily steps: **7,381**\n- Median observed days per participant: **293.5**; range **142 to 345**\n- Coverage: **78.5%** of possible participant-days among these 28 users\n- No missing, negative, or >100,000 step values after deduplication\n\nDuplicate-handling sensitivity:\n- All raw rows: **7,286** steps/day\n- Latest record per participant-day, primary: **7,465**\n- Average duplicate records within participant-day: **7,363**\n- Maximum duplicate record within participant-day: **7,465**\n\nI saved the static report here: [/work/outputs/garmin_steps_2025_intern_year.html](/work/outputs/garmin_steps_2025_intern_year.html)  \nReproducible source: [/work/garmin_steps_2025_report.py](/work/garmin_steps_2025_report.py)\n\nThe report includes the exact SQL for each query, result file provenance, monthly summaries, data quality checks, and limitations.",
+  "finished": true,
+  "seconds": 115.22131681442261,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS rows_total,\n  COUNT(DISTINCT participantidentifier) AS participants_total,\n  COUNT(steps) AS rows_with_steps,\n  COUNT(DISTINCT CASE WHEN steps IS NOT NULL THEN participantidentifier END) AS participants_with_steps,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date,\n  SUM(CASE WHEN calendardate IS NULL THEN 1 ELSE 0 END) AS rows_missing_date,\n  SUM(CASE WHEN participantidentifier IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n  SUM(CASE WHEN steps IS NULL THEN 1 ELSE 0 END) AS rows_missing_steps,\n  SUM(CASE WHEN steps < 0 THEN 1 ELSE 0 END) AS rows_negative_steps\nFROM IHS_2025.VGARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')",
+    "WITH participant_days AS (\n  SELECT participantidentifier, calendardate, COUNT(*) AS rows_per_day\n  FROM IHS_2025.VGARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n  GROUP BY participantidentifier, calendardate\n)\nSELECT\n  COUNT(*) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicate_participant_days,\n  MAX(rows_per_day) AS max_rows_per_participant_day\nFROM participant_days",
+    "WITH participant_days AS (\n  SELECT\n    participantidentifier,\n    calendardate,\n    COUNT(*) AS rows_per_day,\n    COUNT(DISTINCT steps) AS distinct_step_values,\n    MIN(steps) AS min_steps,\n    MAX(steps) AS max_steps\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n  GROUP BY participantidentifier, calendardate\n)\nSELECT\n  COUNT(*) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicate_participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN rows_per_day ELSE 0 END) AS rows_in_duplicate_days,\n  SUM(CASE WHEN rows_per_day > 1 AND distinct_step_values = 1 THEN 1 ELSE 0 END) AS duplicate_days_same_steps,\n  SUM(CASE WHEN rows_per_day > 1 AND distinct_step_values > 1 THEN 1 ELSE 0 END) AS duplicate_days_different_steps,\n  MAX(CASE WHEN rows_per_day > 1 THEN max_steps - min_steps ELSE NULL END) AS max_step_spread_duplicate_days\nFROM participant_days",
+    "WITH ranked_days AS (\n  SELECT\n    participantidentifier,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantidentifier, calendardate\n      ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n    ) AS rn\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n), deduped_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM ranked_days\n  WHERE rn = 1\n)\nSELECT\n  COUNT(*) AS participant_days_after_deduplication,\n  COUNT(DISTINCT participantidentifier) AS participants,\n  COUNT(DISTINCT calendardate) AS calendar_dates,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date,\n  COUNT(steps) AS participant_days_with_steps,\n  SUM(CASE WHEN steps IS NULL THEN 1 ELSE 0 END) AS missing_step_days,\n  SUM(CASE WHEN steps < 0 THEN 1 ELSE 0 END) AS negative_step_days,\n  SUM(CASE WHEN steps > 100000 THEN 1 ELSE 0 END) AS days_over_100000_steps,\n  MIN(steps) AS min_steps,\n  MAX(steps) AS max_steps,\n  ROUND(AVG(steps), 1) AS mean_steps_per_observed_participant_day,\n  ROUND(STDDEV(steps), 1) AS sd_steps_per_observed_participant_day,\n  ROUND(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY steps), 1) AS p25_steps,\n  ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY steps), 1) AS median_steps,\n  ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY steps), 1) AS p75_steps\nFROM deduped_days",
+    "WITH ranked_days AS (\n  SELECT\n    participantidentifier,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantidentifier, calendardate\n      ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n    ) AS rn\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n), deduped_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM ranked_days\n  WHERE rn = 1\n), participant_summary AS (\n  SELECT\n    participantidentifier,\n    COUNT(*) AS observed_days,\n    AVG(steps) AS mean_steps\n  FROM deduped_days\n  WHERE steps IS NOT NULL\n  GROUP BY participantidentifier\n)\nSELECT\n  COUNT(*) AS participants,\n  SUM(observed_days) AS observed_participant_days,\n  ROUND(AVG(observed_days), 1) AS mean_observed_days_per_participant,\n  MIN(observed_days) AS min_observed_days_per_participant,\n  ROUND(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY observed_days), 1) AS p25_observed_days_per_participant,\n  ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY observed_days), 1) AS median_observed_days_per_participant,\n  ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY observed_days), 1) AS p75_observed_days_per_participant,\n  MAX(observed_days) AS max_observed_days_per_participant,\n  ROUND(AVG(mean_steps), 1) AS mean_of_participant_mean_daily_steps,\n  ROUND(STDDEV(mean_steps), 1) AS sd_of_participant_mean_daily_steps,\n  ROUND(PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY mean_steps), 1) AS p25_participant_mean_steps,\n  ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY mean_steps), 1) AS median_participant_mean_steps,\n  ROUND(PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY mean_steps), 1) AS p75_participant_mean_steps\nFROM participant_summary",
+    "WITH ranked_days AS (\n  SELECT\n    participantidentifier,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantidentifier, calendardate\n      ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n    ) AS rn\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n), deduped_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM ranked_days\n  WHERE rn = 1\n)\nSELECT\n  TO_CHAR(TRUNC(calendardate, 'MM'), 'YYYY-MM') AS month,\n  COUNT(*) AS observed_participant_days,\n  COUNT(DISTINCT participantidentifier) AS participants_with_steps,\n  ROUND(AVG(steps), 1) AS mean_steps_per_observed_participant_day,\n  ROUND(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY steps), 1) AS median_steps_per_observed_participant_day\nFROM deduped_days\nWHERE steps IS NOT NULL\nGROUP BY TRUNC(calendardate, 'MM')\nORDER BY TRUNC(calendardate, 'MM')",
+    "WITH all_rows AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n), ranked_days AS (\n  SELECT\n    participantidentifier,\n    calendardate,\n    steps,\n    ROW_NUMBER() OVER (\n      PARTITION BY participantidentifier, calendardate\n      ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n    ) AS rn\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n), duplicate_averaged_days AS (\n  SELECT participantidentifier, calendardate, AVG(steps) AS steps\n  FROM all_rows\n  GROUP BY participantidentifier, calendardate\n), duplicate_max_days AS (\n  SELECT participantidentifier, calendardate, MAX(steps) AS steps\n  FROM all_rows\n  GROUP BY participantidentifier, calendardate\n), latest_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM ranked_days\n  WHERE rn = 1\n)\nSELECT 'all raw rows' AS method,\n       COUNT(*) AS records_used,\n       COUNT(DISTINCT participantidentifier) AS participants,\n       ROUND(AVG(steps), 1) AS mean_steps\nFROM all_rows\nUNION ALL\nSELECT 'participant-day latest inserted record' AS method,\n       COUNT(*) AS records_used,\n       COUNT(DISTINCT participantidentifier) AS participants,\n       ROUND(AVG(steps), 1) AS mean_steps\nFROM latest_days\nUNION ALL\nSELECT 'participant-day average duplicate records' AS method,\n       COUNT(*) AS records_used,\n       COUNT(DISTINCT participantidentifier) AS participants,\n       ROUND(AVG(steps), 1) AS mean_steps\nFROM duplicate_averaged_days\nUNION ALL\nSELECT 'participant-day maximum duplicate records' AS method,\n       COUNT(*) AS records_used,\n       COUNT(DISTINCT participantidentifier) AS participants,\n       ROUND(AVG(steps), 1) AS mean_steps\nFROM duplicate_max_days"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 325179,
+        "inputTokens": 313971,
+        "cachedInputTokens": 153600,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 11208,
+        "reasoningOutputTokens": 1755
+      },
+      "last": {
+        "totalTokens": 31642,
+        "inputTokens": 30756,
+        "cachedInputTokens": 17408,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 886,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_ceae13de7b2c020a",
+  "attempt": 2
+}

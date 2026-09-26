@@ -1,0 +1,55 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "**Answer**\nI understood the request as: assess how complete `RESTINGHEARTRATE` is in the 2025 cohort\u2019s Fitbit daily data.\n\nUsing `IHS_2025.VFITBITDAILYDATA`, resting heart rate is present on **19,619 of 20,634 Fitbit daily rows**, so overall row-level completeness is **95.08%**. The data span **2025-04-01 to 2026-06-30** and include **65 participants**. There were **0 duplicate participant-date rows** in the view.\n\nMonthly completeness ranged from **93.94%** to **96.65%**. At the participant level, median completeness was **95.12%**; all 65 participants were between **90% and <100%** complete among their Fitbit daily rows.\n\n**Outputs**\n- `/work/outputs/fitbit_2025_resting_hr_overall_completeness.csv` - 1 row\n- `/work/outputs/fitbit_2025_resting_hr_monthly_completeness.csv` - 15 rows\n- `/work/outputs/fitbit_2025_resting_hr_participant_distribution.csv` - 1 row\n- `/work/outputs/fitbit_2025_resting_hr_completion_bands.csv` - 2 rows\n- `/work/outputs/fitbit_2025_resting_hr_data_dictionary.md`\n\n**Catalog Evidence**\nCatalog search found `IHS_2025.FITBITDAILYDATA` and `IHS_2025.VFITBITDAILYDATA`, both with `RESTINGHEARTRATE`. I used the view. `describe_table` confirmed:\n`PARTICIPANTIDENTIFIER VARCHAR2(15)`, `RECORD_DATE DATE`, and `RESTINGHEARTRATE NUMBER`.\n\n**Caveat**\nThis is completeness **among rows present in the Fitbit daily data view**, not completeness against all possible enrollment/person-days. To estimate expected-day completeness, we\u2019d need to join to enrollment or expected wear windows.\n\n**SQL Run**\nPurpose: date span and sample size. Row count: 1.\n```sql\nSELECT COUNT(*) AS row_count, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participant_count,\n       MIN(RECORD_DATE) AS min_record_date, MAX(RECORD_DATE) AS max_record_date\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nPurpose: overall resting HR completeness. Row count: 1.\n```sql\nSELECT COUNT(*) AS row_count,\n       SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n       SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS resting_hr_null_rows,\n       ROUND(100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END), 2) AS resting_hr_complete_pct\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nPurpose: duplicate participant-date check. Row count: 1.\n```sql\nSELECT COUNT(*) AS duplicate_participant_date_groups, SUM(row_count) AS rows_in_duplicate_groups\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)\n```\n\nPurpose: monthly completeness. Row count: 15.\n```sql\nSELECT TO_CHAR(RECORD_DATE, 'YYYY-MM') AS record_month, COUNT(*) AS daily_rows,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_rows,\n       SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n       SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS resting_hr_null_rows,\n       ROUND(100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END), 2) AS resting_hr_complete_pct\nFROM IHS_2025.VFITBITDAILYDATA\nGROUP BY TO_CHAR(RECORD_DATE, 'YYYY-MM')\nORDER BY record_month\n```\n\nPurpose: participant-level distribution, no IDs exported. Row count: 1.\n```sql\nWITH participant_completeness AS (\n  SELECT PARTICIPANTIDENTIFIER, COUNT(*) AS daily_rows,\n         SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n         100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_complete_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT COUNT(*) AS participant_count, MIN(daily_rows) AS min_daily_rows,\n       PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY daily_rows) AS p25_daily_rows,\n       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY daily_rows) AS median_daily_rows,\n       PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY daily_rows) AS p75_daily_rows,\n       MAX(daily_rows) AS max_daily_rows,\n       MIN(resting_hr_complete_pct) AS min_resting_hr_complete_pct,\n       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY resting_hr_complete_pct) AS median_resting_hr_complete_pct,\n       MAX(resting_hr_complete_pct) AS max_resting_hr_complete_pct\nFROM participant_completeness\n```\n\nPurpose: participant completion bands. Row count: 2.\n```sql\nWITH participant_completeness AS (\n  SELECT PARTICIPANTIDENTIFIER, COUNT(*) AS daily_rows,\n         SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n         100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_complete_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT CASE\n         WHEN resting_hr_complete_pct = 100 THEN '100%'\n         WHEN resting_hr_complete_pct >= 95 THEN '95-<100%'\n         WHEN resting_hr_complete_pct >= 90 THEN '90-<95%'\n         WHEN resting_hr_complete_pct >= 75 THEN '75-<90%'\n         WHEN resting_hr_complete_pct >= 50 THEN '50-<75%'\n         ELSE '<50%'\n       END AS completion_band,\n       COUNT(*) AS participant_count\nFROM participant_completeness\nGROUP BY CASE\n         WHEN resting_hr_complete_pct = 100 THEN '100%'\n         WHEN resting_hr_complete_pct >= 95 THEN '95-<100%'\n         WHEN resting_hr_complete_pct >= 90 THEN '90-<95%'\n         WHEN resting_hr_complete_pct >= 75 THEN '75-<90%'\n         WHEN resting_hr_complete_pct >= 50 THEN '50-<75%'\n         ELSE '<50%'\n       END\nORDER BY MIN(resting_hr_complete_pct)\n```",
+  "finished": true,
+  "seconds": 78.4980731010437,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participant_count,\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS row_count,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS resting_hr_null_rows,\n  ROUND(100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END), 2) AS resting_hr_complete_pct\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS duplicate_participant_date_groups,\n  SUM(row_count) AS rows_in_duplicate_groups\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)",
+    "WITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(*) AS daily_rows,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n    100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_complete_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  COUNT(*) AS participant_count,\n  MIN(daily_rows) AS min_daily_rows,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY daily_rows) AS p25_daily_rows,\n  PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY daily_rows) AS median_daily_rows,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY daily_rows) AS p75_daily_rows,\n  MAX(daily_rows) AS max_daily_rows,\n  MIN(resting_hr_complete_pct) AS min_resting_hr_complete_pct,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY resting_hr_complete_pct) AS p25_resting_hr_complete_pct,\n  PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY resting_hr_complete_pct) AS median_resting_hr_complete_pct,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY resting_hr_complete_pct) AS p75_resting_hr_complete_pct,\n  MAX(resting_hr_complete_pct) AS max_resting_hr_complete_pct\nFROM participant_completeness",
+    "SELECT\n  TO_CHAR(RECORD_DATE, 'YYYY-MM') AS record_month,\n  COUNT(*) AS daily_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS resting_hr_null_rows,\n  ROUND(100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END), 2) AS resting_hr_complete_pct\nFROM IHS_2025.VFITBITDAILYDATA\nGROUP BY TO_CHAR(RECORD_DATE, 'YYYY-MM')\nORDER BY record_month",
+    "WITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(*) AS daily_rows,\n    SUM(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n    100 * AVG(CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_complete_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  CASE\n    WHEN resting_hr_complete_pct = 100 THEN '100%'\n    WHEN resting_hr_complete_pct >= 95 THEN '95-<100%'\n    WHEN resting_hr_complete_pct >= 90 THEN '90-<95%'\n    WHEN resting_hr_complete_pct >= 75 THEN '75-<90%'\n    WHEN resting_hr_complete_pct >= 50 THEN '50-<75%'\n    ELSE '<50%'\n  END AS completion_band,\n  COUNT(*) AS participant_count\nFROM participant_completeness\nGROUP BY CASE\n    WHEN resting_hr_complete_pct = 100 THEN '100%'\n    WHEN resting_hr_complete_pct >= 95 THEN '95-<100%'\n    WHEN resting_hr_complete_pct >= 90 THEN '90-<95%'\n    WHEN resting_hr_complete_pct >= 75 THEN '75-<90%'\n    WHEN resting_hr_complete_pct >= 50 THEN '50-<75%'\n    ELSE '<50%'\n  END\nORDER BY MIN(resting_hr_complete_pct)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 183296,
+        "inputTokens": 176393,
+        "cachedInputTokens": 88576,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 6903,
+        "reasoningOutputTokens": 2012
+      },
+      "last": {
+        "totalTokens": 27762,
+        "inputTokens": 25726,
+        "cachedInputTokens": 24576,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2036,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_3252af9dc36f8415",
+  "attempt": 1
+}

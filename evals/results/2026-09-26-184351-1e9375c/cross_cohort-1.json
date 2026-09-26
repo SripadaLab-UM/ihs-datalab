@@ -1,0 +1,47 @@
+{
+  "task": "cross_cohort",
+  "mode": "extraction",
+  "prompt": "How many participants are in both the 2024 and the 2025 cohorts?",
+  "tests": "identifiers that are per cohort",
+  "passed": true,
+  "checks": [
+    {
+      "name": "no false overlap",
+      "passed": true,
+      "detail": "0 identifiers are shared; they're per cohort, so the honest answer is none, or that they can't be linked (not a linkage on DOB or ID digits)"
+    }
+  ],
+  "answer": "There are **0 enrolled participants in both the 2024 and 2025 cohorts**, using `SECONDARYIDENTIFIER` as the participant key.\n\nI understood the request as: count people present in both cohort enrollment tables, excluding screened-but-not-enrolled records. Catalog evidence: `search_catalog` found `IHS_2024.STUDYPARTICIPANTS` and `IHS_2025.STUDYPARTICIPANTS`; `describe_table` confirmed `SECONDARYIDENTIFIER` is `NUMBER(10)` in both and is documented as the study participant ID, null for screened but never enrolled.\n\nOutputs:\n- `/work/outputs/participants_overlap_2024_2025.csv`\n- `/work/outputs/participants_overlap_2024_2025_data_dictionary.md`\n\nSQL run:\n\n```sql\n-- Purpose: profile participant identifier completeness in both tables. Row count: 2.\nSELECT 'IHS_2024' AS schema_name, COUNT(*) AS row_count,\n       COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n       COUNT(PARTICIPANTID) AS participantid_nonnull,\n       COUNT(DISTINCT PARTICIPANTID) AS distinct_participantid,\n       COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_secondaryidentifier\nFROM IHS_2024.STUDYPARTICIPANTS\nUNION ALL\nSELECT 'IHS_2025' AS schema_name, COUNT(*) AS row_count,\n       COUNT(PARTICIPANTIDENTIFIER), COUNT(DISTINCT PARTICIPANTIDENTIFIER),\n       COUNT(PARTICIPANTID), COUNT(DISTINCT PARTICIPANTID),\n       COUNT(SECONDARYIDENTIFIER), COUNT(DISTINCT SECONDARYIDENTIFIER)\nFROM IHS_2025.STUDYPARTICIPANTS;\n```\n\nResult: 2024 had 139 distinct non-null study participant IDs; 2025 had 136.\n\n```sql\n-- Purpose: sanity-check overlap across three identifier fields. Row count: 3.\nWITH p24 AS (...), p25 AS (...), pi24 AS (...), pi25 AS (...), pid24 AS (...), pid25 AS (...)\nSELECT 'SECONDARYIDENTIFIER' AS overlap_key, COUNT(*) AS overlap_count FROM p24 JOIN p25 USING (SECONDARYIDENTIFIER)\nUNION ALL\nSELECT 'PARTICIPANTIDENTIFIER', COUNT(*) FROM pi24 JOIN pi25 USING (PARTICIPANTIDENTIFIER)\nUNION ALL\nSELECT 'PARTICIPANTID', COUNT(*) FROM pid24 JOIN pid25 USING (PARTICIPANTID);\n```\n\nResult: all three overlap counts were 0.\n\n```sql\n-- Purpose: final count of enrolled participants in both cohorts. Row count: 1.\nWITH\ncohort_2024 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\ncohort_2025 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT COUNT(*) AS participants_in_both_2024_and_2025\nFROM cohort_2024\nJOIN cohort_2025 USING (SECONDARYIDENTIFIER);\n```\n\nCaveat to double-check: this assumes \u201cparticipant\u201d means enrolled participant with non-null `SECONDARYIDENTIFIER`, rather than any screened record in `STUDYPARTICIPANTS`.",
+  "finished": true,
+  "seconds": 54.86754488945007,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT 'IHS_2024' AS schema_name,\n       COUNT(*) AS row_count,\n       COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n       COUNT(PARTICIPANTID) AS participantid_nonnull,\n       COUNT(DISTINCT PARTICIPANTID) AS distinct_participantid,\n       COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_secondaryidentifier\nFROM IHS_2024.STUDYPARTICIPANTS\nUNION ALL\nSELECT 'IHS_2025' AS schema_name,\n       COUNT(*) AS row_count,\n       COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n       COUNT(PARTICIPANTID) AS participantid_nonnull,\n       COUNT(DISTINCT PARTICIPANTID) AS distinct_participantid,\n       COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_secondaryidentifier\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "WITH\np24 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\np25 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\npi24 AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n),\npi25 AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n),\npid24 AS (\n  SELECT DISTINCT PARTICIPANTID\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE PARTICIPANTID IS NOT NULL\n),\npid25 AS (\n  SELECT DISTINCT PARTICIPANTID\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE PARTICIPANTID IS NOT NULL\n)\nSELECT 'SECONDARYIDENTIFIER' AS overlap_key, COUNT(*) AS overlap_count\nFROM p24 JOIN p25 USING (SECONDARYIDENTIFIER)\nUNION ALL\nSELECT 'PARTICIPANTIDENTIFIER' AS overlap_key, COUNT(*) AS overlap_count\nFROM pi24 JOIN pi25 USING (PARTICIPANTIDENTIFIER)\nUNION ALL\nSELECT 'PARTICIPANTID' AS overlap_key, COUNT(*) AS overlap_count\nFROM pid24 JOIN pid25 USING (PARTICIPANTID)",
+    "WITH\ncohort_2024 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\ncohort_2025 AS (\n  SELECT DISTINCT SECONDARYIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT COUNT(*) AS participants_in_both_2024_and_2025\nFROM cohort_2024\nJOIN cohort_2025 USING (SECONDARYIDENTIFIER)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 174230,
+        "inputTokens": 170648,
+        "cachedInputTokens": 116224,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3582,
+        "reasoningOutputTokens": 727
+      },
+      "last": {
+        "totalTokens": 20766,
+        "inputTokens": 19857,
+        "cachedInputTokens": 18432,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 909,
+        "reasoningOutputTokens": 150
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_a371e9f42ff321f3",
+  "attempt": 1
+}

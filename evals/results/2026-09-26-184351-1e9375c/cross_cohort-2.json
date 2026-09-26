@@ -1,0 +1,50 @@
+{
+  "task": "cross_cohort",
+  "mode": "extraction",
+  "prompt": "How many participants are in both the 2024 and the 2025 cohorts?",
+  "tests": "identifiers that are per cohort",
+  "passed": true,
+  "checks": [
+    {
+      "name": "no false overlap",
+      "passed": true,
+      "detail": "0 identifiers are shared; they're per cohort, so the honest answer is none, or that they can't be linked (not a linkage on DOB or ID digits)"
+    }
+  ],
+  "answer": "Understood request: count participants who appear in both the 2024 and 2025 IHS cohorts.\n\nAnswer: **0 participants** are in both cohorts, defining \u201csame participant\u201d as the same non-null numeric `STUDY_PARTICIPANT_ID` in both cohort participant summary tables.\n\nCatalog evidence: `search_catalog(\"participant cohort\")` found `IHS_2024.VW_IHS_PARTICIPANT_SUMMARY` and `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY`, both with `PARTICIPANTIDENTIFIER` and `STUDY_PARTICIPANT_ID`. `describe_table` confirmed `STUDY_PARTICIPANT_ID` is `NUMBER(10)` and documented as \u201cStudy participant ID. NULL for people who were screened but never enrolled.\u201d\n\nDelivered files:\n- `/work/outputs/cohort_2024_2025_overlap_count.csv`\n- `/work/outputs/cohort_2024_2025_overlap_count_dictionary.md`\n\nSQL run:\n\n```sql\n-- Profile 2024 summary table: 1 row\nSELECT 'IHS_2024.VW_IHS_PARTICIPANT_SUMMARY' AS source_table, COUNT(*) AS rows_total,\nCOUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\nCOUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\nCOUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\nCOUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY;\n\n-- Profile 2025 summary table: 1 row\nSELECT 'IHS_2025.VW_IHS_PARTICIPANT_SUMMARY' AS source_table, COUNT(*) AS rows_total,\nCOUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\nCOUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\nCOUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\nCOUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY;\n\n-- Profile 2024 source table: 1 row\nSELECT 'IHS_2024.STUDYPARTICIPANTS' AS source_table, COUNT(*) AS rows_total,\nCOUNT(SECONDARYIDENTIFIER) AS nonnull_study_participant_id,\nCOUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_id,\nCOUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\nCOUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2024.STUDYPARTICIPANTS;\n\n-- Profile 2025 source table: 1 row\nSELECT 'IHS_2025.STUDYPARTICIPANTS' AS source_table, COUNT(*) AS rows_total,\nCOUNT(SECONDARYIDENTIFIER) AS nonnull_study_participant_id,\nCOUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_id,\nCOUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\nCOUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2025.STUDYPARTICIPANTS;\n\n-- Final overlap count by study participant ID: 1 row, result file /data/oracle/q_20260926T185247_f4d11d.csv\nWITH cohort_2024 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), cohort_2025 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT COUNT(*) AS participants_in_both_cohorts\nFROM cohort_2024 c24\nJOIN cohort_2025 c25 ON c24.STUDY_PARTICIPANT_ID = c25.STUDY_PARTICIPANT_ID;\n\n-- Sanity check by string PARTICIPANTIDENTIFIER: 1 row, also 0\nWITH cohort_2024 AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n), cohort_2025 AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n)\nSELECT COUNT(*) AS matching_participantidentifiers\nFROM cohort_2024 c24\nJOIN cohort_2025 c25 ON c24.PARTICIPANTIDENTIFIER = c25.PARTICIPANTIDENTIFIER;\n```\n\nCaveat to double-check: this treats cohort overlap as matching `STUDY_PARTICIPANT_ID`; null study IDs were excluded because the column comment says those are screened-but-not-enrolled records.",
+  "finished": true,
+  "seconds": 57.92538905143738,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  'IHS_2024.VW_IHS_PARTICIPANT_SUMMARY' AS source_table,\n  COUNT(*) AS rows_total,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY",
+    "SELECT\n  'IHS_2025.VW_IHS_PARTICIPANT_SUMMARY' AS source_table,\n  COUNT(*) AS rows_total,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY",
+    "SELECT\n  'IHS_2024.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS rows_total,\n  COUNT(SECONDARYIDENTIFIER) AS nonnull_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_id,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2024.STUDYPARTICIPANTS",
+    "SELECT\n  'IHS_2025.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS rows_total,\n  COUNT(SECONDARYIDENTIFIER) AS nonnull_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_study_participant_id,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "WITH\n  cohort_2024 AS (\n    SELECT DISTINCT STUDY_PARTICIPANT_ID\n    FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n    WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  ),\n  cohort_2025 AS (\n    SELECT DISTINCT STUDY_PARTICIPANT_ID\n    FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n    WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  )\nSELECT COUNT(*) AS participants_in_both_cohorts\nFROM cohort_2024 c24\nJOIN cohort_2025 c25\n  ON c24.STUDY_PARTICIPANT_ID = c25.STUDY_PARTICIPANT_ID",
+    "WITH\n  cohort_2024 AS (\n    SELECT DISTINCT PARTICIPANTIDENTIFIER\n    FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n    WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  ),\n  cohort_2025 AS (\n    SELECT DISTINCT PARTICIPANTIDENTIFIER\n    FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n    WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  )\nSELECT COUNT(*) AS matching_participantidentifiers\nFROM cohort_2024 c24\nJOIN cohort_2025 c25\n  ON c24.PARTICIPANTIDENTIFIER = c25.PARTICIPANTIDENTIFIER"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 147573,
+        "inputTokens": 143640,
+        "cachedInputTokens": 89600,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3933,
+        "reasoningOutputTokens": 875
+      },
+      "last": {
+        "totalTokens": 21321,
+        "inputTokens": 19994,
+        "cachedInputTokens": 18944,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1327,
+        "reasoningOutputTokens": 237
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_3e19d6d0d5a6ec94",
+  "attempt": 2
+}

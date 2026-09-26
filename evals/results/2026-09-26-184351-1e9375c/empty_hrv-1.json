@@ -1,0 +1,52 @@
+{
+  "task": "empty_hrv",
+  "mode": "extraction",
+  "prompt": "How many nights of Garmin HRV data does the 2026 cohort have?",
+  "tests": "a table that exists but is empty (a feed not loaded yet)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says it's empty",
+      "passed": true,
+      "detail": "IHS_2026.GARMINHRVSUMMARY has 0 rows"
+    },
+    {
+      "name": "missing data, not a finding",
+      "passed": true,
+      "detail": "the cohort has 9 Garmin users: the HRV feed just isn't loaded"
+    }
+  ],
+  "answer": "The 2026 cohort currently has **0 nights of Garmin HRV data** by the rule I used: one distinct participant-calendar-date in `IHS_2026.GARMINHRVSUMMARY` with a non-missing participant key, non-missing `CALENDARDATE`, and at least one HRV value in `LASTNIGHTAVG` or `LASTNIGHT5MINHIGH`.\n\nOutputs:\n- `/work/outputs/garmin_hrv_2026_night_count.csv`\n- `/work/outputs/garmin_hrv_2026_night_count_dictionary.md`\n\n**Catalog Evidence**\nI found `IHS_2026.GARMINHRVSUMMARY` and `IHS_2026.VGARMINHRVSUMMARY` via catalog search for Garmin HRV. `describe_table` confirmed these columns in both: `PARTICIPANTID`, `PARTICIPANTIDENTIFIER`, `CALENDARDATE`, `LASTNIGHTAVG`, `LASTNIGHT5MINHIGH`. In the base table, `CALENDARDATE` is `DATE`.\n\n**SQL Run**\nProfiling base table:\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(CASE WHEN LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL THEN 1 END) AS rows_with_any_hrv_value,\n  COUNT(DISTINCT PARTICIPANTID) AS distinct_participantids,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY\n```\nResult row count: 1 aggregate row; all counts were `0`.\n\nView cross-check:\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(CASE WHEN LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL THEN 1 END) AS rows_with_any_hrv_value,\n  COUNT(DISTINCT PARTICIPANTID) AS distinct_participantids,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY\n```\nResult row count: 1 aggregate row; all counts were `0`.\n\nFinal extraction:\n```sql\nSELECT\n  COUNT(DISTINCT COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER) || '|' || TO_CHAR(CALENDARDATE, 'YYYY-MM-DD')) AS garmin_hrv_participant_nights,\n  COUNT(DISTINCT COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER)) AS participants_with_garmin_hrv,\n  COUNT(1) AS qualifying_rows\nFROM IHS_2026.GARMINHRVSUMMARY\nWHERE CALENDARDATE IS NOT NULL\n  AND COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER) IS NOT NULL\n  AND (LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL)\n```\nResult row count: 1 aggregate row. Columns: `GARMIN_HRV_PARTICIPANT_NIGHTS`, `PARTICIPANTS_WITH_GARMIN_HRV`, `QUALIFYING_ROWS`. Values: `0`, `0`, `0`.\n\nCaveat to double-check: this answers for the Garmin HRV summary table currently available in `IHS_2026`; if Garmin HRV data are expected but not yet loaded into this table/view, the database load status may need checking.",
+  "finished": true,
+  "seconds": 51.860207080841064,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(CASE WHEN LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL THEN 1 END) AS rows_with_any_hrv_value,\n  COUNT(DISTINCT PARTICIPANTID) AS distinct_participantids,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY",
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(CASE WHEN LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL THEN 1 END) AS rows_with_any_hrv_value,\n  COUNT(DISTINCT PARTICIPANTID) AS distinct_participantids,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY",
+    "SELECT\n  COUNT(DISTINCT COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER) || '|' || TO_CHAR(CALENDARDATE, 'YYYY-MM-DD')) AS garmin_hrv_participant_nights,\n  COUNT(DISTINCT COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER)) AS participants_with_garmin_hrv,\n  COUNT(1) AS qualifying_rows\nFROM IHS_2026.GARMINHRVSUMMARY\nWHERE CALENDARDATE IS NOT NULL\n  AND COALESCE(PARTICIPANTID, PARTICIPANTIDENTIFIER) IS NOT NULL\n  AND (LASTNIGHTAVG IS NOT NULL OR LASTNIGHT5MINHIGH IS NOT NULL)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 157433,
+        "inputTokens": 153988,
+        "cachedInputTokens": 97792,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3445,
+        "reasoningOutputTokens": 831
+      },
+      "last": {
+        "totalTokens": 18484,
+        "inputTokens": 17607,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 877,
+        "reasoningOutputTokens": 83
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_a936f55c283fb095",
+  "attempt": 1
+}
