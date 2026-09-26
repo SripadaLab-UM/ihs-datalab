@@ -44,3 +44,24 @@ jobs:
           # Dev-only password of the synthetic database (see synthetic/README.md).
           DATALAB_ORACLE_PASSWORD: datalab_ro
         run: uv sync --locked && uv run pytest -m oracle -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: API types match the backend
+        run: sh scripts/api-types.sh && git diff --exit-code frontend/src/api/schema.d.ts
+      - name: Type check, test, build
+        working-directory: frontend
+        run: npm run typecheck && npm test && npm run build

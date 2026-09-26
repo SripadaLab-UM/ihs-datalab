@@ -45,7 +45,13 @@ class FakeRuntime:
 
 @pytest.fixture
 def app(settings, catalog):
-    return create_app(settings, database=FakeDatabase(), catalog=catalog, manage_containers=False)
+    return create_app(
+        settings,
+        database=FakeDatabase(),
+        catalog=catalog,
+        manage_containers=False,
+        protect_api=False,
+    )
 
 
 def use_fake_runtime(app, hold: asyncio.Event | None = None) -> list[FakeRuntime]:

@@ -28,6 +28,7 @@ from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
+from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
 VERSION = "0.1.0"
 
@@ -55,6 +56,9 @@ def create_app(
     model_client: httpx.AsyncClient | None = None,
     model_key: Callable[[], str] = model_api_key,
     manage_containers: bool = True,
+    browser: BrowserSession | None = None,
+    protect_api: bool = True,
+    web_dist: Path | None = None,
 ) -> FastAPI:
     connection = db.connect(settings.database_file)
     access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
@@ -101,6 +105,9 @@ def create_app(
         build_conversations_router(conversations, sessions, settings.default_model, access_log)
     )
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
+    browser = browser or BrowserSession()
+    app.state.browser = browser
+    app.add_middleware(ApiProtection, session=browser, enforce=protect_api)
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -113,6 +120,8 @@ def create_app(
             "catalog_schemas": catalog.schemas,
         }
 
+    # Last, so the web UI's catch-all route never shadows the API.
+    mount_web_ui(app, browser, web_dist)
     return app
 
 

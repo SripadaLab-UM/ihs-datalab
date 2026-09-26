@@ -20,7 +20,9 @@ from tests.conftest import FakeDatabase, live_server
 @pytest.fixture
 def server(settings, catalog) -> Iterator[tuple[str, object, FakeDatabase]]:
     database = FakeDatabase()
-    app = create_app(settings, database=database, catalog=catalog, manage_containers=False)
+    app = create_app(
+        settings, database=database, catalog=catalog, manage_containers=False, protect_api=False
+    )
     with live_server(app) as base_url:
         yield base_url, app.state.services, database
 
