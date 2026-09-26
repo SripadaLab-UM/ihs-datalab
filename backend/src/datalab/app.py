@@ -164,6 +164,7 @@ def create_app(
         )
     )
     previews = Previews()
+    app.state.previews = previews
     app.include_router(build_files_router(conversations, sessions, previews))
     app.include_router(build_preview_router(previews))
     app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
@@ -174,7 +175,7 @@ def create_app(
     )
     canaries = Canaries()
     app.include_router(canaries.router())
-    safety = SafetyCheck(settings, tokens, canaries, model_key=model_key)
+    safety = SafetyCheck(settings, tokens, canaries, model_key=model_key, previews=previews)
     app.state.canaries = canaries
     app.state.safety = safety
     app.include_router(build_safety_router(safety, settings.data_dir / "logs" / "safety-last.json"))

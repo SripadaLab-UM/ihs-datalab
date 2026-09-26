@@ -22,17 +22,20 @@ export default function VegaChart({ spec }: { spec: string }) {
       setError("This chart's specification isn't valid JSON.");
       return;
     }
+    // Vega would only log a refused link and draw an empty chart: say why.
+    const refuse = () => {
+      setError("Charts can't load data from links. The data must be in the chart itself.");
+      return Promise.reject(new Error("Charts can't load data from links."));
+    };
     const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     const result = embed(container.current, parsed as never, {
       actions: { export: true, source: false, compiled: false, editor: false },
+      renderer: "svg",
       theme: dark ? "dark" : undefined,
       config: { background: "transparent" },
       ast: true,
       expr: expressionInterpreter,
-      loader: {
-        load: () => Promise.reject(new Error("Charts can't load data from links.")),
-        sanitize: () => Promise.reject(new Error("Charts can't load data from links.")),
-      } as never,
+      loader: { load: refuse, sanitize: refuse } as never,
     });
     result.catch((reason: unknown) => setError(String(reason)));
     return () => {

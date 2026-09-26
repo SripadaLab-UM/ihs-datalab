@@ -142,6 +142,16 @@ class Previews:
     def get(self, token: str) -> _Grant | None:
         return self._grants.get(token)
 
+    def share(self, checkpoints: Checkpoints, entries: dict[str, Entry], prefix: str) -> str:
+        """A preview link for these files of a checkpoint (by path under `prefix`)."""
+        # Not counted against the limit: sharing never pushes out a person's link.
+        token = secrets.token_urlsafe(24)
+        self._grants[token] = _Grant(entries, checkpoints, prefix)
+        return token
+
+    def revoke(self, token: str) -> None:
+        self._grants.pop(token, None)
+
 
 def kind_of(path: str) -> Kind:
     suffix = os.path.splitext(path)[1].lower()

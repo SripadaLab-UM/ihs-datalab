@@ -134,8 +134,15 @@ access. It never gains it.
   - Previewed pages are cleaned first: resource hints (`dns-prefetch`,
     `preconnect`), `<meta>` and `<base>` tags, scripts, and frames are
     removed, since a DNS lookup of a crafted name could carry data out. DNS
-    prefetching is also switched off for the whole app. Previews are served
-    only into the viewer's frame, never as a page of their own.
+    prefetching is also switched off for the whole app. Addresses outside
+    the page's own folder are dropped as well, as a second layer behind the
+    policy. Previews are served only into the viewer's frame, never as a
+    page of their own.
+  - Links in the agent's answers open only after the person has seen the
+    full address (where look-alike letters show as `xn--`) and confirmed.
+    Links to this computer or the local network, or with a user name or
+    password in them, aren't opened at all.
+    Charts must embed their data; a chart that points at a link isn't drawn.
   - Workspace files shown in the viewer come from the latest checkpoint,
     never the live folder, so the agent can't swap a file for a link to
     somewhere else on the computer while DataLab reads it. They carry the
@@ -355,7 +362,7 @@ Oracle.
 
 | Check | How it's tested |
 |---|---|
-| Data session can't reach the internet | A request from inside a container to an outside host fails, and an outside DNS name doesn't resolve |
+| Data session can't reach the internet | A request from inside a container to an outside host fails, and an outside DNS name doesn't resolve. In CI, every network interface is watched while the check runs (`scripts/dns-leak-test.sh`): its one-off lookup name must never appear on the wire, since a lookup that fails can still carry data out in the name. A control lookup from the computer itself must appear, so a capture that saw nothing can't pass |
 | Hosted tools are refused | A web-search, remote-MCP, or image-URL request sent straight to the relay from a data container is rejected |
 | U-M GPT is reachable | The model list loads from inside a container |
 | No key in containers | Container environment and config have no U-M GPT key or Oracle password |
@@ -365,4 +372,4 @@ Oracle.
 | Helper gets only the approved text | A helper container's mounts and inputs contain only the approved question |
 | Database access is read-only | After connecting, the session's enabled roles are exactly the read-only set, its system privileges are exactly `CREATE SESSION`, and it has no non-SELECT privileges on any IHS schema |
 | Right agent image | The image digest matches the pinned release |
-| Agent HTML can't phone home | A test report that tries to run a script, load an outside image, refresh to an outside URL, or submit a form sends nothing in the preview |
+| Agent HTML can't phone home | A test page that tries every way a page can send data out (scripts, outside images and styles, refresh, prefetch, `<base>`, forms, frames, links and pings, SVG animation, event handlers) is put through the real preview route: nothing active or pointing outside its folder is left, the policy is sandboxed with no allowances and allows only the page's own folder, and the page won't open outside the viewer's frame |

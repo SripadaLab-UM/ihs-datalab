@@ -558,9 +558,8 @@ something we can use end to end ourselves.
        and CI);
      - research sessions with internet through Squid;
      - a CI test that the check catches a deliberately leaky sandbox.
-     Still to add to the adversarial suite: the tcpdump DNS leak test, and
-     browser-side HTML and Markdown leak tests. For now the check verifies
-     the security policy header.
+     Added in 3g: the tcpdump DNS leak test in CI, a preview containment
+     row, and browser-side Markdown and chart leak tests.
 3. **Complete workspace.**
    - Inputs, outputs, checkpoints, and rollback. (3a done 2026-09-26:
      checkpoints and rollback, the Outputs and History panels, the file
@@ -573,7 +572,9 @@ something we can use end to end ourselves.
      skills, and the model picker, with the relay allowing only approved
      models. 3e done the same day: the research helper, from the
      approval card to the throwaway research container. 3f done the same
-     day: analysis plans, claim tracing, and the rigor review.)
+     day: analysis plans, claim tracing, and the rigor review. 3g done the
+     same day: the join_paths and find_concept metadata tools, confirmed
+     external links, and the leak tests above. Milestone 3 is complete.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

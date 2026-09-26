@@ -4,13 +4,16 @@ import remarkGfm from "remark-gfm";
 
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
+import { ExternalLink } from "./ExternalLink";
+
 const VegaChart = lazy(() => import("./VegaChart"));
 
 /**
  * Renders an agent's Markdown. Charts in ```vega-lite blocks are drawn inline.
  * Images are only shown if they're embedded (data: URLs). Links to images
  * elsewhere are dropped: the page's security policy would block them anyway,
- * since loading one could send data out.
+ * since loading one could send data out. Other links open only after the
+ * person has seen the full address and confirmed.
  */
 export function Markdown({ text }: { text: string }) {
   const openFile = use(OpenFileContext);
@@ -48,11 +51,9 @@ export function Markdown({ text }: { text: string }) {
                 </button>
               );
             }
-            return (
-              <a href={href} target="_blank" rel="noreferrer noopener" className="text-accent underline">
-                {children}
-              </a>
-            );
+            // A link within the answer itself (a footnote) stays a link.
+            if (href && /^#[\w-]+$/.test(href)) return <a href={href}>{children}</a>;
+            return <ExternalLink href={href}>{children}</ExternalLink>;
           },
         }}
       >

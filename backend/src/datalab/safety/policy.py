@@ -53,3 +53,33 @@ def problems(header: str) -> list[str]:
         if not sources:
             found.append(f"{name} is empty")
     return found
+
+
+def preview_problems(header: str, folder: str) -> list[str]:
+    """Why a preview's policy would let its page contact anything; empty if it wouldn't.
+
+    A preview may load only files from its own folder, and must be sandboxed
+    with no allowances (no scripts, forms, popups, or navigation).
+    """
+    if not header.strip():
+        return ["no security policy is sent"]
+    directives = parse(header)
+    found = []
+    if "sandbox" not in directives:
+        found.append("the page isn't sandboxed")
+    elif directives["sandbox"]:
+        found.append(f"the sandbox allows {' '.join(directives['sandbox'])}")
+    if directives.get("default-src") != ["'none'"]:
+        found.append("default-src isn't 'none'")
+    for name in ("form-action", "base-uri"):
+        if directives.get(name) != ["'none'"]:
+            found.append(f"{name} isn't 'none'")
+    own = {folder.lower(), "data:", "'none'"}
+    for name, sources in directives.items():
+        if name in ("sandbox", "frame-ancestors"):
+            continue
+        allowed = own | ({"'unsafe-inline'"} if name == "style-src" else set())
+        extra = [s for s in sources if s not in allowed]
+        if extra:
+            found.append(f"{name} allows {' '.join(extra)}")
+    return found

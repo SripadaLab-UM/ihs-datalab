@@ -44,7 +44,7 @@ jobs:
           # Dev-only password of the synthetic database (see synthetic/README.md).
           DATALAB_ORACLE_PASSWORD: datalab_ro
         run: uv sync --locked && uv run pytest -m oracle -q
-      - name: Safety check (adversarial, against the synthetic database)
+      - name: Safety check (adversarial, against the synthetic database), watching for DNS leaks
         working-directory: backend
         env:
           DATALAB_ORACLE_PASSWORD: datalab_ro
@@ -54,7 +54,8 @@ jobs:
           DATALAB_HOST: 0.0.0.0
         run: |
           docker build -q -t datalab-probe:ci ../images/probe
-          uv run datalab safety-check --strict
+          command -v tcpdump >/dev/null || (sudo apt-get update -q && sudo apt-get install -y -q tcpdump)
+          ../scripts/dns-leak-test.sh
       - name: The Safety check catches a broken sandbox
         working-directory: backend
         env:

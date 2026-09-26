@@ -54,6 +54,8 @@ async def test_tools_are_listed(server, tmp_path):
     assert tools == {
         "search_catalog",
         "describe_table",
+        "join_paths",
+        "find_concept",
         "query",
         "ask_research_helper",
         "propose_plan",
@@ -70,6 +72,28 @@ async def test_search_and_describe(server, tmp_path):
     assert hits[0]["table"] == "IHS_2025.VW_DAILY_MOOD"
     assert described["also_in"] == ["IHS_2024"]
     assert described["columns"][2]["name"] == "TRACKERSTEPS"
+
+
+async def test_metadata_helpers(server, tmp_path):
+    base_url, services, _ = server
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        joins = payload(
+            await session.call_tool(
+                "join_paths",
+                {
+                    "first_table": "IHS_2025.VFITBITDAILYDATA",
+                    "second_table": "IHS_2024.VFITBITDAILYDATA",
+                },
+            )
+        )
+        missing = await session.call_tool(
+            "join_paths", {"first_table": "IHS_2025.NOPE", "second_table": "IHS_2025.VW_DAILY_MOOD"}
+        )
+        concept = payload(await session.call_tool("find_concept", {"concept": "mood"}))
+    assert joins["shared_columns"][0]["column"] == "STUDY_PARTICIPANT_ID"
+    assert any("different cohorts" in note for note in joins["notes"])
+    assert missing.is_error
+    assert concept["candidates"][0]["table"] == "IHS_2025.VW_DAILY_MOOD"
 
 
 async def test_query_writes_result_to_the_session_folder(server, tmp_path):

@@ -1,11 +1,13 @@
 """Outputs, previews, and checkpoints over the API."""
 
 import asyncio
+import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from datalab.app import create_app
-from datalab.htmlclean import clean_html
+from datalab.htmlclean import clean_fragment, clean_html
 from datalab.sessions.containers import DockerError
 from tests.conftest import FakeDatabase
 from tests.test_conversations import use_fake_runtime, wait_for
@@ -280,3 +282,76 @@ async def test_a_turn_being_set_up_counts_as_busy(settings, catalog):
     assert manager.is_busy(conversation.id)  # a restore arriving now is refused
     room.set()
     await sending
+
+
+def test_cleaning_drops_addresses_outside_the_pages_folder():
+    cleaned = clean_html(
+        '<img src="chart.png" srcset="a.png 1x, //x.test/b 2x"><img src="ht\ttps://x.test/p">'
+        '<img src="/api/health"><img src="data:image/png;base64,AA">'
+        '<div style="background:url(https://x.test/s)">x</div>'
+        '<link rel="stylesheet" href="https://x.test/c.css"><link rel="stylesheet" href="own.css">'
+        "<style>@import 'x.css'; a { background: url(ok.png) }"
+        " b { background: url('//x.test') }</style>"
+    )
+    assert "x.test" not in cleaned and "/api/health" not in cleaned and "@import" not in cleaned
+    assert 'src="chart.png"' in cleaned and "data:image/png" in cleaned
+    assert 'href="own.css"' in cleaned and "url(ok.png)" in cleaned
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "<style>@imp@importort 'https://x.test/a.css';</style>",
+        "<style>p { background: u\\72l(https://x.test/b) }</style>",
+        "<style>p { background: \\69mage-set('https://x.test/c' 1x) }</style>",
+        '<p style="background:u\\72l(https://x.test/d)">p</p>',
+        '<svg><rect filter="url(https://x.test/e.svg#f)" mask="url(//x.test/m)"/></svg>',
+        "<img src='\x01https://x.test/f.png'>",
+    ],
+)
+def test_exports_stay_inert_against_spelled_out_loads(hostile):
+    cleaned = clean_fragment(hostile, offline=True)
+    assert "x.test" not in cleaned, cleaned
+    assert "@import" not in cleaned.lower()
+
+
+def test_cleaning_stays_fast_on_many_unclosed_urls():
+    started = time.monotonic()
+    clean_html("<style>" + "url(/" * 20000 + "</style>" + '<p style="' + "url(/" * 20000 + '">')
+    assert time.monotonic() - started < 1
+
+
+def test_in_page_references_and_own_folder_styles_still_work():
+    cleaned = clean_html(
+        "<style>@import 'own.css'; p { color: red }</style>"
+        '<svg><defs><filter id="f"/></defs><rect filter="url(#f)"/></svg>'
+    )
+    assert "@-x-removed-import 'own.css'; p { color: red }" in cleaned  # the next rule survives
+    assert 'filter="url(#f)"' in cleaned
+
+
+def test_exports_keep_in_page_references():
+    cleaned = clean_fragment(
+        "<style>.a { fill: url( '#g') }</style>"
+        '<svg><rect fill="url(#g)" clip-path="url( \'#c\')" filter="url( https://x.test/f)"/></svg>',
+        offline=True,
+    )
+    assert "fill: url( '#g')" in cleaned and 'fill="url(#g)"' in cleaned
+    assert "clip-path" in cleaned and "x.test" not in cleaned
+
+
+@pytest.mark.parametrize(
+    "css",
+    [
+        "a{background:url(https://x.test/" + "a" * 5000 + ")}",
+        "a{background:image-set('https://x.test/" + "a" * 5000 + "' 1x)}",
+        "a{background: url(https://x.test/unclosed",
+    ],
+)
+def test_exports_drop_css_that_still_loads_after_cleaning(css):
+    assert "x.test" not in clean_fragment(f"<style>{css}</style>", offline=True)
+
+
+def test_exports_keep_ordinary_quoted_text():
+    cleaned = clean_fragment('<style>p::before { content: "Note: x" }</style>', offline=True)
+    assert 'content: "Note: x"' in cleaned

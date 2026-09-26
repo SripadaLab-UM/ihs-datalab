@@ -17,6 +17,8 @@ from mcp.types import ToolAnnotations
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from datalab.data.catalog import Catalog, TableInfo
+from datalab.data.helpers import find_concept as concept_candidates
+from datalab.data.helpers import join_keys
 from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
@@ -31,8 +33,9 @@ PLAN_APPROVAL = "analysis_plan"
 
 INSTRUCTIONS = """\
 Read-only access to the Intern Health Study (IHS) Oracle database, one schema
-per cohort year (for example IHS_2024, IHS_2025). Start with search_catalog,
-check columns with describe_table, then run SELECT queries with query. Qualify
+per cohort year (for example IHS_2024, IHS_2025). Start with search_catalog
+(or find_concept for a research concept), check columns with describe_table
+and joins with join_paths, then run SELECT queries with query. Qualify
 every table with its schema. Results are saved as CSV files in /data/oracle;
 work with the file for anything beyond the preview.
 """
@@ -82,6 +85,29 @@ def build_agent_tools(
         if info is None:
             raise ToolError(f"{table} isn't in the catalog. Use search_catalog to find tables.")
         return _json(_describe(info, catalog))
+
+    @server.tool(annotations=_READ_ONLY)
+    def join_paths(first_table: str, second_table: str) -> str:
+        """How two tables can be joined: shared columns, most useful first, and caveats.
+
+        Metadata only. Flags cross-cohort joins, type mismatches, a missing
+        date column, and tables that link different participant identifiers.
+        first_table, second_table: schema-qualified names, e.g. "IHS_2025.VFITBITSLEEP".
+        """
+        result = join_keys(catalog, first_table, second_table)
+        if "error" in result:
+            raise ToolError(result["error"])
+        return _json(result)
+
+    @server.tool(annotations=_READ_ONLY)
+    def find_concept(concept: str, cohorts: list[str] | None = None) -> str:
+        """Candidate tables for a research concept, such as "sleep" or "depression".
+
+        Metadata only: searches names and comments with the words the catalog
+        uses for the concept. Check each candidate with describe_table.
+        cohorts: optional schema names to search, e.g. ["IHS_2025"].
+        """
+        return _json(concept_candidates(catalog, concept[:200], cohorts))
 
     @server.tool(annotations=_READ_ONLY)
     async def query(

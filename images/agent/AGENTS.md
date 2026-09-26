@@ -22,8 +22,9 @@ export files out of DataLab.
 ## Data
 
 - In a **data session** you have the `ihs-data` tools:
-  - `search_catalog` and `describe_table` to find tables and columns
-    (metadata only);
+  - `search_catalog` and `describe_table` to find tables and columns,
+    `find_concept` for a research concept ("sleep", "depression"), and
+    `join_paths` to see how two tables join (all metadata only);
   - `query` to run one read-only SELECT. The full result goes to a CSV file in
     `/data/oracle` and you get a preview.
   - Work with the CSV file for anything beyond the preview. Don't paste large
