@@ -1,0 +1,79 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": true,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Bottom line: in this planned exploratory descriptive analysis, daily mood was lower during the intern year. Among 149 IHS 2025 participants with valid daily mood data both before and during internship, the mean within-person change was -0.70 points on the 1-10 mood scale, from 6.65 pre-internship to 5.95 during internship (95% CI -0.74 to -0.66).\n\nEvidence: I used `IHS_2025.VW_DAILY_MOOD`, with 26,400 mood records from 150 participants before 2026-07-01. The primary analysis averaged multiple same-day entries first, then compared each participant\u2019s pre-internship mean with their own intern-year mean. A sensitivity requiring at least 7 valid mood days in each period gave the same estimate, and a participant fixed-effect participant-day weighted sensitivity was also very similar: -0.70 points (95% CI -0.74 to -0.66).\n\nFiles:\n- Report: `/work/outputs/daily_mood_2025_report.html`\n- Analysis source: `/work/outputs/analyze_2025_daily_mood.py`\n- Result tables: `/work/outputs/daily_mood_2025_primary_result.csv` and `/work/outputs/daily_mood_2025_period_summary.csv`\n\nMain limitations: this is descriptive, not causal; I used July 1, 2025 as a cohort-level internship start boundary; missing mood days were not imputed; and observation coverage varied by participant and period. Full SQL provenance is included in the report, including the date coverage query, period coverage query, and final extraction query.",
+  "finished": true,
+  "seconds": 150.87828016281128,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_647dfb8d1444b795",
+      "plan": {
+        "question": "Did daily mood change from before internship to during the intern year in the IHS 2025 cohort, and by how much?",
+        "estimand": "Primary estimand: the mean within-person change in daily mood, defined as each participant's mean daily mood during the intern year (2025-07-01 through 2026-06-30) minus that same participant's mean daily mood before internship (records before 2025-07-01), among participants with at least one valid numeric daily mood observation in both periods. Secondary descriptive estimands: observation-weighted period means and the number of daily observations and participants contributing to each period.",
+        "exposure": "Time period relative to internship: pre-internship (< 2025-07-01) versus during intern year (>= 2025-07-01 and < 2026-07-01). July 1, 2025 will be used as the cohort-level internship start boundary because no person-level internship start date was identified in the catalog metadata inspected so far.",
+        "outcome": "Daily mood score from IHS_2025.VW_DAILY_MOOD: MOOD_SCORE, dated by MOOD_STARTDATE. The column is stored as VARCHAR2, so the analysis will first verify which values are parseable as numeric and will exclude nonnumeric or missing values from score summaries, reporting their frequency.",
+        "covariates": "No covariate adjustment for the primary answer. This is a within-person before/during descriptive comparison; adjustment would answer a different question and is not needed to estimate the average within-person change.",
+        "cohort": "IHS_2025 cohort, daily mood records in IHS_2025.VW_DAILY_MOOD. Include participants with valid participant identifiers and valid numeric MOOD_SCORE values. Primary paired analysis includes participants with at least one valid numeric daily mood observation in both pre-internship and during-intern-year periods. Records on or after 2026-07-01 are excluded from the planned comparison.",
+        "decisions": "Data checks before estimation: duplicates by participant/date/time, missing participant IDs, missing dates, nonnumeric mood values, mood score range, date coverage by period, and participants with observations in only one period. If multiple entries occur for the same participant on the same calendar day, average valid numeric scores within that participant-day before computing period means so highly repeated same-day entries do not over-weight a day. Primary uncertainty: 95% confidence interval for the mean of participant-level paired changes, using participant as the independent unit. Sensitivity checks: require at least 7 valid daily mood days in each period; and compare with an observation-weighted mixed/cluster-robust descriptive contrast if feasible. Results beyond these checks will be labeled exploratory/off-plan."
+      }
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS n_rows, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS n_participants, MIN(CAST(MOOD_STARTDATE AS DATE)) AS min_mood_date, MAX(CAST(MOOD_STARTDATE AS DATE)) AS max_mood_date FROM IHS_2025.VW_DAILY_MOOD WHERE MOOD_STARTDATE IS NOT NULL",
+    "SELECT CASE WHEN CAST(MOOD_STARTDATE AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre_internship' WHEN CAST(MOOD_STARTDATE AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD') AND CAST(MOOD_STARTDATE AS DATE) < ADD_MONTHS(TO_DATE(:intern_start, 'YYYY-MM-DD'), 12) THEN 'during_intern_year' ELSE 'outside_window' END AS period, COUNT(*) AS n_rows, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS n_participants FROM IHS_2025.VW_DAILY_MOOD WHERE MOOD_STARTDATE IS NOT NULL GROUP BY CASE WHEN CAST(MOOD_STARTDATE AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre_internship' WHEN CAST(MOOD_STARTDATE AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD') AND CAST(MOOD_STARTDATE AS DATE) < ADD_MONTHS(TO_DATE(:intern_start, 'YYYY-MM-DD'), 12) THEN 'during_intern_year' ELSE 'outside_window' END ORDER BY period",
+    "WITH labeled AS ( SELECT PARTICIPANTIDENTIFIER, CASE WHEN CAST(MOOD_STARTDATE AS DATE) < TO_DATE(:intern_start, 'YYYY-MM-DD') THEN 'pre_internship' WHEN CAST(MOOD_STARTDATE AS DATE) >= TO_DATE(:intern_start, 'YYYY-MM-DD') AND CAST(MOOD_STARTDATE AS DATE) < ADD_MONTHS(TO_DATE(:intern_start, 'YYYY-MM-DD'), 12) THEN 'during_intern_year' ELSE 'outside_window' END AS period FROM IHS_2025.VW_DAILY_MOOD WHERE MOOD_STARTDATE IS NOT NULL ) SELECT period, COUNT(*) AS n_rows, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS n_participants FROM labeled GROUP BY period ORDER BY period",
+    "SELECT PARTICIPANTIDENTIFIER, MOOD_STARTDATE, MOOD_ENDDATE, MOOD_SCORE FROM IHS_2025.VW_DAILY_MOOD WHERE MOOD_STARTDATE IS NOT NULL AND CAST(MOOD_STARTDATE AS DATE) < TO_DATE(:end_date, 'YYYY-MM-DD')"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 379377,
+        "inputTokens": 367181,
+        "cachedInputTokens": 208896,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 12196,
+        "reasoningOutputTokens": 3093
+      },
+      "last": {
+        "totalTokens": 36832,
+        "inputTokens": 35973,
+        "cachedInputTokens": 21504,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 859,
+        "reasoningOutputTokens": 509
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_925eec275fdd7d80",
+  "attempt": 2
+}
