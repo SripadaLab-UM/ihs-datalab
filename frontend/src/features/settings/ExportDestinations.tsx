@@ -12,9 +12,9 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
   const remove = useMutation({ mutationFn: api.removeDestination, onSuccess: refresh });
 
   return (
-    <section className="rounded-2xl border border-line bg-surface p-5">
+    <section className="border-t border-ink pt-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Export folders</h2>
+        <h2 className="font-serif text-[28px] leading-tight">Export folders</h2>
         {!practice && (
           <Button onClick={() => add.mutate()} disabled={add.isPending}>
             {add.isPending ? "Choose in the window that opened…" : "Add a folder…"}

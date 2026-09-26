@@ -41,9 +41,9 @@ function PlanCard({ conversationId, approval }: { conversationId: string; approv
   const decided = answer.isPending || answer.isSuccess;
   const shown = approval.frozen ? (approval.plan ?? plan) : plan;
   return (
-    <div className={clsx("rounded-2xl border bg-surface p-4", approval.state === "pending" ? "border-you/50" : "border-line")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <p className="text-[15px] font-semibold">Analysis plan</p>
+    <div className={clsx("border-l py-1 pl-5", approval.state === "pending" ? "border-you" : "border-line")}>
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <p className="font-serif text-[21px]">Analysis plan</p>
         {approval.state === "pending" && <Chip tone="you">needs you</Chip>}
         {approval.frozen && (
           <Chip tone="good" title={`sha256 ${approval.frozen.sha256}`}>
@@ -54,25 +54,25 @@ function PlanCard({ conversationId, approval }: { conversationId: string; approv
       </div>
       {approval.state === "pending" ? (
         <>
-          <p className="mt-1 max-w-[62ch] text-[13.5px] text-muted">
+          <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
             Before looking at outcome data, the agent writes down what it will do. Edit anything, then approve it: it's
             frozen, and later work is labelled as following it or exploratory.
           </p>
-          <div className="mt-3 flex flex-col gap-3">
+          <div className="mt-4 flex flex-col gap-4">
             {PLAN_FIELDS.map(([name, label]) => (
               <label key={name} className="block">
-                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-faint">{label}</span>
+                <span className="dl-label">{label}</span>
                 <textarea
                   value={plan[name] ?? ""}
                   onChange={(e) => setPlan({ ...plan, [name]: e.target.value })}
                   rows={Math.max(2, Math.ceil((plan[name] ?? "").length / 90) + (plan[name] ?? "").split("\n").length - 1)}
-                  className="mt-1 w-full resize-y rounded-xl border border-line bg-canvas px-3 py-2 text-[14px] leading-relaxed outline-none focus:border-you/60"
+                  className="mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink"
                 />
               </label>
             ))}
           </div>
           {answer.error && <p className="mt-2 text-[13px] text-danger">{answer.error.message}</p>}
-          <div className="mt-3 flex justify-end gap-2">
+          <div className="mt-4 flex justify-end gap-2">
             <Button onClick={() => answer.mutate(false)} disabled={decided}>
               Not yet
             </Button>
@@ -83,15 +83,15 @@ function PlanCard({ conversationId, approval }: { conversationId: string; approv
         </>
       ) : (
         <>
-          <dl className="mt-3 grid gap-x-4 gap-y-2 text-[14px] sm:grid-cols-[11rem_1fr]">
+          <dl className="mt-3 grid gap-x-5 gap-y-2.5 font-serif text-[16px] sm:grid-cols-[10rem_1fr]">
             {PLAN_FIELDS.filter(([name]) => shown[name]).map(([name, label]) => (
               <div key={name} className="contents">
-                <dt className="text-[12px] font-semibold uppercase tracking-[0.06em] text-faint sm:pt-0.5">{label}</dt>
+                <dt className="dl-label sm:pt-1.5">{label}</dt>
                 <dd className="whitespace-pre-wrap leading-relaxed">{shown[name]}</dd>
               </div>
             ))}
           </dl>
-          <p className="mt-3 text-[13px] text-muted">
+          <p className="mt-3 font-sans text-[12.5px] text-muted">
             {approval.frozen
               ? `Approved by you and frozen ${new Date(approval.frozen.at).toLocaleString()}. Later work is labelled as following it or exploratory.`
               : approval.state === "declined"
@@ -136,15 +136,15 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
   const decided = answer.isPending || answer.isSuccess;
 
   return (
-    <div className={clsx("rounded-2xl border bg-surface p-4 text-[14px]", approval.state === "pending" ? "border-research/50" : "border-line")}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Icon name="globe" size={15} className="text-research" />
-        <p className="text-[15px] font-semibold">The agent wants to look something up online</p>
+    <div className={clsx("border-l py-1 pl-5 text-[14px]", approval.state === "pending" ? "border-research" : "border-line")}>
+      <div className="flex flex-wrap items-baseline gap-2.5">
+        <Icon name="globe" size={15} className="translate-y-[2px] text-research" />
+        <p className="font-serif text-[21px]">The agent wants to look something up online</p>
         {approval.state === "pending" && <Chip tone="you">needs you</Chip>}
       </div>
       {approval.state === "pending" ? (
         <>
-          <p className="mt-1 max-w-[62ch] text-[13.5px] text-muted">
+          <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
             The helper has the internet and sees only this question: not the conversation, files, or data. Check it
             contains no study data before sending. You can edit it.
           </p>
@@ -153,15 +153,15 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
             value={question}
             dir="ltr"
             onChange={(e) => setQuestion(e.target.value)}
-            className="mt-2 w-full resize-none overflow-hidden rounded-lg border border-line bg-surface p-2 font-mono text-xs"
+            className="mt-3 w-full resize-none overflow-hidden border border-line bg-transparent p-2.5 font-mono text-xs outline-none focus:border-ink"
           />
           <p className={`text-right text-xs ${length > 1000 ? "text-danger" : "text-muted"}`}>
             {length} / 1000 characters
           </p>
           {/* Exactly what will be sent, all of it, with anything that isn't plain
               English letters highlighted (look-alike letters could carry data). */}
-          <p className="mt-2 text-xs font-medium">What will be sent:</p>
-          <p dir="ltr" className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-surface p-2 font-mono text-xs">
+          <p className="dl-label mt-3">What will be sent</p>
+          <p dir="ltr" className="mt-1.5 whitespace-pre-wrap break-words bg-sunken p-2.5 font-mono text-xs">
             {Array.from(question).map((char, i) =>
               /[\x20-\x7e\n]/.test(char) ? (
                 char
@@ -194,7 +194,7 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
         </>
       ) : (
         <>
-          <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 font-mono text-xs">
+          <pre className="mt-2 whitespace-pre-wrap bg-sunken p-2.5 font-mono text-xs">
             {approval.sent ?? approval.question}
           </pre>
           <p className="mt-1 text-xs text-muted">

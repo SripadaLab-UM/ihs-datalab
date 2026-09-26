@@ -1,13 +1,20 @@
-# Design: the Narrator
+# Design: the Narrator, on paper
 
 DataLab is used by scientists and analysts who need to trust what the agent
 did. The interface's job is to make that easy: every turn reads as a short
 story of what the agent looked at and did, in plain language, with the
 evidence one click away.
 
-The redesign compared three directions: Clippings, Evidence map, and
-Narrator. We chose the Narrator, with the Clippings idea for detail views.
-The Evidence map is a possible future "How was this made?" view.
+Two decisions shape it:
+
+- **Structure: the Narrator.** The redesign compared three directions:
+  Clippings, Evidence map, and Narrator. We chose the Narrator, with the
+  Clippings idea for detail views. The Evidence map is a possible future
+  "How was this made?" view.
+- **Look: paper.** A quiet language modelled on
+  [understand.cap-study.com](https://understand.cap-study.com/). It reads
+  like a well-set page, not a dashboard: a serif for reading, hairline rules
+  instead of cards, small uppercase labels, and almost no colour.
 
 ## Principles
 
@@ -17,19 +24,23 @@ The Evidence map is a possible future "How was this made?" view.
 2. **Show the evidence, friendly first.** Opening a step shows what the agent
    saw: the lab guide as formatted text, a table's columns, the SQL and its
    row count, the files it read. Raw output is the last resort.
-3. **The agent's own words are narration.** Commentary between steps is shown
-   as plain prose on the timeline, so the story explains itself.
+3. **The agent's own words are narration.** Commentary between steps is set
+   as serif prose between the steps, so the story explains itself.
 4. **Fold the repetitive, never the important.** Three or more finished steps
    of one kind fold into one row ("Searched 4 times"). A failed, running, or
    heads-up step is never folded away.
-5. **One live line.** While the agent works, one card says what it's doing
+5. **One live line.** While the agent works, one line says what it's doing
    now, or that it's waiting for you, with Stop always next to it.
-6. **The answer stands apart.** The final answer is its own card, with how it
-   was made (the trace) and the review (the agent checking its own work)
-   below it.
-7. **Safety is always visible.** The session badge (data: no internet;
-   research: no study data) is in the header of every conversation, and the
-   colours match: emerald for data, amber for research.
+6. **The answer stands apart.** The final answer sits under a single ink
+   rule, with how it was made (the trace) and the review (the agent checking
+   its own work) below it.
+7. **Colour means something, or it isn't there.** Green is the data session
+   and things that checked out; amber is the research session and heads-ups;
+   blue is waiting for you; red is an error. Everything else is ink on paper
+   (the live "working" dot too), so a coloured word is always worth reading.
+8. **Safety is always visible.** The session line (data: reads the database,
+   no internet; research: the internet, no study data) is in the header of
+   every conversation, and each conversation in the list says which it is.
 
 ## What a step shows
 
@@ -60,24 +71,38 @@ beside it. Add a case there, not in the components.
 Defined once in `frontend/src/styles/index.css` (`@theme`), with a dark
 palette that follows the system setting.
 
-- **Ground and ink:** `canvas`, `surface`, `sunken`, `line`; `ink`, `muted`,
-  `faint`. Neutrals lean slightly cool.
-- **Accent:** `accent` (emerald), `accent-soft`, `accent-ink` (text on accent).
-- **Meaning:** `data` (emerald), `research` and `attn` (amber), `you` (blue,
-  the person's own messages and choices), `danger`.
-- **Type:** Schibsted Grotesk for text, IBM Plex Mono for data, paths and
-  code. Both are bundled (fontsource): the browser may only contact DataLab.
-- **Motion:** `dl-breathe` (live), `dl-slide` / `dl-in` (arrivals). All are
+- **Paper and ink:** `canvas` and `surface` (the page, white), `sunken`
+  (code and SQL), `line` (hairlines); `ink` (warm near-black), `muted`,
+  `faint`. Neutrals lean warm.
+- **Accent:** the ink itself (`accent`, `accent-soft`, `accent-ink`): primary
+  buttons, focus, the rule over the answer. There is no brand colour.
+- **Meaning:** `data` (green), `research` and `attn` (amber), `you` (blue,
+  waiting for your decision), `danger` (red).
+- **Shape:** square corners (radius tokens of 2–6px), hairline borders, no
+  shadows except under a dialog.
+- **Type:**
+  - A book serif for reading: questions, narration, answers, guides, titles.
+    It uses the system's Iowan Old Style or Palatino (macOS and Windows both
+    have one), so nothing is downloaded.
+  - Schibsted Grotesk for controls and step sentences.
+  - IBM Plex Mono for data: SQL, table and column names, row counts, paths.
+  - `.dl-label` for the small uppercase labels ("THE ANSWER",
+    "CONVERSATIONS").
+  - The two bundled faces come from fontsource: the browser may only contact
+    DataLab.
+- **Motion:** `dl-breathe` (the live dot) and `dl-in` (arrivals). Both are
   off under `prefers-reduced-motion`.
 
 ## Components
 
-- `components/ui`: `Button` (pill), `Chip` (tones good / attn / bad / you),
+- `components/ui`: `Button` (square: ink, outline or text), `Chip` (a mono
+  tag with a hairline border; tones good / attn / bad / you),
   `SessionBadge`, `Panel`, `Modal`, `Tabs`, `Icon` (one stroke style),
   `FileGlyph` (file kind at a glance), `EmptyNote` (what will appear here,
   and when).
-- `components/chat/Story.tsx`: the timeline (`StepRow`, `GroupRow`,
-  `SayRow`, `NowCard`, `DetailView`).
+- `components/chat/Story.tsx`: the story (`StepRow` and `GroupRow` as ruled
+  rows that open with "+", `SayRow` narration, the live `NowCard` line,
+  `DetailView`).
 - `components/chat/Chat.tsx`: turns, the answer card, trace and review, the
   composer. The chat follows new steps only while you're at the bottom;
   scroll up and it stays put, with "Jump to latest".

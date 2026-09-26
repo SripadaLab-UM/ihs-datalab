@@ -12,11 +12,11 @@ export function Button({
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-        variant === "primary" && "bg-accent text-accent-ink hover:brightness-110",
-        variant === "secondary" && "border border-line bg-surface text-ink hover:bg-sunken",
-        variant === "danger" && "border border-danger/40 bg-surface text-danger hover:bg-danger-soft",
-        variant === "ghost" && "text-muted hover:bg-sunken hover:text-ink",
+        "inline-flex items-center justify-center gap-1.5 rounded-[3px] px-3 py-1.5 font-sans text-[13.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-45",
+        variant === "primary" && "bg-accent text-accent-ink hover:opacity-85",
+        variant === "secondary" && "border border-line bg-transparent text-ink hover:border-ink",
+        variant === "danger" && "border border-danger/40 bg-transparent text-danger hover:border-danger",
+        variant === "ghost" && "text-muted hover:text-ink",
         className,
       )}
     />
@@ -37,12 +37,12 @@ export function Chip({
     <span
       title={title}
       className={clsx(
-        "inline-flex max-w-full items-center gap-1 truncate rounded-md px-2 py-0.5 font-mono text-[12px] leading-5",
-        !tone && "border border-line bg-surface text-muted",
-        tone === "good" && "bg-accent-soft text-accent",
-        tone === "attn" && "bg-attn-soft text-attn",
-        tone === "bad" && "bg-danger-soft text-danger",
-        tone === "you" && "bg-you-soft text-you",
+        "inline-flex max-w-full items-center gap-1 overflow-hidden rounded-[2px] border px-1.5 font-mono text-[11.5px] leading-[19px] whitespace-nowrap",
+        !tone && "border-line text-muted",
+        tone === "good" && "border-data/35 text-data",
+        tone === "attn" && "border-attn/40 text-attn",
+        tone === "bad" && "border-danger/40 text-danger",
+        tone === "you" && "border-you/40 text-you",
       )}
     >
       {children}
@@ -53,12 +53,12 @@ export function Chip({
 /** Which kind of session this is: always visible, so nobody is unsure. */
 export function SessionBadge({ kind }: { kind: "data" | "research" }) {
   return kind === "data" ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-data-soft px-2.5 py-0.5 text-xs font-medium text-data">
-      <Icon name="lock" size={13} /> Data session · no internet
+    <span className="inline-flex items-center gap-1.5 font-serif text-[14.5px] text-data italic">
+      <Icon name="lock" size={13} /> Data session — reads the database, no internet
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-research-soft px-2.5 py-0.5 text-xs font-medium text-research">
-      <Icon name="globe" size={13} /> Research session · no study data
+    <span className="inline-flex items-center gap-1.5 font-serif text-[14.5px] text-research italic">
+      <Icon name="globe" size={13} /> Research session — the internet, no study data
     </span>
   );
 }
@@ -66,11 +66,11 @@ export function SessionBadge({ kind }: { kind: "data" | "research" }) {
 export function Panel({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="flex min-h-0 flex-col">
-      <header className="flex items-center justify-between px-3 py-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">{title}</h2>
+      <header className="flex items-center justify-between px-5 py-2">
+        <h2 className="dl-label">{title}</h2>
         {actions}
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">{children}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">{children}</div>
     </section>
   );
 }
@@ -95,24 +95,24 @@ export function Modal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/45 p-6 backdrop-blur-[2px]" onClick={onClose}>
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         className={clsx(
-          "flex max-h-full flex-col rounded-2xl border border-line bg-surface shadow-2xl",
+          "flex max-h-full flex-col rounded-[4px] border border-line bg-surface shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]",
           wide ? "h-[85vh] w-[min(90vw,72rem)]" : "w-[34rem]",
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center gap-3 border-b border-line px-5 py-3">
-          <h2 className="min-w-0 flex-1 truncate font-semibold">{title}</h2>
+        <header className="flex items-center gap-3 border-b border-line px-6 py-4">
+          <h2 className="min-w-0 flex-1 truncate font-serif text-[21px] font-normal">{title}</h2>
           {actions}
           <Button variant="ghost" onClick={onClose} aria-label="Close" className="px-2">
             <Icon name="close" />
           </Button>
         </header>
-        <div className="min-h-0 flex-1 overflow-auto p-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-auto px-6 py-5">{children}</div>
       </div>
     </div>
   );
@@ -128,7 +128,7 @@ export function Tabs<T extends string>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div role="tablist" className="flex gap-1 border-b border-line px-3">
+    <div role="tablist" className="flex gap-4 overflow-x-auto border-b border-line px-4">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -136,8 +136,8 @@ export function Tabs<T extends string>({
           aria-selected={tab.id === value}
           onClick={() => onChange(tab.id)}
           className={clsx(
-            "-mb-px border-b-2 px-2 py-2.5 text-[13px] font-medium",
-            tab.id === value ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink",
+            "-mb-px border-b py-3 font-sans text-[10.5px] font-semibold tracking-[0.14em] uppercase",
+            tab.id === value ? "border-ink text-ink" : "border-transparent text-faint hover:text-ink",
           )}
         >
           {tab.label}
@@ -149,25 +149,24 @@ export function Tabs<T extends string>({
 
 export { Icon } from "./Icon";
 
-const KIND_LOOK: Record<string, { icon: AnyIcon; className: string }> = {
-  html: { icon: "page", className: "bg-accent-soft text-accent" },
-  image: { icon: "image", className: "bg-you-soft text-you" },
-  csv: { icon: "table", className: "bg-data-soft text-data" },
-  pdf: { icon: "page", className: "bg-danger-soft text-danger" },
-  text: { icon: "file", className: "bg-sunken text-muted" },
-  folder: { icon: "folder", className: "bg-attn-soft text-attn" },
+const KIND_ICON: Record<string, AnyIcon> = {
+  html: "page",
+  image: "image",
+  csv: "table",
+  pdf: "page",
+  text: "file",
+  folder: "folder",
 };
 
 /** A small tile that says what kind of file this is, at a glance. */
 export function FileGlyph({ kind, size = 32 }: { kind: string; size?: number }) {
-  const look = KIND_LOOK[kind] ?? { icon: "file" as const, className: "bg-sunken text-muted" };
   return (
     <span
       aria-hidden
-      className={clsx("inline-flex shrink-0 items-center justify-center rounded-lg", look.className)}
+      className="inline-flex shrink-0 items-center justify-center rounded-[2px] border border-line text-muted"
       style={{ width: size, height: size }}
     >
-      <Icon name={look.icon} size={Math.round(size * 0.5)} />
+      <Icon name={KIND_ICON[kind] ?? "file"} size={Math.round(size * 0.5)} />
     </span>
   );
 }
@@ -175,12 +174,11 @@ export function FileGlyph({ kind, size = 32 }: { kind: string; size?: number }) 
 /** What a panel says when there is nothing in it yet: what will appear, and when. */
 export function EmptyNote({ icon, title, children }: { icon: AnyIcon; title: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-line px-4 py-6 text-center">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-sunken text-faint">
-        <Icon name={icon} size={18} />
-      </span>
-      <p className="text-sm font-medium">{title}</p>
-      <p className="max-w-[18rem] text-xs text-muted">{children}</p>
+    <div className="flex flex-col gap-1.5 border-t border-line pt-4">
+      <p className="dl-label flex items-center gap-1.5">
+        <Icon name={icon} size={12} /> {title}
+      </p>
+      <p className="max-w-[20rem] font-serif text-[15px] leading-relaxed text-muted italic">{children}</p>
     </div>
   );
 }

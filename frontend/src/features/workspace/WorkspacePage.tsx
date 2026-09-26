@@ -23,31 +23,35 @@ export function WorkspacePage() {
 
   return (
     <div className="grid h-full min-h-0 grid-cols-[16rem_1fr_20rem]">
-      <aside className="flex min-h-0 flex-col border-r border-line bg-surface">
-        <div className="p-3">
-          <Button variant="primary" className="w-full py-2" onClick={() => setCreating(true)}>
-            <Icon name="pen" size={14} /> New conversation
-          </Button>
+      <aside className="flex min-h-0 flex-col border-r border-line">
+        <div className="px-5 pt-6 pb-4">
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="font-serif text-[16px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
+          >
+            Start a new question
+          </button>
         </div>
         <Panel title="Conversations">
-          <ul className="flex flex-col gap-0.5">
+          <ul className="flex flex-col border-t border-line">
             {conversations.data?.map((c) => (
-              <li key={c.id}>
+              <li key={c.id} className="border-b border-line">
                 <Link
                   to={`/workspace/${c.id}`}
+                  aria-current={c.id === conversationId ? "page" : undefined}
                   className={clsx(
-                    "flex items-center gap-2.5 rounded-xl px-2.5 py-2 text-[14px] hover:bg-sunken",
-                    c.id === conversationId ? "bg-sunken font-medium text-ink" : "text-muted",
+                    "flex flex-col gap-0.5 py-2.5 font-serif text-[15px] leading-snug",
+                    c.id === conversationId ? "text-ink" : "text-muted hover:text-ink",
                   )}
                 >
-                  <span
-                    className={c.kind === "data" ? "text-data" : "text-research"}
-                    aria-label={c.kind === "data" ? "data session" : "research session"}
-                  >
-                    <Icon name={c.kind === "data" ? "lock" : "globe"} size={14} />
+                  <span className="flex items-baseline gap-2">
+                    <span className="line-clamp-2 flex-1 break-words">{c.title}</span>
+                    {c.busy && <span className="dl-breathe size-[7px] shrink-0 rounded-full bg-ink" title="Working" />}
                   </span>
-                  <span className="truncate">{c.title}</span>
-                  {c.busy && <span className="dl-breathe ml-auto size-2 shrink-0 rounded-full bg-accent" title="Working" />}
+                  <span className={clsx("dl-label", c.kind === "data" ? "!text-data" : "!text-research")}>
+                    {c.kind === "data" ? "data · no internet" : "research · no study data"}
+                  </span>
                 </Link>
               </li>
             ))}
@@ -55,34 +59,39 @@ export function WorkspacePage() {
         </Panel>
       </aside>
 
-      <main className="min-h-0 bg-canvas">
+      <main className="min-h-0">
         {current ? (
           <OpenFileContext value={setOpen}>
             <Chat
               key={current.id}
               conversation={current}
               headerActions={
-                <Button variant="ghost" className="text-[13px]" onClick={() => setExportingReport(true)}>
+                <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
                   <Icon name="export" size={14} /> Export
                 </Button>
               }
             />
           </OpenFileContext>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-muted">
-            <p className="text-[22px] font-semibold tracking-[-0.01em] text-ink">Ask the IHS data a question</p>
-            <p className="max-w-[46ch]">
-              Every conversation runs in its own sealed workspace. You'll see each step the agent takes, and everything it
-              reads, as it works.
+          <div className="mx-auto flex h-full max-w-[40rem] flex-col justify-center gap-5 px-8">
+            <p className="dl-label">IHS DataLab</p>
+            <p className="font-serif text-[44px] leading-[1.08] tracking-[-0.01em] text-ink text-balance">
+              Ask the IHS data a question.
             </p>
-            <Button variant="primary" className="mt-2 py-2" onClick={() => setCreating(true)}>
-              <Icon name="pen" size={14} /> New conversation
-            </Button>
+            <p className="max-w-[46ch] font-serif text-[18px] leading-relaxed text-muted">
+              Every conversation runs in its own sealed workspace. You'll see each step the agent takes, and everything
+              it reads, as it works.
+            </p>
+            <div>
+              <Button variant="primary" className="mt-2 px-4 py-2" onClick={() => setCreating(true)}>
+                Start a new question
+              </Button>
+            </div>
           </div>
         )}
       </main>
 
-      <aside className="min-h-0 border-l border-line bg-surface">
+      <aside className="min-h-0 border-l border-line">
         {current && <SidePanel key={current.id} conversation={current} onOpen={setOpen} />}
       </aside>
 

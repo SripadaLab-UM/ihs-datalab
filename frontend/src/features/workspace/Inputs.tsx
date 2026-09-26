@@ -35,8 +35,7 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-2.5 rounded-xl bg-sunken p-3 text-xs text-muted">
-        <Icon name="eye" size={16} className="mt-px shrink-0 text-faint" />
+      <div className="flex gap-2.5 font-serif text-[15px] leading-relaxed text-muted italic">
         <p>
           The agent can read these at <code className="font-mono text-ink">/inputs</code> but can't change them. An
           attached folder is shared whole, including anything added to it later.
@@ -78,9 +77,9 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
           Attach a file or folder when the agent needs something that isn't in the study database.
         </EmptyNote>
       )}
-      <ul className="flex flex-col gap-1">
+      <ul className="flex flex-col border-t border-line empty:border-0">
         {inputs.data?.map((item) => (
-          <li key={item.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-sunken">
+          <li key={item.id} className="flex items-center gap-3 border-b border-line py-2.5">
             <FileGlyph kind={item.kind === "folder" ? "folder" : kindOf(item.container_path)} />
             <div className="min-w-0 flex-1">
               <div className="truncate font-mono text-xs" title={item.container_path}>
@@ -110,18 +109,20 @@ function Samples({ onAttach, disabled }: { onAttach: (sample: string) => void; d
   const samples = useQuery({ queryKey: ["input-samples"], queryFn: api.inputSamples });
   return (
     <div>
-      <p className="mb-1.5 text-xs text-muted">Practice DataLab can't attach your own files. Try a synthetic sample:</p>
-      <ul className="flex flex-col gap-1">
+      <p className="dl-label mb-2">Synthetic samples (practice can't attach your files)</p>
+      <ul className="flex flex-col border-t border-line">
         {samples.data?.map((name) => (
-          <li key={name}>
+          <li key={name} className="border-b border-line">
             <button
               disabled={disabled}
               onClick={() => onAttach(name)}
-              className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-line px-2 py-1.5 text-left text-xs hover:border-accent/50 hover:bg-accent-soft disabled:opacity-50"
+              className="group flex w-full items-center gap-3 py-2 text-left text-xs disabled:opacity-50"
             >
               <FileGlyph kind={name.includes(".") ? kindOf(name) : "folder"} size={26} />
               <span className="min-w-0 flex-1 truncate font-mono">{name}</span>
-              <span className="shrink-0 font-medium text-accent">Attach</span>
+              <span className="shrink-0 font-sans text-[12.5px] text-ink underline decoration-faint underline-offset-4 group-hover:decoration-ink">
+                Attach
+              </span>
             </button>
           </li>
         ))}

@@ -77,23 +77,23 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-surface/60 px-6 py-3 backdrop-blur">
-        <h1 className="truncate text-[17px] font-semibold tracking-[-0.01em]">{conversation.title}</h1>
+      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line px-8 py-3.5">
+        <h1 className="truncate font-serif text-[19px]">{conversation.title}</h1>
         <SessionBadge kind={conversation.kind} />
-        <span className="font-mono text-[12px] text-faint">{conversation.model}</span>
+        <span className="font-mono text-[11.5px] text-faint">{conversation.model}</span>
         <div className="ml-auto flex items-center gap-2">
           {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
           {headerActions}
         </div>
       </header>
       <div
-        className="relative min-h-0 flex-1 overflow-y-auto px-6 py-6"
+        className="relative min-h-0 flex-1 overflow-y-auto px-8 py-8"
         onScroll={(e) => {
           const el = e.currentTarget;
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
         }}
       >
-        <div className="mx-auto flex max-w-[46rem] flex-col gap-8">
+        <div className="mx-auto flex max-w-[42rem] flex-col gap-14">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
             <TurnView key={index} turn={turn} conversationId={conversation.id} running={running} />
@@ -103,7 +103,8 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         {!following && running && (
           <div className="pointer-events-none sticky bottom-0 flex justify-center">
             <Button
-              className="dl-in pointer-events-auto shadow-lg"
+              variant="primary"
+              className="dl-in pointer-events-auto"
               onClick={() => bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" })}
             >
               <Icon name="chevron" size={14} className="rotate-90" /> Jump to latest
@@ -124,7 +125,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   });
   return (
     <label
-      className="flex cursor-pointer items-center gap-2 rounded-full px-2 py-1 text-[13px] text-muted hover:bg-sunken"
+      className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink"
       title="After each answer that did some work, the agent's work is reviewed against a checklist: traced claims, the plan, causal language, sample sizes, uncertainty, privacy. It roughly doubles the time and cost of each answer."
     >
       <input
@@ -136,7 +137,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
       />
       <span
         aria-hidden="true"
-        className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-accent after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+        className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
       />
       Rigor review
     </label>
@@ -148,13 +149,13 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
   const mode = modes.data?.find((m) => m.id === conversation.mode);
   const data = conversation.kind === "data";
   return (
-    <div className="mt-10 flex flex-col gap-6">
+    <div className="mt-6 flex flex-col gap-10">
       <div>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{mode?.label ?? "New conversation"}</p>
-        <h2 className="mt-1 text-[28px] leading-tight font-semibold tracking-[-0.02em] text-balance">What would you like to find out?</h2>
-        <p className="mt-2 max-w-[60ch] text-[15px] text-muted">{mode?.description}</p>
+        <p className="dl-label">{mode?.label ?? "New conversation"}</p>
+        <h2 className="mt-3 font-serif text-[42px] leading-[1.1] tracking-[-0.01em] text-balance">What would you like to find out?</h2>
+        <p className="mt-4 max-w-[52ch] font-serif text-[18px] leading-relaxed text-muted">{mode?.description}</p>
       </div>
-      <ul className="grid gap-2 text-[14px] text-muted sm:grid-cols-3">
+      <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
         {(data
           ? [
               ["db", "Reads the IHS database, read-only"],
@@ -167,25 +168,28 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
               ["lock", "Has no access to study data"],
             ]
         ).map(([icon, text]) => (
-          <li key={text} className="flex items-start gap-2 rounded-2xl bg-surface px-3 py-2.5">
-            <Icon name={icon as "db"} size={16} className="mt-0.5 shrink-0 text-accent" />
+          <li key={text} className="flex items-start gap-2">
+            <Icon name={icon as "db"} size={14} className={clsx("mt-0.5 shrink-0", data ? "text-data" : "text-research")} />
             {text}
           </li>
         ))}
       </ul>
       {mode && mode.starters.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <p className="text-[13px] text-faint">Try one of these, or ask your own:</p>
-          {mode.starters.map((starter) => (
-            <button
-              key={starter}
-              onClick={() => onPick({ text: starter })}
-              className="group flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-left text-[15px] text-ink transition-colors hover:border-accent/60"
-            >
-              <span className="flex-1">{starter}</span>
-              <Icon name="chevron" size={14} className="text-faint group-hover:text-accent" />
-            </button>
-          ))}
+        <div>
+          <p className="dl-label mb-2">Try one of these, or ask your own</p>
+          <ul className="border-t border-line">
+            {mode.starters.map((starter) => (
+              <li key={starter} className="border-b border-line">
+                <button
+                  onClick={() => onPick({ text: starter })}
+                  className="group flex w-full items-baseline gap-4 py-3.5 text-left font-serif text-[18.5px] leading-snug text-ink"
+                >
+                  <span className="flex-1 group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">{starter}</span>
+                  <Icon name="chevron" size={14} className="shrink-0 text-faint group-hover:text-ink" />
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>
@@ -205,11 +209,9 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   return (
-    <article className="flex flex-col gap-4">
+    <article className="flex flex-col gap-5">
       {turn.userText && (
-        <div className="max-w-[85%] self-end rounded-3xl rounded-br-md bg-ink px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-canvas">
-          {turn.userText}
-        </div>
+        <Question text={turn.userText} />
       )}
       <Story
         rows={story}
@@ -223,19 +225,16 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
               return <SayRow text={row.text} />;
             case "approval":
               return (
-                <div className="relative py-1">
-                  <Marker icon={row.approval.approvalKind === "analysis_plan" ? "check" : "globe"} tone="you" />
-                  <div className="pl-3">
-                    <ApprovalCard conversationId={conversationId} approval={row.approval} />
-                  </div>
+                <div className="py-2">
+                  <ApprovalCard conversationId={conversationId} approval={row.approval} />
                 </div>
               );
             case "notice":
               return (
-                <div className="relative">
-                  <Marker icon={row.tone === "error" ? "alert" : "history"} tone={row.tone === "error" ? "error" : "done"} />
-                  <p className={clsx("px-3 py-2 text-[14px]", row.tone === "error" ? "text-danger" : "text-muted")}>{row.text}</p>
-                </div>
+                <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
+                  <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
+                  {row.text}
+                </p>
               );
             default:
               return null;
@@ -255,11 +254,21 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
         <ReviewBox key={`review-${i}`} review={review} conversationId={conversationId} running={running} />
       ))}
       {turn.status === "interrupted" && (
-        <p className="flex items-center gap-2 text-sm text-muted">
-          <Icon name="stop" size={13} /> Stopped. Anything it saved is in History.
-        </p>
+        <p className="font-serif text-[16px] text-muted italic">Stopped. Anything it saved is in History.</p>
       )}
     </article>
+  );
+}
+
+/** The person's question, set large; a long, pasted one reads as text, not as a heading. */
+function Question({ text }: { text: string }) {
+  if (text.length > 220) {
+    return <p className="font-serif text-[19px] leading-relaxed break-words whitespace-pre-wrap text-ink">{text}</p>;
+  }
+  return (
+    <h2 className="font-serif text-[28px] leading-[1.18] tracking-[-0.005em] break-words whitespace-pre-wrap text-balance text-ink">
+      {text}
+    </h2>
   );
 }
 
@@ -275,11 +284,11 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 /** The answer, set apart from the work behind it. */
 function AnswerCard({ answer, trace, streaming }: { answer: string; trace: Turn["trace"]; streaming: boolean }) {
   return (
-    <section className="rounded-3xl border border-line bg-surface px-5 py-4 shadow-[0_1px_0_var(--color-line)]">
-      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{streaming ? "Answering…" : "Answer"}</h3>
+    <section className="mt-4 border-t border-ink pt-5">
+      <h3 className="dl-label mb-3">{streaming ? "Writing the answer…" : "The answer"}</h3>
       <Markdown text={answer} />
       {trace && !streaming && (
-        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">
+        <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
           <TraceChip trace={trace} />
         </div>
       )}
@@ -336,14 +345,13 @@ function ReviewBox({
   const [open, setOpen] = useState(true);
   const reviewing = review.status === "running" && running;
   return (
-    <section className="rounded-3xl border border-line bg-surface">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 px-5 py-3 text-left">
-        <span className={clsx("grid size-7 place-items-center rounded-full", reviewing ? "dl-breathe bg-accent text-accent-ink" : "bg-accent-soft text-accent")}>
-          <Icon name="shield" size={14} />
-        </span>
+    <section className="border-y border-line">
+      <div className="flex items-start gap-3 py-3">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex flex-1 items-start gap-3 text-left">
+        {reviewing ? <Marker tone="now" open={null} /> : <Marker tone="done" open={open} />}
         <span className="flex-1">
-          <span className="block font-medium">Rigor review</span>
-          <span className="block text-[13px] text-muted">
+          <span className="block font-sans text-[14.5px] text-ink">Rigor review</span>
+          <span className="block font-serif text-[15.5px] text-muted italic">
             {reviewing
               ? "The agent is checking its own work against the lab's checklist…"
               : review.status === "done"
@@ -353,15 +361,20 @@ function ReviewBox({
                   : "Didn't finish."}
           </span>
         </span>
-        {reviewing && (
-          <Button variant="ghost" className="text-[13px] text-danger" onClick={(e) => { e.stopPropagation(); stop.mutate(); }} disabled={stop.isPending}>
-            Stop the review
-          </Button>
-        )}
-        <Icon name="chevron" size={14} className={clsx("text-faint transition-transform", open && "rotate-90")} />
       </button>
+        {reviewing && (
+          <button
+            type="button"
+            onClick={() => stop.mutate()}
+            disabled={stop.isPending}
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger disabled:opacity-45"
+          >
+            Stop the review
+          </button>
+        )}
+      </div>
       {open && review.text && review.status === "done" && (
-        <div className="border-t border-line px-5 py-4">
+        <div className="pb-5 pl-[19px]">
           <Markdown text={review.text} />
           <div className="mt-3 flex items-center justify-end gap-3">
             {address.error && <p className="text-[13px] text-danger">{address.error.message}</p>}
@@ -413,10 +426,10 @@ function Composer({
   };
 
   return (
-    <footer className="px-6 pt-2 pb-5">
-      <div className="mx-auto max-w-[46rem]">
+    <footer className="px-8 pt-2 pb-6">
+      <div className="mx-auto max-w-[42rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
-        <div className="flex items-end gap-2 rounded-3xl border border-line bg-surface p-2 pl-3 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.18)] focus-within:border-accent/70">
+        <div className="flex items-end gap-3 border-b border-line pb-2 focus-within:border-ink">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -427,13 +440,14 @@ function Composer({
               }
             }}
             rows={Math.min(8, Math.max(1, text.split("\n").length))}
-            placeholder={running ? "The agent is working…" : "Ask a question (Shift+Enter for a new line)"}
-            className="min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint"
+            placeholder={running ? "The agent is working…" : "Ask a question… (Shift+Enter for a new line)"}
+            title="Enter sends; Shift+Enter starts a new line"
+            className="min-h-10 flex-1 resize-none bg-transparent py-2 font-serif text-[18px] leading-snug outline-none placeholder:text-faint placeholder:italic"
           />
           <select
             value={effort}
             onChange={(e) => setEffort(e.target.value as Effort)}
-            className="rounded-full bg-sunken px-2.5 py-1.5 text-[12px] text-muted outline-none"
+            className="bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
             title="How hard the agent thinks"
           >
             <option value="low">Quick</option>

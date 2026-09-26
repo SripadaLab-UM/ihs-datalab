@@ -212,6 +212,50 @@ Until then, UI logic (event stream, transcript, API calls) is kept separate
 from presentation, so the redesign replaces the look without touching the
 behaviour.
 
+**Status (2026-09-26):** steps 1 to 4 done for the Workspace with the
+"Narrator" structure (docs/DESIGN.md). The lab then chose a quieter visual
+language, "paper", after understand.cap-study.com: serif for reading, hairline
+rules instead of cards, small uppercase labels, and colour only where it means
+something (data session, research session, attention, errors). Data, SQL and
+paths stay in a monospace font. The Narrator structure stays; only the
+treatment changes.
+
+## Planned: help and onboarding (after the paper reskin)
+
+New users should understand, within a few minutes and without a person
+showing them, what DataLab is, what it will and won't do with study data,
+and how to get a good answer out of it. Screenshots and videos wait for the
+final look.
+
+1. **One source of words.** A glossary (data session, research session, plan,
+   pilot, rigor review, trace, checkpoint, read-only, practice) and the
+   how-to guides live as Markdown in the repo (`docs/guide/`). The tooltips,
+   the in-app Help, and the website are all built from it, so they never
+   disagree.
+2. **Tooltips** on DataLab's own terms and safety signals: the session badge,
+   the rigor switch, plan approval, the trace chip, checkpoints, Export. They
+   are short, with a "Learn more" link into Help.
+3. **A first-run tour** of about five steps, on the practice profile:
+   - ask a question;
+   - watch the steps;
+   - open one to see what the agent read;
+   - read the answer with its trace and review;
+   - find the outputs and export them.
+
+   It can be skipped, and replayed from Help.
+4. **In-app Help.** It is searchable, opens on the topic of the current
+   screen, and is bundled with the app: the browser may only contact
+   DataLab, so it can't load anything from the web.
+5. **Short videos** of about 1–2 minutes, one task each, recorded only on the
+   practice profile (synthetic data). They are hosted with the website and
+   linked from Help, since the app can't embed outside video.
+6. **The website:** the same guides as a static site with the paper look,
+   including screenshots made by a script from the practice profile so they
+   stay current.
+
+Open: where the site is hosted (public, or U-M sign-in only), and who
+records the videos.
+
 ## Open decisions (waiting on the lab, noted 2026-09-26)
 
 - [ ] **Attached folders that contain credentials files** (`.env`,

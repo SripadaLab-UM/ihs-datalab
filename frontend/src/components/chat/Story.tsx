@@ -9,15 +9,25 @@ import { shortTable, unwrapShell as unwrap } from "./activity";
 import { Markdown } from "./Markdown";
 
 /**
- * The agent's work, told as a story: a timeline of plain sentences, each
- * opening onto what the agent actually read or ran. The live step breathes.
+ * The agent's work, told as a story: plain sentences on hairline rules, each
+ * opening ("+") onto what the agent actually read or ran, with the agent's
+ * own words between them as narration.
  */
 export function Story({ rows, renderRow }: { rows: Row[]; renderRow: (row: Row) => ReactNode }) {
   if (rows.length === 0) return null;
+  const ruled = (row: Row | undefined) => row?.type === "step" || row?.type === "group";
   return (
-    <ol className="relative flex flex-col gap-0.5 pl-9 before:absolute before:top-3 before:bottom-3 before:left-[13px] before:w-0.5 before:rounded before:bg-line">
-      {rows.map((row) => (
-        <li key={rowKey(row)} className="dl-in">
+    <ol className="flex flex-col">
+      {rows.map((row, i) => (
+        <li
+          key={rowKey(row)}
+          className={clsx(
+            "dl-in",
+            ruled(row) && "border-b border-line",
+            ruled(row) && !ruled(rows[i - 1]) && "mt-1 border-t",
+            !ruled(row) && i > 0 && "mt-3",
+          )}
+        >
           {renderRow(row)}
         </li>
       ))}
@@ -40,20 +50,22 @@ function rowKey(row: Row): string {
   }
 }
 
-/** A disc on the timeline. */
-export function Marker({ icon, tone }: { icon: Parameters<typeof Icon>[0]["name"]; tone: Step["tone"] | "you" }) {
+/** The mark at the start of a row: "+" to open it, or what state it's in. */
+export function Marker({ tone, open }: { tone: Step["tone"] | "you"; open: boolean | null }) {
+  if (tone === "now") return <span aria-hidden className="dl-breathe mt-[7px] size-[7px] shrink-0 rounded-full bg-ink" />;
+  if (open === null) {
+    return <span aria-hidden className={clsx("mt-[8px] size-[5px] shrink-0 rounded-full", tone === "error" ? "bg-danger" : "bg-line")} />;
+  }
   return (
     <span
+      aria-hidden
       className={clsx(
-        "absolute top-2 -left-9 grid size-7 place-items-center rounded-full border-2 bg-surface",
-        tone === "done" && "border-accent/70 text-accent",
-        tone === "now" && "dl-breathe border-accent bg-accent text-accent-ink",
-        tone === "attn" && "border-attn text-attn",
-        tone === "error" && "border-danger text-danger",
-        tone === "you" && "border-you text-you",
+        "w-[7px] shrink-0 font-sans text-[15px] leading-[1.4] transition-transform",
+        open && "rotate-45",
+        tone === "error" ? "text-danger" : tone === "attn" ? "text-attn" : "text-faint group-hover:text-ink",
       )}
     >
-      <Icon name={icon} size={14} />
+      +
     </span>
   );
 }
@@ -78,45 +90,52 @@ function Pressable({
   );
 }
 
+function Chips({ chips }: { chips: Step["chips"] }) {
+  if (chips.length === 0) return null;
+  return (
+    <span className="flex flex-wrap gap-1.5">
+      {chips.map((chip, i) => (
+        <Chip key={i} tone={chip.tone}>
+          {chip.text}
+        </Chip>
+      ))}
+    </span>
+  );
+}
+
+function Title({ step }: { step: Pick<Step, "icon" | "title" | "tone"> }) {
+  return (
+    <span
+      className={clsx(
+        "flex items-baseline gap-2 font-sans text-[14.5px] leading-snug",
+        step.tone === "now" && "font-medium",
+        step.tone === "error" ? "text-danger" : step.tone === "attn" ? "text-attn" : "text-ink",
+      )}
+    >
+      <Icon name={step.icon} size={13} className="shrink-0 translate-y-[1.5px] text-faint" />
+      {step.title}
+    </span>
+  );
+}
+
 export function StepRow({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
-  const canOpen = step.detail !== null;
+  const can = step.detail !== null;
   return (
-    <div className="relative">
-      <Marker icon={step.icon} tone={step.tone} />
+    <div>
       <Pressable
-        open={canOpen ? open : null}
+        open={can ? open : null}
         onToggle={() => setOpen(!open)}
-        className={clsx(
-          "group flex w-full flex-col items-start gap-1 rounded-xl px-3 py-2 text-left",
-          canOpen ? "cursor-pointer hover:bg-surface" : "cursor-default",
-          open && "bg-surface",
-        )}
+        className={clsx("group flex w-full items-start gap-3 py-2.5 text-left", can ? "cursor-pointer" : "cursor-default")}
       >
-        <span className="flex w-full items-baseline gap-2">
-          <span className={clsx("text-[15px] leading-snug", step.tone === "now" ? "font-semibold text-ink" : "text-ink")}>
-            {step.title}
-          </span>
-          {canOpen && (
-            <Icon
-              name="chevron"
-              size={14}
-              className={clsx("ml-auto shrink-0 self-center text-faint transition-transform group-hover:text-muted", open && "rotate-90")}
-            />
-          )}
+        <Marker tone={step.tone} open={can ? open : null} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <Title step={step} />
+          <Chips chips={step.chips} />
         </span>
-        {step.chips.length > 0 && (
-          <span className="flex flex-wrap gap-1.5">
-            {step.chips.map((chip, i) => (
-              <Chip key={i} tone={chip.tone}>
-                {chip.text}
-              </Chip>
-            ))}
-          </span>
-        )}
       </Pressable>
       {open && step.detail && (
-        <div className="mx-3 mt-1 mb-3 rounded-2xl border border-line bg-surface p-4">
+        <div className="pb-5 pl-[19px]">
           <DetailView detail={step.detail} />
         </div>
       )}
@@ -128,32 +147,18 @@ export function StepRow({ step }: { step: Step }) {
 export function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="relative">
-      <Marker icon={row.icon} tone="done" />
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        aria-expanded={open}
-        className={clsx("group flex w-full flex-col items-start gap-1 rounded-xl px-3 py-2 text-left hover:bg-surface", open && "bg-surface")}
-      >
-        <span className="flex w-full items-baseline gap-2">
-          <span className="text-[15px] leading-snug text-ink">{row.title}</span>
-          <Icon name="chevron" size={14} className={clsx("ml-auto shrink-0 self-center text-faint transition-transform group-hover:text-muted", open && "rotate-90")} />
+    <div>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-2.5 text-left">
+        <Marker tone="done" open={open} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <Title step={{ icon: row.icon, title: row.title, tone: "done" }} />
+          <Chips chips={row.chips} />
         </span>
-        {row.chips.length > 0 && (
-          <span className="flex flex-wrap gap-1.5">
-            {row.chips.map((chip, i) => (
-              <Chip key={i} tone={chip.tone}>
-                {chip.text}
-              </Chip>
-            ))}
-          </span>
-        )}
       </button>
       {open && (
-        <ol className="mt-1 mb-2 ml-3 flex flex-col border-l-2 border-line pl-2">
+        <ol className="mb-3 ml-[19px] flex flex-col border-t border-line">
           {row.steps.map((step) => (
-            <li key={step.key}>
+            <li key={step.key} className="border-b border-line last:border-0">
               <InnerStep step={step} />
             </li>
           ))}
@@ -163,7 +168,7 @@ export function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
   );
 }
 
-/** A step inside a group: the same, without its own disc. */
+/** A step inside a group: the same, a little quieter. */
 function InnerStep({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
   return (
@@ -171,17 +176,14 @@ function InnerStep({ step }: { step: Step }) {
       <Pressable
         open={step.detail ? open : null}
         onToggle={() => setOpen(!open)}
-        className={clsx("flex w-full items-baseline gap-2 rounded-lg px-2 py-1.5 text-left text-[14px]", step.detail && "hover:bg-sunken")}
+        className="group flex w-full items-start gap-3 py-2 text-left"
       >
-        <span className="flex-1">{step.title}</span>
-        {step.chips.slice(0, 2).map((chip, i) => (
-          <Chip key={i} tone={chip.tone}>
-            {chip.text}
-          </Chip>
-        ))}
+        <Marker tone={step.tone} open={step.detail ? open : null} />
+        <span className="flex-1 font-sans text-[14px] text-ink">{step.title}</span>
+        <Chips chips={step.chips.slice(0, 2)} />
       </Pressable>
       {open && step.detail && (
-        <div className="mx-2 mt-1 mb-2 rounded-2xl border border-line bg-surface p-4">
+        <div className="pb-4 pl-[19px]">
           <DetailView detail={step.detail} />
         </div>
       )}
@@ -189,19 +191,16 @@ function InnerStep({ step }: { step: Step }) {
   );
 }
 
-/** The agent's own words while it works. */
+/** The agent's own words while it works: narration, set as reading text. */
 export function SayRow({ text }: { text: string }) {
   return (
-    <div className="relative">
-      <span className="absolute top-3.5 -left-[27px] size-2.5 rounded-full border-2 border-line bg-canvas" aria-hidden="true" />
-      <div className="max-w-[62ch] px-3 py-1.5 text-[15px] leading-relaxed text-muted">
-        <Markdown text={text} />
-      </div>
+    <div className="max-w-[62ch] py-1 text-muted [&_.prose-datalab]:text-[1.06rem]">
+      <Markdown text={text} />
     </div>
   );
 }
 
-/** What the agent is doing this moment. */
+/** What the agent is doing this moment: one line, with Stop beside it. */
 export function NowCard({
   line,
   waiting,
@@ -214,39 +213,32 @@ export function NowCard({
   stopping: boolean;
 }) {
   return (
-    <div
-      className={clsx("flex items-center gap-3 rounded-2xl border bg-surface px-4 py-3", waiting ? "border-you/50" : "border-accent/50")}
-      role="status"
-      aria-live="polite"
-    >
-      <span className={clsx("grid size-7 shrink-0 place-items-center rounded-full", waiting ? "bg-you-soft text-you" : "dl-breathe bg-accent text-accent-ink")}>
-        <Icon name={waiting ? "check" : "spark"} size={14} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className={clsx("block text-[11px] font-semibold uppercase tracking-[0.08em]", waiting ? "text-you" : "text-accent")}>
-          {waiting ? "Waiting for you" : "Working now"}
-        </span>
-        <span className="block truncate text-[15px] text-ink">{waiting ?? line}</span>
-      </span>
-      {!waiting && (
-        <span className="hidden h-1.5 w-24 overflow-hidden rounded-full bg-line sm:block" aria-hidden="true">
-          <i className="dl-slide block h-full w-2/5 rounded-full bg-accent" />
-        </span>
-      )}
-      <Button variant="ghost" onClick={onStop} disabled={stopping} className="text-danger">
-        <Icon name="stop" size={14} /> Stop
-      </Button>
+    <div className="flex items-baseline gap-3 border-b border-line py-3" role="status" aria-live="polite">
+      <span
+        aria-hidden
+        className={clsx("size-[7px] shrink-0 -translate-y-[2px] rounded-full", waiting ? "bg-you" : "dl-breathe bg-ink")}
+      />
+      <span className={clsx("dl-label shrink-0", waiting ? "!text-you" : "!text-ink")}>{waiting ? "Waiting for you" : "Working"}</span>
+      <span className="min-w-0 flex-1 truncate font-serif text-[16.5px] text-muted italic">{waiting ?? line}</span>
+      <button
+        type="button"
+        onClick={onStop}
+        disabled={stopping}
+        className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger hover:decoration-danger disabled:opacity-45"
+      >
+        Stop
+      </button>
     </div>
   );
 }
 
 function Caption({ children }: { children: ReactNode }) {
-  return <p className="mb-2 text-[13px] text-muted">{children}</p>;
+  return <p className="mb-2.5 font-sans text-[12.5px] text-muted">{children}</p>;
 }
 
 function Mono({ children }: { children: ReactNode }) {
   return (
-    <pre className="max-h-72 overflow-auto rounded-xl bg-sunken px-3 py-2.5 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink">
+    <pre className="max-h-72 overflow-auto bg-sunken px-3.5 py-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink">
       {children}
     </pre>
   );
@@ -268,13 +260,12 @@ export function DetailView({ detail }: { detail: Detail }) {
     case "guide":
       return (
         <>
-          <Caption>
-            <Icon name="book" size={13} className="mr-1 inline align-[-2px]" />
-            What the agent read, from the lab's guide on <b className="text-ink">{detail.name}</b>
-          </Caption>
-          <div className="max-h-96 overflow-auto rounded-xl bg-canvas px-4 py-3">
+          <div className="max-h-[28rem] overflow-auto border-l border-ink pl-5 [&_.prose-datalab]:text-[1.03rem]">
             <Markdown text={stripFrontMatter(detail.text) || "(The guide came back empty.)"} />
           </div>
+          <p className="mt-2.5 font-sans text-[12px] text-faint">
+            What the agent read, from the lab's guide on <b className="font-medium text-muted">{detail.name}</b>
+          </p>
         </>
       );
     case "tables":
@@ -330,8 +321,8 @@ export function DetailView({ detail }: { detail: Detail }) {
             </table>
           )}
           {detail.notes.map((note, i) => (
-            <p key={i} className="mt-2 flex gap-2 rounded-xl bg-attn-soft px-3 py-2 text-[13.5px] text-ink">
-              <Icon name="alert" size={15} className="mt-0.5 shrink-0 text-attn" />
+            <p key={i} className="mt-3 border-l border-attn pl-3 font-serif text-[15.5px] text-ink">
+              <span className="dl-label mr-2 !text-attn">Heads-up</span>
               {note}
             </p>
           ))}
@@ -343,7 +334,7 @@ export function DetailView({ detail }: { detail: Detail }) {
           <Caption>
             {detail.error
               ? "The database refused this query. Nothing was read."
-              : `A read-only query${detail.rows === null ? "" : `: ${detail.rows.toLocaleString()} row${detail.rows === 1 ? "" : "s"}`}. It's in the Data accessed log.`}
+              : `A read-only query${detail.rows === null ? "" : `: ${detail.rows.toLocaleString()} row${detail.rows === 1 ? "" : "s"}`}. It's listed under Queries.`}
           </Caption>
           <Mono>{detail.sql || "(no SQL recorded)"}</Mono>
           {detail.error && <p className="mt-2 text-[13px] text-danger">{detail.error}</p>}

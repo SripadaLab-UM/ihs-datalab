@@ -1,58 +1,68 @@
 @import "tailwindcss";
 
-/* Design tokens: the Narrator direction (docs/DESIGN.md).
-   A calm mist ground, graphite ink, and one emerald accent that also marks
-   the safe, local data session; amber is for attention and the research
-   session. Type is Schibsted Grotesk, with IBM Plex Mono for data. */
+/* Design tokens: the paper language (docs/DESIGN.md).
+   White paper, warm near-black ink, hairline rules instead of cards, and
+   colour only where it means something: green for the data session and for
+   things that checked out, amber for the research session and heads-ups,
+   red for errors. The ink itself is the accent. Serif for reading, a quiet
+   grotesk for controls, IBM Plex Mono for data. */
 @theme {
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Cambria, Georgia, serif;
   --font-sans: "Schibsted Grotesk Variable", "Helvetica Neue", Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  --color-canvas: #f4f5f6;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 4px;
+  --radius-3xl: 6px;
+
+  --color-canvas: #ffffff;
   --color-surface: #ffffff;
-  --color-sunken: #eceef0;
-  --color-line: #dde0e4;
-  --color-ink: #1a1d21;
-  --color-muted: #5b6168;
-  --color-faint: #8a9098;
-  --color-accent: #0e7a5c;
-  --color-accent-soft: #e3f2ec;
+  --color-sunken: #f6f5f2;
+  --color-line: #e7e5df;
+  --color-ink: #2b2a26;
+  --color-muted: #6c6a62;
+  --color-faint: #767369;
+  --color-accent: #2b2a26;
+  --color-accent-soft: #f1efea;
   --color-accent-ink: #ffffff;
-  --color-data: #0e7a5c;
-  --color-data-soft: #e3f2ec;
-  --color-research: #9a6412;
-  --color-research-soft: #fbf1df;
-  --color-attn: #9a6412;
-  --color-attn-soft: #fbf1df;
-  --color-you: #3b5bc4;
-  --color-you-soft: #e8edfb;
-  --color-danger: #b42318;
-  --color-danger-soft: #fdecea;
+  --color-data: #2f6b4f;
+  --color-data-soft: #edf3ef;
+  --color-research: #8a5a12;
+  --color-research-soft: #f7f0e3;
+  --color-attn: #8a5a12;
+  --color-attn-soft: #f7f0e3;
+  --color-you: #45517a;
+  --color-you-soft: #eef0f6;
+  --color-danger: #9b2c1f;
+  --color-danger-soft: #f9ece9;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --color-canvas: #121416;
-    --color-surface: #1b1e21;
-    --color-sunken: #23272b;
-    --color-line: #2d3135;
-    --color-ink: #e8eaec;
-    --color-muted: #a0a6ad;
-    --color-faint: #767d85;
-    --color-accent: #3fbf94;
-    --color-accent-soft: #173229;
-    --color-accent-ink: #0b1f18;
-    --color-data: #3fbf94;
-    --color-data-soft: #173229;
-    --color-research: #e7b460;
-    --color-research-soft: #33291a;
-    --color-attn: #e7b460;
-    --color-attn-soft: #33291a;
-    --color-you: #8fa8f5;
-    --color-you-soft: #1f2a47;
-    --color-danger: #f97066;
-    --color-danger-soft: #3a1b18;
+    --color-canvas: #161614;
+    --color-surface: #161614;
+    --color-sunken: #1f1e1b;
+    --color-line: #2e2d29;
+    --color-ink: #e9e6de;
+    --color-muted: #a39f94;
+    --color-faint: #8f8b81;
+    --color-accent: #e9e6de;
+    --color-accent-soft: #26251f;
+    --color-accent-ink: #161614;
+    --color-data: #86c3a2;
+    --color-data-soft: #1b2a22;
+    --color-research: #d9a95a;
+    --color-research-soft: #2e2618;
+    --color-attn: #d9a95a;
+    --color-attn-soft: #2e2618;
+    --color-you: #aab6de;
+    --color-you-soft: #20242f;
+    --color-danger: #e58a7c;
+    --color-danger-soft: #33201c;
   }
 }
 
@@ -66,15 +76,25 @@ body {
   background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 14.5px;
   -webkit-font-smoothing: antialiased;
 }
 
 @layer base {
   :focus-visible {
-    outline: 2px solid var(--color-accent);
+    outline: 1.5px solid var(--color-ink);
     outline-offset: 2px;
   }
+}
+
+/* The small uppercase labels that organise a page (READ NEXT, THE ANSWER). */
+.dl-label {
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-faint);
 }
 
 .tabular {
@@ -84,7 +104,7 @@ body {
 /* The agent's live step: a gentle pulse, and none when motion is reduced. */
 @keyframes dl-breathe {
   50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-accent) 20%, transparent);
+    opacity: 0.3;
   }
 }
 @keyframes dl-slide {
@@ -118,57 +138,84 @@ body {
   }
 }
 
-/* Agent answers: readable Markdown without a typography plugin. */
+/* Reading text (answers, guides, the agent's narration): set like a page. */
 .prose-datalab {
-  font-size: 1rem;
+  font-family: var(--font-serif);
+  font-size: 1.14rem;
   line-height: 1.62;
 }
 .prose-datalab > * + * {
-  margin-top: 0.75em;
+  margin-top: 0.8em;
 }
 .prose-datalab h1,
 .prose-datalab h2,
 .prose-datalab h3 {
+  font-weight: 400;
+  font-size: 1.3em;
+  line-height: 1.3;
+  margin-top: 1.3em;
+}
+.prose-datalab h3 {
+  font-size: 1.12em;
+}
+.prose-datalab strong {
   font-weight: 600;
-  margin-top: 1.2em;
 }
 .prose-datalab ul {
   list-style: disc;
-  padding-left: 1.4em;
+  padding-left: 1.3em;
 }
 .prose-datalab ol {
   list-style: decimal;
-  padding-left: 1.4em;
+  padding-left: 1.3em;
+}
+.prose-datalab li + li {
+  margin-top: 0.25em;
 }
 .prose-datalab code {
   font-family: var(--font-mono);
-  font-size: 0.85em;
+  font-size: 0.74em;
   background: var(--color-sunken);
-  border-radius: 4px;
-  padding: 0.1em 0.3em;
+  border-radius: 2px;
+  padding: 0.12em 0.32em;
 }
 .prose-datalab pre {
   background: var(--color-sunken);
-  border-radius: 8px;
   padding: 0.8em 1em;
   overflow-x: auto;
 }
 .prose-datalab pre code {
   background: none;
   padding: 0;
+  font-size: 0.72em;
 }
 .prose-datalab table {
   border-collapse: collapse;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
 }
 .prose-datalab th,
 .prose-datalab td {
-  border: 1px solid var(--color-line);
-  padding: 0.35em 0.7em;
+  border-bottom: 1px solid var(--color-line);
+  padding: 0.45em 1.2em 0.45em 0;
   text-align: left;
 }
 .prose-datalab th {
-  background: var(--color-sunken);
+  font-family: var(--font-sans);
+  font-size: 0.9em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-faint);
+}
+.prose-datalab a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--color-faint);
+}
+.prose-datalab hr {
+  border-color: var(--color-line);
 }
 
 input[type="checkbox"],

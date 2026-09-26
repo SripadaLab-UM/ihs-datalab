@@ -188,7 +188,7 @@ function CsvPreview({ conversationId, file }: { conversationId: string; file: Op
           </thead>
           <tbody>
             {shown.map((row, r) => (
-              <tr key={r} className="odd:bg-surface even:bg-canvas hover:bg-accent-soft">
+              <tr key={r} className="odd:bg-surface even:bg-sunken hover:bg-accent-soft">
                 <td className="sticky left-0 bg-inherit px-2 py-1 text-right text-faint">{r + 1}</td>
                 {row.map((cell, c) => (
                   <td key={c} className={clsx("whitespace-nowrap px-3 py-1 font-mono", numeric[c] && "text-right")}>

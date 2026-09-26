@@ -26,7 +26,7 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {tab === "inputs" && <Inputs conversation={conversation} practice={health.data?.profile === "practice"} />}
         {tab === "outputs" && <Outputs conversation={conversation} onOpen={onOpen} />}
         {tab === "history" && <History conversation={conversation} />}
@@ -61,26 +61,26 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-muted">
-          {all.length} file{all.length === 1 ? "" : "s"}
+        <span className="dl-label">
+          Made here · {all.length} file{all.length === 1 ? "" : "s"}
         </span>
-        <Button className="px-3 py-1 text-xs" onClick={() => setExporting(true)}>
+        <Button variant="ghost" className="px-0 py-0 text-xs" onClick={() => setExporting(true)}>
           <Icon name="export" size={14} /> Export…
         </Button>
       </div>
       {exporting && <ExportDialog conversation={conversation} withReport={false} onClose={() => setExporting(false)} />}
       {figures.length > 0 && (
         <section>
-          <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Figures</h3>
+          <h3 className="dl-label mb-2">Figures</h3>
           <ul className="grid grid-cols-2 gap-2">
             {figures.map((file) => (
               <li key={file.path}>
                 <button
                   onClick={() => open(file)}
                   title={file.path}
-                  className="group flex w-full flex-col overflow-hidden rounded-xl border border-line bg-surface text-left hover:border-accent/50"
+                  className="group flex w-full flex-col text-left"
                 >
-                  <span className="flex aspect-[4/3] w-full items-center justify-center bg-sunken">
+                  <span className="flex aspect-[4/3] w-full items-center justify-center border border-line bg-white p-1 group-hover:border-ink">
                     <img
                       src={api.fileUrl(conversationId, "outputs", file.path, file.checkpoint)}
                       alt=""
@@ -88,7 +88,7 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
                       className="max-h-full max-w-full object-contain"
                     />
                   </span>
-                  <span className="truncate px-2 py-1.5 text-xs group-hover:text-accent">{splitPath(file.path).name}</span>
+                  <span className="truncate pt-1.5 font-mono text-[11px] text-faint group-hover:text-ink">{splitPath(file.path).name}</span>
                 </button>
               </li>
             ))}
@@ -98,22 +98,24 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
       {others.length > 0 && (
         <section>
           {figures.length > 0 && (
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Files</h3>
+            <h3 className="dl-label mb-2">Files</h3>
           )}
-          <ul className="flex flex-col gap-0.5">
+          <ul className="flex flex-col border-t border-line">
             {others.map((file) => {
               const { dir, name } = splitPath(file.path);
               return (
-                <li key={file.path}>
+                <li key={file.path} className="border-b border-line">
                   <button
                     onClick={() => open(file)}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-sunken"
+                    className="group flex w-full items-center gap-3 py-2.5 text-left"
                     title={file.path}
                   >
-                    <FileGlyph kind={file.kind} />
+                    <FileGlyph kind={file.kind} size={26} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{name}</span>
-                      <span className="block truncate text-xs text-muted">
+                      <span className="block truncate font-serif text-[15px] group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
+                        {name}
+                      </span>
+                      <span className="block truncate font-mono text-[11px] text-faint">
                         {dir && <span className="font-mono">{dir} · </span>}
                         {formatBytes(file.size)}
                       </span>
@@ -144,7 +146,9 @@ function History({ conversation }: { conversation: Conversation }) {
   }
   return (
     <>
-      <p className="mb-3 text-xs text-muted">A copy of the files after each turn. Restoring never loses the current ones.</p>
+      <p className="mb-4 font-serif text-[15px] leading-relaxed text-muted italic">
+        A copy of the files after each turn. Restoring never loses the current ones.
+      </p>
       <ol className="relative flex flex-col gap-3 before:absolute before:bottom-2 before:left-[7px] before:top-2 before:w-px before:bg-line">
         {checkpoints.data?.map((checkpoint, index) => (
           <li key={checkpoint.number} className="relative flex gap-3 pl-0">
@@ -157,7 +161,7 @@ function History({ conversation }: { conversation: Conversation }) {
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
-                <span className="text-sm font-medium">{checkpoint.label}</span>
+                <span className="font-serif text-[15px]">{checkpoint.label}</span>
                 <Button
                   variant="ghost"
                   className="shrink-0 px-2 py-0.5 text-xs"
@@ -168,7 +172,7 @@ function History({ conversation }: { conversation: Conversation }) {
                   <Icon name="restore" size={13} /> Restore
                 </Button>
               </div>
-              <div className="text-xs text-muted">
+              <div className="font-mono text-[11px] text-faint">
                 {new Date(checkpoint.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
                 {checkpoint.files} file{checkpoint.files === 1 ? "" : "s"} · {formatBytes(checkpoint.bytes)}
               </div>
@@ -250,21 +254,21 @@ function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOp
   }
   return (
     <>
-      <p className="mb-3 flex items-center gap-1.5 text-xs text-muted">
-        <Icon name="lock" size={13} /> Read-only. Every query the agent ran, newest last.
+      <p className="dl-label mb-2 flex items-center gap-1.5 !text-data">
+        <Icon name="lock" size={11} /> Read-only · every query, newest last
       </p>
-      <ol className="flex flex-col gap-2">
+      <ol className="flex flex-col border-t border-line">
         {queries.data?.map((q) => (
-          <li key={q.id} className="rounded-xl border border-line bg-surface p-3 text-xs">
+          <li key={q.id} className="border-b border-line py-3 text-xs">
             <div className="flex items-center gap-2">
               <span
                 aria-hidden
                 className={clsx(
                   "h-2 w-2 shrink-0 rounded-full",
-                  q.status === "succeeded" ? "bg-accent" : q.status === "running" ? "dl-breathe bg-attn" : "bg-danger",
+                  q.status === "succeeded" ? "bg-data" : q.status === "running" ? "dl-breathe bg-attn" : "bg-danger",
                 )}
               />
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+              <span className="min-w-0 flex-1 truncate font-serif text-[15px]">
                 {q.tables.map(shortTable).join(", ") || (q.status === "rejected" ? "Stopped before it ran" : "No tables named")}
               </span>
               <span className="shrink-0 text-muted">
@@ -285,13 +289,13 @@ function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOp
               <summary className="flex cursor-pointer list-none items-center gap-1 text-muted hover:text-ink">
                 <Icon name="chevron" size={12} className="transition-transform group-open:rotate-90" /> The SQL
               </summary>
-              <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap rounded-lg bg-sunken p-2 font-mono text-[11.5px] leading-relaxed">
+              <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap bg-sunken p-2.5 font-mono text-[11.5px] leading-relaxed">
                 {q.sql_text}
               </pre>
             </details>
             {q.result_file && q.status === "succeeded" && (
               <button
-                className="mt-2 inline-flex items-center gap-1 font-medium text-accent hover:underline"
+                className="mt-2 inline-flex items-center gap-1 font-medium text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
                 onClick={() => onOpen({ root: "results", path: q.result_file!, kind: "csv" })}
               >
                 <Icon name="open" size={13} /> Open the result
