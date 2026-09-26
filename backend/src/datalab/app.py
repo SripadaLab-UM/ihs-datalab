@@ -1,0 +1,129 @@
+"""Builds the DataLab web app: API, agent tools, and (later) the web UI."""
+
+from __future__ import annotations
+
+import threading
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI
+from mcp.server.transport_security import TransportSecuritySettings
+
+from datalab import db
+from datalab.config import Settings
+from datalab.credentials import oracle_password
+from datalab.data.access_log import AccessLog
+from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
+from datalab.data.catalog import Catalog
+from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
+from datalab.data.service import Database, DataService
+from datalab.sessions.tokens import SessionTokens
+
+VERSION = "0.1.0"
+
+# Hosts the agent-tools endpoint answers to: the local browser, and the
+# gateway container reaching the host.
+_MCP_HOSTS = ["127.0.0.1:*", "localhost:*", "host.docker.internal:*"]
+
+
+@dataclass
+class Services:
+    settings: Settings
+    data: DataService
+    catalog: Catalog
+    tokens: SessionTokens
+    access_log: AccessLog
+
+
+def create_app(
+    settings: Settings,
+    *,
+    database: Database | None = None,
+    catalog: Catalog | None = None,
+) -> FastAPI:
+    connection = db.connect(settings.database_file)
+    access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
+    if catalog is None:
+        catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
+    allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
+    data = DataService(database or _LazyOracle(settings), access_log, settings.limits, allowed)
+    tokens = SessionTokens()
+    services = Services(settings, data, catalog, tokens, access_log)
+
+    agent_tools = build_agent_tools(data, catalog, tokens)
+    agent_tools_app = agent_tools.streamable_http_app(
+        streamable_http_path="/mcp",
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True, allowed_hosts=_MCP_HOSTS
+        ),
+    )
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        async with agent_tools.session_manager.run():
+            yield
+        connection.close()
+
+    app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
+    app.state.services = services
+    app.router.routes.extend(agent_tools_app.routes)
+    app.add_middleware(AgentTokenMiddleware, tokens=tokens)
+
+    @app.get("/api/health")
+    def health() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "version": VERSION,
+            "profile": settings.profile,
+            "database_configured": settings.oracle is not None,
+            "catalog_tables": len(catalog),
+            "catalog_schemas": catalog.schemas,
+        }
+
+    return app
+
+
+class _LazyOracle:
+    """Connects on first use, so DataLab starts even before a password is saved."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._settings = settings
+        self._database: OracleDatabase | None = None
+        self._lock = threading.Lock()
+
+    def extract_to_csv(
+        self,
+        sql: str,
+        binds: Mapping[str, Any],
+        out_path: Path,
+        *,
+        max_rows: int,
+        max_bytes: int,
+        preview_rows: int,
+        cancel: threading.Event,
+    ) -> ExtractResult:
+        return self._get().extract_to_csv(
+            sql,
+            binds,
+            out_path,
+            max_rows=max_rows,
+            max_bytes=max_bytes,
+            preview_rows=preview_rows,
+            cancel=cancel,
+        )
+
+    def _get(self) -> OracleDatabase:
+        with self._lock:
+            if self._database is None:
+                oracle = self._settings.oracle
+                if oracle is None:
+                    raise QueryFailed(
+                        "No database is configured. Set it up in Settings → Connections."
+                    )
+                self._database = OracleDatabase(
+                    oracle, oracle_password(oracle), self._settings.limits
+                )
+            return self._database

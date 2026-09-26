@@ -1,0 +1,55 @@
+[project]
+name = "datalab"
+version = "0.1.0"
+description = "IHS DataLab: a safe local workspace for using Codex with Intern Health Study data"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.37",
+    "pydantic>=2.11",
+    "oracledb>=26",
+    "sqlglot>=30",
+    "mcp>=2.2",
+    "keyring>=25",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+datalab = "datalab.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4",
+    "pytest-asyncio>=1.2",
+    "httpx>=0.28",
+    "ruff>=0.13",
+    "pyright>=1.1.405",
+    "types-pyyaml>=6.0.12.20260906",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/datalab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "oracle: needs a running Oracle database (the synthetic one in CI)",
+]
+addopts = "-m 'not oracle'"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"

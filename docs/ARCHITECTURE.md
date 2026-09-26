@@ -224,7 +224,10 @@ src/datalab/
 ### 5. Data service
 
 - **`python-oracledb` in thin mode.** No Oracle client install is needed.
-  Each query uses a fresh connection with `SET TRANSACTION READ ONLY`, and the
+  Each query uses a fresh connection. That connection first runs
+  `SET ROLE` with only the configured read-only roles, because the shared
+  account also holds a write role (see [SAFETY.md](SAFETY.md)). It then runs
+  `SET TRANSACTION READ ONLY`, and the
   transaction is always rolled back.
 - **Guardrails** (in v1):
   - **Deadlines.** `call_timeout` only limits each database round trip, so
@@ -459,8 +462,15 @@ something we can use end to end ourselves.
    It also found the hosted-tool bypass, fixed by the relay, and the
    interrupt-doesn't-kill-commands issue, fixed in the adapter. Evidence is
    in [spikes/2026-09-26-codex-gateway](../spikes/2026-09-26-codex-gateway/README.md).
-1. **Foundations.** Repo, CI, and lockfiles. A first synthetic dataset, and
-   the data service with SQL check, audit log, and MCP.
+1. **Foundations** ✅ done 2026-09-26.
+   - Repo, CI, and lockfiles.
+   - The synthetic dataset: 3 cohorts on Oracle Free, with a write role that
+     mirrors the real account's.
+   - The data service: SQL check, read-only-roles sessions, guardrails, the
+     Data accessed log and audit log, the catalog, and the `ihs-data` MCP
+     tools.
+   - Verified against both the synthetic and the real database.
+   - The metadata helpers and the frontend skeleton move to milestone 2.
 2. **First data session, installed on both platforms.** A conversation
    starts a container, Codex answers a question about synthetic data, and the
    chat streams in the new UI. The Safety check and adversarial test run in

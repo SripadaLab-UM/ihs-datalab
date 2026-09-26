@@ -127,8 +127,18 @@ access. It never gains it.
 - Only DataLab's host process holds the Oracle password, which it reads from
   the OS keychain. The password never appears in a container, in files, or in
   logs.
-- The Oracle account has SELECT-only grants. This is the real guarantee;
-  everything else is a second layer.
+- **Every connection enables only the read-only roles.** DataLab runs
+  `SET ROLE <read-only roles>` before anything else.
+  - Why: the shared service account `SVC_IHS_AGENT` holds a role
+    (`IHS_2026_ROLE`) that grants UPDATE, DELETE, and ALTER on the live 2026
+    tables, plus CREATE privileges. This was checked on 2026-09-26.
+  - Effect: with the write role switched off, the session's only system
+    privilege is `CREATE SESSION`, and every cohort remains readable, because
+    older cohorts are granted to the account directly.
+  - Limit: read-only transactions alone would not be enough, since they don't
+    block DDL.
+  - Follow-up: the DBA is asked to remove the write role from the account, as
+    a second layer (see the PRODUCT to-dos).
 - Each query runs in a `READ ONLY` transaction. Only `SELECT`/`WITH`
   statements are accepted; the SQL is parsed, not pattern-matched.
 - **Guardrails protect the database and the laptop:**
@@ -236,6 +246,14 @@ access. It never gains it.
   - It has no write access to the lab repos.
 
   A practice instance therefore can't hold real data, even by accident.
+- **The practice profile checks it's really talking to the synthetic
+  database.** Every connection looks for a marker table that exists only
+  there. Without it, no query runs, even if something else answers on the
+  practice port, such as an SSH tunnel to the real server.
+- **The synthetic database is reachable only from this computer.** Its port is
+  bound to `127.0.0.1`, since its dev passwords are public. Its setup scripts
+  refuse to run against anything that isn't the local Oracle Database Free
+  container.
 - **Real-profile connectors are deferred** until the exact permitted fields,
   operations, and error handling are specified. Even "metadata" can leak
   through error messages or SQL in workflow files.
@@ -277,6 +295,6 @@ Oracle.
 | Container is locked down | Non-root, capabilities dropped, not privileged, no Docker socket |
 | Research session can't reach data | The data service is unreachable from a research container |
 | Helper gets only the approved text | A helper container's mounts and inputs contain only the approved question |
-| Database access is read-only | Account privileges contain no write grants, and the session is read-only |
+| Database access is read-only | After connecting, the session's enabled roles are exactly the read-only set, its system privileges are exactly `CREATE SESSION`, and it has no non-SELECT privileges on any IHS schema |
 | Right agent image | The image digest matches the pinned release |
 | Agent HTML can't phone home | A test report that tries to fetch an outside URL and call DataLab's API is blocked in the preview |

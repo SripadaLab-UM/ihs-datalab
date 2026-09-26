@@ -1,0 +1,63 @@
+# Synthetic cohorts. Dates are ISO; *_end dates are exclusive.
+#
+#   window_start      baseline window opens; participants enroll in the first ~6 weeks
+#   internship_start  intern year begins (behaviour shifts: less sleep, lower mood)
+#   data_end          last day of generated data. IHS_2026 is still in progress, so
+#                     its data stop early. Fixed dates keep the output deterministic.
+seed: 20260926
+
+cohorts:
+  IHS_2024:
+    id_prefix: SYN24
+    participants: 150
+    window_start: 2024-04-01
+    internship_start: 2024-07-01
+    data_end: 2025-07-01
+  IHS_2025:
+    id_prefix: SYN25
+    participants: 150
+    window_start: 2025-04-01
+    internship_start: 2025-07-01
+    data_end: 2026-07-01
+  IHS_2026:
+    id_prefix: SYN26
+    participants: 40
+    window_start: 2026-04-01
+    internship_start: 2026-07-01
+    data_end: 2026-09-20
+    device_mix: {Fitbit: 0.30, AppleWatch: 0.35, Garmin: 0.20, Oura: 0.15}  # Oura is newer
+
+# Share of participants by primary wearable. Cohorts without Oura tables
+# (IHS_2024) give Oura participants a Fitbit instead. A cohort may override it.
+device_mix: {Fitbit: 0.40, AppleWatch: 0.35, Garmin: 0.20, Oura: 0.05}
+
+# Survey waves: (wave number, survey name, days after internship_start).
+# Wave 0 (baseline) is taken shortly after enrollment instead.
+survey_waves:
+  - [0, IHS Baseline Survey, null]
+  - [1, IHS Q1 September Survey, 62]
+  - [2, IHS Q2 December Survey, 153]
+  - [3, IHS Q3 March Survey, 243]
+  - [4, IHS Q4 June Survey, 335]
+
+# Survey items asked at every wave (long form: SURVEYQUESTIONRESULTS.RESULTIDENTIFIER).
+# Item ids and wording follow the public IHS data dictionaries; the smoking
+# routine matches the tobacco question text exactly.
+survey_items:
+  PHQ9:
+    choices: "0=Not at all|1=Several days|2=More than half the days|3=Nearly every day"
+    items:
+      interest: "Little interest or pleasure in doing things"
+      down: "Feeling down, depressed or hopeless"
+      asleep: "Trouble falling asleep, staying asleep or sleeping too much"
+      tired: "Feeling tired or having little energy"
+      appetite: "Poor appetite or overeating"
+      failure: "Feeling badly about yourself, or that you are a failure, or that you have let yourself or your family down"
+      concentr: "Trouble concentrating on things such as reading the newspaper or watching TV"
+      activity: "Moving or speaking so slow that others could have noticed or the opposite, being so fidgety or restless that you have been moving around a lot more than usual"
+      suic: "Thoughts that you would be better off dead or hurting yourself in some way"
+  Substances:
+    choices: "0=Never|1=Once or Twice|2=Monthly|3=Weekly|4=Daily or Almost Daily"
+    items:
+      substance_tobacco: "Tobacco products (cigarettes, chewing tobacco, cigars, etc.)"
+      substance_alcohol: "Alcoholic beverages (beer, wine, liquor, etc.)"

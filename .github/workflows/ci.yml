@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check src tests && uv run ruff format --check src tests
+      - name: Type check
+        run: uv run pyright
+      - name: Unit tests
+        run: uv run pytest -q
+
+  oracle:
+    # The backend against a real Oracle: the synthetic database (fake data only).
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Start and load the synthetic database
+        run: synthetic/db.sh generate && synthetic/db.sh verify
+      - name: Integration tests
+        working-directory: backend
+        env:
+          # Dev-only password of the synthetic database (see synthetic/README.md).
+          DATALAB_ORACLE_PASSWORD: datalab_ro
+        run: uv sync --locked && uv run pytest -m oracle -q

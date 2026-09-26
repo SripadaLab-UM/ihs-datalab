@@ -198,10 +198,27 @@ v1 ships when all of these are true on a fresh **Mac** and a fresh
 
 ## To-dos before or during the build
 
-- [ ] **Confirm the cohort schemas.** Behind the VPN, check which `IHS_*`
-      schemas the read-only account can read today. The July 2026 note lists
-      IHS_2017 and IHS_2021 through IHS_2026. Then re-export catalog metadata
-      for all of them. This is the first content for `generated/schema/`.
+- [x] **Confirm the cohort schemas** (2026-09-26).
+      - `SVC_IHS_AGENT` can read IHS_2017 and IHS_2021 through IHS_2026.
+        IHS_2018 is visible, but has no readable tables.
+      - Catalog metadata for all seven was exported to
+        `srijan-knowledge-graph/metadata/db_exports/ihs_oracle_metadata_20260926T060331Z`.
+        That location is outside this repo, and the export is metadata only.
+- [ ] **Ask the DBA to remove write access from `SVC_IHS_AGENT`.**
+      - The account holds `IHS_2026_ROLE`, which grants UPDATE, DELETE, and
+        ALTER on all 161 IHS_2026 tables, plus CREATE TABLE, PROCEDURE, and
+        DATABASE LINK.
+      - The request: keep `IHS_2025_RO`, `IHS_2026_RO`, and the direct SELECT
+        grants on the older cohorts, and remove `IHS_2026_ROLE`. The two
+        IHS_2026 tables reachable only through that role would then need
+        adding to `IHS_2026_RO`.
+      - Until then, DataLab enables only the read-only roles on each
+        connection, and the Safety check verifies it.
+      - This also affects the prototype, which is still in use and doesn't
+        restrict roles.
+- [ ] **Before making this repo public,** decide whether the synthetic IHS
+      schema stays here. It is derived from real table and column names,
+      which are internal metadata.
 - [ ] **Per-person Oracle accounts (future).** Check with team members
       whether they have, or can get, individual read-only Oracle accounts. If
       so, DataLab should use each person's own account, so access follows
