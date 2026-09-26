@@ -2,7 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import { Button } from "@/components/ui";
+import clsx from "clsx";
+
+import { Button, Chip, Icon } from "@/components/ui";
 
 import { Markdown } from "./Markdown";
 
@@ -39,29 +41,38 @@ function PlanCard({ conversationId, approval }: { conversationId: string; approv
   const decided = answer.isPending || answer.isSuccess;
   const shown = approval.frozen ? (approval.plan ?? plan) : plan;
   return (
-    <div className="rounded-xl border border-accent/40 bg-accent-soft/40 p-4 text-sm">
-      <p className="font-medium">📋 Analysis plan{approval.frozen ? " (approved and frozen)" : ""}</p>
+    <div className={clsx("rounded-2xl border bg-surface p-4", approval.state === "pending" ? "border-you/50" : "border-line")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[15px] font-semibold">Analysis plan</p>
+        {approval.state === "pending" && <Chip tone="you">needs you</Chip>}
+        {approval.frozen && (
+          <Chip tone="good" title={`sha256 ${approval.frozen.sha256}`}>
+            <Icon name="lock" size={11} /> frozen {new Date(approval.frozen.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
+            {approval.frozen.sha256.slice(0, 8)}
+          </Chip>
+        )}
+      </div>
       {approval.state === "pending" ? (
         <>
-          <p className="mt-1 text-xs text-muted">
-            The agent proposes this plan before looking at outcome data. Edit anything, then approve it. Once approved
-            it's frozen, and later work is labelled as following it or exploratory.
+          <p className="mt-1 max-w-[62ch] text-[13.5px] text-muted">
+            Before looking at outcome data, the agent writes down what it will do. Edit anything, then approve it: it's
+            frozen, and later work is labelled as following it or exploratory.
           </p>
-          <div className="mt-2 flex flex-col gap-2">
+          <div className="mt-3 flex flex-col gap-3">
             {PLAN_FIELDS.map(([name, label]) => (
-              <label key={name} className="block text-xs">
-                <span className="font-medium">{label}</span>
+              <label key={name} className="block">
+                <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-faint">{label}</span>
                 <textarea
                   value={plan[name] ?? ""}
                   onChange={(e) => setPlan({ ...plan, [name]: e.target.value })}
-                  rows={Math.max(2, (plan[name] ?? "").split("\n").length)}
-                  className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-xs"
+                  rows={Math.max(2, Math.ceil((plan[name] ?? "").length / 90) + (plan[name] ?? "").split("\n").length - 1)}
+                  className="mt-1 w-full resize-y rounded-xl border border-line bg-canvas px-3 py-2 text-[14px] leading-relaxed outline-none focus:border-you/60"
                 />
               </label>
             ))}
           </div>
-          {answer.error && <p className="mt-1 text-xs text-danger">{answer.error.message}</p>}
-          <div className="mt-2 flex justify-end gap-2">
+          {answer.error && <p className="mt-2 text-[13px] text-danger">{answer.error.message}</p>}
+          <div className="mt-3 flex justify-end gap-2">
             <Button onClick={() => answer.mutate(false)} disabled={decided}>
               Not yet
             </Button>
@@ -72,17 +83,17 @@ function PlanCard({ conversationId, approval }: { conversationId: string; approv
         </>
       ) : (
         <>
-          <dl className="mt-2 grid grid-cols-[12rem_1fr] gap-x-3 gap-y-1 text-xs">
+          <dl className="mt-3 grid gap-x-4 gap-y-2 text-[14px] sm:grid-cols-[11rem_1fr]">
             {PLAN_FIELDS.filter(([name]) => shown[name]).map(([name, label]) => (
               <div key={name} className="contents">
-                <dt className="text-muted">{label}</dt>
-                <dd className="whitespace-pre-wrap">{shown[name]}</dd>
+                <dt className="text-[12px] font-semibold uppercase tracking-[0.06em] text-faint sm:pt-0.5">{label}</dt>
+                <dd className="whitespace-pre-wrap leading-relaxed">{shown[name]}</dd>
               </div>
             ))}
           </dl>
-          <p className="mt-2 text-xs text-muted">
+          <p className="mt-3 text-[13px] text-muted">
             {approval.frozen
-              ? `Frozen ${new Date(approval.frozen.at).toLocaleString()} · ${approval.frozen.sha256.slice(0, 12)}`
+              ? `Approved by you and frozen ${new Date(approval.frozen.at).toLocaleString()}. Later work is labelled as following it or exploratory.`
               : approval.state === "declined"
                 ? "Not approved. The agent will ask what to change."
                 : approval.state === "withdrawn"
@@ -125,11 +136,15 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
   const decided = answer.isPending || answer.isSuccess;
 
   return (
-    <div className="rounded-xl border border-research/40 bg-research-soft/40 p-4 text-sm">
-      <p className="font-medium text-research">🌐 The agent wants to ask the research helper</p>
+    <div className={clsx("rounded-2xl border bg-surface p-4 text-[14px]", approval.state === "pending" ? "border-research/50" : "border-line")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Icon name="globe" size={15} className="text-research" />
+        <p className="text-[15px] font-semibold">The agent wants to look something up online</p>
+        {approval.state === "pending" && <Chip tone="you">needs you</Chip>}
+      </div>
       {approval.state === "pending" ? (
         <>
-          <p className="mt-1 text-xs text-muted">
+          <p className="mt-1 max-w-[62ch] text-[13.5px] text-muted">
             The helper has the internet and sees only this question: not the conversation, files, or data. Check it
             contains no study data before sending. You can edit it.
           </p>
@@ -190,7 +205,7 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
           {approval.answer && (
             <details className="mt-2">
               <summary className="cursor-pointer text-xs text-muted">
-                {approval.answerStatus === "answered" ? "The helper's answer" : "The helper couldn't answer"}
+                {approval.answerStatus === "answered" ? "The helper's answer" : "No answer came back"}
               </summary>
               <div className="mt-1">
                 <Markdown text={approval.answer} />

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { api } from "@/api/client";
-import { Button } from "@/components/ui";
+import { Button, FileGlyph } from "@/components/ui";
 
 /** Folders the person has chosen to export to, such as a local Dropbox folder. */
 export function ExportDestinations({ practice }: { practice: boolean }) {
@@ -12,7 +12,7 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
   const remove = useMutation({ mutationFn: api.removeDestination, onSuccess: refresh });
 
   return (
-    <section>
+    <section className="rounded-2xl border border-line bg-surface p-5">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">Export folders</h2>
         {!practice && (
@@ -31,7 +31,8 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
       <ul className="mt-3 flex flex-col gap-2">
         {destinations.data?.length === 0 && <li className="text-sm text-muted">No export folders yet.</li>}
         {destinations.data?.map((d) => (
-          <li key={d.id} className="flex items-center gap-3 rounded-lg border border-line px-3 py-2 text-sm">
+          <li key={d.id} className="flex items-center gap-3 rounded-lg bg-canvas px-3 py-2 text-sm">
+            <FileGlyph kind="folder" size={28} />
             <span className="font-medium">{d.name}</span>
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted" title={d.path}>
               {d.path}

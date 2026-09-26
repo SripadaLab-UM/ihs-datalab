@@ -1,9 +1,11 @@
+import clsx from "clsx";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import { api, type Conversation, type FileRoot, type WorkspaceFile } from "@/api/client";
-import { Button, Modal } from "@/components/ui";
+import { Button, FileGlyph, Icon, Modal } from "@/components/ui";
+import { kindOf } from "@/lib/files";
 import { formatBytes } from "@/lib/csv";
 
 import { buildReport, REPORT_CSS } from "./report";
@@ -85,22 +87,28 @@ export function ExportDialog({
         </div>
       ) : (
         <div className="flex flex-col gap-4 text-sm">
-          <label className="flex items-start gap-2">
+          <label
+            className={clsx(
+              "flex cursor-pointer items-start gap-3 rounded-xl border p-3",
+              report ? "border-accent bg-accent-soft" : "border-line hover:bg-sunken",
+            )}
+          >
             <input type="checkbox" checked={report} onChange={(e) => setReport(e.target.checked)} className="mt-1" />
-            <span>
+            <FileGlyph kind="html" />
+            <span className="flex-1">
               The conversation, as one self-contained web page
               <span className="block text-xs text-muted">Questions, answers, charts, and the SQL that was run.</span>
             </span>
           </label>
           {report && (
-            <label className="ml-6 flex items-center gap-2 text-xs text-muted">
+            <label className="-mt-2 ml-7 flex items-center gap-2 text-xs text-muted">
               <input type="checkbox" checked={includeWork} onChange={(e) => setIncludeWork(e.target.checked)} />
-              Include the agent's reasoning and commands
+              Include the agent's reasoning and the commands it ran (never their output)
             </label>
           )}
           <div>
             <div className="flex items-center justify-between">
-              <p className="font-medium">Files from outputs/</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Files from outputs/</p>
               {(shown?.files.length ?? 0) > 0 && (
                 <button
                   className="text-xs text-accent underline"
@@ -133,11 +141,12 @@ export function ExportDialog({
               </p>
             )}
             {shown?.files.length === 0 && <p className="text-xs text-muted">No output files yet.</p>}
-            <ul className="mt-1 flex max-h-56 flex-col gap-0.5 overflow-y-auto">
+            <ul className="mt-1.5 flex max-h-56 flex-col gap-0.5 overflow-y-auto">
               {shown?.files.map((file) => (
                 <li key={file.path}>
-                  <label className="flex items-center gap-2">
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sunken">
                     <input type="checkbox" checked={chosen.has(file.path)} onChange={() => toggle(file.path)} />
+                    <FileGlyph kind={kindOf(file.path)} size={24} />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">{file.path}</span>
                     <span className="text-xs text-muted">{formatBytes(file.size)}</span>
                   </label>
@@ -158,7 +167,7 @@ export function ExportDialog({
             </div>
           )}
           <label className="block">
-            <span className="font-medium">To</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-xs text-muted">
                 No export folders yet. Add one in <Link to="/settings" className="text-accent underline">Settings</Link>.
@@ -167,7 +176,7 @@ export function ExportDialog({
               <select
                 value={destinationId}
                 onChange={(e) => setDestination(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-1.5"
+                className="mt-1.5 w-full rounded-xl border border-line bg-canvas px-3 py-2 outline-none focus:border-accent"
               >
                 {destinations.data?.map((d) => (
                   <option key={d.id} value={d.id} disabled={!d.available}>
@@ -190,7 +199,7 @@ export function ExportDialog({
               }
               onClick={() => run.mutate()}
             >
-              {run.isPending ? "Exporting…" : "Export"}
+              <Icon name="export" size={14} /> {run.isPending ? "Exporting…" : "Export"}
             </Button>
           </div>
         </div>

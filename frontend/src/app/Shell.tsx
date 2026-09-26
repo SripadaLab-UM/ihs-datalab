@@ -30,17 +30,23 @@ export function Shell() {
           open DataLab again with the link it printed when it started.
         </div>
       )}
-      <header className="flex items-center gap-6 border-b border-line bg-surface px-4">
-        <span className="py-3 font-semibold tracking-tight">DataLab</span>
-        <nav className="flex gap-1">
+      <header className="flex items-center gap-5 border-b border-line bg-surface px-4 py-2">
+        <span className="flex items-center gap-2 font-semibold tracking-[-0.01em]">
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+            <rect x="1" y="1" width="22" height="22" rx="7" fill="var(--color-accent)" />
+            <path d="M6 15.5l3.5-3.5 3 2 5.5-6" fill="none" stroke="var(--color-accent-ink)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          DataLab
+        </span>
+        <nav className="flex gap-0.5 overflow-x-auto">
           {TABS.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
               className={({ isActive }) =>
                 clsx(
-                  "border-b-2 px-3 py-3 text-sm",
-                  isActive ? "border-accent font-medium" : "border-transparent text-muted hover:text-ink",
+                  "rounded-full px-3 py-1.5 text-[14px] whitespace-nowrap transition-colors",
+                  isActive ? "bg-sunken font-medium text-ink" : "text-muted hover:bg-sunken/60 hover:text-ink",
                 )
               }
             >
@@ -49,7 +55,10 @@ export function Shell() {
           ))}
         </nav>
         {health.data?.profile === "practice" && (
-          <span className="ml-auto rounded-full bg-research-soft px-2 py-0.5 text-xs font-medium text-research">
+          <span
+            className="ml-auto shrink-0 rounded-full bg-attn-soft px-2.5 py-1 text-xs font-medium text-attn"
+            title="The practice profile: synthetic data only, never the real study database"
+          >
             Practice · synthetic data
           </span>
         )}
@@ -63,6 +72,9 @@ export function Shell() {
 
 export function ComingSoon({ name }: { name: string }) {
   return (
-    <div className="flex h-full items-center justify-center text-muted">{name} is coming in a later milestone.</div>
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-muted">
+      <p className="text-[17px] font-medium text-ink">{name}</p>
+      <p>Coming in a later milestone.</p>
+    </div>
   );
 }

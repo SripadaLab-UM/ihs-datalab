@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 
 import { api, type CheckResult, type SafetyReport } from "@/api/client";
-import { Button } from "@/components/ui";
+import { Button, Icon } from "@/components/ui";
 
 import { ExportDestinations } from "./ExportDestinations";
 
@@ -13,9 +13,9 @@ export function SettingsPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-8">
         <SafetySection />
         <ExportDestinations practice={health.data?.profile === "practice"} />
-        <section>
+        <section className="rounded-2xl border border-line bg-surface p-5">
           <h2 className="text-lg font-semibold">About this DataLab</h2>
-          <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1 text-sm">
+          <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1.5 text-sm">
             <dt className="text-muted">Profile</dt>
             <dd>{health.data?.profile === "practice" ? "Practice (synthetic data only)" : "Real data"}</dd>
             <dt className="text-muted">Version</dt>
@@ -41,15 +41,18 @@ function SafetySection() {
   const report = last.data;
 
   return (
-    <section>
-      <div className="flex items-center justify-between">
-        <div>
+    <section className="rounded-2xl border border-line bg-surface p-5">
+      <div className="flex items-start justify-between gap-4">
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+          <Icon name="shield" size={20} />
+        </span>
+        <div className="flex-1">
           <h2 className="text-lg font-semibold">Safety check</h2>
           <p className="mt-1 text-sm text-muted">
             Live tests of DataLab's safety promises: it starts sealed test sessions and tries to break out of them.
           </p>
         </div>
-        <Button variant="primary" onClick={() => run.mutate()} disabled={run.isPending}>
+        <Button variant="primary" className="shrink-0" onClick={() => run.mutate()} disabled={run.isPending}>
           {run.isPending ? "Checking… (about 20 s)" : "Run safety check"}
         </Button>
       </div>
@@ -70,33 +73,35 @@ function Report({ report }: { report: SafetyReport }) {
     <div className="mt-4">
       <div
         className={clsx(
-          "rounded-xl px-4 py-3 text-sm font-medium",
-          !report.passed ? "bg-sunken text-danger" : unverified ? "bg-research-soft text-research" : "bg-data-soft text-data",
+          "flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-medium",
+          !report.passed ? "bg-danger-soft text-danger" : unverified ? "bg-research-soft text-research" : "bg-accent-soft text-accent",
         )}
       >
+        <Icon name={!report.passed ? "close" : unverified ? "alert" : "check"} />
         {!report.passed
-          ? `✗ ${failed} check${failed > 1 ? "s" : ""} failed`
+          ? `${failed} check${failed > 1 ? "s" : ""} failed`
           : unverified
-            ? `✓ No failures, but ${unverified} check${unverified > 1 ? "s" : ""} couldn't be verified`
-            : "✓ Every check passed"}
-        <span className="ml-2 font-normal text-muted">{new Date(report.finished_at).toLocaleString()}</span>
+            ? `No failures, but ${unverified} check${unverified > 1 ? "s" : ""} couldn't be verified`
+            : "Every check passed"}
+        <span className="ml-auto font-normal text-muted">{new Date(report.finished_at).toLocaleString()}</span>
       </div>
       {[...byPromise].map(([promise, results]) => (
         <div key={promise} className="mt-5">
-          <h3 className="text-sm font-semibold">{promise}</h3>
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">{promise}</h3>
           <ul className="mt-2 flex flex-col gap-1.5">
             {results.map((r) => (
-              <li key={r.id} className="flex gap-3 rounded-lg border border-line bg-surface px-3 py-2 text-sm">
+              <li key={r.id} className="flex gap-3 rounded-lg bg-canvas px-3 py-2 text-sm">
                 <span
                   className={clsx(
-                    "w-4 shrink-0 text-center",
-                    r.status === "pass" && "text-data",
-                    r.status === "fail" && "text-danger",
-                    r.status === "skip" && (r.required ? "text-research" : "text-muted"),
+                    "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+                    r.status === "pass" && "bg-accent-soft text-accent",
+                    r.status === "fail" && "bg-danger-soft text-danger",
+                    r.status === "skip" && (r.required ? "bg-research-soft text-research" : "bg-sunken text-muted"),
                   )}
+                  role="img"
                   aria-label={r.status}
                 >
-                  {r.status === "pass" ? "✓" : r.status === "fail" ? "✗" : "–"}
+                  <Icon name={r.status === "pass" ? "check" : r.status === "fail" ? "close" : "alert"} size={12} />
                 </span>
                 <span>
                   {r.label}

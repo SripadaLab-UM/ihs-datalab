@@ -43,3 +43,21 @@ it("renders questions, answers, charts as SVG, and the SQL, with links as plain 
   expect(html).not.toContain("href=\"https://x.org");
   expect(html).toContain("SELECT 1 FROM dual");
 });
+
+it("shows the commands the agent ran but never their output, which can hold rows", async () => {
+  const html = await buildReport(
+    conversation,
+    [
+      { seq: 1, type: "user_message", data: { text: "Look" } },
+      { seq: 2, type: "command_started", data: { id: "c", command: "head /data/oracle/q_1.csv" } },
+      { seq: 3, type: "command_output", data: { id: "c", text: "PARTICIPANTIDENTIFIER,MOOD\nP-0001,7\n" } },
+      { seq: 4, type: "command_finished", data: { id: "c", exit_code: 0, status: "completed", output: "P-0002,6" } },
+      { seq: 5, type: "turn_finished", data: { status: "completed" } },
+    ],
+    [],
+    { includeWork: true },
+  );
+  expect(html).toContain("head /data/oracle/q_1.csv");
+  expect(html).not.toContain("P-0001");
+  expect(html).not.toContain("P-0002");
+});

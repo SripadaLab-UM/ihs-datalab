@@ -200,10 +200,8 @@ function Work({ turn }: { turn: Turn }) {
             return <p key={i} className="muted">{item.text}</p>;
           case "command":
             return (
-              <pre key={i}>
-                $ {item.command}
-                {item.output ? `\n${item.output}` : ""}
-              </pre>
+              // The command only, never its output: output can show rows of study data.
+              <pre key={i}>$ {item.command}</pre>
             );
           case "tool":
             return <pre key={i}>{`${item.tool} ${JSON.stringify(item.arguments, null, 2)}`}</pre>;

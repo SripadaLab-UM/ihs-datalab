@@ -15,7 +15,17 @@ export type Item =
   | { kind: "message"; id: string; phase: "commentary" | "final_answer" | null; text: string }
   | { kind: "reasoning"; text: string }
   | { kind: "command"; id: string; command: string; output: string; exitCode: number | null; status: string }
-  | { kind: "tool"; id: string; tool: string; server: string; status: string; arguments: unknown; error: string | null }
+  | {
+      kind: "tool";
+      id: string;
+      tool: string;
+      server: string;
+      status: string;
+      arguments: unknown;
+      error: string | null;
+      /** What the tool returned, metadata only (backend runtime.tool_summary). Untrusted: render as text. */
+      summary: Record<string, unknown> | null;
+    }
   | { kind: "files"; paths: string[] }
   | Approval
   | { kind: "review"; text: string; status: "running" | "done" | "stopped" | "failed" }
@@ -152,6 +162,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         if (item?.kind === "command") {
           item.exitCode = typeof data.exit_code === "number" ? data.exit_code : null;
           item.status = text(data.status) || "completed";
+          // A fast command's output comes whole, when it finishes.
+          if (!item.output && text(data.output)) item.output = text(data.output).slice(-MAX_COMMAND_OUTPUT);
         }
         break;
       }
@@ -164,6 +176,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           status: text(data.status),
           arguments: data.arguments,
           error: data.error ? JSON.stringify(data.error) : null,
+          summary: data.summary && typeof data.summary === "object" ? (data.summary as Record<string, unknown>) : null,
         });
         break;
       case "error":

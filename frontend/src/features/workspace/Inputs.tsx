@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
-import { Button } from "@/components/ui";
+import { Button, EmptyNote, FileGlyph, Icon } from "@/components/ui";
+import { kindOf } from "@/lib/files";
 
 /** Files and folders attached to a conversation. The agent reads them; it can't change them. */
 export function Inputs({ conversation, practice }: { conversation: Conversation; practice: boolean }) {
@@ -34,22 +35,27 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-muted">
-        The agent can read these at <code className="font-mono">/inputs</code> but can't change them. An attached
-        folder is shared whole, including anything added to it later.
-        {conversation.kind === "research" && (
-          <span className="text-research"> This is a research session: anything attached may reach the internet.</span>
-        )}
-      </p>
+      <div className="flex gap-2.5 rounded-xl bg-sunken p-3 text-xs text-muted">
+        <Icon name="eye" size={16} className="mt-px shrink-0 text-faint" />
+        <p>
+          The agent can read these at <code className="font-mono text-ink">/inputs</code> but can't change them. An
+          attached folder is shared whole, including anything added to it later.
+          {conversation.kind === "research" && (
+            <span className="mt-1 block text-research">
+              This is a research session: anything attached may reach the internet.
+            </span>
+          )}
+        </p>
+      </div>
       {practice ? (
         <Samples onAttach={(sample) => attach.mutate({ source: "sample", sample })} disabled={blocked} />
       ) : (
         <div className="flex gap-2">
           <Button onClick={() => attach.mutate({ source: "files" })} disabled={blocked}>
-            Attach files…
+            <Icon name="attach" size={14} /> Attach files…
           </Button>
           <Button onClick={() => attach.mutate({ source: "folder" })} disabled={blocked}>
-            Attach folder…
+            <Icon name="folder" size={14} /> Attach folder…
           </Button>
         </div>
       )}
@@ -67,27 +73,32 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
           Not attached: {r.reason}
         </p>
       ))}
+      {inputs.data?.length === 0 && (
+        <EmptyNote icon="attach" title="Nothing attached">
+          Attach a file or folder when the agent needs something that isn't in the study database.
+        </EmptyNote>
+      )}
       <ul className="flex flex-col gap-1">
         {inputs.data?.map((item) => (
-          <li key={item.id} className="rounded-lg border border-line p-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span aria-hidden>{item.kind === "folder" ? "📁" : "📄"}</span>
-              <span className="min-w-0 flex-1 truncate font-mono" title={item.container_path}>
+          <li key={item.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 hover:bg-sunken">
+            <FileGlyph kind={item.kind === "folder" ? "folder" : kindOf(item.container_path)} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-mono text-xs" title={item.container_path}>
                 {item.container_path}
-              </span>
-              <Button
-                variant="ghost"
-                className="px-2 py-0.5 text-xs"
-                disabled={conversation.busy || detach.isPending}
-                onClick={() => detach.mutate(item.id)}
-              >
-                Remove
-              </Button>
+              </div>
+              <div className="truncate text-xs text-muted" title={item.host_path}>
+                {practice ? "Practice sample" : item.host_path}
+              </div>
+              {!item.available && <div className="text-xs text-danger">Not found on this computer any more.</div>}
             </div>
-            <div className="mt-0.5 truncate text-muted" title={item.host_path}>
-              {practice ? "Practice sample" : item.host_path}
-            </div>
-            {!item.available && <div className="mt-0.5 text-danger">Not found on this computer any more.</div>}
+            <Button
+              variant="ghost"
+              className="shrink-0 px-2 py-0.5 text-xs"
+              disabled={conversation.busy || detach.isPending}
+              onClick={() => detach.mutate(item.id)}
+            >
+              Remove
+            </Button>
           </li>
         ))}
       </ul>
@@ -98,15 +109,20 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
 function Samples({ onAttach, disabled }: { onAttach: (sample: string) => void; disabled: boolean }) {
   const samples = useQuery({ queryKey: ["input-samples"], queryFn: api.inputSamples });
   return (
-    <div className="rounded-lg bg-sunken p-2 text-xs">
-      <p className="text-muted">Practice DataLab can't attach your own files. Try a synthetic sample:</p>
-      <ul className="mt-1 flex flex-col">
+    <div>
+      <p className="mb-1.5 text-xs text-muted">Practice DataLab can't attach your own files. Try a synthetic sample:</p>
+      <ul className="flex flex-col gap-1">
         {samples.data?.map((name) => (
-          <li key={name} className="flex items-center justify-between gap-2">
-            <span className="truncate font-mono">{name}</span>
-            <Button variant="ghost" className="px-2 py-0.5 text-xs" disabled={disabled} onClick={() => onAttach(name)}>
-              Attach
-            </Button>
+          <li key={name}>
+            <button
+              disabled={disabled}
+              onClick={() => onAttach(name)}
+              className="flex w-full items-center gap-2.5 rounded-lg border border-dashed border-line px-2 py-1.5 text-left text-xs hover:border-accent/50 hover:bg-accent-soft disabled:opacity-50"
+            >
+              <FileGlyph kind={name.includes(".") ? kindOf(name) : "folder"} size={26} />
+              <span className="min-w-0 flex-1 truncate font-mono">{name}</span>
+              <span className="shrink-0 font-medium text-accent">Attach</span>
+            </button>
           </li>
         ))}
       </ul>

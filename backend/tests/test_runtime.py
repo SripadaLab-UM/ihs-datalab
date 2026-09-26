@@ -331,3 +331,52 @@ async def test_another_threads_notifications_are_ignored(tmp_path):
     assert not any("leak" in str(data) for _, data in events)
     assert [data.get("status") for kind, data in events if kind == "turn_finished"] == ["completed"]
     await runtime.close()
+
+
+def test_tool_summaries_keep_metadata_and_never_rows():
+    import json as _json
+
+    from datalab.sessions.runtime import tool_summary
+
+    def result(value):
+        return {"content": [{"type": "text", "text": _json.dumps(value)}]}
+
+    query = tool_summary(
+        "query",
+        "ihs-data",
+        result(
+            {
+                "query_id": "q1",
+                "row_count": 2,
+                "columns": ["ID", "STEPS"],
+                "result_file": "/data/oracle/q1.csv",
+                "preview": [["SYN25-0001", 9000]],
+                "tables": ["IHS_2025.X"],
+            }
+        ),
+    )
+    assert query == {
+        "row_count": 2,
+        "columns": ["ID", "STEPS"],
+        "result_file": "/data/oracle/q1.csv",
+        "tables": ["IHS_2025.X"],
+        "warnings": [],
+    }
+    assert "SYN25-0001" not in _json.dumps(query)  # the rows stay out of the event log
+    table = tool_summary(
+        "describe_table",
+        "ihs-data",
+        result(
+            {
+                "table": "IHS_2025.X",
+                "columns": [{"name": "STEPS", "type": "NUMBER", "comment": "<b>x</b>"}],
+            }
+        ),
+    )
+    assert table["columns"][0] == {"name": "STEPS", "type": "NUMBER", "comment": "<b>x</b>"}
+    assert table["column_count"] == 1
+    assert tool_summary("query", "someone-else", result({"row_count": 1})) is None
+    assert (
+        tool_summary("query", "ihs-data", {"content": [{"type": "text", "text": "not json"}]})
+        is None
+    )

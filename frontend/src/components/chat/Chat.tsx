@@ -3,10 +3,12 @@ import clsx from "clsx";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
-import { Button, SessionBadge } from "@/components/ui";
+import { Button, Chip, Icon, SessionBadge } from "@/components/ui";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
+import { activityRows, nowLine } from "./activity";
+import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
@@ -21,6 +23,9 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
   const reviewing = last?.items.some((i) => i.kind === "review" && i.status === "running") ?? false;
   const transcriptRunning = last?.status === "running" || reviewing;
   const bottom = useRef<HTMLDivElement>(null);
+  // Follow new steps only while the person is at the bottom: scrolling up to
+  // read something shouldn't be undone by the next step arriving.
+  const [following, setFollowing] = useState(true);
   const [suggestion, setSuggestion] = useState<{ text: string } | null>(null);
   const queryClient = useQueryClient();
 
@@ -64,29 +69,47 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }, [lastFilesEvent, conversation.id, queryClient]);
 
+  // A new conversation, or a new question, brings the view back to the bottom.
+  useEffect(() => setFollowing(true), [conversation.id, turns.length]);
   useEffect(() => {
-    bottom.current?.scrollIntoView({ block: "end" });
-  }, [events.length]);
+    if (following) bottom.current?.scrollIntoView({ block: "end" });
+  }, [events.length, following]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex items-center gap-3 border-b border-line px-5 py-3">
-        <h1 className="truncate font-semibold">{conversation.title}</h1>
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-line bg-surface/60 px-6 py-3 backdrop-blur">
+        <h1 className="truncate text-[17px] font-semibold tracking-[-0.01em]">{conversation.title}</h1>
         <SessionBadge kind={conversation.kind} />
-        <span className="text-xs text-muted">{conversation.model}</span>
+        <span className="font-mono text-[12px] text-faint">{conversation.model}</span>
         <div className="ml-auto flex items-center gap-2">
           {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
           {headerActions}
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <div className="mx-auto flex max-w-3xl flex-col gap-6">
+      <div
+        className="relative min-h-0 flex-1 overflow-y-auto px-6 py-6"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+        }}
+      >
+        <div className="mx-auto flex max-w-[46rem] flex-col gap-8">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
             <TurnView key={index} turn={turn} conversationId={conversation.id} running={running} />
           ))}
           <div ref={bottom} />
         </div>
+        {!following && running && (
+          <div className="pointer-events-none sticky bottom-0 flex justify-center">
+            <Button
+              className="dl-in pointer-events-auto shadow-lg"
+              onClick={() => bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" })}
+            >
+              <Icon name="chevron" size={14} className="rotate-90" /> Jump to latest
+            </Button>
+          </div>
+        )}
       </div>
       <Composer conversation={conversation} running={running} suggestion={suggestion} />
     </div>
@@ -101,10 +124,20 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   });
   return (
     <label
-      className="flex items-center gap-1.5 text-xs text-muted"
+      className="flex cursor-pointer items-center gap-2 rounded-full px-2 py-1 text-[13px] text-muted hover:bg-sunken"
       title="After each answer that did some work, the agent's work is reviewed against a checklist: traced claims, the plan, causal language, sample sizes, uncertainty, privacy. It roughly doubles the time and cost of each answer."
     >
-      <input type="checkbox" checked={conversation.rigor_review} onChange={() => toggle.mutate()} disabled={toggle.isPending} />
+      <input
+        type="checkbox"
+        className="peer sr-only"
+        checked={conversation.rigor_review}
+        onChange={() => toggle.mutate()}
+        disabled={toggle.isPending}
+      />
+      <span
+        aria-hidden="true"
+        className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-accent after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+      />
       Rigor review
     </label>
   );
@@ -113,23 +146,44 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
 function EmptyState({ conversation, onPick }: { conversation: Conversation; onPick: (s: { text: string }) => void }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
   const mode = modes.data?.find((m) => m.id === conversation.mode);
+  const data = conversation.kind === "data";
   return (
-    <div className="mt-16 text-center text-muted">
-      <p className="text-lg text-ink">What would you like to find out?</p>
-      <p className="mt-2 text-sm">
-        {conversation.kind === "data"
-          ? "The agent can query the IHS database (read-only) and analyse the results. It has no internet."
-          : "The agent can search the web and read papers. It has no access to study data."}
-      </p>
+    <div className="mt-10 flex flex-col gap-6">
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{mode?.label ?? "New conversation"}</p>
+        <h2 className="mt-1 text-[28px] leading-tight font-semibold tracking-[-0.02em] text-balance">What would you like to find out?</h2>
+        <p className="mt-2 max-w-[60ch] text-[15px] text-muted">{mode?.description}</p>
+      </div>
+      <ul className="grid gap-2 text-[14px] text-muted sm:grid-cols-3">
+        {(data
+          ? [
+              ["db", "Reads the IHS database, read-only"],
+              ["eye", "Shows you everything it reads and runs"],
+              ["lock", "No internet: nothing leaves this computer"],
+            ]
+          : [
+              ["globe", "Searches the web and reads papers"],
+              ["eye", "Shows you everything it reads"],
+              ["lock", "Has no access to study data"],
+            ]
+        ).map(([icon, text]) => (
+          <li key={text} className="flex items-start gap-2 rounded-2xl bg-surface px-3 py-2.5">
+            <Icon name={icon as "db"} size={16} className="mt-0.5 shrink-0 text-accent" />
+            {text}
+          </li>
+        ))}
+      </ul>
       {mode && mode.starters.length > 0 && (
-        <div className="mx-auto mt-6 flex max-w-xl flex-col gap-2">
+        <div className="flex flex-col gap-2">
+          <p className="text-[13px] text-faint">Try one of these, or ask your own:</p>
           {mode.starters.map((starter) => (
             <button
               key={starter}
               onClick={() => onPick({ text: starter })}
-              className="rounded-xl border border-line bg-surface px-4 py-2 text-left text-sm text-ink hover:bg-sunken"
+              className="group flex items-center gap-3 rounded-2xl border border-line bg-surface px-4 py-3 text-left text-[15px] text-ink transition-colors hover:border-accent/60"
             >
-              {starter}
+              <span className="flex-1">{starter}</span>
+              <Icon name="chevron" size={14} className="text-faint group-hover:text-accent" />
             </button>
           ))}
         </div>
@@ -140,59 +194,123 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
 
 function TurnView({ turn, conversationId, running }: { turn: Turn; conversationId: string; running: boolean }) {
   const answer = finalAnswer(turn);
-  // Notices and approval cards are shown on their own, above the work log.
-  const working = turn.items.filter(
-    (item) =>
-      item.kind !== "notice" &&
-      item.kind !== "approval" &&
-      item.kind !== "review" &&
-      !(item.kind === "message" && item.text === answer && answer),
-  );
+  const live = turn.status === "running" && running;
+  const rows = activityRows(turn.items, live);
+  const story = rows.filter((row) => row.type !== "review");
+  const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
+  const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
+  const queryClient = useQueryClient();
+  const stop = useMutation({
+    mutationFn: () => api.stop(conversationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
   return (
-    <article className="flex flex-col gap-3">
+    <article className="flex flex-col gap-4">
       {turn.userText && (
-        <div className="self-end whitespace-pre-wrap rounded-2xl bg-accent-soft px-4 py-2.5 text-sm">
+        <div className="max-w-[85%] self-end rounded-3xl rounded-br-md bg-ink px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap text-canvas">
           {turn.userText}
         </div>
       )}
-      {turn.items
-        .filter((item) => item.kind === "notice")
-        .map((item, index) => (
-          <p key={index} className={item.kind === "notice" && item.tone === "error" ? "text-sm text-danger" : "rounded-lg bg-sunken px-3 py-2 text-sm text-muted"}>
-            {item.kind === "notice" ? item.text : null}
-          </p>
-        ))}
-      {working.length > 0 && <WorkLog items={working} running={turn.status === "running"} />}
-      {turn.items.map((item) =>
-        item.kind === "approval" ? <ApprovalCard key={item.id} conversationId={conversationId} approval={item} /> : null,
+      <Story
+        rows={story}
+        renderRow={(row) => {
+          switch (row.type) {
+            case "step":
+              return <StepRow step={row.step} />;
+            case "group":
+              return <GroupRow row={row} />;
+            case "say":
+              return <SayRow text={row.text} />;
+            case "approval":
+              return (
+                <div className="relative py-1">
+                  <Marker icon={row.approval.approvalKind === "analysis_plan" ? "check" : "globe"} tone="you" />
+                  <div className="pl-3">
+                    <ApprovalCard conversationId={conversationId} approval={row.approval} />
+                  </div>
+                </div>
+              );
+            case "notice":
+              return (
+                <div className="relative">
+                  <Marker icon={row.tone === "error" ? "alert" : "history"} tone={row.tone === "error" ? "error" : "done"} />
+                  <p className={clsx("px-3 py-2 text-[14px]", row.tone === "error" ? "text-danger" : "text-muted")}>{row.text}</p>
+                </div>
+              );
+            default:
+              return null;
+          }
+        }}
+      />
+      {live && !answer && (
+        <NowCard
+          line={nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")}
+          waiting={waitingFor(rows)}
+          onStop={() => stop.mutate()}
+          stopping={stop.isPending}
+        />
       )}
-      {answer && <Markdown text={answer} />}
-      {answer && turn.trace && <TraceLine trace={turn.trace} />}
-      {turn.items.map((item, i) =>
-        item.kind === "review" ? <ReviewBox key={`review-${i}`} review={item} conversationId={conversationId} running={running} /> : null,
+      {answer && <AnswerCard answer={answer} trace={turn.trace} streaming={live} />}
+      {reviews.map((review, i) => (
+        <ReviewBox key={`review-${i}`} review={review} conversationId={conversationId} running={running} />
+      ))}
+      {turn.status === "interrupted" && (
+        <p className="flex items-center gap-2 text-sm text-muted">
+          <Icon name="stop" size={13} /> Stopped. Anything it saved is in History.
+        </p>
       )}
-      {turn.status === "interrupted" && <p className="text-sm text-muted">Stopped.</p>}
     </article>
   );
 }
 
+/** What the agent is waiting for the person to decide, if anything. */
+function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
+  const pending = rows.find((row) => row.type === "approval" && row.approval.state === "pending");
+  if (pending?.type !== "approval") return undefined;
+  return pending.approval.approvalKind === "analysis_plan"
+    ? "Review the analysis plan above, then approve it or say what to change."
+    : "Check the question for the research helper above, then send it or not.";
+}
+
+/** The answer, set apart from the work behind it. */
+function AnswerCard({ answer, trace, streaming }: { answer: string; trace: Turn["trace"]; streaming: boolean }) {
+  return (
+    <section className="rounded-3xl border border-line bg-surface px-5 py-4 shadow-[0_1px_0_var(--color-line)]">
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-accent">{streaming ? "Answering…" : "Answer"}</h3>
+      <Markdown text={answer} />
+      {trace && !streaming && (
+        <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line pt-3">
+          <TraceChip trace={trace} />
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Which numbers in the answer came from something the turn produced. */
-function TraceLine({ trace }: { trace: NonNullable<Turn["trace"]> }) {
+function TraceChip({ trace }: { trace: NonNullable<Turn["trace"]> }) {
   const how =
     "DataLab looks for each number in this turn's query results, command output, and data files. A match only means the number appears there, not that it's right.";
   if (trace.untraced.length === 0) {
     return (
-      <p className="text-xs text-muted" title={how}>
-        All {trace.numbers} numbers were found in this turn's output.
-      </p>
+      <Chip tone="good" title={how}>
+        <Icon name="check" size={12} />{" "}
+        {trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} found in this turn's results
+      </Chip>
     );
   }
   return (
-    <p className="text-xs text-research" title={how}>
-      {trace.untraced.length} of {trace.numbers} numbers weren't found in this turn's query results, command output,
-      or data files; check them: <span className="font-mono">{trace.untraced.slice(0, 12).join(", ")}</span>
-      {trace.untraced.length > 12 ? ", …" : ""}
-    </p>
+    <>
+      <Chip tone="attn" title={how}>
+        {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not found in this turn's results
+      </Chip>
+      {trace.untraced.slice(0, 8).map((n) => (
+        <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">
+          {n}
+        </Chip>
+      ))}
+      {trace.untraced.length > 8 && <Chip tone="attn">+{trace.untraced.length - 8}</Chip>}
+    </>
   );
 }
 
@@ -215,126 +333,50 @@ function ReviewBox({
       api.send(conversationId, "Please address the problems the rigor review found, where you can, and say which you couldn't."),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
+  const [open, setOpen] = useState(true);
+  const reviewing = review.status === "running" && running;
   return (
-    <details open className="rounded-xl border border-line bg-surface px-4 py-2 text-sm">
-      <summary className="cursor-pointer font-medium">
-        🔎 Rigor review
-        {review.status === "running" && !running && (
-          <span className="ml-2 text-xs font-normal text-danger">didn't finish</span>
+    <section className="rounded-3xl border border-line bg-surface">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 px-5 py-3 text-left">
+        <span className={clsx("grid size-7 place-items-center rounded-full", reviewing ? "dl-breathe bg-accent text-accent-ink" : "bg-accent-soft text-accent")}>
+          <Icon name="shield" size={14} />
+        </span>
+        <span className="flex-1">
+          <span className="block font-medium">Rigor review</span>
+          <span className="block text-[13px] text-muted">
+            {reviewing
+              ? "The agent is checking its own work against the lab's checklist…"
+              : review.status === "done"
+                ? "The agent's check of its own work: a second opinion, not proof."
+                : review.status === "stopped"
+                  ? "Stopped before it finished."
+                  : "Didn't finish."}
+          </span>
+        </span>
+        {reviewing && (
+          <Button variant="ghost" className="text-[13px] text-danger" onClick={(e) => { e.stopPropagation(); stop.mutate(); }} disabled={stop.isPending}>
+            Stop the review
+          </Button>
         )}
-        {review.status === "running" && running && (
-          <>
-            <span className="ml-2 text-xs font-normal text-muted">reviewing…</span>
-            <Button variant="ghost" className="ml-2 px-2 py-0.5 text-xs" onClick={() => stop.mutate()} disabled={stop.isPending}>
-              Stop the review
-            </Button>
-          </>
-        )}
-        {review.status === "failed" && <span className="ml-2 text-xs font-normal text-danger">didn't finish</span>}
-        {review.status === "stopped" && <span className="ml-2 text-xs font-normal text-muted">stopped</span>}
-      </summary>
-      {review.text && review.status === "done" && (
-        <div className="mt-2">
+        <Icon name="chevron" size={14} className={clsx("text-faint transition-transform", open && "rotate-90")} />
+      </button>
+      {open && review.text && review.status === "done" && (
+        <div className="border-t border-line px-5 py-4">
           <Markdown text={review.text} />
-          <div className="mt-2 flex justify-end">
+          <div className="mt-3 flex items-center justify-end gap-3">
+            {address.error && <p className="text-[13px] text-danger">{address.error.message}</p>}
             <Button
               onClick={() => address.mutate()}
-              disabled={running || review.status !== "done" || address.isPending || address.isSuccess}
+              disabled={running || address.isPending || address.isSuccess}
               title={running ? "Wait until the agent has finished" : undefined}
             >
               Ask the agent to address these
             </Button>
           </div>
-          {address.error && <p className="mt-1 text-right text-xs text-danger">{address.error.message}</p>}
         </div>
       )}
-    </details>
+    </section>
   );
-}
-
-function WorkLog({ items, running }: { items: Item[]; running: boolean }) {
-  const [open, setOpen] = useState(false);
-  const commands = items.filter((i) => i.kind === "command").length;
-  const tools = items.filter((i) => i.kind === "tool").length;
-  const edits = items.reduce((n, i) => n + (i.kind === "files" ? i.paths.length : 0), 0);
-  const latest = [...items].reverse().find((i) => i.kind === "message");
-  return (
-    <div className="rounded-xl border border-line bg-surface">
-      <button
-        className="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-muted"
-        onClick={() => setOpen(!open)}
-      >
-        <span className="truncate">
-          {running ? "Working… " : "Worked · "}
-          {[
-            commands && `${commands} command${commands > 1 ? "s" : ""}`,
-            tools && `${tools} database step${tools > 1 ? "s" : ""}`,
-            edits && `${edits} file edit${edits > 1 ? "s" : ""}`,
-          ]
-            .filter(Boolean)
-            .join(", ")}
-          {running && latest?.kind === "message" && latest.text && (
-            <span className="ml-2 text-ink">{latest.text.slice(-140)}</span>
-          )}
-        </span>
-        <span aria-hidden>{open ? "▾" : "▸"}</span>
-      </button>
-      {open && (
-        <ol className="flex flex-col gap-2 border-t border-line px-4 py-3 text-sm">
-          {items.map((item, index) => (
-            <li key={index}>
-              <WorkItem item={item} />
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
-  );
-}
-
-function WorkItem({ item }: { item: Item }) {
-  switch (item.kind) {
-    case "message":
-      return <p className="text-muted">{item.text}</p>;
-    case "reasoning":
-      return <p className="italic text-muted">{item.text}</p>;
-    case "command":
-      return (
-        <details>
-          <summary className="cursor-pointer font-mono text-xs">
-            <span className={clsx(item.exitCode ? "text-danger" : "text-data")}>$</span> {item.command}
-            {item.status === "running" && <span className="ml-2 text-muted">(running)</span>}
-          </summary>
-          {item.output && (
-            <pre className="mt-1 max-h-64 overflow-auto rounded bg-sunken p-2 font-mono text-xs">{item.output}</pre>
-          )}
-        </details>
-      );
-    case "tool":
-      return (
-        <details>
-          <summary className="cursor-pointer text-xs">
-            <span className={clsx(item.status === "failed" ? "text-danger" : "text-data")}>●</span> {item.tool}
-            {item.status === "failed" && <span className="ml-2 text-danger">failed</span>}
-          </summary>
-          <pre className="mt-1 max-h-64 overflow-auto rounded bg-sunken p-2 font-mono text-xs">
-            {JSON.stringify(item.arguments, null, 2)}
-            {item.error ? `\n\n${item.error}` : ""}
-          </pre>
-        </details>
-      );
-    case "approval":
-    case "review":
-      return null;
-    case "files":
-      return (
-        <p className="text-xs text-muted">
-          Edited <span className="font-mono">{item.paths.map((p) => p.replace(/^\/work\//, "")).join(", ")}</span>
-        </p>
-      );
-    case "notice":
-      return <p className={item.tone === "error" ? "text-danger" : "text-muted"}>{item.text}</p>;
-  }
 }
 
 function Composer({
@@ -371,10 +413,10 @@ function Composer({
   };
 
   return (
-    <footer className="border-t border-line px-5 py-3">
-      <div className="mx-auto max-w-3xl">
+    <footer className="px-6 pt-2 pb-5">
+      <div className="mx-auto max-w-[46rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
-        <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface p-2 focus-within:border-accent">
+        <div className="flex items-end gap-2 rounded-3xl border border-line bg-surface p-2 pl-3 shadow-[0_8px_30px_-12px_rgb(0_0_0/0.18)] focus-within:border-accent/70">
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -386,12 +428,12 @@ function Composer({
             }}
             rows={Math.min(8, Math.max(1, text.split("\n").length))}
             placeholder={running ? "The agent is working…" : "Ask a question (Shift+Enter for a new line)"}
-            className="min-h-9 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
+            className="min-h-10 flex-1 resize-none bg-transparent px-1 py-2 text-[15px] outline-none placeholder:text-faint"
           />
           <select
             value={effort}
             onChange={(e) => setEffort(e.target.value as Effort)}
-            className="rounded-lg bg-transparent px-1 py-1.5 text-xs text-muted"
+            className="rounded-full bg-sunken px-2.5 py-1.5 text-[12px] text-muted outline-none"
             title="How hard the agent thinks"
           >
             <option value="low">Quick</option>
@@ -400,11 +442,11 @@ function Composer({
           </select>
           {running ? (
             <Button variant="danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
-              Stop
+              <Icon name="stop" size={14} /> Stop
             </Button>
           ) : (
             <Button variant="primary" onClick={submit} disabled={!text.trim() || send.isPending}>
-              Send
+              <Icon name="send" size={14} /> Send
             </Button>
           )}
         </div>

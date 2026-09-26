@@ -402,6 +402,87 @@ def _result_text(result: Any) -> str:
     return "\n".join(parts)[:_MAX_RESULT_TEXT]
 
 
+def tool_summary(tool: Any, server: Any, result: Any) -> dict[str, Any] | None:
+    """What an ihs-data tool returned, for the chat's step views: metadata only.
+
+    Catalog tools return names, types, and comments, kept (trimmed). A query
+    keeps its row count, columns, and file, never its rows: study data stays
+    out of the event log (the person can open the result file itself). The
+    text arrives through Codex in the container, so it's untrusted: only plain
+    fields are kept, and the chat renders them as text.
+    """
+    if server != "ihs-data" or not isinstance(result, dict):
+        return None
+    text = "\n".join(
+        c.get("text", "")
+        for c in result.get("content") or []
+        if isinstance(c, dict) and c.get("type") == "text"
+    )[:1_000_000]
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+
+    def s(value: Any, limit: int = 120) -> str:
+        return value[:limit] if isinstance(value, str) else ""
+
+    def names(values: Any, limit: int = 8) -> list[str]:
+        return [s(v, 80) for v in values[:limit]] if isinstance(values, list) else []
+
+    def hit(h: dict) -> dict[str, Any]:
+        return {
+            "table": s(h.get("table"), 80),
+            "comment": s(h.get("comment")),
+            "columns": names(h.get("matching_columns"), 6),
+        }
+
+    if tool == "search_catalog" and isinstance(data, list):
+        return {"tables": [hit(h) for h in data[:15] if isinstance(h, dict)]}
+    if tool == "find_concept" and isinstance(data, dict):
+        found = [h for h in (data.get("candidates") or [])[:12] if isinstance(h, dict)]
+        return {"tables": [hit(h) for h in found]}
+    if tool == "describe_table" and isinstance(data, dict):
+        columns = [c for c in data.get("columns") or [] if isinstance(c, dict)]
+        return {
+            "table": s(data.get("table"), 80),
+            "comment": s(data.get("comment"), 300),
+            "column_count": len(columns),
+            "columns": [
+                {
+                    "name": s(c.get("name"), 80),
+                    "type": s(c.get("type"), 40),
+                    "comment": s(c.get("comment"), 160),
+                }
+                for c in columns[:80]
+            ],
+            "also_in": names(data.get("also_in")),
+        }
+    if tool == "join_paths" and isinstance(data, dict):
+        return {
+            "tables": names(data.get("tables"), 2),
+            "shared": [
+                {
+                    "column": s(k.get("column"), 80),
+                    "role": s(k.get("role"), 20),
+                    "note": s(k.get("note"), 200),
+                }
+                for k in (data.get("shared_columns") or [])[:10]
+                if isinstance(k, dict)
+            ],
+            "notes": [s(n, 300) for n in (data.get("notes") or [])[:5]],
+        }
+    if tool == "query" and isinstance(data, dict):
+        count = data.get("row_count")
+        return {
+            "row_count": count if isinstance(count, int) else None,
+            "columns": names(data.get("columns"), 40),
+            "result_file": s(data.get("result_file"), 200),
+            "tables": names(data.get("tables"), 10),
+            "warnings": [s(w, 200) for w in (data.get("warnings") or [])[:5]],
+        }
+    return None
+
+
 def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
     item = params.get("item") or {}
     kind = item.get("type")
@@ -428,6 +509,9 @@ def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]
                 "id": item.get("id"),
                 "exit_code": item.get("exitCode"),
                 "status": item.get("status"),
+                # Fast commands arrive whole, without streamed output. The chat
+                # uses this only if nothing streamed (the same text either way).
+                "output": str(item.get("aggregatedOutput") or "")[-20_000:],
             }
         if kind == "mcpToolCall":
             return "tool_call", {
@@ -437,6 +521,7 @@ def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]
                 "arguments": item.get("arguments"),
                 "status": item.get("status"),
                 "error": item.get("error"),
+                "summary": tool_summary(item.get("tool"), item.get("server"), item.get("result")),
             }
         if kind == "fileChange":
             changes = item.get("changes") or []

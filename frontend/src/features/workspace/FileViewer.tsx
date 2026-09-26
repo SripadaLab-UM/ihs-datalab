@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
+import clsx from "clsx";
 import { useEffect, useState } from "react";
 
 import { api } from "@/api/client";
-import { Button, Modal } from "@/components/ui";
+import { Button, Chip, FileGlyph, Icon, Modal } from "@/components/ui";
 import { formatBytes, parseCsv } from "@/lib/csv";
 import type { OpenFile } from "@/lib/files";
 
@@ -30,30 +31,31 @@ export function FileViewer({ conversationId, file, onClose }: { conversationId: 
     <Modal
       wide
       title={
-        <span>
-          {file.path}
-          {file.size != null && <span className="ml-2 text-xs font-normal text-muted">{formatBytes(file.size)}</span>}
+        <span className="flex min-w-0 items-center gap-2.5">
+          <FileGlyph kind={file.kind} size={28} />
+          <span className="min-w-0 truncate">{file.path}</span>
+          {file.size != null && <span className="shrink-0 text-xs font-normal text-muted">{formatBytes(file.size)}</span>}
         </span>
       }
       onClose={onClose}
       actions={
         file.kind === "html" && (
           <Button variant="ghost" onClick={() => setSource(!source)}>
-            {source ? "Show page" : "Show source"}
+            <Icon name={source ? "eye" : "code"} size={14} /> {source ? "Show page" : "Show source"}
           </Button>
         )
       }
     >
       {!live && version != null && (
-        <p className="mb-2 flex items-center gap-2 text-xs text-muted" data-testid="file-version">
-          As saved at checkpoint {version}.
+        <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="file-version">
+          <Icon name="history" size={13} /> As saved at checkpoint {version}.
           {newer && (
-            <>
-              <span className="text-research">A newer version of the workspace has been saved.</span>
-              <button type="button" className="text-accent underline" onClick={() => setChosen(latest)}>
+            <span className="inline-flex items-center gap-2 rounded-full bg-attn-soft px-2.5 py-0.5 text-attn">
+              A newer version has been saved.
+              <button type="button" className="font-medium underline" onClick={() => setChosen(latest)}>
                 Show the newest
               </button>
-            </>
+            </span>
           )}
         </p>
       )}
@@ -62,11 +64,13 @@ export function FileViewer({ conversationId, file, onClose }: { conversationId: 
       ) : (
         <>
           {file.kind === "image" && (
-            <img
-              src={api.fileUrl(conversationId, file.root, file.path, version)}
-              alt={file.path}
-              className="mx-auto max-h-full max-w-full"
-            />
+            <div className="flex h-full items-center justify-center rounded-xl bg-sunken p-4">
+              <img
+                src={api.fileUrl(conversationId, file.root, file.path, version)}
+                alt={file.path}
+                className="max-h-full max-w-full rounded-md bg-white shadow-sm"
+              />
+            </div>
           )}
           {file.kind === "html" && !source && <HtmlPreview conversationId={conversationId} file={pinned} />}
           {(file.kind === "text" || (file.kind === "html" && source)) && (
@@ -76,7 +80,9 @@ export function FileViewer({ conversationId, file, onClose }: { conversationId: 
         </>
       )}
       {(file.kind === "pdf" || file.kind === "other") && (
-        <p className="text-sm text-muted">DataLab can't preview this kind of file yet.</p>
+        <p className="rounded-xl bg-sunken p-6 text-center text-sm text-muted">
+          DataLab can't preview this kind of file yet. You can export it and open it on your computer.
+        </p>
       )}
     </Modal>
   );
@@ -94,8 +100,8 @@ function HtmlPreview({ conversationId, file }: { conversationId: string; file: O
   if (!preview.data) return <p className="text-sm text-muted">Loading…</p>;
   return (
     <div className="flex h-full flex-col gap-2">
-      <p className="text-xs text-muted">
-        Shown with scripts turned off and no network access, so interactive parts of the page may not work.
+      <p className="flex items-center gap-1.5 text-xs text-muted">
+        <Icon name="shield" size={13} /> Shown with scripts turned off and no network access, so interactive parts of the page may not work.
       </p>
       {/* No sandbox allowances at all: no scripts, forms, or popups. DataLab also
           turns links in the page into plain text (backend htmlclean.py). */}
@@ -124,7 +130,9 @@ function TextPreview({ conversationId, file }: { conversationId: string; file: O
   return (
     <>
       {text.data.truncated && <p className="mb-2 text-xs text-muted">Showing the start of the file.</p>}
-      <pre className="whitespace-pre-wrap break-words font-mono text-xs">{text.data.text}</pre>
+      <pre className="whitespace-pre-wrap break-words rounded-xl bg-sunken p-4 font-mono text-xs leading-relaxed">
+        {text.data.text}
+      </pre>
     </>
   );
 }
@@ -141,28 +149,49 @@ function CsvPreview({ conversationId, file }: { conversationId: string; file: Op
     truncated: text.data.truncated,
   });
   const [header, ...body] = rows;
+  const shown = body.slice(0, MAX_ROWS);
   const more = text.data.truncated || body.length > MAX_ROWS;
+  // Right-align a column when every value in it is a number, like a spreadsheet does.
+  const numeric = (header ?? []).map((_, c) => {
+    const values = shown.map((row) => row[c] ?? "").filter((v) => v !== "");
+    return values.some((v) => /\d/.test(v)) && values.every((v) => NUMBER.test(v));
+  });
   return (
     <>
-      <p className="mb-2 text-xs text-muted">
-        {more ? `Showing the first ${Math.min(body.length, MAX_ROWS).toLocaleString()} rows.` : `${body.length.toLocaleString()} rows.`}
-      </p>
-      <div className="overflow-auto rounded-lg border border-line">
-        <table className="min-w-full text-xs">
-          <thead className="sticky top-0 bg-sunken">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <Chip tone="good">
+          {more ? `first ${shown.length.toLocaleString()} rows` : `${shown.length.toLocaleString()} row${shown.length === 1 ? "" : "s"}`}
+        </Chip>
+        <Chip>
+          {(header?.length ?? 0).toLocaleString()} column{header?.length === 1 ? "" : "s"}
+        </Chip>
+      </div>
+      <div className="max-h-[calc(85vh-10rem)] overflow-auto rounded-xl border border-line">
+        <table className="min-w-full border-separate border-spacing-0 text-xs tabular-nums">
+          <thead>
             <tr>
+              <th className="sticky left-0 top-0 z-[2] border-b border-line bg-sunken px-2 py-1.5 text-right font-normal text-faint">
+                #
+              </th>
               {header?.map((cell, i) => (
-                <th key={i} className="whitespace-nowrap px-2 py-1 text-left font-semibold">
+                <th
+                  key={i}
+                  className={clsx(
+                    "sticky top-0 z-[1] whitespace-nowrap border-b border-line bg-sunken px-3 py-1.5 font-semibold",
+                    numeric[i] ? "text-right" : "text-left",
+                  )}
+                >
                   {cell}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {body.slice(0, MAX_ROWS).map((row, r) => (
-              <tr key={r} className="border-t border-line">
+            {shown.map((row, r) => (
+              <tr key={r} className="odd:bg-surface even:bg-canvas hover:bg-accent-soft">
+                <td className="sticky left-0 bg-inherit px-2 py-1 text-right text-faint">{r + 1}</td>
                 {row.map((cell, c) => (
-                  <td key={c} className="whitespace-nowrap px-2 py-1 font-mono">
+                  <td key={c} className={clsx("whitespace-nowrap px-3 py-1 font-mono", numeric[c] && "text-right")}>
                     {cell}
                   </td>
                 ))}
@@ -174,3 +203,5 @@ function CsvPreview({ conversationId, file }: { conversationId: string; file: Op
     </>
   );
 }
+
+const NUMBER = /^[-+]?(\d[\d,]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?$|^NA$|^NaN$/;
