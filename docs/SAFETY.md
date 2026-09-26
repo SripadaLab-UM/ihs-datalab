@@ -190,6 +190,14 @@ access. It never gains it.
   because the U-M endpoint *does* run hosted tools if asked, and code in a
   container could ask directly, bypassing Codex's own settings. The spike
   demonstrated this.
+- **Only approved models.** The U-M endpoint also serves other companies'
+  models, which aren't approved for study data. The relay refuses any
+  request for a model that isn't an OpenAI GPT or o-series text model (a
+  lab's settings can narrow that to a list, never widen it), and lists only
+  approved models to Codex. New conversations can only pick approved models.
+- **The relay forwards exactly what it checked.** It re-serializes each
+  request, and refuses one with duplicate keys, since parsers disagree about
+  which copy wins.
 - **Agent containers sit on an internal Docker network with no route out.**
   Their only exit is a small **gateway** that holds no secrets:
   - **data sessions:** the gateway forwards only to the relay and to DataLab's

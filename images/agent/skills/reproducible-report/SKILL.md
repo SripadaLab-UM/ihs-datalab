@@ -15,8 +15,9 @@ Make every deliverable easy to find, understand, and regenerate.
    exclusions, and parameter choices.
 4. Separate findings from assumptions and limitations. Don't overstate
    observational associations as causal.
-5. Prefer self-contained HTML (offline: inline CSS/JS, embedded data) or
-   Markdown. For Markdown, `render-report /work/<source>.md` renders it into
+5. Prefer static, self-contained HTML (inline CSS, images next to it or
+   embedded, no scripts: DataLab shows HTML with scripts off) or Markdown.
+   For Markdown, `render-report /work/<source>.md` renders it into
    `/work/outputs`.
 6. Never put credentials, tokens, or participant identifiers in deliverables
    unless the user explicitly asks for identifiers.

@@ -5,6 +5,7 @@ import type { components } from "./schema";
 type Schemas = components["schemas"];
 export type Conversation = Schemas["ConversationOut"];
 export type Mode = Schemas["ModeOut"];
+export type Models = Schemas["ModelsOut"];
 export type QueryRecord = Schemas["QueryRecordOut"];
 export type Effort = NonNullable<Schemas["NewMessage"]["effort"]>;
 export type SafetyReport = Schemas["SafetyReportOut"];
@@ -51,12 +52,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/api/health"),
   modes: () => request<Mode[]>("/api/modes"),
+  models: () => request<Models>("/api/models"),
   conversations: () => request<Conversation[]>("/api/conversations"),
   conversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
-  createConversation: (mode: string, title: string) =>
+  createConversation: (mode: string, title: string, model?: string) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ mode, title }),
+      body: JSON.stringify({ mode, title, model }),
     }),
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),

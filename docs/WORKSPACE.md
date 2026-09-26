@@ -64,6 +64,11 @@ Everything uses native Codex mechanisms, arranged in four layers:
 | (new) `sql-extraction` | App skill | The good parts of the prototype's SQL Playground mode: catalog first, check columns, profiling separate from delivery, show the SQL. |
 | (new) `research-helper` | App skill | When to ask, how to phrase a question that contains no data, and to ask sparingly. |
 
+Until the knowledge base exists (milestone 5), `statistical-review` and
+`academic-figures` ship in the agent image as app skills, adjusted for v1's
+folders and for previews with scripts off. They move to the knowledge base
+then, so the lab can edit them.
+
 The prototype's mode prompts contain careful scientific guidance worth keeping
 nearly word for word: pilot-first, estimands, within-person versus
 between-person effects, and no causal overclaiming. Their tool-by-tool recipes

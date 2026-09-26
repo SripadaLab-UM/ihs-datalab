@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Models
+         * @description The approved models, for the picker. Asked of U-M GPT with DataLab's own key.
+         */
+        get: operations["list_models_api_models_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations": {
         parameters: {
             query?: never;
@@ -557,6 +577,17 @@ export interface components {
              * @enum {string}
              */
             kind: "data" | "research";
+            /** Description */
+            description: string;
+            /** Starters */
+            starters: string[];
+        };
+        /** ModelsOut */
+        ModelsOut: {
+            /** Default */
+            default: string;
+            /** Available */
+            available: string[];
         };
         /** NewConversation */
         NewConversation: {
@@ -729,6 +760,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModeOut"][];
+                };
+            };
+        };
+    };
+    list_models_api_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelsOut"];
                 };
             };
         };

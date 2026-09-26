@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from datalab.app import create_app
+from datalab.credentials import MissingCredential
 from datalab.sessions.runtime import TurnResult
 from tests.conftest import FakeDatabase, live_server
 
@@ -59,6 +60,10 @@ class FakeRuntime:
         pass
 
 
+def no_key() -> str:
+    raise MissingCredential("no key in tests")  # and no calls to U-M GPT
+
+
 @pytest.fixture
 def app(settings, catalog):
     return create_app(
@@ -67,6 +72,7 @@ def app(settings, catalog):
         catalog=catalog,
         manage_containers=False,
         protect_api=False,
+        model_key=no_key,
     )
 
 
@@ -205,3 +211,19 @@ def test_deleting_removes_the_conversation(app, monkeypatch):
         assert client.delete(f"/api/conversations/{cid}").status_code == 204
         assert client.get(f"/api/conversations/{cid}").status_code == 404
     assert removed == [cid]
+
+
+def test_conversations_use_only_approved_models(app):
+    with TestClient(app) as client:
+        assert client.post("/api/conversations", json={"model": "claude-opus-5"}).status_code == 422
+        created = client.post("/api/conversations", json={"model": "gpt-5.4"}).json()
+        assert created["model"] == "gpt-5.4"
+        assert client.get("/api/models").json() == {"default": "gpt-5.5", "available": []}
+
+
+def test_modes_come_with_descriptions_and_starters(app):
+    with TestClient(app) as client:
+        modes = {m["id"]: m for m in client.get("/api/modes").json()}
+    assert set(modes) == {"analysis", "extraction", "engineering", "research"}
+    assert all(m["description"] and m["starters"] for m in modes.values())
+    assert modes["research"]["kind"] == "research"

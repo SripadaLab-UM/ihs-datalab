@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from datalab.app import create_app
-from datalab.relay.policy import Refused, check_responses_request
+from datalab.relay.policy import Refused, check_responses_request, parse_request
 from datalab.sessions.tokens import SessionAccess
 from tests.conftest import FakeDatabase
 
@@ -72,6 +72,42 @@ class TestPolicy:
         with pytest.raises(Refused):
             check_responses_request(codex_request(input=[item]), "data")
 
+    @pytest.mark.parametrize(
+        "model",
+        ["claude-opus-5", "gemini-3.5-flash", "kimi-k3", "Llama-4-Scout-17B-16E-Instruct",
+         "gpt-image-2", "text-embedding-3-large", None, "", "gpt-5.5\n", "GPT-5.5",
+         "gpt-5.5-claude-opus", "o3-gemini", "gpt-oss-120b", "gpt-\u0665", "openai/gpt-5.5",
+         ["gpt-5.5"]],
+    )  # fmt: skip
+    def test_only_approved_openai_models(self, model):
+        with pytest.raises(Refused, match="approved"):
+            check_responses_request(codex_request(model=model), "data")
+
+    @pytest.mark.parametrize("model", ["gpt-5.5", "gpt-5-mini", "gpt-6-sol", "o3"])
+    def test_openai_text_models_are_approved(self, model):
+        check_responses_request(codex_request(model=model), "data")
+
+    def test_a_lab_can_narrow_but_never_widen_the_list(self):
+        check_responses_request(codex_request(model="gpt-5.5"), "data", ("gpt-5.5",))
+        with pytest.raises(Refused):
+            check_responses_request(codex_request(model="gpt-5.4"), "data", ("gpt-5.5",))
+        with pytest.raises(Refused):
+            check_responses_request(
+                codex_request(model="claude-opus-5"), "data", ("claude-opus-5",)
+            )
+
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            '{"model":"claude-opus-5","model":"gpt-5.5","store":false}',
+            '{"model":"gpt-5.5","store":true,"store":false}',
+            '{"model":"gpt-5.5","store":false,"tools":[{"type":"mcp","type":"function"}]}',
+        ],
+    )
+    def test_duplicate_keys_are_refused(self, raw):
+        with pytest.raises(Refused, match="duplicate"):
+            parse_request(raw.encode())
+
     def test_research_sessions_may_use_hosted_web_search(self):
         check_responses_request(codex_request(tools=[{"type": "web_search"}]), "research")
         with pytest.raises(Refused):
@@ -85,7 +121,9 @@ def relay(settings, catalog, tmp_path):
     def upstream(request: httpx.Request) -> httpx.Response:
         seen.append(request)
         if request.url.path.endswith("/models"):
-            return httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+            return httpx.Response(
+                200, json={"data": [{"id": "gpt-5.5"}, {"id": "claude-opus-5"}, {"id": "o3"}]}
+            )
         return httpx.Response(
             200, content=b"event: done\ndata: {}\n\n", headers={"content-type": "text/event-stream"}
         )
@@ -111,6 +149,8 @@ def test_models_are_forwarded_with_the_real_key(relay):
     response = client.get("/relay/v1/models", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert seen[0].headers["authorization"] == f"Bearer {REAL_KEY}"
+    # Only approved models are listed.
+    assert [m["id"] for m in response.json()["data"]] == ["gpt-5.5", "o3"]
 
 
 def test_allowed_request_streams_back_and_uses_the_real_key(relay):
@@ -125,6 +165,18 @@ def test_allowed_request_streams_back_and_uses_the_real_key(relay):
     assert b"event: done" in response.content
     assert seen[0].headers["authorization"] == f"Bearer {REAL_KEY}"
     assert token not in seen[0].headers["authorization"]
+
+
+def test_what_goes_upstream_is_exactly_what_was_checked(relay):
+    client, token, seen = relay
+    raw = json.dumps(codex_request()).replace('"store": false', '"store": false  ')
+    client.post(
+        "/relay/v1/responses",
+        content=raw,
+        headers={"Authorization": f"Bearer {token}", "content-type": "application/json"},
+    )
+    sent = json.loads(seen[-1].content)
+    assert sent == codex_request()
 
 
 def test_refused_request_never_reaches_u_m(relay):

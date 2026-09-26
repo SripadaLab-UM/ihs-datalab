@@ -212,21 +212,24 @@ class SafetyCheck:
             )
 
         not_refused = []
-        for label, body in _HOSTED_TOOL_PROBES:
+        # Built on an approved model, so each is refused for what it asks, not the model.
+        for label, body, reason in _probes(self._settings.default_model):
             response = await probe.http(
                 "POST", "http://gateway/v1/responses", token=True, body=body
             )
-            if not (response.status == 403 and "datalab_refused" in response.body):
+            refused = response.status == 403 and "datalab_refused" in response.body
+            if not (refused and reason in response.body):
                 not_refused.append(f"{label} (HTTP {response.status})")
         results.append(
             _result(
                 "hosted_tools_refused",
                 PROMISE_NETWORK,
-                "Hosted tools and provider-side links are refused",
+                "Hosted tools, provider-side links, and unapproved models are refused",
                 not not_refused,
                 "Not refused: " + ", ".join(not_refused)
                 if not_refused
-                else "Web search, remote MCP, code interpreter, and image links were refused.",
+                else "Web search, remote MCP, code interpreter, image links, other companies' "
+                "models, and ambiguous requests were refused.",
             )
         )
 
@@ -526,19 +529,31 @@ class SafetyCheck:
 
 
 # Requests an agent might send straight to the gateway to get U-M's servers to
-# reach outside on its behalf. The relay must refuse every one.
-_BASE = {"model": "gpt-5.5", "input": "hello", "store": False}
+# reach outside on its behalf, or to reach a model that isn't approved. The
+# relay must refuse every one, for the reason given.
 _IMAGE_LINK = {"type": "input_image", "image_url": "https://example.com/a.png"}
-_HOSTED_TOOL_PROBES = [
-    ("web search", {**_BASE, "tools": [{"type": "web_search"}]}),
-    ("remote MCP", {**_BASE, "tools": [{"type": "mcp", "server_url": "https://example.com"}]}),
-    ("code interpreter", {**_BASE, "tools": [{"type": "code_interpreter"}]}),
-    ("stored response", {**_BASE, "store": True}),
-    (
-        "image link",
-        {**_BASE, "input": [{"type": "message", "role": "user", "content": [_IMAGE_LINK]}]},
-    ),
-]
+
+
+def _probes(model: str) -> list[tuple[str, dict | str, str]]:
+    base = {"model": model, "input": "hello", "store": False}
+    message = {"type": "message", "role": "user", "content": [_IMAGE_LINK]}
+    return [
+        ("web search", {**base, "tools": [{"type": "web_search"}]}, "tool type"),
+        (
+            "remote MCP",
+            {**base, "tools": [{"type": "mcp", "server_url": "https://example.com"}]},
+            "tool type",
+        ),
+        ("code interpreter", {**base, "tools": [{"type": "code_interpreter"}]}, "tool type"),
+        ("stored response", {**base, "store": True}, "store"),
+        ("image link", {**base, "input": [message]}, "images"),
+        ("another company's model", {**base, "model": "claude-opus-5"}, "approved"),
+        (
+            "duplicate keys",
+            '{"model":"claude-opus-5","model":' + json.dumps(model) + ',"store":false}',
+            "duplicate",
+        ),
+    ]
 
 
 def _squid_denied(response: str) -> bool:
@@ -571,7 +586,7 @@ class _Probe:
         url: str,
         *,
         token: bool = False,
-        body: dict | None = None,
+        body: dict | str | None = None,
         proxied: bool = False,
         path_as_is: bool = False,
         include_headers: bool = False,
@@ -590,7 +605,7 @@ class _Probe:
             parts += [
                 "-H 'content-type: application/json'",
                 "--data-binary",
-                _quote(json.dumps(body)),
+                _quote(body if isinstance(body, str) else json.dumps(body)),
             ]
         parts.append(_quote(url))
         _, output = await self.sh(" ".join(parts))

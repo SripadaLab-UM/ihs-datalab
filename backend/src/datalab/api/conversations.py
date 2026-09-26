@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from datalab.relay.policy import model_allowed
 from datalab.sessions.manager import Busy, SessionManager
 from datalab.sessions.modes import MODES
 from datalab.sessions.store import Conversation, ConversationStore
@@ -62,10 +63,24 @@ class ModeOut(BaseModel):
     id: str
     label: str
     kind: Literal["data", "research"]
+    description: str
+    starters: list[str]
+
+
+class ModelsOut(BaseModel):
+    default: str
+    # Approved models U-M GPT offers now (empty if it couldn't be asked).
+    available: list[str]
 
 
 def build_conversations_router(
-    store: ConversationStore, sessions: SessionManager, default_model: str, access_log
+    store: ConversationStore,
+    sessions: SessionManager,
+    default_model: str,
+    access_log,
+    *,
+    models: Callable[[], Awaitable[list[str]]],
+    allowed_models: tuple[str, ...] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["conversations"])
 
@@ -80,7 +95,21 @@ def build_conversations_router(
 
     @router.get("/modes")
     def list_modes() -> list[ModeOut]:
-        return [ModeOut(id=m.id, label=m.label, kind=m.kind) for m in MODES.values()]
+        return [
+            ModeOut(
+                id=m.id,
+                label=m.label,
+                kind=m.kind,
+                description=m.description,
+                starters=list(m.starters),
+            )
+            for m in MODES.values()
+        ]
+
+    @router.get("/models")
+    async def list_models() -> ModelsOut:
+        """The approved models, for the picker. Asked of U-M GPT with DataLab's own key."""
+        return ModelsOut(default=default_model, available=await models())
 
     @router.get("/conversations")
     def list_conversations() -> list[ConversationOut]:
@@ -91,9 +120,10 @@ def build_conversations_router(
         mode = MODES.get(body.mode)
         if mode is None:
             raise HTTPException(422, f"Unknown mode {body.mode!r}.")
-        conversation = store.create(
-            kind=mode.kind, mode=mode.id, title=body.title, model=body.model or default_model
-        )
+        model = body.model or default_model
+        if not model_allowed(model, allowed_models):
+            raise HTTPException(422, f"{model!r} isn't approved for DataLab.")
+        conversation = store.create(kind=mode.kind, mode=mode.id, title=body.title, model=model)
         return out(conversation)
 
     @router.get("/conversations/{conversation_id}")
@@ -108,6 +138,12 @@ def build_conversations_router(
     @router.post("/conversations/{conversation_id}/messages", status_code=202)
     async def send_message(conversation_id: str, body: NewMessage) -> ConversationOut:
         conversation = get_or_404(conversation_id)
+        if not model_allowed(conversation.model, allowed_models):
+            raise HTTPException(
+                409,
+                f"This conversation uses {conversation.model}, which isn't approved for DataLab "
+                "any more. Start a new conversation to continue.",
+            )
         try:
             await sessions.send(conversation, body.text, body.effort)
         except Busy as error:

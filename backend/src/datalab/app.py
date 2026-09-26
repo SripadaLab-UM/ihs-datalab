@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
+from datalab.relay.policy import model_allowed
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions.containers import remove_all_session_containers
@@ -109,9 +111,42 @@ def create_app(
     app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
     app.state.services = services
     app.router.routes.extend(agent_tools_app.routes)
-    app.include_router(build_relay_router(tokens, model_key, settings.model_base_url, model_http))
     app.include_router(
-        build_conversations_router(conversations, sessions, settings.default_model, access_log)
+        build_relay_router(
+            tokens, model_key, settings.model_base_url, model_http, settings.allowed_models
+        )
+    )
+
+    listing: dict[str, Any] = {}
+
+    async def approved_models() -> list[str]:
+        """Approved models U-M GPT offers, asked at most every five minutes."""
+        if listing and time.monotonic() - listing["at"] < 300:
+            return listing["models"]
+        try:
+            # The keychain can show a prompt: never on the event loop.
+            key = await asyncio.to_thread(model_key)
+            response = await model_http.get(
+                f"{settings.model_base_url.rstrip('/')}/models",
+                headers={"authorization": f"Bearer {key}"},
+                timeout=15,
+            )
+            listed = [m.get("id") for m in response.json().get("data", [])]
+        except Exception:  # no key yet, no VPN, U-M down: the picker shows the default
+            return []
+        models = sorted(m for m in listed if model_allowed(m, settings.allowed_models))
+        listing.update(at=time.monotonic(), models=models)
+        return models
+
+    app.include_router(
+        build_conversations_router(
+            conversations,
+            sessions,
+            settings.default_model,
+            access_log,
+            models=approved_models,
+            allowed_models=settings.allowed_models,
+        )
     )
     previews = Previews()
     app.include_router(build_files_router(conversations, sessions, previews))

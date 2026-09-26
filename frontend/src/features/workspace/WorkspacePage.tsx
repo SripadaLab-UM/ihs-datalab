@@ -87,12 +87,22 @@ export function WorkspacePage() {
 
 function NewConversation({ onClose }: { onClose: () => void }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const models = useQuery({ queryKey: ["models"], queryFn: api.models, staleTime: 5 * 60_000 });
   const [mode, setMode] = useState("analysis");
   const [title, setTitle] = useState("");
+  const [model, setModel] = useState("");
+  // The default is offered while the list loads, or if U-M can't be asked.
+  const choices = !models.data
+    ? []
+    : models.data.available.length === 0
+      ? [models.data.default]
+      : models.data.available.includes(models.data.default)
+        ? [models.data.default, ...models.data.available.filter((m) => m !== models.data.default)]
+        : models.data.available;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const create = useMutation({
-    mutationFn: () => api.createConversation(mode, title.trim() || "New conversation"),
+    mutationFn: () => api.createConversation(mode, title.trim() || "New conversation", model || undefined),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       navigate(`/workspace/${conversation.id}`);
@@ -118,6 +128,24 @@ function NewConversation({ onClose }: { onClose: () => void }) {
         <div className="mt-1 grid grid-cols-2 gap-2">
           {modes.data?.map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
         </div>
+        <p className="mt-2 text-sm text-muted">{modes.data?.find((m) => m.id === mode)?.description}</p>
+        <label className="mt-4 block text-sm">
+          Model
+          <select
+            value={model || (choices.includes(models.data?.default ?? "") ? models.data?.default : choices[0]) || ""}
+            onChange={(e) => setModel(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-line bg-canvas px-2 py-1.5 text-sm"
+          >
+            {choices.length === 0 && <option value="">Loading…</option>}
+            {choices.map((m) => (
+              <option key={m} value={m}>
+                {m}
+                {m === models.data?.default ? " (recommended)" : ""}
+              </option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-muted">Only models approved for study data are offered.</span>
+        </label>
         <p className="mt-3 text-xs text-muted">
           {mode === "research"
             ? "🌐 Research sessions have the internet but no study data. Anything you attach may reach the internet."

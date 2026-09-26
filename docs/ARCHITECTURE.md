@@ -542,7 +542,11 @@ something we can use end to end ourselves.
      viewer, and HTML previews. 3b done the same day: attaching files and
      folders through the native picker, read-only mounts, and practice
      samples. 3c done the same day: export folders, exporting outputs with
-     a manifest, and "Export conversation" as one self-contained page.)
+     a manifest, and "Export conversation" as one self-contained page.
+     3d done the same day: the four modes' full instructions and starter
+     prompts, the sql-extraction, statistical-review, and academic-figures
+     skills, and the model picker, with the relay allowing only approved
+     models.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

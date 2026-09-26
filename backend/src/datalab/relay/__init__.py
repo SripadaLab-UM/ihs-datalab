@@ -12,6 +12,7 @@ The real key never leaves this process.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Callable
@@ -22,7 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from datalab.credentials import MissingCredential
-from datalab.relay.policy import Refused, check_responses_request
+from datalab.relay.policy import Refused, check_responses_request, model_allowed, parse_request
 from datalab.sessions.tokens import SessionTokens, bearer_token
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ def build_relay_router(
     api_key: Callable[[], str],
     base_url: str,
     client: httpx.AsyncClient,
+    allowed_models: tuple[str, ...] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/relay/v1", include_in_schema=False)
     base_url = base_url.rstrip("/")
@@ -45,10 +47,24 @@ def build_relay_router(
     async def models(request: Request) -> Response:
         if tokens.resolve(bearer_token(request.headers.get("authorization"))) is None:
             return _refused(401, "unknown session")
-        key = _key_or_none(api_key)
+        key = await asyncio.to_thread(_key_or_none, api_key)
         if key is None:
             return _refused(503, "no U-M GPT key is saved in DataLab")
-        return await _forward(client, "GET", f"{base_url}/models", None, key)
+        # Only the approved models are listed, so Codex never offers others.
+        try:
+            upstream = await client.get(
+                f"{base_url}/models", headers={"authorization": f"Bearer {key}"}
+            )
+            listing = upstream.json()
+        except (httpx.HTTPError, ValueError) as error:
+            return _refused(502, f"couldn't reach U-M GPT ({type(error).__name__})")
+        entries = listing.get("data") if isinstance(listing, dict) else None
+        approved = [
+            m
+            for m in (entries if isinstance(entries, list) else [])
+            if isinstance(m, dict) and model_allowed(m.get("id"), allowed_models)
+        ]
+        return JSONResponse({"object": "list", "data": approved}, status_code=upstream.status_code)
 
     @router.post("/responses")
     async def responses(request: Request) -> Response:
@@ -57,16 +73,19 @@ def build_relay_router(
             return _refused(401, "unknown session")
         raw = await request.body()
         try:
-            check_responses_request(json.loads(raw), access.kind)
+            body = parse_request(raw)
+            check_responses_request(body, access.kind, allowed_models)
         except json.JSONDecodeError:
             return _refused(400, "the request body isn't JSON")
         except Refused as refusal:
             log.warning("relay refused a request from session %s: %s", access.session_id, refusal)
             return _refused(403, str(refusal))
-        key = _key_or_none(api_key)
+        key = await asyncio.to_thread(_key_or_none, api_key)
         if key is None:
             return _refused(503, "no U-M GPT key is saved in DataLab")
-        return await _forward(client, "POST", f"{base_url}/responses", raw, key)
+        # Exactly what was checked goes upstream, not the original bytes.
+        checked = json.dumps(body, ensure_ascii=False).encode()
+        return await _forward(client, "POST", f"{base_url}/responses", checked, key)
 
     @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def everything_else(path: str) -> Response:

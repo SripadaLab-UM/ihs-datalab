@@ -62,6 +62,9 @@ class Settings:
     agent_image: str = "datalab-agent:dev"
     model_base_url: str = "https://api.toolkit.umgpt.umich.edu/v1"
     default_model: str = "gpt-5.5"
+    # Models approved for study data. None: OpenAI GPT and o-series text
+    # models (see relay/policy.py). A lab can pin an explicit list.
+    allowed_models: tuple[str, ...] | None = None
     host: str = "127.0.0.1"
     port: int = 8765
 
@@ -120,7 +123,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle = _oracle_from(raw["oracle"]) if "oracle" in raw else None
 
     catalog_dir = raw.get("catalog_dir") or os.environ.get("DATALAB_CATALOG_DIR")
-    return Settings(
+    settings = Settings(
         profile=profile,
         data_dir=data_dir,
         oracle=oracle,
@@ -132,11 +135,33 @@ def load_settings(profile: Profile | None = None) -> Settings:
         or Settings.agent_image,
         model_base_url=raw.get("model_base_url", Settings.model_base_url),
         default_model=raw.get("default_model", Settings.default_model),
+        allowed_models=_allowed_models(raw),
         port=int(raw.get("port", 8766 if profile == "practice" else 8765)),
         # CI only: on Linux, containers reach the host through the Docker
         # bridge, so DataLab must listen beyond 127.0.0.1 there.
         host=os.environ.get("DATALAB_HOST", Settings.host),
     )
+    return _check_models(settings)
+
+
+def _allowed_models(raw: dict) -> tuple[str, ...] | None:
+    if "allowed_models" not in raw:
+        return None
+    value = raw["allowed_models"]
+    if not isinstance(value, list) or not all(isinstance(m, str) for m in value):
+        raise ValueError("allowed_models in settings.toml must be a list of model names")
+    return tuple(value)
+
+
+def _check_models(settings: Settings) -> Settings:
+    from datalab.relay.policy import model_allowed
+
+    if not model_allowed(settings.default_model, settings.allowed_models):
+        raise ValueError(
+            f"default_model {settings.default_model!r} isn't an approved model "
+            "(see allowed_models in settings.toml)"
+        )
+    return settings
 
 
 def _env_profile() -> Profile:

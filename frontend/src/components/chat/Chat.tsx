@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
@@ -15,6 +15,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
   const turns = useMemo(() => buildTranscript(events), [events]);
   const running = turns.at(-1)?.status === "running";
   const bottom = useRef<HTMLDivElement>(null);
+  const [suggestion, setSuggestion] = useState<{ text: string } | null>(null);
   const queryClient = useQueryClient();
 
   // When a turn finishes, refresh what depends on it (busy dots, data accessed).
@@ -52,27 +53,42 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
-          {turns.length === 0 && <EmptyState kind={conversation.kind} />}
+          {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
             <TurnView key={index} turn={turn} />
           ))}
           <div ref={bottom} />
         </div>
       </div>
-      <Composer conversation={conversation} running={running} />
+      <Composer conversation={conversation} running={running} suggestion={suggestion} />
     </div>
   );
 }
 
-function EmptyState({ kind }: { kind: "data" | "research" }) {
+function EmptyState({ conversation, onPick }: { conversation: Conversation; onPick: (s: { text: string }) => void }) {
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const mode = modes.data?.find((m) => m.id === conversation.mode);
   return (
     <div className="mt-16 text-center text-muted">
       <p className="text-lg text-ink">What would you like to find out?</p>
       <p className="mt-2 text-sm">
-        {kind === "data"
+        {conversation.kind === "data"
           ? "The agent can query the IHS database (read-only) and analyse the results. It has no internet."
           : "The agent can search the web and read papers. It has no access to study data."}
       </p>
+      {mode && mode.starters.length > 0 && (
+        <div className="mx-auto mt-6 flex max-w-xl flex-col gap-2">
+          {mode.starters.map((starter) => (
+            <button
+              key={starter}
+              onClick={() => onPick({ text: starter })}
+              className="rounded-xl border border-line bg-surface px-4 py-2 text-left text-sm text-ink hover:bg-sunken"
+            >
+              {starter}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -186,8 +202,21 @@ function WorkItem({ item }: { item: Item }) {
   }
 }
 
-function Composer({ conversation, running }: { conversation: Conversation; running: boolean }) {
+function Composer({
+  conversation,
+  running,
+  suggestion,
+}: {
+  conversation: Conversation;
+  running: boolean;
+  suggestion: { text: string } | null;
+}) {
   const [text, setText] = useState("");
+  // A starter prompt the person picked goes into the box, for them to edit and send.
+  useEffect(() => {
+    // Never over what the person has already typed.
+    if (suggestion) setText((current) => (current.trim() ? current : suggestion.text));
+  }, [suggestion]);
   const [effort, setEffort] = useState<Effort>("medium");
   const queryClient = useQueryClient();
   const send = useMutation({
