@@ -185,7 +185,14 @@ def test_cleaning_drops_svg_animation_and_outside_links_in_svg():
     )
     assert "https://x" not in cleaned
     assert "<set" not in cleaned and "<animate" not in cleaned
-    assert '<image href="plot.png">' in cleaned
+    assert '<image href="plot.png"/>' in cleaned  # self-closing stays self-closing
+
+
+def test_cleaning_keeps_svg_siblings_apart():
+    # Written as <rect> (unclosed), everything after it would sit inside the rect
+    # and never be drawn.
+    cleaned = clean_html('<svg><rect fill="white"/><g><path d="M0,0"/></g></svg>')
+    assert '<rect fill="white"/><g><path d="M0,0"/></g>' in cleaned
 
 
 def test_turns_are_checkpointed_and_restorable(settings, catalog):

@@ -42,6 +42,9 @@ class FakeContainers:
         self.stops += 1
         self.running = False
 
+    async def stop_and_confirm(self) -> None:
+        await self.stop()
+
     async def is_running(self) -> bool:
         return self.running
 

@@ -163,6 +163,13 @@ src/datalab/
 - The host folder `sessions/<id>/work` is mounted at `/work`. Attached items
   are mounted read-only under `/inputs`. Query results go under
   `/data/oracle`, also read-only.
+- **Attaching** (`sessions/inputs.py`, `sessions/picker.py`). The UI asks
+  DataLab to open the native picker (`osascript` on a Mac, a Windows Forms
+  dialog through PowerShell on Windows); what the person picks is resolved to
+  its real location, checked against the refused places (see SAFETY.md), and
+  recorded. Mounts use `--mount type=bind,…,readonly`, so a missing source
+  is an error rather than an empty folder. The practice profile never opens
+  the picker; it offers synthetic samples shipped with DataLab.
 - **Checkpoints.** After each turn, the host records every file in `/work`
   in a content-addressed store in the session folder, outside every mount,
   so the agent can't touch it. Unchanged files cost nothing extra. This is
@@ -396,7 +403,11 @@ src/datalab/
   - **Workspace files** opened through the API are served as plain text or
     images, with a `sandbox` policy, so they are inert even in their own tab.
   - **Exported conversation reports** embed the same "no network" CSP, so
-    they stay inert when opened later in any browser.
+    they stay inert when opened later in any browser. The web UI renders the
+    report with the chat's own transcript and Markdown code, drawing charts
+    as SVG (no scripts needed); DataLab cleans that markup (`htmlclean.py`)
+    and wraps it in a page whose first element is the policy
+    (`exports.py`).
 - **Local API protection.** The app listens on `127.0.0.1` only. The launcher
   opens it with a one-time token that sets a session cookie, so other local
   programs or web pages can't drive DataLab's API.
@@ -528,7 +539,10 @@ something we can use end to end ourselves.
 3. **Complete workspace.**
    - Inputs, outputs, checkpoints, and rollback. (3a done 2026-09-26:
      checkpoints and rollback, the Outputs and History panels, the file
-     viewer, and HTML previews.)
+     viewer, and HTML previews. 3b done the same day: attaching files and
+     folders through the native picker, read-only mounts, and practice
+     samples. 3c done the same day: export folders, exporting outputs with
+     a manifest, and "Export conversation" as one self-contained page.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

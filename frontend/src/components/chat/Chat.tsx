@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
 import { Button, SessionBadge } from "@/components/ui";
@@ -10,7 +10,7 @@ import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript
 import { useConversationEvents } from "./useConversationEvents";
 
 /** The shared chat. Every tab that needs an agent uses this component. */
-export function Chat({ conversation }: { conversation: Conversation }) {
+export function Chat({ conversation, headerActions }: { conversation: Conversation; headerActions?: ReactNode }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
   const running = turns.at(-1)?.status === "running";
@@ -26,12 +26,15 @@ export function Chat({ conversation }: { conversation: Conversation }) {
   }, [running, conversation.id, queryClient]);
 
   // A new checkpoint or a restore changes the files the side panel shows.
-  const lastFilesEvent = events.findLast((e) => e.type === "checkpoint" || e.type === "files_restored")?.seq;
+  const lastFilesEvent = events.findLast((e) =>
+    ["checkpoint", "files_restored", "input_attached", "input_removed"].includes(e.type),
+  )?.seq;
   useEffect(() => {
     if (lastFilesEvent === undefined) return;
     queryClient.invalidateQueries({ queryKey: ["files", conversation.id] });
     queryClient.invalidateQueries({ queryKey: ["checkpoints", conversation.id] });
     queryClient.invalidateQueries({ queryKey: ["file-text", conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ["inputs", conversation.id] });
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }, [lastFilesEvent, conversation.id, queryClient]);
 
@@ -45,6 +48,7 @@ export function Chat({ conversation }: { conversation: Conversation }) {
         <h1 className="truncate font-semibold">{conversation.title}</h1>
         <SessionBadge kind={conversation.kind} />
         <span className="text-xs text-muted">{conversation.model}</span>
+        {headerActions && <div className="ml-auto flex gap-2">{headerActions}</div>}
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">

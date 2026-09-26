@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import html
 import re
+from collections.abc import Callable
 from html.parser import HTMLParser
 
 _VOID = {
@@ -36,6 +37,10 @@ _DROP_WITH_CONTENT = {
 _DROP = {"base", "meta", "link", "form", "plaintext", "xmp"}
 # Links become plain text: their content stays, the link doesn't.
 _UNLINK = {"a": "span", "area": "span"}
+_OUTSIDE_URL = re.compile(r"url\(\s*(?![\"']?\s*data:)[^)]*\)", re.IGNORECASE)
+_IMAGE_SET = re.compile(r"(-webkit-)?image-set\((?:[^()]|\([^()]*\))*\)", re.IGNORECASE)
+# CSS in a style attribute that could load something.
+_LOADS = re.compile(r"url\(|image-set|@import", re.IGNORECASE)
 _TAG = re.compile(r"^[a-z][a-z0-9-]*(:[a-z][a-z0-9-]*)?$")
 _ATTRIBUTE = re.compile(r"^[a-z_:][a-z0-9_:.-]*$")
 # Attributes that make a request or navigate that the page's policy doesn't
@@ -50,9 +55,19 @@ _DROP_ATTRIBUTES = {
 _HREF_ALLOWED = {"image", "feimage"}
 
 
+# Attributes that load something by URL. In offline mode (exported reports)
+# only data: URLs and in-page links survive, so the report is inert even in
+# an app that ignores its security policy (Word, an email client).
+_URL_ATTRIBUTES = {"src", "srcset", "poster", "background", "href", "xlink:href", "data"}
+
+
 class _Cleaner(HTMLParser):
-    def __init__(self) -> None:
+    def __init__(
+        self, *, offline: bool = False, inline: Callable[[str], str | None] | None = None
+    ) -> None:
         super().__init__(convert_charrefs=True)
+        self._offline = offline
+        self._inline = inline
         self.out: list[str] = []
         self._skipping: list[str] = []  # open elements whose content is dropped
         self._in_style = False
@@ -69,6 +84,8 @@ class _Cleaner(HTMLParser):
                 self._skipping.append(tag)
             return
         attrs = _first_of_each(attrs)
+        if tag == "link" and self._offline:
+            return
         if tag == "link":
             values = dict(attrs)
             rel = (values.get("rel") or "").strip().lower()
@@ -90,9 +107,21 @@ class _Cleaner(HTMLParser):
                     continue
             elif name in _DROP_ATTRIBUTES:
                 continue
+            if self._offline and name in _URL_ATTRIBUTES:
+                text = (value or "").strip().lower()
+                if not (text.startswith("data:") or text.startswith("#")):
+                    # The page's own images can come along, embedded.
+                    embedded = self._inline(value or "") if self._inline and name == "src" else None
+                    if embedded is None:
+                        continue
+                    value = embedded
+            if self._offline and name == "style" and _LOADS.search(value or ""):
+                continue
             kept.append(f' {name}="{html.escape(value or "", quote=True)}"')
-        self.out.append(f"<{tag}{''.join(kept)}>")
-        if tag == "style":
+        # A self-closing tag stays self-closing: inside <svg> the browser would
+        # otherwise nest everything after it inside it, and draw none of it.
+        self.out.append(f"<{tag}{''.join(kept)}{'/' if closed and tag not in _VOID else ''}>")
+        if tag == "style" and not closed:
             self._in_style = True
 
     def handle_endtag(self, tag: str) -> None:
@@ -113,7 +142,11 @@ class _Cleaner(HTMLParser):
         if self._in_style:
             # CSS stays as it is (its fetches obey the policy), but no "<":
             # inside <svg> a browser reads a style's text as markup.
-            self.out.append(data.replace("<", "\\3c "))
+            css = data.replace("<", "\\3c ")
+            if self._offline:
+                css = _OUTSIDE_URL.sub("url()", css).replace("@import", "")
+                css = _IMAGE_SET.sub("none", css)
+            self.out.append(css)
         else:
             self.out.append(html.escape(data, quote=False))
 
@@ -131,11 +164,22 @@ def _first_of_each(attrs: list[tuple[str, str | None]]) -> list[tuple[str, str |
     return kept
 
 
-def clean_html(source: str) -> str:
-    cleaner = _Cleaner()
+def clean_fragment(
+    source: str, *, offline: bool = False, inline: Callable[[str], str | None] | None = None
+) -> str:
+    """The cleaned markup alone, to place inside a page DataLab builds.
+
+    `offline` also drops every URL that isn't a data: URL or an in-page link;
+    `inline` may turn an image's `src` into a data: URL instead.
+    """
+    cleaner = _Cleaner(offline=offline, inline=inline)
     cleaner.feed(source)
     cleaner.close()
+    return "".join(cleaner.out)
+
+
+def clean_html(source: str) -> str:
     return (
         '<!doctype html>\n<meta charset="utf-8">\n'
-        '<meta http-equiv="x-dns-prefetch-control" content="off">\n' + "".join(cleaner.out)
+        '<meta http-equiv="x-dns-prefetch-control" content="off">\n' + clean_fragment(source)
     )

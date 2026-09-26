@@ -7,12 +7,17 @@ import { Button, Modal, Tabs } from "@/components/ui";
 import { formatBytes } from "@/lib/csv";
 import type { OpenFile } from "@/lib/files";
 
-type Tab = "outputs" | "history" | "data";
+import { ExportDialog } from "./ExportDialog";
+import { Inputs } from "./Inputs";
+
+type Tab = "inputs" | "outputs" | "history" | "data";
 
 /** The Workspace's right-hand column: what the agent made, checkpoints, and data it read. */
 export function SidePanel({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
   const [tab, setTab] = useState<Tab>("outputs");
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const tabs: { id: Tab; label: string }[] = [
+    { id: "inputs", label: "Inputs" },
     { id: "outputs", label: "Outputs" },
     { id: "history", label: "History" },
     ...(conversation.kind === "data" ? [{ id: "data" as const, label: "Data accessed" }] : []),
@@ -21,7 +26,8 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
     <div className="flex h-full min-h-0 flex-col">
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
-        {tab === "outputs" && <Outputs conversationId={conversation.id} onOpen={onOpen} />}
+        {tab === "inputs" && <Inputs conversation={conversation} practice={health.data?.profile === "practice"} />}
+        {tab === "outputs" && <Outputs conversation={conversation} onOpen={onOpen} />}
         {tab === "history" && <History conversation={conversation} />}
         {tab === "data" && <DataAccessed conversationId={conversation.id} onOpen={onOpen} />}
       </div>
@@ -38,8 +44,10 @@ const ICONS: Record<OpenFile["kind"], string> = {
   other: "•",
 };
 
-function Outputs({ conversationId, onOpen }: { conversationId: string; onOpen: (file: OpenFile) => void }) {
+function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
+  const conversationId = conversation.id;
   const files = useQuery({ queryKey: ["files", conversationId], queryFn: () => api.files(conversationId) });
+  const [exporting, setExporting] = useState(false);
   if (files.data?.length === 0) {
     return (
       <p className="text-sm text-muted">
@@ -48,25 +56,34 @@ function Outputs({ conversationId, onOpen }: { conversationId: string; onOpen: (
     );
   }
   return (
-    <ul className="flex flex-col gap-0.5">
-      {files.data?.map((file) => (
-        <li key={file.path}>
-          <button
-            onClick={() => onOpen({ root: "outputs", path: file.path, kind: file.kind, size: file.size })}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-sunken"
-            title={file.path}
-          >
-            <span aria-hidden className="w-4 text-center text-muted">
-              {ICONS[file.kind]}
-            </span>
-            <span className="min-w-0 flex-1 truncate">{file.path}</span>
-            <span className="shrink-0 text-xs text-muted">{formatBytes(file.size)}</span>
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <div className="mb-2 flex justify-end">
+        <Button className="px-2 py-0.5 text-xs" onClick={() => setExporting(true)}>
+          Export…
+        </Button>
+      </div>
+      {exporting && <ExportDialog conversation={conversation} withReport={false} onClose={() => setExporting(false)} />}
+      <ul className="flex flex-col gap-0.5">
+        {files.data?.map((file) => (
+          <li key={file.path}>
+            <button
+              onClick={() => onOpen({ root: "outputs", path: file.path, kind: file.kind, size: file.size })}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-sunken"
+              title={file.path}
+            >
+              <span aria-hidden className="w-4 text-center text-muted">
+                {ICONS[file.kind]}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{file.path}</span>
+              <span className="shrink-0 text-xs text-muted">{formatBytes(file.size)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
+
 
 function History({ conversation }: { conversation: Conversation }) {
   const checkpoints = useQuery({

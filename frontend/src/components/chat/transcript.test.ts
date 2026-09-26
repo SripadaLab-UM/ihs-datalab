@@ -87,3 +87,12 @@ describe("workspace events", () => {
     expect(turns[1].items[0]).toMatchObject({ kind: "notice", text: expect.stringContaining("after turn 1") });
   });
 });
+
+it("shows attaching and removing inputs between turns", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "hi" }),
+    e("turn_finished", { status: "completed" }),
+    e("input_attached", { items: [{ path: "/inputs/data.csv", kind: "file" }] }),
+  ]);
+  expect(turns[1].items[0]).toMatchObject({ kind: "notice", text: expect.stringContaining("/inputs/data.csv") });
+});

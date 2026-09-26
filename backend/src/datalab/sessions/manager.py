@@ -9,15 +9,24 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import shutil
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
-from datalab.config import Settings
+from datalab.config import Settings, default_data_dir
 from datalab.sessions import modes
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
+from datalab.sessions.inputs import (
+    AttachmentStore,
+    is_sample,
+    mount_args,
+    practice_samples,
+    recheck,
+)
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.tokens import SessionTokens
@@ -38,10 +47,12 @@ class SessionManager:
         *,
         idle_seconds: float = 30 * 60,
         max_running: int = 3,
+        attachments: AttachmentStore | None = None,
     ) -> None:
         self._settings = settings
         self._store = store
         self._tokens = tokens
+        self._attachments = attachments
         self._idle_seconds = idle_seconds
         self._max_running = max_running
         self._runtimes: dict[str, SessionRuntime] = {}
@@ -147,6 +158,25 @@ class SessionManager:
             self._restoring.discard(conversation.id)
         return result
 
+    @contextlib.asynccontextmanager
+    async def changing_inputs(self, conversation: Conversation) -> AsyncIterator[None]:
+        """Hold the conversation while its attachments change.
+
+        Nothing may start meanwhile, and the container must be confirmed gone
+        before the change (mounts are fixed when a container starts), so a
+        removed attachment can't stay mounted. The next message starts a new
+        container and Codex picks the conversation up where it left off.
+        """
+        if self.is_busy(conversation.id):
+            raise Busy("Wait for the agent to finish, or stop it, first.")
+        self._restoring.add(conversation.id)
+        try:
+            await self._shutdown(conversation.id)
+            await self._containers(conversation).stop_and_confirm()
+            yield
+        finally:
+            self._restoring.discard(conversation.id)
+
     async def stop(self, conversation_id: str) -> None:
         runtime = self._runtimes.get(conversation_id)
         if runtime and self.is_busy(conversation_id):
@@ -189,26 +219,43 @@ class SessionManager:
             agent_image=self._settings.agent_image,
             host_port=self._settings.port,
             profile=self._settings.profile,
+            extra_mounts=(lambda: self._input_mounts(conversation_id))
+            if self._attachments
+            else None,
         )
 
+    def _input_mounts(self, conversation_id: str) -> list[str]:
+        """Mounts for the attachments that still pass every check, right now."""
+        assert self._attachments is not None
+        protected = [self._settings.data_dir, *(default_data_dir(p) for p in ("real", "practice"))]
+        mountable = []
+        for attachment in self._attachments.list(conversation_id):
+            samples = practice_samples()
+            if self._settings.profile == "practice" and is_sample(attachment, samples):
+                mountable.append(attachment)
+                continue
+            problem = recheck(attachment, protected=protected)
+            if problem is None:
+                mountable.append(attachment)
+            else:
+                log.warning("not mounting an attachment in %s: %s", conversation_id, problem)
+                self._store.append(
+                    conversation_id,
+                    "input_unavailable",
+                    {"path": attachment.container_path, "reason": problem},
+                )
+        return mount_args(mountable)
+
     def _workspace_note(self, conversation_id: str) -> str:
-        """Tell the agent if its files were restored since its last turn."""
-        restored = self._store.last(conversation_id, "files_restored")
+        """Tell the agent what changed in its files since its last turn."""
         asked = self._store.last(conversation_id, "user_message")
-        if restored is None or (asked is not None and asked.seq > restored.seq):
-            return ""
-        label = str(restored.data.get("label", "an earlier checkpoint")).lower()
-        if restored.data.get("failed"):
-            return (
-                f"[DataLab: the user tried to restore the files in /work to how they were "
-                f"{label}, but it failed partway, so some files may be restored and others "
-                "not. Check the files before relying on them.]\n\n"
-            )
-        return (
-            f"[DataLab: the user restored the files in /work to how they were {label}. "
-            "Changes made to /work since then were undone. Check the files before relying "
-            "on anything you remember about them.]\n\n"
+        changes = self._store.events_of_types_after(
+            conversation_id,
+            asked.seq if asked else 0,
+            ("files_restored", "input_attached", "input_removed", "input_unavailable"),
         )
+        notes = [_note(event.type, event.data) for event in changes]
+        return "".join(f"[DataLab: {note}]\n" for note in notes if note) + ("\n" if notes else "")
 
     async def _checkpoint(self, conversation_id: str, runtime: SessionRuntime, turn: int) -> None:
         """Checkpoint /work after a turn, with the container frozen meanwhile."""
@@ -338,3 +385,31 @@ def _enough_disk(folder, settings: Settings) -> bool:
     except OSError:
         return True
     return free >= settings.limits.min_free_disk_bytes
+
+
+def _note(kind: str, data: dict[str, Any]) -> str:
+    if kind == "files_restored":
+        label = str(data.get("label", "an earlier checkpoint")).lower()
+        if data.get("failed"):
+            return (
+                f"the user tried to restore the files in /work to how they were {label}, but "
+                "it failed partway, so some files may be restored and others not. Check the "
+                "files before relying on them."
+            )
+        return (
+            f"the user restored the files in /work to how they were {label}. Changes made "
+            "to /work since then were undone. Check the files before relying on anything you "
+            "remember about them."
+        )
+    items = data.get("items") or []
+    # Names come from files, so they're quoted: they can't pose as DataLab's words.
+    listed = ", ".join(f"{json.dumps(str(i.get('path')))} ({i.get('kind')})" for i in items)
+    if kind == "input_attached":
+        return f"the user attached {listed}, read-only (names are the files' own)."
+    if kind == "input_removed":
+        return f"the user removed {listed}; no longer available."
+    if kind == "input_unavailable":
+        path = str(data.get("path"))
+        reason = str(data.get("reason", "")).replace(path, "it")
+        return f"{json.dumps(path)} isn't available this time ({reason})."
+    return ""

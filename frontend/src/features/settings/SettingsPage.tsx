@@ -4,12 +4,15 @@ import clsx from "clsx";
 import { api, type CheckResult, type SafetyReport } from "@/api/client";
 import { Button } from "@/components/ui";
 
+import { ExportDestinations } from "./ExportDestinations";
+
 export function SettingsPage() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-8 px-6 py-8">
         <SafetySection />
+        <ExportDestinations practice={health.data?.profile === "practice"} />
         <section>
           <h2 className="text-lg font-semibold">About this DataLab</h2>
           <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1 text-sm">

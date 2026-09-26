@@ -119,7 +119,18 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         add({ kind: "notice", tone: "error", text: text(data.message) || "Something went wrong." });
         break;
       case "notice":
-        add({ kind: "notice", tone: "info", text: text(data.text) });
+        add({ kind: "notice", tone: data.tone === "error" ? "error" : "info", text: text(data.text) });
+        break;
+      case "input_unavailable":
+        add({ kind: "notice", tone: "error", text: `Not attached this time: ${text(data.reason)}.` });
+        break;
+      case "exported":
+        turn = {
+          userText: "",
+          items: [{ kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` }],
+          status: "completed",
+        };
+        turns.push(turn);
         break;
       case "files_changed": {
         const paths = Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === "string") : [];
@@ -142,6 +153,15 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
                 (notRestored ? ` ${notRestored} file${notRestored > 1 ? "s weren't" : " wasn't"} put back, so as not to replace ${leftAlone > 1 ? "those" : "it"}.` : ""),
             };
         turn = { userText: "", items: [notice], status: "completed" };
+        turns.push(turn);
+        break;
+      }
+      case "input_attached":
+      case "input_removed": {
+        const items = Array.isArray(data.items) ? (data.items as { path?: string }[]) : [];
+        const paths = items.map((i) => i.path).filter(Boolean).join(", ");
+        const what = event.type === "input_attached" ? `You attached ${paths} (read-only).` : `You removed ${paths}.`;
+        turn = { userText: "", items: [{ kind: "notice", tone: "info", text: `${what} The agent will be told on its next turn.` }], status: "completed" };
         turns.push(turn);
         break;
       }

@@ -13,6 +13,10 @@ export type WorkspaceFile = Schemas["FileOut"];
 export type FileRoot = Schemas["NewPreview"]["root"];
 export type Checkpoint = Schemas["CheckpointOut"];
 export type RestoreResult = Schemas["RestoreOut"];
+export type Attachment = Schemas["AttachmentOut"];
+export type AttachResult = Schemas["AttachResult"];
+export type Destination = Schemas["DestinationOut"];
+export type ExportResult = Schemas["ExportOut"];
 
 export interface Health {
   status: string;
@@ -81,6 +85,41 @@ export const api = {
   checkpoints: (id: string) => request<Checkpoint[]>(`/api/conversations/${id}/checkpoints`),
   restore: (id: string, number: number) =>
     request<RestoreResult>(`/api/conversations/${id}/checkpoints/${number}/restore`, { method: "POST" }),
+  inputs: (id: string) => request<Attachment[]>(`/api/conversations/${id}/inputs`),
+  inputSamples: () => request<string[]>("/api/input-samples"),
+  attach: (id: string, source: "files" | "folder" | "sample", sample?: string) =>
+    request<AttachResult>(`/api/conversations/${id}/inputs`, {
+      method: "POST",
+      body: JSON.stringify({ source, sample }),
+    }),
+  detach: (id: string, attachmentId: string) =>
+    request<void>(`/api/conversations/${id}/inputs/${attachmentId}`, { method: "DELETE" }),
+  /** Every event in a conversation (the API returns them 1,000 at a time). */
+  allEvents: async (id: string) => {
+    const all: { seq: number; type: string; data: Record<string, unknown> }[] = [];
+    for (;;) {
+      const page = await request<{ seq: number; type: string; data: Record<string, unknown> }[]>(
+        `/api/conversations/${id}/events?after=${all.at(-1)?.seq ?? 0}`,
+      );
+      all.push(...page);
+      if (page.length < 1000) return all;
+    }
+  },
+  destinations: () => request<Destination[]>("/api/export-destinations"),
+  addDestination: () => request<Destination>("/api/export-destinations", { method: "POST" }),
+  removeDestination: (id: string) => request<void>(`/api/export-destinations/${id}`, { method: "DELETE" }),
+  export: (
+    id: string,
+    destinationId: string,
+    files: { root: FileRoot; path: string }[],
+    report?: { html: string; css: string },
+    checkpoint?: number,
+    rawHtml = false,
+  ) =>
+    request<ExportResult>(`/api/conversations/${id}/exports`, {
+      method: "POST",
+      body: JSON.stringify({ destination_id: destinationId, files, report, checkpoint, raw_html: rawHtml }),
+    }),
   lastSafetyReport: () => request<SafetyReport | null>("/api/safety/last"),
   runSafetyCheck: () => request<SafetyReport>("/api/safety/check", { method: "POST" }),
 };

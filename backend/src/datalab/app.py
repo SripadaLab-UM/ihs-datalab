@@ -16,7 +16,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from datalab import __version__, db
 from datalab.api.conversations import build_conversations_router
+from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
+from datalab.api.inputs import build_inputs_router
 from datalab.api.safety import build_safety_router
 from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
@@ -25,10 +27,12 @@ from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
+from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions.containers import remove_all_session_containers
+from datalab.sessions.inputs import AttachmentStore
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
@@ -72,7 +76,8 @@ def create_app(
     data = DataService(database or _LazyOracle(settings), access_log, settings.limits, allowed)
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
-    sessions = SessionManager(settings, conversations, tokens)
+    attachments = AttachmentStore(connection)
+    sessions = SessionManager(settings, conversations, tokens, attachments=attachments)
     services = Services(settings, data, catalog, tokens, access_log, conversations, sessions)
 
     agent_tools = build_agent_tools(data, catalog, tokens)
@@ -111,6 +116,12 @@ def create_app(
     previews = Previews()
     app.include_router(build_files_router(conversations, sessions, previews))
     app.include_router(build_preview_router(previews))
+    app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
+    app.include_router(
+        build_exports_router(
+            settings, conversations, DestinationStore(connection), sessions, attachments, access_log
+        )
+    )
     canaries = Canaries()
     app.include_router(canaries.router())
     safety = SafetyCheck(settings, tokens, canaries, model_key=model_key)

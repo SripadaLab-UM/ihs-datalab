@@ -147,7 +147,9 @@ class SessionRuntime:
         if self._client:
             await self._client.close()
             self._client = None
-        await self.containers.stop()
+        # Confirmed gone, never reused: a container that couldn't be removed
+        # may still have an old mount (such as a removed attachment).
+        await self.containers.stop_and_confirm()
         self._tokens.revoke_session(self.session_id)
         token = self._tokens.issue(
             SessionAccess(

@@ -144,6 +144,18 @@ class ConversationStore:
             ).fetchone()
         return Event(row[0], row[1], row[2], json.loads(row[3])) if row else None
 
+    def events_of_types_after(
+        self, conversation_id: str, seq: int, types: tuple[str, ...]
+    ) -> list[Event]:
+        marks = ", ".join("?" for _ in types)
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT seq, created_at, type, data_json FROM events "
+                f"WHERE conversation_id = ? AND seq > ? AND type IN ({marks}) ORDER BY seq",
+                (conversation_id, seq, *types),
+            ).fetchall()
+        return [Event(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
+
     async def wait_for_events(self, conversation_id: str, after: int, timeout: float) -> None:
         """Return once this conversation has events after `after`, or after `timeout`.
 

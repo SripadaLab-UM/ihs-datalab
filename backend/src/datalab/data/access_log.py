@@ -88,6 +88,21 @@ class AccessLog:
         self.started(query_id=query_id, session_id=session_id, sql=sql, binds={}, tables=[])
         self.finished(query_id, status="rejected", message=reason)
 
+    def record_export(
+        self, *, session_id: str, destination: str, files: int, contains_study_data: bool
+    ) -> None:
+        """An export the person made: where to, and how many files. No contents."""
+        entry = {
+            "ts": _now(),
+            "event": "export",
+            "session_id": session_id,
+            "destination": destination,
+            "files": files,
+            "contains_study_data": contains_study_data,
+        }
+        with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+
     def for_session(self, session_id: str) -> list[QueryRecord]:
         with self._lock:
             rows = self._db.execute(

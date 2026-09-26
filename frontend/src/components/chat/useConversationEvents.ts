@@ -23,6 +23,10 @@ const EVENT_TYPES = [
   "notice",
   "checkpoint",
   "files_restored",
+  "input_attached",
+  "input_removed",
+  "exported",
+  "input_unavailable",
 ];
 
 /**

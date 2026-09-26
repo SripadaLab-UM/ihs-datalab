@@ -106,6 +106,17 @@ access. It never gains it.
 - Mounts are exactly the conversation's workspace plus any attached items,
   **read-only**. Never mounted: the home folder, the Docker socket, credential
   stores, or another conversation's workspace.
+- **Only a person can attach, and only by choosing in the computer's own file
+  picker.** The browser can ask DataLab to open the picker, but it can't name
+  a path, so neither a web page nor the agent can attach anything. Attached
+  items are mounted, not copied, and never written to.
+- Some places are never attachable: a whole home folder or drive, system
+  folders, private app data (`~/.ssh`, `~/Library`, `AppData`, and so on,
+  except cloud-synced folders such as Dropbox), and DataLab's own data folder,
+  which would expose other conversations.
+- Adding or removing an attachment restarts the conversation's container on
+  its next message, because mounts are fixed when a container starts. The
+  agent is told what changed.
 - Model-written code runs only inside containers, never in DataLab's host
   process.
 - **The host runs only DataLab's own code.** Scripts from the lab repos, such
@@ -119,8 +130,7 @@ access. It never gains it.
   - Agent-made HTML reports are previewed in a sandboxed frame with **scripts
     turned off** and a policy that allows no network requests. With scripts
     on, a page could send data out simply by navigating itself to another
-    site, and no browser policy can stop that. Interactive reports work once
-    you export them and open them yourself.
+    site, and no browser policy can stop that.
   - Previewed pages are cleaned first: resource hints (`dns-prefetch`,
     `preconnect`), `<meta>` and `<base>` tags, scripts, and frames are
     removed, since a DNS lookup of a crafted name could carry data out. DNS
@@ -130,7 +140,9 @@ access. It never gains it.
     never the live folder, so the agent can't swap a file for a link to
     somewhere else on the computer while DataLab reads it. They carry the
     same inert policy, so opening one directly in a tab can't run anything.
-  - Exported conversation reports carry the same no-network policy.
+  - Exported conversation reports carry the same no-network policy, as the
+    first thing in the page, and their text is cleaned the same way
+    (links become plain text).
 - DataLab listens only on `127.0.0.1`, and its API requires the session
   cookie the launcher sets.
 
@@ -290,8 +302,25 @@ access. It never gains it.
 - DataLab writes only to:
   - **its data folder**, which is internal (see
     [DISTRIBUTION.md](DISTRIBUTION.md) for the layout);
-  - **export destinations** that the user configures. Each export goes into
-    its own dated subfolder with a manifest recording what it is, when it was
+  - **export destinations** that the user configures, by choosing a folder
+    in the computer's own picker (the same places are off limits as for
+    attaching). Files are copied from the checkpoint the person was shown,
+    never the live workspace, and nothing already in the folder is
+    overwritten.
+  - **Exported files can't act on the computer by themselves.** The agent's
+    files go under `files/`, apart from DataLab's report and manifest. Types
+    that run code or open something when double-clicked (`.bat`, `.lnk`,
+    `.hta`, `.command`, …) get `.txt` added. Web pages are exported as inert
+    copies (cleaned, their own images embedded, and a policy that blocks
+    every request), unless the person ticks "keep web pages exactly as the
+    agent made them". An SVG with anything active in it gets `.txt` added.
+    Every exported file is marked as downloaded (Mark of the Web on Windows,
+    the quarantine flag on a Mac), so the computer treats it with the same
+    caution as a file from the internet.
+  - Every export is recorded in the audit log: when, where to, how many
+    files, and whether it may contain study data. No contents. Each export
+    goes into its own dated subfolder with a manifest recording what it is,
+    when it was
     made, and which session or workflow produced it.
 - Nothing is deleted automatically. A Storage view in Settings shows disk
   use and offers one-click cleanup of old conversations and runs.

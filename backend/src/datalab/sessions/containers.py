@@ -11,6 +11,7 @@ import asyncio
 import logging
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -120,7 +121,11 @@ class SessionContainers:
         host_port: int,
         profile: str,
         limits: ContainerLimits | None = None,
+        # More `docker run` mount arguments, read when the agent starts: the
+        # conversation's attached inputs, all read-only (see inputs.py).
+        extra_mounts: Callable[[], list[str]] | None = None,
     ) -> None:
+        self._extra_mounts = extra_mounts
         self.session_id = session_id
         self.kind: SessionKind = kind
         self.paths = paths
@@ -292,6 +297,9 @@ class SessionContainers:
         ]  # fmt: skip
         if self.kind == "data":
             mounts += ["-v", f"{self.paths.oracle_results}:/data/oracle:ro"]
+        if self._extra_mounts:
+            # Checks the disk (and maybe slow cloud folders): not on the event loop.
+            mounts += await asyncio.to_thread(self._extra_mounts)
         await docker(
             "run", "-d", "--name", self.agent,
             *self._labels,

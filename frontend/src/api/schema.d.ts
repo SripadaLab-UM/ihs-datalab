@@ -236,6 +236,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/input-samples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Samples
+         * @description Synthetic files the practice profile can attach (empty elsewhere).
+         */
+        get: operations["samples_api_input_samples_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Inputs */
+        get: operations["list_inputs_api_conversations__conversation_id__inputs_get"];
+        put?: never;
+        /** Attach */
+        post: operations["attach_api_conversations__conversation_id__inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/inputs/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Detach */
+        delete: operations["detach_api_conversations__conversation_id__inputs__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export-destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Destinations */
+        get: operations["list_destinations_api_export_destinations_get"];
+        put?: never;
+        /**
+         * Add Destination
+         * @description Choose a folder in the computer's picker and add it as a destination.
+         */
+        post: operations["add_destination_api_export_destinations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export-destinations/{destination_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Destination
+         * @description Forget a destination. Files already exported there are untouched.
+         */
+        delete: operations["remove_destination_api_export_destinations__destination_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Export */
+        post: operations["export_api_conversations__conversation_id__exports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/safety/check": {
         parameters: {
             query?: never;
@@ -291,6 +404,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AttachResult */
+        AttachResult: {
+            /** Added */
+            added: components["schemas"]["AttachmentOut"][];
+            /** Refused */
+            refused: components["schemas"]["Refused"][];
+        };
+        /** AttachmentOut */
+        AttachmentOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Container Path */
+            container_path: string;
+            /** Host Path */
+            host_path: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "file" | "folder";
+            /** Available */
+            available: boolean;
+        };
         /** CheckResultOut */
         CheckResultOut: {
             /** Id */
@@ -348,6 +486,17 @@ export interface components {
             /** Busy */
             busy: boolean;
         };
+        /** DestinationOut */
+        DestinationOut: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Available */
+            available: boolean;
+        };
         /** EventOut */
         EventOut: {
             /** Seq */
@@ -360,6 +509,13 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /** ExportOut */
+        ExportOut: {
+            /** Folder */
+            folder: string;
+            /** Files */
+            files: string[];
         };
         /** FileOut */
         FileOut: {
@@ -374,6 +530,16 @@ export interface components {
              * @enum {string}
              */
             kind: "html" | "image" | "csv" | "text" | "pdf" | "other";
+        };
+        /** FileRef */
+        FileRef: {
+            /**
+             * Root
+             * @enum {string}
+             */
+            root: "outputs" | "work" | "results";
+            /** Path */
+            path: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -406,6 +572,31 @@ export interface components {
             title: string;
             /** Model */
             model?: string | null;
+        };
+        /** NewExport */
+        NewExport: {
+            /** Destination Id */
+            destination_id: string;
+            /** Files */
+            files?: components["schemas"]["FileRef"][];
+            report?: components["schemas"]["ReportIn"] | null;
+            /** Checkpoint */
+            checkpoint?: number | null;
+            /**
+             * Raw Html
+             * @default false
+             */
+            raw_html: boolean;
+        };
+        /** NewInputs */
+        NewInputs: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "files" | "folder" | "sample";
+            /** Sample */
+            sample?: string | null;
         };
         /** NewMessage */
         NewMessage: {
@@ -449,6 +640,23 @@ export interface components {
             result_file: string | null;
             /** Message */
             message: string | null;
+        };
+        /** Refused */
+        Refused: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ReportIn */
+        ReportIn: {
+            /** Html */
+            html: string;
+            /**
+             * Css
+             * @default
+             */
+            css: string;
         };
         /** RestoreOut */
         RestoreOut: {
@@ -956,6 +1164,226 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    samples_api_input_samples_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    list_inputs_api_conversations__conversation_id__inputs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attach_api_conversations__conversation_id__inputs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewInputs"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    detach_api_conversations__conversation_id__inputs__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_destinations_api_export_destinations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationOut"][];
+                };
+            };
+        };
+    };
+    add_destination_api_export_destinations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationOut"];
+                };
+            };
+        };
+    };
+    remove_destination_api_export_destinations__destination_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_api_conversations__conversation_id__exports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewExport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"];
                 };
             };
             /** @description Validation Error */

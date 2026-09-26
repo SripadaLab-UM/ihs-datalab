@@ -8,6 +8,7 @@ import { Chat } from "@/components/chat/Chat";
 import { Button, Panel } from "@/components/ui";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
+import { ExportDialog } from "./ExportDialog";
 import { FileViewer } from "./FileViewer";
 import { SidePanel } from "./SidePanel";
 
@@ -15,6 +16,7 @@ export function WorkspacePage() {
   const { conversationId } = useParams();
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<OpenFile | null>(null);
+  const [exportingReport, setExportingReport] = useState(false);
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
   const current = conversations.data?.find((c) => c.id === conversationId);
 
@@ -52,7 +54,15 @@ export function WorkspacePage() {
       <main className="min-h-0 bg-canvas">
         {current ? (
           <OpenFileContext value={setOpen}>
-            <Chat key={current.id} conversation={current} />
+            <Chat
+              key={current.id}
+              conversation={current}
+              headerActions={
+                <Button variant="ghost" className="text-xs" onClick={() => setExportingReport(true)}>
+                  Export conversation
+                </Button>
+              }
+            />
           </OpenFileContext>
         ) : (
           <div className="flex h-full items-center justify-center text-muted">
@@ -65,6 +75,9 @@ export function WorkspacePage() {
         {current && <SidePanel key={current.id} conversation={current} onOpen={setOpen} />}
       </aside>
 
+      {current && exportingReport && (
+        <ExportDialog conversation={current} withReport onClose={() => setExportingReport(false)} />
+      )}
       {current && open && <FileViewer conversationId={current.id} file={open} onClose={() => setOpen(null)} />}
 
       {creating && <NewConversation onClose={() => setCreating(false)} />}
