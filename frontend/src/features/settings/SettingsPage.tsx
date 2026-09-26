@@ -62,15 +62,20 @@ function Report({ report }: { report: SafetyReport }) {
     byPromise.set(result.promise, [...(byPromise.get(result.promise) ?? []), result]);
   }
   const failed = report.results.filter((r) => r.status === "fail").length;
+  const unverified = report.results.filter((r) => r.status === "skip" && r.required).length;
   return (
     <div className="mt-4">
       <div
         className={clsx(
           "rounded-xl px-4 py-3 text-sm font-medium",
-          report.passed ? "bg-data-soft text-data" : "bg-sunken text-danger",
+          !report.passed ? "bg-sunken text-danger" : unverified ? "bg-research-soft text-research" : "bg-data-soft text-data",
         )}
       >
-        {report.passed ? "✓ Every check passed" : `✗ ${failed} check${failed > 1 ? "s" : ""} failed`}
+        {!report.passed
+          ? `✗ ${failed} check${failed > 1 ? "s" : ""} failed`
+          : unverified
+            ? `✓ No failures, but ${unverified} check${unverified > 1 ? "s" : ""} couldn't be verified`
+            : "✓ Every check passed"}
         <span className="ml-2 font-normal text-muted">{new Date(report.finished_at).toLocaleString()}</span>
       </div>
       {[...byPromise].map(([promise, results]) => (
@@ -84,7 +89,7 @@ function Report({ report }: { report: SafetyReport }) {
                     "w-4 shrink-0 text-center",
                     r.status === "pass" && "text-data",
                     r.status === "fail" && "text-danger",
-                    r.status === "skip" && "text-muted",
+                    r.status === "skip" && (r.required ? "text-research" : "text-muted"),
                   )}
                   aria-label={r.status}
                 >
@@ -93,6 +98,9 @@ function Report({ report }: { report: SafetyReport }) {
                 <span>
                   {r.label}
                   {r.detail && <span className="block text-xs text-muted">{r.detail}</span>}
+                  {r.status === "skip" && r.required && (
+                    <span className="block text-xs text-research">Not verified: this needs attention.</span>
+                  )}
                 </span>
               </li>
             ))}

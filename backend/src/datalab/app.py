@@ -26,6 +26,7 @@ from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.relay import build_relay_router
 from datalab.safety import SafetyCheck
+from datalab.safety.canary import Canaries
 from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -106,7 +107,10 @@ def create_app(
     app.include_router(
         build_conversations_router(conversations, sessions, settings.default_model, access_log)
     )
-    safety = SafetyCheck(settings, tokens, model_key=model_key)
+    canaries = Canaries()
+    app.include_router(canaries.router())
+    safety = SafetyCheck(settings, tokens, canaries, model_key=model_key)
+    app.state.canaries = canaries
     app.state.safety = safety
     app.include_router(build_safety_router(safety, settings.data_dir / "logs" / "safety-last.json"))
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)

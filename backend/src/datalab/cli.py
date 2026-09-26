@@ -21,7 +21,10 @@ def main(argv: list[str] | None = None) -> int:
     trial.add_argument("--image", default="datalab-agent:dev")
     trial.add_argument("--research", action="store_true", help="a research session instead")
     commands.add_parser("db-check", help="connect and report what the session may do")
-    commands.add_parser("safety-check", help="run the Safety check and print the results")
+    safety = commands.add_parser("safety-check", help="run the Safety check and print the results")
+    safety.add_argument(
+        "--strict", action="store_true", help="fail if a required check couldn't be verified"
+    )
 
     catalog = commands.add_parser("catalog", help="build the schema catalog (metadata only)")
     catalog.add_argument("--out", type=Path, required=True, help="catalog folder to write")
@@ -50,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
 
         from datalab.trial import run_safety_check
 
-        return asyncio.run(run_safety_check(settings))
+        return asyncio.run(run_safety_check(settings, strict=args.strict))
 
     if args.command == "catalog":
         return _build_catalog(settings, args)
@@ -58,6 +61,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _serve(settings, *, open_browser: bool) -> int:
+    from datalab.trial import refuse_if_running
+
+    refuse_if_running(settings)
     import threading
     import webbrowser
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+import socket
 import sys
 from typing import Any
 
@@ -25,8 +26,25 @@ INSTRUCTIONS = (
 )
 
 
+def refuse_if_running(settings: Settings) -> None:
+    """Exit if DataLab is already running for this profile.
+
+    Starting a second copy would clean up the running one's session
+    containers at startup, and then fail anyway because its port is taken.
+    """
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex(("127.0.0.1", settings.port)) == 0:
+            sys.exit(
+                f"DataLab ({settings.profile}) is already running on port {settings.port}. "
+                "Use it (Settings & Safety has the Safety check), or stop it first."
+            )
+
+
 async def run_trial(settings: Settings, question: str, image: str, research: bool) -> int:
-    app = create_app(settings)
+    refuse_if_running(settings)
+    # This process's containers are cleaned up below; never touch others.
+    app = create_app(settings, manage_containers=False)
     server = uvicorn.Server(
         uvicorn.Config(app, host=settings.host, port=settings.port, log_level="warning")
     )
@@ -86,9 +104,13 @@ async def _print_event(kind: str, data: dict[str, Any]) -> None:
         print(f"\n\033[31merror: {data.get('message')}\033[0m", file=sys.stderr)
 
 
-async def run_safety_check(settings: Settings) -> int:
-    """Start DataLab in this process, run the Safety check, print the results."""
-    app = create_app(settings)
+async def run_safety_check(settings: Settings, *, strict: bool = False) -> int:
+    """Start DataLab in this process, run the Safety check, print the results.
+
+    In strict mode (CI), a required check that couldn't be verified fails.
+    """
+    refuse_if_running(settings)
+    app = create_app(settings, manage_containers=False)
     server = uvicorn.Server(
         uvicorn.Config(app, host=settings.host, port=settings.port, log_level="warning")
     )
@@ -105,5 +127,11 @@ async def run_safety_check(settings: Settings) -> int:
         print(f"{symbols[result.status]} {result.label}")
         if result.detail:
             print(f"    {result.detail}")
-    print("\nAll checks passed." if report.passed else "\nSOME CHECKS FAILED.")
-    return 0 if report.passed else 1
+    passed = report.passed_strict if strict else report.passed
+    if passed:
+        print("\nAll checks passed.")
+    elif report.passed:
+        print("\nNo failures, but some required checks couldn't be verified (strict mode).")
+    else:
+        print("\nSOME CHECKS FAILED.")
+    return 0 if passed else 1

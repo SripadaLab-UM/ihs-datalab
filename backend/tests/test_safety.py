@@ -6,6 +6,7 @@ Run with `uv run pytest -m docker`.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import subprocess
 
@@ -29,6 +30,19 @@ class LeakyContainers(SessionContainers):
         await docker("network", "connect", "bridge", self.agent)
 
 
+class LeakyGateway(SessionContainers):
+    """A gateway that forwards everything to DataLab, not just /v1 and /mcp."""
+
+    async def start(self, token: str) -> None:
+        await super().start(token)
+        conf = self.paths.gateway_conf.read_text().replace(
+            "return 404;", f"proxy_pass http://host.docker.internal:{self.host_port};"
+        )
+        self.paths.gateway_conf.write_text(conf)
+        await docker("exec", self.gateway, "nginx", "-s", "reload")
+        await asyncio.sleep(0.5)
+
+
 @pytest.fixture
 def app(settings, catalog):
     have_image = subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True)
@@ -39,8 +53,6 @@ def app(settings, catalog):
 
 
 def _run(app, containers) -> dict[str, str]:
-    import asyncio
-
     services = app.state.services
     with live_server(app) as base_url:
         port = int(base_url.rsplit(":", 1)[1])
@@ -48,6 +60,7 @@ def _run(app, containers) -> dict[str, str]:
         check = SafetyCheck(
             settings,
             services.tokens,
+            app.state.canaries,
             model_key=lambda: "sk-test-not-real",
             containers=containers,
         )
@@ -70,3 +83,10 @@ def test_a_leaky_session_is_caught(app):
     # The separate DNS layer (--dns to an unroutable address) still holds, so
     # names don't resolve even with the route: the two layers are independent.
     assert results["outside_dns_blocked"] == "pass"
+
+
+def test_a_leaky_gateway_is_caught_by_canaries(app):
+    # Through the leaky gateway, requests reach DataLab and get a 401 or 404
+    # back. Only the canaries can tell that they arrived.
+    results = _run(app, LeakyGateway)
+    assert results["gateway_routes_only"] == "fail"

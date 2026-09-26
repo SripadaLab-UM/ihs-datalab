@@ -54,7 +54,7 @@ jobs:
           DATALAB_HOST: 0.0.0.0
         run: |
           docker build -q -t datalab-probe:ci ../images/probe
-          uv run datalab safety-check
+          uv run datalab safety-check --strict
       - name: The Safety check catches a broken sandbox
         working-directory: backend
         env:

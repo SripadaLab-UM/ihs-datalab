@@ -19,12 +19,14 @@ class CheckResultOut(BaseModel):
     label: str
     status: Literal["pass", "fail", "skip"]
     detail: str
+    required: bool
 
 
 class SafetyReportOut(BaseModel):
     started_at: str
     finished_at: str
     passed: bool
+    passed_strict: bool
     results: list[CheckResultOut]
 
 

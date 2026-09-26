@@ -215,6 +215,8 @@ export interface components {
             status: "pass" | "fail" | "skip";
             /** Detail */
             detail: string;
+            /** Required */
+            required: boolean;
         };
         /** ConversationOut */
         ConversationOut: {
@@ -319,6 +321,8 @@ export interface components {
             finished_at: string;
             /** Passed */
             passed: boolean;
+            /** Passed Strict */
+            passed_strict: boolean;
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
         };
