@@ -3,39 +3,26 @@
 from __future__ import annotations
 
 import json
-import socket
-import threading
-import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 import pytest
-import uvicorn
 from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from datalab.app import create_app
 from datalab.sessions.tokens import SessionAccess
-from tests.conftest import FakeDatabase
+from tests.conftest import FakeDatabase, live_server
 
 
 @pytest.fixture
-def server(settings, catalog, tmp_path) -> Iterator[tuple[str, object, FakeDatabase]]:
+def server(settings, catalog) -> Iterator[tuple[str, object, FakeDatabase]]:
     database = FakeDatabase()
-    app = create_app(settings, database=database, catalog=catalog)
-    port = _free_port()
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning")
-    running = uvicorn.Server(config)
-    thread = threading.Thread(target=running.run, daemon=True)
-    thread.start()
-    deadline = time.time() + 10
-    while not running.started and time.time() < deadline:
-        time.sleep(0.05)
-    yield f"http://127.0.0.1:{port}", app.state.services, database
-    running.should_exit = True
-    thread.join(timeout=5)
+    app = create_app(settings, database=database, catalog=catalog, manage_containers=False)
+    with live_server(app) as base_url:
+        yield base_url, app.state.services, database
 
 
 @asynccontextmanager
@@ -122,9 +109,3 @@ def test_health(server):
     base_url, _, _ = server
     body = httpx.get(f"{base_url}/api/health").json()
     assert body["status"] == "ok" and body["catalog_tables"] == 3
-
-
-def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]

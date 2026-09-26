@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import csv
+import socket
 import threading
-from collections.abc import Mapping
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import pytest
+import uvicorn
 
 from datalab.config import OracleSettings, QueryLimits, Settings
 from datalab.data.catalog import Catalog, Column, TableInfo
@@ -102,3 +106,22 @@ def settings(tmp_path: Path) -> Settings:
         ),
         limits=QueryLimits(max_concurrent_queries=1),
     )
+
+
+@contextmanager
+def live_server(app) -> Iterator[str]:
+    """Run `app` on a real local port, for tests that need real HTTP behaviour."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.time() + 10
+    while not server.started and time.time() < deadline:
+        time.sleep(0.05)
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)

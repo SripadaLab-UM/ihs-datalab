@@ -2,24 +2,31 @@
 
 from __future__ import annotations
 
+import asyncio
 import threading
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 
 from datalab import db
+from datalab.api.conversations import build_conversations_router
 from datalab.config import Settings
-from datalab.credentials import oracle_password
+from datalab.credentials import model_api_key, oracle_password
 from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
+from datalab.relay import build_relay_router
+from datalab.sessions.containers import remove_all_session_containers
+from datalab.sessions.manager import SessionManager
+from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
 
 VERSION = "0.1.0"
@@ -36,6 +43,8 @@ class Services:
     catalog: Catalog
     tokens: SessionTokens
     access_log: AccessLog
+    conversations: ConversationStore
+    sessions: SessionManager
 
 
 def create_app(
@@ -43,6 +52,9 @@ def create_app(
     *,
     database: Database | None = None,
     catalog: Catalog | None = None,
+    model_client: httpx.AsyncClient | None = None,
+    model_key: Callable[[], str] = model_api_key,
+    manage_containers: bool = True,
 ) -> FastAPI:
     connection = db.connect(settings.database_file)
     access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
@@ -51,7 +63,9 @@ def create_app(
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
     data = DataService(database or _LazyOracle(settings), access_log, settings.limits, allowed)
     tokens = SessionTokens()
-    services = Services(settings, data, catalog, tokens, access_log)
+    conversations = ConversationStore(connection)
+    sessions = SessionManager(settings, conversations, tokens)
+    services = Services(settings, data, catalog, tokens, access_log, conversations, sessions)
 
     agent_tools = build_agent_tools(data, catalog, tokens)
     agent_tools_app = agent_tools.streamable_http_app(
@@ -61,15 +75,31 @@ def create_app(
         ),
     )
 
+    # Long read timeout: model responses stream for as long as a turn runs.
+    model_http = model_client or httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=15, read=900, write=60, pool=15)
+    )
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        if manage_containers:
+            # Containers from a previous run that didn't shut down cleanly.
+            await remove_all_session_containers()
+        reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
             yield
+        reaper.cancel()
+        await sessions.close_all()
+        await model_http.aclose()
         connection.close()
 
     app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
     app.state.services = services
     app.router.routes.extend(agent_tools_app.routes)
+    app.include_router(build_relay_router(tokens, model_key, settings.model_base_url, model_http))
+    app.include_router(
+        build_conversations_router(conversations, sessions, settings.default_model, access_log)
+    )
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
 
     @app.get("/api/health")

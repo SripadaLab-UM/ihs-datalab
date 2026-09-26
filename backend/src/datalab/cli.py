@@ -15,6 +15,10 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("serve", help="run DataLab")
+    trial = commands.add_parser("try", help="ask one question in a new data session (for testing)")
+    trial.add_argument("question")
+    trial.add_argument("--image", default="datalab-agent:dev")
+    trial.add_argument("--research", action="store_true", help="a research session instead")
     commands.add_parser("db-check", help="connect and report what the session may do")
 
     catalog = commands.add_parser("catalog", help="build the schema catalog (metadata only)")
@@ -33,6 +37,13 @@ def main(argv: list[str] | None = None) -> int:
 
         uvicorn.run(create_app(settings), host=settings.host, port=settings.port)
         return 0
+
+    if args.command == "try":
+        import asyncio
+
+        from datalab.trial import run_trial
+
+        return asyncio.run(run_trial(settings, args.question, args.image, args.research))
 
     if args.command == "db-check":
         return _db_check(settings)

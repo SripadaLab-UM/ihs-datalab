@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: profile-data <file>" >&2
+  exit 2
+fi
+
+python_bin="${DATALAB_PYTHON:-/opt/datalab-python/bin/python}"
+if [ ! -x "$python_bin" ]; then
+  python_bin="$(command -v python3 || true)"
+fi
+if [ -z "$python_bin" ] || [ ! -x "$python_bin" ]; then
+  echo "profile-data: no usable Python interpreter found" >&2
+  exit 127
+fi
+
+"$python_bin" - "$1" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+
+
+def sql_string(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+def print_duckdb_profile(path: Path, query: str) -> None:
+    con = duckdb.connect()
+    print("schema:")
+    print(con.execute(f"DESCRIBE SELECT * FROM ({query})").fetchdf().to_string(index=False))
+    print("rows:")
+    print(con.execute(f"SELECT COUNT(*) AS rows FROM ({query})").fetchdf().to_string(index=False))
+    print("sample:")
+    print(con.execute(f"SELECT * FROM ({query}) LIMIT 5").fetchdf().to_string(index=False))
+
+
+def print_excel_profile(path: Path) -> None:
+    workbook = pd.ExcelFile(path)
+    print(f"sheets={','.join(workbook.sheet_names)}")
+    for sheet in workbook.sheet_names[:10]:
+        sample = pd.read_excel(workbook, sheet_name=sheet, nrows=20)
+        print(f"sheet={sheet}")
+        print("schema:")
+        schema = pd.DataFrame(
+            {"column": sample.columns.astype(str), "dtype": [str(dtype) for dtype in sample.dtypes]}
+        )
+        print(schema.to_string(index=False))
+        print("sample:")
+        print(sample.head(5).to_string(index=False))
+
+
+path = Path(sys.argv[1]).expanduser()
+if not path.exists():
+    raise SystemExit(f"file does not exist: {path}")
+if not path.is_file():
+    raise SystemExit(f"not a file: {path}")
+
+suffix = path.suffix.lower()
+size = path.stat().st_size
+print(f"file={path}")
+print(f"size_bytes={size}")
+print(f"size_mb={size / 1024 / 1024:.2f}")
+print(f"suffix={suffix or '<none>'}")
+
+quoted = sql_string(str(path))
+if suffix == ".csv":
+    print_duckdb_profile(path, f"SELECT * FROM read_csv_auto({quoted})")
+elif suffix == ".tsv":
+    print_duckdb_profile(path, f"SELECT * FROM read_csv_auto({quoted}, delim='\\t')")
+elif suffix == ".parquet":
+    print_duckdb_profile(path, f"SELECT * FROM read_parquet({quoted})")
+elif suffix in {".json", ".jsonl", ".ndjson"}:
+    print_duckdb_profile(path, f"SELECT * FROM read_json_auto({quoted})")
+elif suffix in {".xlsx", ".xlsm", ".xls"}:
+    print_excel_profile(path)
+else:
+    raise SystemExit(
+        "unsupported file type: "
+        f"{suffix or '<none>'}; expected csv, tsv, parquet, json, ndjson, xlsx, xlsm, or xls"
+    )
+PY

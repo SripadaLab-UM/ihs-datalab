@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
+  echo "usage: render-report <source.md> [output.html|output.docx|output.pdf]" >&2
+  exit 2
+fi
+
+src="$1"
+if [ ! -f "$src" ]; then
+  echo "source file does not exist: $src" >&2
+  exit 2
+fi
+
+if [ "$#" -eq 2 ]; then
+  requested_out="$2"
+else
+  base="$(basename "$src")"
+  requested_out="/work/outputs/${base%.*}.html"
+fi
+
+out="$(
+  python3 - "$requested_out" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+raw = Path(sys.argv[1])
+if not raw.is_absolute():
+    raw = Path("/work/outputs") / raw
+resolved = raw.resolve()
+outputs = Path("/work/outputs").resolve()
+if resolved != outputs and outputs not in resolved.parents:
+    raise SystemExit("render-report output must be under /work/outputs")
+print(resolved)
+PY
+)"
+
+mkdir -p "$(dirname "$out")"
+pandoc "$src" -s -o "$out"
+echo "$out"

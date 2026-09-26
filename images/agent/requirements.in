@@ -1,0 +1,34 @@
+# Python data tools in the agent image. Pinned versions are in requirements.txt:
+#   uv pip compile requirements.in --universal --python-version 3.12 -o requirements.txt
+altair
+duckdb
+matplotlib
+numpy
+openpyxl
+pandas
+pdfplumber
+plotly
+plotnine
+polars
+pyarrow
+pypdf
+python-docx
+python-pptx
+scikit-learn
+scipy
+seaborn
+statsmodels
+tabulate
+vl-convert-python
+xlrd
+xlsxwriter
+# Figures (the academic-figures skill)
+colorcet
+scienceplots
+# Research sessions (internet) and general scripting
+beautifulsoup4
+httpx
+lxml
+requests
+pytest
+ruff

@@ -58,6 +58,10 @@ class Settings:
     limits: QueryLimits = field(default_factory=QueryLimits)
     # Folder of catalog YAML files (the knowledge base's generated/schema).
     catalog_dir: Path | None = None
+    # The pinned agent image. Releases set this to an image digest.
+    agent_image: str = "datalab-agent:dev"
+    model_base_url: str = "https://api.toolkit.umgpt.umich.edu/v1"
+    default_model: str = "gpt-5.5"
     host: str = "127.0.0.1"
     port: int = 8765
 
@@ -112,6 +116,9 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle=oracle,
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
+        agent_image=raw.get("agent_image", Settings.agent_image),
+        model_base_url=raw.get("model_base_url", Settings.model_base_url),
+        default_model=raw.get("default_model", Settings.default_model),
         port=int(raw.get("port", 8766 if profile == "practice" else 8765)),
     )
 

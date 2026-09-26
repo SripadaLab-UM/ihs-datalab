@@ -12,9 +12,26 @@ import keyring
 
 from datalab.config import OracleSettings
 
+MODEL_KEY_SERVICE = "datalab-umgpt"
+MODEL_KEY_ACCOUNT = "api-key"
+
 
 class MissingCredential(RuntimeError):
     pass
+
+
+def model_api_key() -> str:
+    """The U-M GPT key. Only the model relay uses it; it never leaves this process."""
+    key = os.environ.get("DATALAB_MODEL_API_KEY") or keyring.get_password(
+        MODEL_KEY_SERVICE, MODEL_KEY_ACCOUNT
+    )
+    if not key:
+        raise MissingCredential("No U-M GPT key saved. Add it in Settings → Connections.")
+    return key
+
+
+def save_model_api_key(key: str) -> None:
+    keyring.set_password(MODEL_KEY_SERVICE, MODEL_KEY_ACCOUNT, key)
 
 
 def oracle_password(oracle: OracleSettings) -> str:
