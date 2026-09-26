@@ -31,6 +31,10 @@ export files out of DataLab.
 - There is one schema per cohort year (`IHS_2017`, `IHS_2021` … `IHS_2026`).
   Always qualify tables with their schema. Tables and columns differ between
   years, so check with `describe_table` before relying on a column.
+- `propose_plan` sends an analysis plan to the person for approval (see
+  your mode's instructions for when). An approved plan is frozen.
+- Your work may be reviewed against a rigor checklist after you answer.
+  When you're asked to review, don't change files.
 - In a data session there is **no internet**. Use the installed R and Python
   tools; you can't install packages. If you really need something from the
   internet (package documentation, a method, a paper), use

@@ -36,12 +36,16 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired when DataLab no longer knows this browser (it restarted, or the sign-in expired). */
+export const SIGNED_OUT = "datalab:signed-out";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
     headers: { "content-type": "application/json", ...init?.headers },
   });
   if (!response.ok) {
+    if (response.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
     const body = await response.json().catch(() => ({}));
     const detail = typeof body.detail === "string" ? body.detail : response.statusText;
     throw new ApiError(response.status, detail);
@@ -67,11 +71,13 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, effort }),
     }),
-  answerApproval: (id: string, approvalId: string, approve: boolean, question: string) =>
+  answerApproval: (id: string, approvalId: string, approve: boolean, question: string, plan?: Record<string, string>) =>
     request<void>(`/api/conversations/${id}/approvals/${approvalId}`, {
       method: "POST",
-      body: JSON.stringify({ approve, question }),
+      body: JSON.stringify({ approve, question, plan }),
     }),
+  setRigorReview: (id: string, on: boolean) =>
+    request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ rigor_review: on }) }),
   stop: (id: string) => request<Conversation>(`/api/conversations/${id}/stop`, { method: "POST" }),
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
   files: (id: string, root: FileRoot = "outputs") =>

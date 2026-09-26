@@ -37,6 +37,8 @@ class FakeRuntime:
         self.sent: list[str] = []
         self.stopped = False
         self.containers = FakeContainers()
+        self.reviews: list[str] = []
+        self.evidence = ["rows: 12"]
 
     def begin_turn(self) -> None:
         pass
@@ -50,6 +52,23 @@ class FakeRuntime:
         status = "interrupted" if self.stopped else "completed"
         await self.emit("turn_finished", {"turn_id": "t1", "status": status})
         return TurnResult("t1", status)
+
+    def take_evidence(self) -> list[str]:
+        # The turn did some work; its review ran nothing.
+        evidence, self.evidence = self.evidence, []
+        return evidence
+
+    def ran_commands(self) -> bool:
+        return False
+
+    @property
+    def stop_requested(self) -> bool:
+        return self.stopped
+
+    async def review(self, instructions: str) -> TurnResult:
+        self.reviews.append(instructions)
+        await self.emit("review", {"id": "r1", "text": "1. Traced claims: yes."})
+        return TurnResult("t2", "completed")
 
     async def stop_turn(self) -> None:
         self.stopped = True
@@ -125,16 +144,24 @@ def test_a_message_runs_a_turn_and_logs_its_events(app):
             client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"}).status_code
             == 202
         )
-        events = wait_for(client, cid, "checkpoint")
+        events = wait_for(client, cid, "turn_done")
+        assert client.get(f"/api/conversations/{cid}").json()["busy"] is False
+    # An Analysis conversation: the rigor review runs after the answer.
     assert [e["type"] for e in events] == [
         "user_message",
         "turn_started",
         "answer_delta",
         "turn_finished",
         "checkpoint",
+        "review_started",
+        "review",
+        "review_finished",
+        "turn_done",
     ]
-    assert [e["seq"] for e in events] == [1, 2, 3, 4, 5]
     assert made[0].sent == ["hi"]
+    assert "Traced claims" in made[0].reviews[0]
+    # Review mode has no history, so the question is passed in.
+    assert "<question>\nhi\n</question>" in made[0].reviews[0]
     assert made[0].containers.paused == 1  # frozen while the files were saved
 
 
@@ -227,3 +254,34 @@ def test_modes_come_with_descriptions_and_starters(app):
     assert set(modes) == {"analysis", "extraction", "engineering", "research"}
     assert all(m["description"] and m["starters"] for m in modes.values())
     assert modes["research"]["kind"] == "research"
+
+
+def test_the_rigor_review_can_be_switched_off(app):
+    made = use_fake_runtime(app)
+    with TestClient(app) as client:
+        created = client.post("/api/conversations", json={"mode": "analysis"}).json()
+        assert created["rigor_review"] is True
+        extraction = client.post("/api/conversations", json={"mode": "extraction"}).json()
+        assert extraction["rigor_review"] is False
+        cid = created["id"]
+        changed = client.patch(f"/api/conversations/{cid}", json={"rigor_review": False})
+        assert changed.json()["rigor_review"] is False
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"})
+        events = wait_for(client, cid, "checkpoint")
+    assert "review_started" not in [e["type"] for e in events]
+    assert made[0].reviews == []
+
+
+def test_numbers_in_an_answer_are_traced(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    conversation = store.create(kind="data", mode="analysis", title="t", model="m")
+    store.append(conversation.id, "user_message", {"text": "how many?"})
+    store.append(
+        conversation.id,
+        "answer",
+        {"id": "m1", "phase": "final_answer", "text": "There were 20,592 days and 81 people."},
+    )
+    asyncio.run(manager._trace(conversation.id, 0, ['{"row_count": 20592} at 12:45:00']))
+    [traced] = store.events_of_types_after(conversation.id, 0, ("trace",))
+    assert traced.data == {"answer": "m1", "numbers": 2, "untraced": ["81"]}

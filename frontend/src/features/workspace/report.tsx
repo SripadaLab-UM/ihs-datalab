@@ -125,7 +125,25 @@ function Report({
               </p>
             ))}
           {turn.items.map((item) =>
-            item.kind === "approval" ? (
+            item.kind === "approval" && item.approvalKind === "analysis_plan" && item.frozen ? (
+              <div key={item.id} className="plan">
+                <p>
+                  <strong>Approved analysis plan</strong>{" "}
+                  <span className="muted">
+                    (frozen {new Date(item.frozen.at).toLocaleString()}, {item.frozen.sha256.slice(0, 12)})
+                  </span>
+                </p>
+                <ul>
+                  {Object.entries(item.plan ?? {})
+                    .filter(([, value]) => value)
+                    .map(([name, value]) => (
+                      <li key={name}>
+                        <em>{name}</em>: {value}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : item.kind === "approval" && item.approvalKind === "research_helper" ? (
               <p key={item.id} className="muted">
                 Research helper question{" "}
                 {{ approved: "sent", declined: "not sent (declined)", withdrawn: "withdrawn", pending: "not answered" }[item.state]}:{" "}
@@ -135,6 +153,19 @@ function Report({
           )}
           {options.includeWork && <Work turn={turn} />}
           {finalAnswer(turn) && <Answer text={finalAnswer(turn)} charts={charts} />}
+          {finalAnswer(turn) && turn.trace && turn.trace.untraced.length > 0 && (
+            <p className="muted">
+              Numbers not traced to a query result, command output, or output file: {turn.trace.untraced.join(", ")}
+            </p>
+          )}
+          {turn.items.map((item, i) =>
+            item.kind === "review" && item.text ? (
+              <details key={`r${i}`} className="work">
+                <summary>Rigor review</summary>
+                <Answer text={item.text} charts={charts} />
+              </details>
+            ) : null,
+          )}
         </section>
       ))}
       {queries.length > 0 && (
@@ -179,6 +210,7 @@ function Work({ turn }: { turn: Turn }) {
           case "files":
             return <p key={i} className="muted">Edited {item.paths.join(", ")}</p>;
           case "approval":
+          case "review":
             return null; // shown with the turn, work or not
           default:
             return null;
@@ -220,6 +252,7 @@ th { background: #f7f7f9; }
 .work summary { cursor: pointer; color: #6b6b7b; }
 .link { text-decoration: underline dotted; }
 .query { margin-top: 1rem; }
+.plan { border: 1px solid #c7c9f9; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; }
 img { max-width: 100%; }
 `;
 

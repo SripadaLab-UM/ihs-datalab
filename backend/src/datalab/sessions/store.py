@@ -29,6 +29,7 @@ class Conversation:
     model: str
     created_at: str
     updated_at: str
+    rigor_review: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,9 @@ class ConversationStore:
 
     # Conversations -----------------------------------------------------------
 
-    def create(self, *, kind: SessionKind, mode: str, title: str, model: str) -> Conversation:
+    def create(
+        self, *, kind: SessionKind, mode: str, title: str, model: str, rigor_review: bool = False
+    ) -> Conversation:
         now = _now()
         conversation = Conversation(
             id=f"c_{secrets.token_hex(8)}",
@@ -57,21 +60,23 @@ class ConversationStore:
             model=model,
             created_at=now,
             updated_at=now,
+            rigor_review=rigor_review,
         )
         with self._lock:
             self._db.execute(
-                "INSERT INTO conversations VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (
-                    conversation.id,
-                    kind,
-                    mode,
-                    title,
-                    model,
-                    now,
-                    now,
-                ),
+                "INSERT INTO conversations "
+                "(id, kind, mode, title, model, created_at, updated_at, rigor_review) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (conversation.id, kind, mode, title, model, now, now, int(rigor_review)),
             )
         return conversation
+
+    def set_rigor_review(self, conversation_id: str, on: bool) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE conversations SET rigor_review = ? WHERE id = ?",
+                (int(on), conversation_id),
+            )
 
     def get(self, conversation_id: str) -> Conversation | None:
         with self._lock:
@@ -126,6 +131,13 @@ class ConversationStore:
                 (conversation_id, seq, limit),
             ).fetchall()
         return [Event(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
+
+    def all_events_after(self, conversation_id: str, seq: int) -> list[Event]:
+        events: list[Event] = []
+        while batch := self.events_after(conversation_id, seq):
+            events += batch
+            seq = batch[-1].seq
+        return events
 
     def count(self, conversation_id: str, type: str) -> int:
         with self._lock:
@@ -185,6 +197,7 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         model=row["model"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        rigor_review=bool(row["rigor_review"]),
     )
 
 

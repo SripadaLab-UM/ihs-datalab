@@ -111,36 +111,11 @@ class ResearchHelper:
     async def _approval(
         self, conversation_id: str, question: str, elicit: Elicit
     ) -> tuple[bool, str, str]:
-        # The card appears when Codex forwards the request (runtime._on_request),
-        # showing this stored text. A tool call made around Codex gets no card,
-        # so it can't be approved.
         pending = self._approvals.open(conversation_id, question)
-        waiting = asyncio.ensure_future(elicit(pending.id))
-        try:
-            approved, text = await asyncio.wait_for(
-                asyncio.shield(pending.decision), APPROVAL_WAIT_SECONDS
-            )
-        except TimeoutError:
-            self._withdraw(conversation_id, pending.id)
-            return False, "", pending.id
-        except BaseException:
-            # The tool call was cancelled (Stop, a timeout, shutdown).
-            self._withdraw(conversation_id, pending.id)
-            raise
-        finally:
-            self._approvals.close(pending.id)
-            # Codex gets its answer from the runtime; don't wait long for it here.
-            # (A cancel of this call still goes through.)
-            with anyio.move_on_after(5), contextlib.suppress(Exception):
-                await asyncio.shield(waiting)
-            waiting.cancel()
+        approved, text = await self._approvals.decide(
+            pending, elicit, self._emit, APPROVAL_WAIT_SECONDS
+        )
         return approved, text, pending.id
-
-    def _withdraw(self, conversation_id: str, approval_id: str) -> None:
-        pending = self._approvals.get(approval_id, conversation_id)
-        shown = pending is not None and pending.shown
-        if self._approvals.withdraw(conversation_id, approval_id) and shown:
-            self._emit(conversation_id, "approval_withdrawn", {"id": approval_id})
 
     async def _run(self, question: str) -> HelperAnswer:
         settings = self._settings

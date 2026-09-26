@@ -10,14 +10,38 @@ import { Markdown } from "./Markdown";
 import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
+// Events that start or end a turn or its review: DataLab's busy flag changes.
+const TURN_EVENTS = new Set(["user_message", "turn_started", "turn_finished", "review_started", "review_finished", "turn_done"]);
+
 /** The shared chat. Every tab that needs an agent uses this component. */
 export function Chat({ conversation, headerActions }: { conversation: Conversation; headerActions?: ReactNode }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
-  const running = turns.at(-1)?.status === "running";
+  const last = turns.at(-1);
+  const reviewing = last?.items.some((i) => i.kind === "review" && i.status === "running") ?? false;
+  const transcriptRunning = last?.status === "running" || reviewing;
   const bottom = useRef<HTMLDivElement>(null);
   const [suggestion, setSuggestion] = useState<{ text: string } | null>(null);
   const queryClient = useQueryClient();
+
+  // Working: DataLab says so, or the transcript does and DataLab hasn't
+  // answered since. A restart mid-turn leaves the transcript without an end,
+  // so DataLab's newer word wins.
+  const lastTurnEvent = events.findLast((e) => TURN_EVENTS.has(e.type))?.seq;
+  const [turnEventAt, setTurnEventAt] = useState(0);
+  useEffect(() => {
+    if (lastTurnEvent === undefined) return;
+    setTurnEventAt(Date.now());
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  }, [lastTurnEvent, queryClient]);
+  const status = useQuery({
+    queryKey: ["conversations"],
+    queryFn: api.conversations,
+    // While working, until DataLab answers that it isn't.
+    refetchInterval: (query) =>
+      conversation.busy || (transcriptRunning && query.state.dataUpdatedAt <= turnEventAt) ? 3000 : false,
+  });
+  const running = conversation.busy || (transcriptRunning && status.dataUpdatedAt <= turnEventAt);
 
   // When a turn finishes, refresh what depends on it (busy dots, data accessed).
   useEffect(() => {
@@ -29,7 +53,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
 
   // A new checkpoint or a restore changes the files the side panel shows.
   const lastFilesEvent = events.findLast((e) =>
-    ["checkpoint", "files_restored", "input_attached", "input_removed"].includes(e.type),
+    ["checkpoint", "files_restored", "input_attached", "input_removed", "review_started", "review_finished"].includes(e.type),
   )?.seq;
   useEffect(() => {
     if (lastFilesEvent === undefined) return;
@@ -50,19 +74,39 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         <h1 className="truncate font-semibold">{conversation.title}</h1>
         <SessionBadge kind={conversation.kind} />
         <span className="text-xs text-muted">{conversation.model}</span>
-        {headerActions && <div className="ml-auto flex gap-2">{headerActions}</div>}
+        <div className="ml-auto flex items-center gap-2">
+          {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
+          {headerActions}
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
-            <TurnView key={index} turn={turn} conversationId={conversation.id} />
+            <TurnView key={index} turn={turn} conversationId={conversation.id} running={running} />
           ))}
           <div ref={bottom} />
         </div>
       </div>
       <Composer conversation={conversation} running={running} suggestion={suggestion} />
     </div>
+  );
+}
+
+function RigorSwitch({ conversation }: { conversation: Conversation }) {
+  const queryClient = useQueryClient();
+  const toggle = useMutation({
+    mutationFn: () => api.setRigorReview(conversation.id, !conversation.rigor_review),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  return (
+    <label
+      className="flex items-center gap-1.5 text-xs text-muted"
+      title="After each answer that did some work, the agent's work is reviewed against a checklist: traced claims, the plan, causal language, sample sizes, uncertainty, privacy. It roughly doubles the time and cost of each answer."
+    >
+      <input type="checkbox" checked={conversation.rigor_review} onChange={() => toggle.mutate()} disabled={toggle.isPending} />
+      Rigor review
+    </label>
   );
 }
 
@@ -94,12 +138,15 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
   );
 }
 
-function TurnView({ turn, conversationId }: { turn: Turn; conversationId: string }) {
+function TurnView({ turn, conversationId, running }: { turn: Turn; conversationId: string; running: boolean }) {
   const answer = finalAnswer(turn);
   // Notices and approval cards are shown on their own, above the work log.
   const working = turn.items.filter(
     (item) =>
-      item.kind !== "notice" && item.kind !== "approval" && !(item.kind === "message" && item.text === answer && answer),
+      item.kind !== "notice" &&
+      item.kind !== "approval" &&
+      item.kind !== "review" &&
+      !(item.kind === "message" && item.text === answer && answer),
   );
   return (
     <article className="flex flex-col gap-3">
@@ -120,8 +167,88 @@ function TurnView({ turn, conversationId }: { turn: Turn; conversationId: string
         item.kind === "approval" ? <ApprovalCard key={item.id} conversationId={conversationId} approval={item} /> : null,
       )}
       {answer && <Markdown text={answer} />}
+      {answer && turn.trace && <TraceLine trace={turn.trace} />}
+      {turn.items.map((item, i) =>
+        item.kind === "review" ? <ReviewBox key={`review-${i}`} review={item} conversationId={conversationId} running={running} /> : null,
+      )}
       {turn.status === "interrupted" && <p className="text-sm text-muted">Stopped.</p>}
     </article>
+  );
+}
+
+/** Which numbers in the answer came from something the turn produced. */
+function TraceLine({ trace }: { trace: NonNullable<Turn["trace"]> }) {
+  const how =
+    "DataLab looks for each number in this turn's query results, command output, and data files. A match only means the number appears there, not that it's right.";
+  if (trace.untraced.length === 0) {
+    return (
+      <p className="text-xs text-muted" title={how}>
+        All {trace.numbers} numbers were found in this turn's output.
+      </p>
+    );
+  }
+  return (
+    <p className="text-xs text-research" title={how}>
+      {trace.untraced.length} of {trace.numbers} numbers weren't found in this turn's query results, command output,
+      or data files; check them: <span className="font-mono">{trace.untraced.slice(0, 12).join(", ")}</span>
+      {trace.untraced.length > 12 ? ", …" : ""}
+    </p>
+  );
+}
+
+function ReviewBox({
+  review,
+  conversationId,
+  running,
+}: {
+  review: Extract<Item, { kind: "review" }>;
+  conversationId: string;
+  running: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const stop = useMutation({
+    mutationFn: () => api.stop(conversationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  const address = useMutation({
+    mutationFn: () =>
+      api.send(conversationId, "Please address the problems the rigor review found, where you can, and say which you couldn't."),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  return (
+    <details open className="rounded-xl border border-line bg-surface px-4 py-2 text-sm">
+      <summary className="cursor-pointer font-medium">
+        🔎 Rigor review
+        {review.status === "running" && !running && (
+          <span className="ml-2 text-xs font-normal text-danger">didn't finish</span>
+        )}
+        {review.status === "running" && running && (
+          <>
+            <span className="ml-2 text-xs font-normal text-muted">reviewing…</span>
+            <Button variant="ghost" className="ml-2 px-2 py-0.5 text-xs" onClick={() => stop.mutate()} disabled={stop.isPending}>
+              Stop the review
+            </Button>
+          </>
+        )}
+        {review.status === "failed" && <span className="ml-2 text-xs font-normal text-danger">didn't finish</span>}
+        {review.status === "stopped" && <span className="ml-2 text-xs font-normal text-muted">stopped</span>}
+      </summary>
+      {review.text && review.status === "done" && (
+        <div className="mt-2">
+          <Markdown text={review.text} />
+          <div className="mt-2 flex justify-end">
+            <Button
+              onClick={() => address.mutate()}
+              disabled={running || review.status !== "done" || address.isPending || address.isSuccess}
+              title={running ? "Wait until the agent has finished" : undefined}
+            >
+              Ask the agent to address these
+            </Button>
+          </div>
+          {address.error && <p className="mt-1 text-right text-xs text-danger">{address.error.message}</p>}
+        </div>
+      )}
+    </details>
   );
 }
 
@@ -197,6 +324,7 @@ function WorkItem({ item }: { item: Item }) {
         </details>
       );
     case "approval":
+    case "review":
       return null;
     case "files":
       return (
@@ -233,7 +361,10 @@ function Composer({
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },
   });
-  const stop = useMutation({ mutationFn: () => api.stop(conversation.id) });
+  const stop = useMutation({
+    mutationFn: () => api.stop(conversation.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
 
   const submit = () => {
     if (text.trim() && !running && !send.isPending) send.mutate();

@@ -25,7 +25,7 @@ def send(message):
 
 
 def notify(method, **params):
-    send({"method": method, "params": params})
+    send({"method": method, "params": {"threadId": "thread-1", **params}})
 
 
 for line in sys.stdin:
@@ -57,8 +57,16 @@ for line in sys.stdin:
     elif method == "turn/start":
         send({"id": request_id, "result": {"turn": {"id": "turn-1"}}})
         notify("turn/started", turn={"id": "turn-1"})
+        if MODE == "other_thread":
+            # Another thread's news, which must not end or show in this turn.
+            notify("turn/started", threadId="thread-2", turn={"id": "turn-x"})
+            notify("item/agentMessage/delta", threadId="thread-2", itemId="x", delta="leak")
+            notify("turn/completed", threadId="thread-2", turn={"id": "turn-x", "status": "failed"})
         if MODE in ("elicit", "elicit_other"):
-            text = {"datalab": "research_helper", "approval": os.environ.get("FAKE_APPROVAL", "")}
+            text = {
+                "datalab": os.environ.get("FAKE_KIND", "research_helper"),
+                "approval": os.environ.get("FAKE_APPROVAL", ""),
+            }
             server = "ihs-data" if MODE == "elicit" else "someone-else"
             send(
                 {
@@ -71,14 +79,32 @@ for line in sys.stdin:
         if MODE == "crash":
             time.sleep(0.1)
             sys.exit(1)
-        if MODE in ("normal", "no_resume"):
+        if MODE in ("normal", "no_resume", "other_thread"):
             notify(
                 "item/started", item={"type": "agentMessage", "id": "m1", "phase": "final_answer"}
             )
             notify("item/agentMessage/delta", itemId="m1", delta="done")
             notify("turn/completed", turn={"id": "turn-1", "status": "completed"})
+    elif method == "review/start":
+        # Like Codex 0.157: the id returned isn't the id of the turn that runs.
+        send({"id": request_id, "result": {"turn": {"id": "turn-r-returned"}}})
+        if MODE == "late_review":
+            time.sleep(0.5)  # a Stop can land before Codex says which turn runs
+        notify("turn/started", turn={"id": "turn-r"})
+        if MODE in ("slow_review", "late_review"):
+            continue
+        notify("item/completed", item={"type": "exitedReviewMode", "id": "r1", "review": "1. ok"})
+        notify("turn/completed", turn={"id": "turn-r", "status": "completed"})
     elif method == "turn/interrupt":
+        wanted = (message.get("params") or {}).get("turnId")
+        if MODE in ("slow_review", "late_review") and wanted != "turn-r":
+            error = {"code": -32600, "message": "expected active turn id"}
+            send({"id": request_id, "error": error})
+            continue
         send({"id": request_id, "result": {}})
+        if MODE in ("slow_review", "late_review"):
+            notify("turn/completed", turn={"id": "turn-r", "status": "interrupted"})
+            continue
         if MODE == "elicit":
             notify("serverRequest/resolved", requestId=900)
         notify("turn/completed", turn={"id": "turn-1", "status": "interrupted"})

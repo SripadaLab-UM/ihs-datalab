@@ -22,10 +22,12 @@ from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
 from datalab.sessions.approvals import Unshowable, clean_question
 from datalab.sessions.helper import ResearchHelper
+from datalab.sessions.plans import Outcome, PlanDesk, PlanInvalid, clean_plan
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
 
 # The kind of approval DataLab asks the person for, carried in the elicitation message.
 HELPER_APPROVAL = "research_helper"
+PLAN_APPROVAL = "analysis_plan"
 
 INSTRUCTIONS = """\
 Read-only access to the Intern Health Study (IHS) Oracle database, one schema
@@ -43,6 +45,7 @@ def build_agent_tools(
     catalog: Catalog,
     tokens: SessionTokens,
     helper: ResearchHelper | None = None,
+    plans: PlanDesk | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
@@ -112,6 +115,70 @@ def build_agent_tools(
                 "tables": outcome.tables,
             }
         )
+
+    if plans is not None:
+
+        @server.tool()
+        async def propose_plan(
+            question: str,
+            ctx: Context,
+            estimand: str = "",
+            exposure: str = "",
+            outcome: str = "",
+            covariates: str = "",
+            cohort: str = "",
+            decisions: str = "",
+        ) -> str:
+            """Propose an analysis plan for the person to approve, before touching outcome data.
+
+            question: the scientific question, in plain words.
+            estimand: exactly what will be estimated (e.g. the within-person
+              association between nightly sleep and next-day mood).
+            exposure / outcome: the measures, with tables and columns.
+            covariates: adjustment variables, and why.
+            cohort: cohorts, time window, inclusions and exclusions.
+            decisions: choices you expect to make along the way (missing days,
+              outliers, thresholds), and how you'll make them.
+            The person may edit the plan before approving it. Once approved it
+            is frozen: label any later work outside it as exploratory.
+            """
+            access = _session(ctx, tokens)
+            try:
+                content = clean_plan(
+                    {
+                        "question": question,
+                        "estimand": estimand,
+                        "exposure": exposure,
+                        "outcome": outcome,
+                        "covariates": covariates,
+                        "cohort": cohort,
+                        "decisions": decisions,
+                    }
+                )
+            except PlanInvalid as error:
+                raise ToolError(str(error)) from error
+
+            async def elicit(approval_id: str):
+                return await ctx.request_context.session.elicit_form(
+                    message=json.dumps({"datalab": PLAN_APPROVAL, "approval": approval_id}),
+                    requested_schema={"type": "object", "properties": {}},  # type: ignore[arg-type]
+                    related_request_id=ctx.request_id,
+                )
+
+            plan = await plans.propose(access.session_id, content, elicit)
+            if isinstance(plan, Outcome):
+                return _json(
+                    {"status": "not approved", "note": plan.note, "persons_edits": plan.suggested}
+                )
+            return _json(
+                {
+                    "status": "approved",
+                    "plan": plan.content,
+                    "approved_at": plan.approved_at,
+                    "note": "The plan is frozen. Say which work follows it, and label anything "
+                    "else exploratory (off-plan).",
+                }
+            )
 
     if helper is not None:
 

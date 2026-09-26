@@ -74,7 +74,8 @@ export interface paths {
         delete: operations["delete_conversation_api_conversations__conversation_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Change Conversation */
+        patch: operations["change_conversation_api_conversations__conversation_id__patch"];
         trace?: never;
     };
     "/api/conversations/{conversation_id}/messages": {
@@ -453,6 +454,10 @@ export interface components {
              * @default
              */
             question: string;
+            /** Plan */
+            plan?: {
+                [key: string]: string;
+            } | null;
         };
         /** AttachResult */
         AttachResult: {
@@ -514,6 +519,11 @@ export interface components {
             /** Skipped */
             skipped: components["schemas"]["SkippedOut"][];
         };
+        /** ConversationChange */
+        ConversationChange: {
+            /** Rigor Review */
+            rigor_review?: boolean | null;
+        };
         /** ConversationOut */
         ConversationOut: {
             /** Id */
@@ -533,6 +543,8 @@ export interface components {
             created_at: string;
             /** Updated At */
             updated_at: string;
+            /** Rigor Review */
+            rigor_review: boolean;
             /** Busy */
             busy: boolean;
         };
@@ -915,6 +927,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_conversation_api_conversations__conversation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationChange"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationOut"];
+                };
             };
             /** @description Validation Error */
             422: {

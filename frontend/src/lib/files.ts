@@ -31,7 +31,8 @@ export function kindOf(path: string): FileKind {
 export function workspaceFile(href: string): OpenFile | null {
   let path: string;
   try {
-    path = decodeURI(href.split("#")[0].split("?")[0]);
+    // "/work/outputs/report.html:22" points at a line: open the file.
+    path = decodeURI(href.split("#")[0].split("?")[0]).replace(/:\d+(?::\d+)?$/, "");
   } catch {
     return null;
   }

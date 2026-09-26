@@ -146,17 +146,34 @@ src/datalab/
 
 ### 2b. Rigor features
 
-- **Analysis plans** are structured records in SQLite: fields, status, and a
-  frozen hash. The agent drafts one through a `propose_plan` tool on `/mcp`.
-  The UI shows it as an approval card, as with the research helper. Later
-  turns record whether they were per plan or off-plan.
-- **Tracing** joins three things that are already recorded: the event log
-  (commands and outputs), the audit log (queries), and checkpoints (files).
-  After each final answer, a small checker in DataLab's own code flags
-  numbers that match no query or output.
-- **Rigor review** uses app-server `review/start` with the rigor checklist as
-  custom instructions, run before the final answer when the toggle is on.
-  Nothing new is needed in the container.
+- **Analysis plans** (`sessions/plans.py`). The agent drafts one through the
+  `propose_plan` tool on `/mcp`. Like the research helper, the plan and the
+  person's decision are held on the host (`sessions/approvals.py`); the card
+  appears when Codex forwards the request, the person may edit any part, and
+  the approved version is frozen in SQLite (`plans`) with a timestamp and a
+  hash. The agent gets the approved text back and is told to label off-plan
+  work as exploratory.
+- **Tracing** (`sessions/tracing.py`). After each completed turn, DataLab
+  takes the numbers in the final answer (leaving out code, links, dates,
+  years, small counts, and confidence levels) and looks for each, allowing
+  for rounding and percentages, in what the turn produced: each command's
+  whole output, the data tool's query results (kept in memory for the
+  turn, never stored), and the data files (CSV/TSV) in `/work/outputs`. Not
+  the agent's own prose (its reports would "trace" whatever they say), and
+  not research-helper answers or plans. Clock times and dates are ignored.
+  The chat says how many numbers were found and lists the rest. It's an aid:
+  a coincidental match passes, and a correct derived number is flagged.
+- **Rigor review** (`sessions/rigor.py`). A per-conversation switch, on by
+  default in Analysis mode. After each completed turn, DataLab runs
+  app-server `review/start` (inline, custom instructions). Review mode starts
+  without the conversation's history, so the instructions carry the
+  question, the approved plans, the queries run, and the answer, fenced and
+  marked as data. It's skipped when a turn did no work and states no
+  numbers. The review's text (the `exitedReviewMode` item) is shown under
+  the answer, with a button to ask the agent to address it; the review can
+  be stopped like a turn. (Codex 0.157 answers `review/start` with a
+  different turn id than the one it runs, so the runtime takes the id from
+  `turn/started`.)
 
 ### 3. Workspace and checkpoints
 
@@ -555,7 +572,8 @@ something we can use end to end ourselves.
      prompts, the sql-extraction, statistical-review, and academic-figures
      skills, and the model picker, with the relay allowing only approved
      models. 3e done the same day: the research helper, from the
-     approval card to the throwaway research container.)
+     approval card to the throwaway research container. 3f done the same
+     day: analysis plans, claim tracing, and the rigor review.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

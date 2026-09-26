@@ -9,11 +9,90 @@ import { Markdown } from "./Markdown";
 export interface Approval {
   kind: "approval";
   id: string;
+  approvalKind: "research_helper" | "analysis_plan";
   question: string;
+  plan?: Record<string, string>;
+  frozen?: { at: string; sha256: string };
   state: "pending" | "approved" | "declined" | "withdrawn";
   sent?: string;
   answer?: string;
   answerStatus?: string;
+}
+
+// The plan's parts, as the backend names them (sessions/plans.py FIELDS).
+const PLAN_FIELDS: [string, string][] = [
+  ["question", "Question"],
+  ["estimand", "Estimand (what exactly is estimated)"],
+  ["exposure", "Exposure or predictor"],
+  ["outcome", "Outcome"],
+  ["covariates", "Covariates and adjustment"],
+  ["cohort", "Cohort, time window, and exclusions"],
+  ["decisions", "Decisions expected along the way"],
+];
+
+/** An analysis plan to approve (and edit) before the agent touches outcome data. */
+function PlanCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
+  const [plan, setPlan] = useState<Record<string, string>>(approval.plan ?? {});
+  const answer = useMutation({
+    mutationFn: (approve: boolean) => api.answerApproval(conversationId, approval.id, approve, "", plan),
+  });
+  const decided = answer.isPending || answer.isSuccess;
+  const shown = approval.frozen ? (approval.plan ?? plan) : plan;
+  return (
+    <div className="rounded-xl border border-accent/40 bg-accent-soft/40 p-4 text-sm">
+      <p className="font-medium">📋 Analysis plan{approval.frozen ? " (approved and frozen)" : ""}</p>
+      {approval.state === "pending" ? (
+        <>
+          <p className="mt-1 text-xs text-muted">
+            The agent proposes this plan before looking at outcome data. Edit anything, then approve it. Once approved
+            it's frozen, and later work is labelled as following it or exploratory.
+          </p>
+          <div className="mt-2 flex flex-col gap-2">
+            {PLAN_FIELDS.map(([name, label]) => (
+              <label key={name} className="block text-xs">
+                <span className="font-medium">{label}</span>
+                <textarea
+                  value={plan[name] ?? ""}
+                  onChange={(e) => setPlan({ ...plan, [name]: e.target.value })}
+                  rows={Math.max(2, (plan[name] ?? "").split("\n").length)}
+                  className="mt-1 w-full rounded-lg border border-line bg-surface p-2 text-xs"
+                />
+              </label>
+            ))}
+          </div>
+          {answer.error && <p className="mt-1 text-xs text-danger">{answer.error.message}</p>}
+          <div className="mt-2 flex justify-end gap-2">
+            <Button onClick={() => answer.mutate(false)} disabled={decided}>
+              Not yet
+            </Button>
+            <Button variant="primary" onClick={() => answer.mutate(true)} disabled={decided || !plan.question?.trim()}>
+              Approve plan
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <dl className="mt-2 grid grid-cols-[12rem_1fr] gap-x-3 gap-y-1 text-xs">
+            {PLAN_FIELDS.filter(([name]) => shown[name]).map(([name, label]) => (
+              <div key={name} className="contents">
+                <dt className="text-muted">{label}</dt>
+                <dd className="whitespace-pre-wrap">{shown[name]}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-2 text-xs text-muted">
+            {approval.frozen
+              ? `Frozen ${new Date(approval.frozen.at).toLocaleString()} · ${approval.frozen.sha256.slice(0, 12)}`
+              : approval.state === "declined"
+                ? "Not approved. The agent will ask what to change."
+                : approval.state === "withdrawn"
+                  ? "Withdrawn (the turn stopped)."
+                  : "Approved."}
+          </p>
+        </>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -22,6 +101,11 @@ export interface Approval {
  * which they may edit first.
  */
 export function ApprovalCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
+  if (approval.approvalKind === "analysis_plan") return <PlanCard conversationId={conversationId} approval={approval} />;
+  return <HelperCard conversationId={conversationId} approval={approval} />;
+}
+
+function HelperCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
   const [question, setQuestion] = useState(approval.question);
   // Counted as the server counts: by character, not by UTF-16 unit.
   const length = Array.from(question).length;

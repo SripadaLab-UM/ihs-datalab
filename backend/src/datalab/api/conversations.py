@@ -14,6 +14,7 @@ from datalab.relay.policy import model_allowed
 from datalab.sessions.approvals import Unshowable
 from datalab.sessions.manager import Busy, SessionManager
 from datalab.sessions.modes import MODES
+from datalab.sessions.plans import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
 
 _HEARTBEAT_SECONDS = 15
@@ -33,7 +34,12 @@ class ConversationOut(BaseModel):
     model: str
     created_at: str
     updated_at: str
+    rigor_review: bool
     busy: bool
+
+
+class ConversationChange(BaseModel):
+    rigor_review: bool | None = None
 
 
 class NewMessage(BaseModel):
@@ -45,6 +51,8 @@ class ApprovalAnswer(BaseModel):
     approve: bool
     # The question as the person left it: they may edit it before sending.
     question: str = Field(default="", max_length=4000)  # checked again, more strictly
+    # Or, for an analysis plan, its parts as the person left them.
+    plan: dict[str, str] | None = None
 
 
 class EventOut(BaseModel):
@@ -130,11 +138,25 @@ def build_conversations_router(
         model = body.model or default_model
         if not model_allowed(model, allowed_models):
             raise HTTPException(422, f"{model!r} isn't approved for DataLab.")
-        conversation = store.create(kind=mode.kind, mode=mode.id, title=body.title, model=model)
+        # The rigor review is on by default in Analysis mode.
+        conversation = store.create(
+            kind=mode.kind,
+            mode=mode.id,
+            title=body.title,
+            model=model,
+            rigor_review=mode.id == "analysis",
+        )
         return out(conversation)
 
     @router.get("/conversations/{conversation_id}")
     def get_conversation(conversation_id: str) -> ConversationOut:
+        return out(get_or_404(conversation_id))
+
+    @router.patch("/conversations/{conversation_id}")
+    def change_conversation(conversation_id: str, body: ConversationChange) -> ConversationOut:
+        get_or_404(conversation_id)
+        if body.rigor_review is not None:
+            store.set_rigor_review(conversation_id, body.rigor_review)
         return out(get_or_404(conversation_id))
 
     @router.delete("/conversations/{conversation_id}", status_code=204)
@@ -168,12 +190,14 @@ def build_conversations_router(
         """Approve (maybe edited) or decline a research-helper question."""
         get_or_404(conversation_id)
         try:
-            sessions.answer_approval(conversation_id, approval_id, body.approve, body.question)
+            sessions.answer_approval(
+                conversation_id, approval_id, body.approve, body.question, body.plan
+            )
         except KeyError as error:
             raise HTTPException(
                 409, "This request isn't waiting for an answer any more."
             ) from error
-        except Unshowable as error:
+        except (Unshowable, PlanInvalid) as error:
             raise HTTPException(422, str(error)) from error
 
     @router.get("/conversations/{conversation_id}/events")

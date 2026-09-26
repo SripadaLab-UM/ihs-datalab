@@ -275,3 +275,59 @@ async def test_another_conversations_approval_is_declined(tmp_path, monkeypatch)
     assert ("answer_delta", {"id": "m2", "text": "decline"}) in events
     assert not elsewhere.decision.done()
     await runtime.close()
+
+
+async def test_a_request_of_the_wrong_kind_is_declined(tmp_path, monkeypatch):
+    runtime, events, approvals = helper_runtime(tmp_path, monkeypatch)
+    pending = approvals.open("c_test", "q")  # a research-helper question
+    monkeypatch.setenv("FAKE_APPROVAL", pending.id)
+    monkeypatch.setenv("FAKE_KIND", "analysis_plan")  # asked for as if it were a plan
+    runtime.begin_turn()
+    await asyncio.wait_for(runtime.send("look it up"), 5)
+    assert ("answer_delta", {"id": "m2", "text": "decline"}) in events
+    await runtime.close()
+
+
+async def test_a_review_runs_on_the_thread_and_reports_its_findings(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl")
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    await runtime.send("hi")
+    result = await asyncio.wait_for(runtime.review("check it"), 5)
+    assert result.status == "completed"
+    assert ("review", {"id": "r1", "text": "1. ok"}) in events
+    assert "review/start" in containers.requests()
+    await runtime.close()
+
+
+async def test_stop_interrupts_a_review_by_the_id_of_the_turn_that_runs(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", "slow_review")
+    runtime, _ = make(tmp_path, containers)
+    runtime.begin_turn()
+    review = asyncio.create_task(runtime.review("check it"))
+    await asyncio.sleep(0.3)
+    await runtime.stop_turn()
+    assert (await asyncio.wait_for(review, 5)).status == "interrupted"
+    await runtime.close()
+
+
+async def test_a_stop_before_codex_names_the_running_review_still_stops_it(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", "late_review")
+    runtime, _ = make(tmp_path, containers)
+    runtime.begin_turn()
+    review = asyncio.create_task(runtime.review("check it"))
+    await asyncio.sleep(0.2)
+    await runtime.stop_turn()
+    assert (await asyncio.wait_for(review, 5)).status == "interrupted"
+    await runtime.close()
+
+
+async def test_another_threads_notifications_are_ignored(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", "other_thread")
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    result = await asyncio.wait_for(runtime.send("hi"), 5)
+    assert result.status == "completed"
+    assert not any("leak" in str(data) for _, data in events)
+    assert [data.get("status") for kind, data in events if kind == "turn_finished"] == ["completed"]
+    await runtime.close()

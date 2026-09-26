@@ -31,6 +31,12 @@ const EVENT_TYPES = [
   "approval_answered",
   "approval_withdrawn",
   "helper_answered",
+  "plan_approved",
+  "review_started",
+  "review",
+  "review_finished",
+  "trace",
+  "turn_done",
 ];
 
 /**

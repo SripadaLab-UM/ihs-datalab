@@ -113,3 +113,69 @@ it("tracks a research-helper approval from request to answer", () => {
     { id: "ap2", state: "withdrawn" },
   ]);
 });
+
+it("keeps the rigor review apart from the answer, and records the trace", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("answer_started", { id: "m1", phase: "final_answer" }),
+    e("answer", { id: "m1", phase: "final_answer", text: "The mean was 7.2." }),
+    e("turn_finished", { status: "completed" }),
+    e("trace", { numbers: 1, untraced: [] }),
+    e("review_started", {}),
+    e("turn_started", {}),
+    e("answer_started", { id: "m2", phase: "final_answer" }),
+    e("answer", { id: "m2", phase: "final_answer", text: "review chatter" }),
+    e("review", { text: "1. Traced claims: yes." }),
+    e("turn_finished", { status: "completed" }),
+    e("review_finished", { status: "completed" }),
+  ]);
+  expect(turns).toHaveLength(1);
+  expect(finalAnswer(turns[0])).toBe("The mean was 7.2.");
+  expect(turns[0].trace).toEqual({ numbers: 1, untraced: [] });
+  expect(turns[0].items.find((i) => i.kind === "review")).toMatchObject({ text: "1. Traced claims: yes.", status: "done" });
+});
+
+it("shows an approved plan as frozen", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan: { question: "Sleep?" } }),
+    e("approval_answered", { id: "ap1", approved: true }),
+    e("plan_approved", { approval: "ap1", plan: { question: "Sleep and mood?" }, approved_at: "2026-09-26T12:00:00Z", sha256: "abc" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({
+    approvalKind: "analysis_plan",
+    state: "approved",
+    plan: { question: "Sleep and mood?" },
+    frozen: { sha256: "abc" },
+  });
+});
+
+it("a review that never finished doesn't swallow later turns", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "one" }),
+    e("answer", { id: "m1", phase: "final_answer", text: "First." }),
+    e("turn_finished", { status: "completed" }),
+    e("review_started", {}),
+    // DataLab stopped here, mid-review.
+    e("user_message", { text: "two" }),
+    e("answer_started", { id: "m2", phase: "final_answer" }),
+    e("answer", { id: "m2", phase: "final_answer", text: "Second." }),
+    e("turn_finished", { status: "completed" }),
+  ]);
+  expect(turns.map((t) => [t.status, finalAnswer(t)])).toEqual([
+    ["completed", "First."],
+    ["completed", "Second."],
+  ]);
+  expect(turns[0].items.find((i) => i.kind === "review")).toMatchObject({ status: "failed" });
+});
+
+it("turn_done ends the turn and any review still open", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "one" }),
+    e("turn_started"),
+    e("review_started", {}),
+    e("turn_done", {}),
+  ]);
+  expect(turns[0].status).toBe("completed");
+  expect(turns[0].items.find((i) => i.kind === "review")).toMatchObject({ status: "failed" });
+});

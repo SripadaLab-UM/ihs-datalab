@@ -39,6 +39,7 @@ from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import AttachmentStore
 from datalab.sessions.manager import SessionManager
+from datalab.sessions.plans import PlanDesk, PlanStore
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
@@ -91,7 +92,11 @@ def create_app(
     research_helper = ResearchHelper(settings, tokens, approvals, conversations.append)
     research_helper.turn_running = sessions.turn_running
     sessions.helper = research_helper
-    agent_tools = build_agent_tools(data, catalog, tokens, research_helper)
+    plans = PlanStore(connection)
+    sessions.plans = plans
+    plan_desk = PlanDesk(approvals, plans, conversations.append)
+    plan_desk.turn_running = sessions.turn_running
+    agent_tools = build_agent_tools(data, catalog, tokens, research_helper, plan_desk)
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
         transport_security=TransportSecuritySettings(

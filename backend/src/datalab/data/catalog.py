@@ -62,6 +62,10 @@ class Catalog:
         schema, _, name = qualified_name.upper().partition(".")
         return self._tables.get((schema, name))
 
+    def names(self, schema: str) -> list[str]:
+        """The tables and views in one cohort schema."""
+        return sorted(name for s, name in self._tables if s == schema.upper())
+
     def cohorts_with(self, name: str) -> list[str]:
         """Which cohort schemas have a table or view with this name."""
         return sorted(schema for schema, table in self._tables if table == name.upper())

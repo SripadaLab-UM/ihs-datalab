@@ -12,10 +12,16 @@ stored here.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import re
 import secrets
 import unicodedata
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import Any
+
+import anyio
 
 MAX_QUESTION = 1000
 # Categories that don't show on screen: controls, format characters (zero
@@ -48,6 +54,16 @@ def clean_question(text: str) -> str:
     Anything invisible is refused rather than dropped, so what's approved is
     exactly what's shown.
     """
+    text = visible_text(text)
+    if not text:
+        raise Unshowable("The question is empty.")
+    if len(text) > MAX_QUESTION:
+        raise Unshowable(f"The question is longer than {MAX_QUESTION} characters.")
+    return text
+
+
+def visible_text(text: str) -> str:
+    """`text` normalized and tidied, or Unshowable if any of it wouldn't show."""
     text = unicodedata.normalize("NFKC", text).replace("\r\n", "\n")
     marks = 0
     for char in text:
@@ -57,40 +73,51 @@ def clean_question(text: str) -> str:
         code = ord(char)
         if unicodedata.category(char) in _INVISIBLE or any(a <= code <= b for a, b in _IGNORABLE):
             raise Unshowable(
-                f"The question contains a hidden or joining character (U+{code:04X}), "
+                f"The text contains a hidden or joining character (U+{code:04X}), "
                 "so it can't be shown for review. Emoji and special spacing aren't allowed."
             )
         marks = marks + 1 if unicodedata.category(char).startswith("M") else 0
         if marks > _MAX_MARKS:
-            raise Unshowable("The question has too many accent marks stacked on one letter.")
+            raise Unshowable("The text has too many accent marks stacked on one letter.")
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r" +\n", "\n", text)  # a space at a line's end doesn't show
-    text = re.sub(r"\n\s*\n\s*\n+", "\n\n", text).strip()
-    if not text:
-        raise Unshowable("The question is empty.")
-    if len(text) > MAX_QUESTION:
-        raise Unshowable(f"The question is longer than {MAX_QUESTION} characters.")
-    return text
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", text).strip()
 
 
 @dataclass
 class Pending:
     id: str
     conversation_id: str
-    question: str
+    kind: str  # "research_helper" or "analysis_plan"
+    question: str = ""  # a research-helper question
+    plan: dict[str, str] | None = None  # an analysis plan
     # Set once Codex has forwarded the request: only then is it shown for review.
     shown: bool = False
+    # (approved, what was approved: the question's text, or the plan as JSON)
     decision: asyncio.Future[tuple[bool, str]] = field(
         default_factory=lambda: asyncio.get_running_loop().create_future()
     )
+
+    def card(self) -> dict[str, Any]:
+        """What the chat shows for review: always the host's stored copy."""
+        if self.kind == "analysis_plan":
+            return {"id": self.id, "kind": self.kind, "plan": self.plan}
+        return {"id": self.id, "kind": self.kind, "question": self.question}
 
 
 class Approvals:
     def __init__(self) -> None:
         self._pending: dict[str, Pending] = {}
 
-    def open(self, conversation_id: str, question: str) -> Pending:
-        pending = Pending(f"ap_{secrets.token_hex(8)}", conversation_id, question)
+    def open(
+        self,
+        conversation_id: str,
+        question: str = "",
+        *,
+        kind: str = "research_helper",
+        plan: dict[str, str] | None = None,
+    ) -> Pending:
+        pending = Pending(f"ap_{secrets.token_hex(8)}", conversation_id, kind, question, plan)
         self._pending[pending.id] = pending
         return pending
 
@@ -100,14 +127,36 @@ class Approvals:
             return None
         return pending
 
-    def answer(self, conversation_id: str, approval_id: str, approved: bool, text: str) -> str:
-        """Record the person's decision. Returns the text that will be sent."""
+    def answer(
+        self,
+        conversation_id: str,
+        approval_id: str,
+        approved: bool,
+        text: str = "",
+        plan: dict[str, Any] | None = None,
+    ) -> str:
+        """Record the person's decision. Returns what was approved ("" if declined)."""
         pending = self.get(approval_id, conversation_id)
         if pending is None or pending.decision.done():
             raise KeyError(approval_id)
-        sent = clean_question(text) if approved else ""
-        pending.decision.set_result((approved, sent))
-        return sent
+        approved_value = ""
+        if pending.kind == "analysis_plan":
+            from datalab.sessions.plans import PlanInvalid, clean_plan
+
+            if approved:
+                # The plan to freeze, as the person left it.
+                approved_value = json.dumps(clean_plan(plan if plan is not None else pending.plan))
+            elif plan is not None:
+                # A "no" always counts. Edits go to the agent as suggestions,
+                # if there are any and they're a valid plan.
+                with contextlib.suppress(PlanInvalid):
+                    edited = clean_plan(plan)
+                    if edited != clean_plan(pending.plan):
+                        approved_value = json.dumps(edited)
+        elif approved:
+            approved_value = clean_question(text)
+        pending.decision.set_result((approved, approved_value))
+        return approved_value
 
     def withdraw(self, conversation_id: str, approval_id: str | None = None) -> list[str]:
         """Withdraw one pending approval, or all of a conversation's. Returns their ids."""
@@ -124,3 +173,38 @@ class Approvals:
 
     def close(self, approval_id: str) -> None:
         self._pending.pop(approval_id, None)
+
+    async def decide(
+        self,
+        pending: Pending,
+        elicit: Callable[[str], Awaitable[Any]],
+        emit: Callable[[str, str, dict[str, Any]], object],
+        timeout: float,
+    ) -> tuple[bool, str]:
+        """Wait for the person's decision on `pending`, keeping Codex waiting too.
+
+        `elicit` sends Codex the request (so its tool timeout pauses) and the
+        card appears when Codex forwards it. The decision comes only from
+        here; whatever Codex replies is ignored.
+        """
+        waiting = asyncio.ensure_future(elicit(pending.id))
+
+        def withdraw() -> None:
+            if self.withdraw(pending.conversation_id, pending.id) and pending.shown:
+                emit(pending.conversation_id, "approval_withdrawn", {"id": pending.id})
+
+        try:
+            return await asyncio.wait_for(asyncio.shield(pending.decision), timeout)
+        except TimeoutError:
+            withdraw()
+            return False, ""
+        except BaseException:
+            withdraw()  # the tool call was cancelled (Stop, a timeout, shutdown)
+            raise
+        finally:
+            self.close(pending.id)
+            # Codex gets its answer from the runtime; don't wait long for it here.
+            # (A cancel of this call still goes through.)
+            with anyio.move_on_after(5), contextlib.suppress(Exception):
+                await asyncio.shield(waiting)
+            waiting.cancel()

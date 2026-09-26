@@ -51,7 +51,13 @@ async def test_tools_are_listed(server, tmp_path):
     base_url, services, _ = server
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         tools = {t.name for t in (await session.list_tools()).tools}
-    assert tools == {"search_catalog", "describe_table", "query", "ask_research_helper"}
+    assert tools == {
+        "search_catalog",
+        "describe_table",
+        "query",
+        "ask_research_helper",
+        "propose_plan",
+    }
 
 
 async def test_search_and_describe(server, tmp_path):

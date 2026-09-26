@@ -130,7 +130,8 @@ def test_odd_names_are_refused_or_cleaned(tmp_path):
 def test_store_adds_lists_and_removes(settings, tmp_path):
     connection = db.connect(settings.database_file)
     connection.execute(
-        "INSERT INTO conversations VALUES ('c1', 'data', 'analysis', 't', 'm', 'x', 'x')"
+        "INSERT INTO conversations (id, kind, mode, title, model, created_at, updated_at) "
+        "VALUES ('c1', 'data', 'analysis', 't', 'm', 'x', 'x')"
     )
     store = AttachmentStore(connection)
     (tmp_path / "x.csv").write_text("1")

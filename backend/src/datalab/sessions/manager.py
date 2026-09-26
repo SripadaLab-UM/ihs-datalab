@@ -11,13 +11,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import shutil
 import time
 from collections.abc import AsyncIterator
 from typing import Any
 
 from datalab.config import Settings, default_data_dir
-from datalab.sessions import modes
+from datalab.sessions import modes, rigor
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
@@ -29,9 +30,11 @@ from datalab.sessions.inputs import (
     practice_samples,
     recheck,
 )
+from datalab.sessions.plans import PlanStore, as_text
 from datalab.sessions.runtime import SessionRuntime
-from datalab.sessions.store import Conversation, ConversationStore
+from datalab.sessions.store import Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens
+from datalab.sessions.tracing import trace
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +58,8 @@ class SessionManager:
         self._approvals = approvals or Approvals()
         # The research helper, so Stop and close can stop its work too (set by the app).
         self.helper: ResearchHelper | None = None
+        # Approved analysis plans, for the rigor review (set by the app).
+        self.plans: PlanStore | None = None
         self._settings = settings
         self._store = store
         self._tokens = tokens
@@ -184,15 +189,21 @@ class SessionManager:
             self._restoring.discard(conversation.id)
 
     def answer_approval(
-        self, conversation_id: str, approval_id: str, approved: bool, question: str
+        self,
+        conversation_id: str,
+        approval_id: str,
+        approved: bool,
+        question: str = "",
+        plan: dict[str, Any] | None = None,
     ) -> None:
-        """The person's decision on a research-helper question, recorded on the host."""
-        sent = self._approvals.answer(conversation_id, approval_id, approved, question)
-        self._store.append(
-            conversation_id,
-            "approval_answered",
-            {"id": approval_id, "approved": approved, "question": sent if approved else None},
-        )
+        """The person's decision on a question or plan, recorded on the host."""
+        pending = self._approvals.get(approval_id, conversation_id)
+        kind = pending.kind if pending else ""
+        value = self._approvals.answer(conversation_id, approval_id, approved, question, plan)
+        answered: dict[str, Any] = {"id": approval_id, "approved": approved}
+        if approved and kind == "research_helper":
+            answered["question"] = value
+        self._store.append(conversation_id, "approval_answered", answered)
 
     async def stop(self, conversation_id: str) -> None:
         if self.helper is not None:
@@ -276,7 +287,9 @@ class SessionManager:
         notes = [_note(event.type, event.data) for event in changes]
         return "".join(f"[DataLab: {note}]\n" for note in notes if note) + ("\n" if notes else "")
 
-    async def _checkpoint(self, conversation_id: str, runtime: SessionRuntime, turn: int) -> None:
+    async def _checkpoint(
+        self, conversation_id: str, runtime: SessionRuntime, turn: int, label: str = ""
+    ) -> None:
         """Checkpoint /work after a turn, with the container frozen meanwhile."""
         containers = runtime.containers
         checkpoints = self.checkpoints(conversation_id)
@@ -294,7 +307,7 @@ class SessionManager:
         try:
             await containers.pause()
             take = asyncio.ensure_future(
-                asyncio.to_thread(checkpoints.take, f"After turn {turn}", turn=turn)
+                asyncio.to_thread(checkpoints.take, label or f"After turn {turn}", turn=turn)
             )
             try:
                 checkpoint = await asyncio.shield(take)
@@ -358,9 +371,12 @@ class SessionManager:
         effort: str | None,
         turn: int,
     ) -> None:
+        started = self._store.last(conversation_id, "user_message")
+        completed = False
         try:
             result = await runtime.send(text, effort=effort)
-            if result.status != "completed" and result.error:
+            completed = result.status == "completed"
+            if not completed and result.error:
                 self._store.append(conversation_id, "error", {"message": result.error})
         except asyncio.CancelledError:
             raise
@@ -371,8 +387,125 @@ class SessionManager:
             )
         finally:
             self._last_used[conversation_id] = time.monotonic()
-        # Still part of the turn, so nothing else can start until it's saved.
-        await self._checkpoint(conversation_id, runtime, turn)
+        try:
+            # Still part of the turn, so nothing else can start until it's saved.
+            await self._checkpoint(conversation_id, runtime, turn)
+            if not completed:
+                return
+            since = started.seq if started else 0
+            evidence = runtime.take_evidence()
+            ran_commands = runtime.ran_commands()
+            claims = await self._trace(conversation_id, since, evidence)
+            conversation = self._store.get(conversation_id)
+            # Reviewed only if there's something to review (work was done, or
+            # the answer states numbers), and not if the person pressed Stop.
+            wanted = conversation is not None and conversation.rigor_review
+            if wanted and (ran_commands or evidence or claims) and not runtime.stop_requested:
+                question = str(started.data.get("text", "")) if started else ""
+                await self._review(conversation_id, runtime, since, question)
+                runtime.take_evidence()
+                if runtime.ran_commands():
+                    # The review ran commands, which could have changed files.
+                    label = f"After turn {turn}'s review"
+                    await self._checkpoint(conversation_id, runtime, turn, label)
+        finally:
+            # The turn, with its checkpoint, trace, and review, is over: no
+            # longer busy by the time the chat hears so.
+            if self._turns.get(conversation_id) is asyncio.current_task():
+                del self._turns[conversation_id]
+            self._store.append(conversation_id, "turn_done", {})
+
+    def _final_answer(self, conversation_id: str, since: int) -> Event | None:
+        events = self._store.all_events_after(conversation_id, since)
+        answers = [e for e in events if e.type == "answer" and e.data.get("text")]
+        final = [e for e in answers if e.data.get("phase") == "final_answer"] or answers
+        return final[-1] if final else None
+
+    async def _trace(self, conversation_id: str, since: int, evidence: list[str]) -> list:
+        """Flag numbers in the turn's answer that nothing the turn produced contains."""
+        try:
+            answer = self._final_answer(conversation_id, since)
+            if answer is None:
+                return []
+
+            def work() -> list:
+                texts = evidence + self._output_data(conversation_id)
+                return trace(str(answer.data["text"]), texts)
+
+            # Can be slow on big outputs: not on the event loop.
+            claims = await asyncio.to_thread(work)
+        except Exception:
+            log.exception("tracing failed in %s", conversation_id)
+            return []
+        if claims:
+            self._store.append(
+                conversation_id,
+                "trace",
+                {
+                    "answer": answer.data.get("id"),
+                    "numbers": len(claims),
+                    "untraced": [c.text for c in claims if not c.traced],
+                },
+            )
+        return claims
+
+    def _output_data(self, conversation_id: str, budget: int = 2 * 1024**2) -> list[str]:
+        """Data files in /work/outputs as of the latest checkpoint (not prose), up to a budget.
+
+        Reports the agent wrote aren't evidence: they'd "trace" whatever they say.
+        """
+        checkpoints = self.checkpoints(conversation_id)
+        latest = checkpoints.latest()
+        if latest is None:
+            return []
+        texts: list[str] = []
+        for rel, entry in checkpoints.entries(latest.number).items():
+            if budget <= 0:
+                break
+            if not rel.startswith("outputs/") or not rel.lower().endswith((".csv", ".tsv")):
+                continue
+            with os.fdopen(checkpoints.open_object(entry), "rb") as source:
+                data = source.read(min(budget, 1024**2))
+            budget -= len(data)
+            texts.append(data.decode("utf-8", "replace"))
+        return texts
+
+    async def _review(
+        self, conversation_id: str, runtime: SessionRuntime, since: int, question: str
+    ) -> None:
+        """The rigor review: Codex's review mode, with DataLab's checklist.
+
+        Review mode starts without the conversation's history, so what it
+        needs is given to it: the question, the approved plans, the queries
+        run, and the answer.
+        """
+        events = self._store.all_events_after(conversation_id, since)
+        answer = self._final_answer(conversation_id, since)
+        queries = [
+            str((e.data.get("arguments") or {}).get("sql", ""))
+            for e in events
+            if e.type == "tool_call" and e.data.get("tool") == "query"
+        ]
+        plans = [as_text(p) for p in self.plans.list(conversation_id)] if self.plans else []
+        context = rigor.instructions(
+            answer=str(answer.data.get("text", "")) if answer else "",
+            question=question,
+            plans=plans,
+            queries=[q for q in queries if q],
+        )
+        self._store.append(conversation_id, "review_started", {})
+        status = "failed"
+        try:
+            result = await runtime.review(context)
+            status = result.status
+        except asyncio.CancelledError:
+            status = "interrupted"
+            raise
+        except Exception:
+            log.exception("rigor review failed in %s", conversation_id)
+        finally:
+            # Always, so the chat never waits for a review that ended.
+            self._store.append(conversation_id, "review_finished", {"status": status})
 
     async def _make_room(self, keep: str) -> None:
         """Stop the least recently used idle conversation if too many are running."""

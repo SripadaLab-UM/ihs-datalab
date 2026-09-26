@@ -8,6 +8,7 @@ UI, the event log, and the CLI all consume these.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Awaitable, Callable
@@ -35,6 +36,7 @@ class TurnResult:
 @dataclass
 class _Turn:
     id: str | None = None
+    started: bool = False  # turn/started has given the running turn's id
     done: asyncio.Future[TurnResult] = field(
         default_factory=lambda: asyncio.get_running_loop().create_future()
     )
@@ -71,6 +73,9 @@ class SessionRuntime:
         self._lock = asyncio.Lock()
         self._approvals = approvals
         self._requests: dict[Any, str] = {}  # Codex request id -> approval id
+        self._evidence: list[str] = []  # this turn's output, for tracing
+        self._ran_commands = False
+        self._background: set[asyncio.Task[None]] = set()
 
     @property
     def busy(self) -> bool:
@@ -90,6 +95,8 @@ class SessionRuntime:
                 await self._emit("turn_finished", {"status": "interrupted"})
                 return TurnResult("", "interrupted")
             self._turn = turn = _Turn()
+            self._evidence = []
+            self._ran_commands = False
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
                 "input": [{"type": "text", "text": text, "text_elements": []}],
@@ -98,12 +105,66 @@ class SessionRuntime:
                 params["effort"] = effort
             try:
                 response = await self._client.request("turn/start", params)
-                turn.id = (response.get("turn") or {}).get("id")
+                # turn/started may already have given the running turn's id.
+                turn.id = turn.id or (response.get("turn") or {}).get("id")
                 if self._stop_requested:
                     await self._interrupt(turn)
                 return await self._wait_for(turn, self._client)
             finally:
                 self._turn = None
+
+    async def review(self, instructions: str) -> TurnResult:
+        """Run Codex's review mode on the thread, with our checklist, and wait for it."""
+        async with self._lock:
+            await self._ensure_started()
+            assert self._client is not None and self._thread_id is not None
+            if self._stop_requested:
+                return TurnResult("", "interrupted")
+            self._turn = turn = _Turn()
+            self._ran_commands = False
+            params = {
+                "threadId": self._thread_id,
+                "target": {"type": "custom", "instructions": instructions},
+                "delivery": "inline",
+            }
+            try:
+                response = await self._client.request("review/start", params)
+                # turn/started may already have given the running turn's id.
+                turn.id = turn.id or (response.get("turn") or {}).get("id")
+                if self._stop_requested:
+                    await self._interrupt(turn)
+                return await self._wait_for(turn, self._client)
+            finally:
+                self._turn = None
+
+    def take_evidence(self) -> list[str]:
+        """What the last turn produced, for tracing its answer. Kept in memory only."""
+        evidence, self._evidence = self._evidence, []
+        return evidence
+
+    def ran_commands(self) -> bool:
+        """Whether the last turn (or review) ran any command. Resets."""
+        ran, self._ran_commands = self._ran_commands, False
+        return ran
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_requested
+
+    def _collect_evidence(self, item: dict[str, Any]) -> None:
+        # A command's whole output, and the data tool's query results. Not other
+        # tools (the research helper's web answer, the agent's own plan).
+        if item.get("type") == "fileChange":
+            self._ran_commands = True  # files changed, as a command could have
+        if item.get("type") == "commandExecution":
+            self._ran_commands = True
+            text = str(item.get("aggregatedOutput") or "")
+        elif item.get("type") == "mcpToolCall" and item.get("tool") == "query":
+            text = _result_text(item.get("result"))
+        else:
+            return
+        if text and sum(len(t) for t in self._evidence) < _MAX_EVIDENCE:
+            self._evidence.append(text[:_MAX_RESULT_TEXT])
 
     async def stop_turn(self) -> None:
         """Stop the running turn, including any commands it started.
@@ -130,10 +191,20 @@ class SessionRuntime:
     async def _interrupt(self, turn: _Turn) -> None:
         if self._client is None or self._thread_id is None or turn.id is None:
             return
-        await self._client.request(
-            "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}, timeout=30
-        )
-        await self.containers.kill_turn_processes()
+        try:
+            await self._client.request(
+                "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}, timeout=30
+            )
+        except (AppServerError, TimeoutError) as error:
+            log.warning("couldn't interrupt turn in %s: %s", self.session_id, error)
+        except Exception:
+            log.exception("interrupting a turn failed in %s", self.session_id)
+        finally:
+            # Whatever Codex said: the commands the turn started are stopped,
+            # unless a later turn has started meanwhile.
+            if self._turn is turn or self._turn is None:
+                with contextlib.suppress(Exception):
+                    await self.containers.kill_turn_processes()
 
     async def _wait_for(self, turn: _Turn, client: AppServerClient) -> TurnResult:
         """The turn's result, or a failure if Codex exits before finishing it."""
@@ -211,9 +282,27 @@ class SessionRuntime:
     # Codex -> DataLab events ------------------------------------------------
 
     async def _on_notification(self, method: str, params: dict[str, Any]) -> None:
+        thread = params.get("threadId")
+        if thread is not None and self._thread_id is not None and thread != self._thread_id:
+            return  # another thread's news isn't this conversation's
         if method == "serverRequest/resolved":
             # Codex withdrew a request it had sent (for example, on Stop).
             await self._withdraw(params.get("requestId"))
+        if method == "item/completed":
+            self._collect_evidence(params.get("item") or {})
+        if method == "turn/started" and self._turn is not None and not self._turn.started:
+            # The id of the turn actually running. For a review, Codex 0.157
+            # answers review/start with a different id than the turn it runs,
+            # and only this one can be interrupted.
+            started = (params.get("turn") or {}).get("id")
+            if started:
+                self._turn.id = started
+                self._turn.started = True
+                if self._stop_requested:
+                    # Stop came before Codex said which turn is running.
+                    task = asyncio.get_running_loop().create_task(self._interrupt(self._turn))
+                    self._background.add(task)
+                    task.add_done_callback(self._background.discard)
         event = _to_event(method, params)
         if event:
             await self._emit(*event)
@@ -240,12 +329,15 @@ class SessionRuntime:
         person's decision live in DataLab's own record (approvals.py); this
         reply only lets Codex carry on once the person has decided.
         """
-        approval_id = _approval_id(method, params)
+        requested = _approval_id(method, params)
+        kind, _, approval_id = (requested or "").partition(":")
         pending = (
             self._approvals.get(approval_id, self.session_id)
             if approval_id and self._approvals
             else None
         )
+        if pending is not None and pending.kind != kind:
+            pending = None
         if pending is None:
             # Nothing else should ask, given the approval policy: decline it.
             log.warning("declining unexpected request from Codex: %s", method)
@@ -255,10 +347,7 @@ class SessionRuntime:
         self._requests[request_id] = pending.id
         if not pending.shown:
             pending.shown = True
-            await self._emit(
-                "approval_requested",
-                {"id": pending.id, "kind": "research_helper", "question": pending.question},
-            )
+            await self._emit("approval_requested", pending.card())
         try:
             approved, _ = await asyncio.shield(pending.decision)
         finally:
@@ -288,10 +377,29 @@ def _approval_id(method: str, params: dict[str, Any]) -> str | None:
         message = json.loads(params.get("message") or "")
     except (TypeError, json.JSONDecodeError):
         return None
-    if not isinstance(message, dict) or message.get("datalab") != "research_helper":
+    if not isinstance(message, dict) or message.get("datalab") not in (
+        "research_helper",
+        "analysis_plan",
+    ):
         return None
     approval = message.get("approval")
-    return approval if isinstance(approval, str) else None
+    return f"{message['datalab']}:{approval}" if isinstance(approval, str) else None
+
+
+_MAX_RESULT_TEXT = 200_000
+_MAX_EVIDENCE = 5 * 1024**2
+
+
+def _result_text(result: Any) -> str:
+    """The text of a tool's result, shortened."""
+    if not isinstance(result, dict):
+        return ""
+    parts = [
+        c.get("text", "")
+        for c in result.get("content") or []
+        if isinstance(c, dict) and c.get("type") == "text"
+    ]
+    return "\n".join(parts)[:_MAX_RESULT_TEXT]
 
 
 def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -337,6 +445,8 @@ def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]
             }
         if kind == "webSearch":
             return "web_search", {"query": item.get("query")}
+        if kind == "exitedReviewMode":
+            return "review", {"id": item.get("id"), "text": item.get("review") or ""}
     if method == "turn/started":
         return "turn_started", {"turn_id": (params.get("turn") or {}).get("id")}
     if method == "turn/completed":

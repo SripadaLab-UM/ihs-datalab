@@ -7,6 +7,7 @@ it("maps container paths to viewer roots", () => {
   expect(workspaceFile("/work/analysis.py")).toEqual({ root: "work", path: "analysis.py", kind: "text" });
   expect(workspaceFile("/data/oracle/q_1.csv")).toEqual({ root: "results", path: "q_1.csv", kind: "csv" });
   expect(workspaceFile("/work/outputs/my%20report.html#top")?.path).toBe("my report.html");
+  expect(workspaceFile("/work/outputs/report.html:22")?.path).toBe("report.html");
 });
 
 it("ignores everything else", () => {

@@ -18,21 +18,30 @@ export type Item =
   | { kind: "tool"; id: string; tool: string; server: string; status: string; arguments: unknown; error: string | null }
   | { kind: "files"; paths: string[] }
   | Approval
+  | { kind: "review"; text: string; status: "running" | "done" | "stopped" | "failed" }
   | { kind: "notice"; tone: "error" | "info"; text: string };
 
 export interface Turn {
   userText: string;
   items: Item[];
   status: "running" | "completed" | "interrupted" | "failed";
+  /** Numbers in the answer that nothing the turn produced contains. */
+  trace?: { numbers: number; untraced: string[] };
 }
 
 const MAX_COMMAND_OUTPUT = 20_000;
+const REVIEW_TURN_EVENTS = new Set([
+  "answer_started", "answer_delta", "answer", "turn_started", "turn_finished", "reasoning_delta",
+  "command_started", "command_output", "command_finished", "tool_call", "files_changed", "web_search",
+]);
 
 export function buildTranscript(events: ConversationEvent[]): Turn[] {
   const turns: Turn[] = [];
   let turn: Turn | undefined;
   const byId = new Map<string, Item>();
   const approvals = new Map<string, Approval>();
+  // During a rigor review, Codex's messages are the review, not the answer.
+  let review: Extract<Item, { kind: "review" }> | undefined;
 
   const current = (): Turn => {
     if (!turn) {
@@ -47,8 +56,47 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   for (const event of events) {
     const data = event.data;
     const id = text(data.id);
+    // The review turn's own work isn't the answer's: its messages, commands,
+    // and tool calls are left out; its end closes the review.
+    if (review?.status === "running" && REVIEW_TURN_EVENTS.has(event.type)) {
+      if (event.type === "turn_finished") {
+        review.status = data.status === "interrupted" ? "stopped" : review.text && data.status === "completed" ? "done" : "failed";
+      }
+      continue;
+    }
     switch (event.type) {
+      case "review_started":
+        review = { kind: "review", text: "", status: "running" };
+        add(review);
+        break;
+      case "review":
+        if (review) review.text = text(data.text);
+        break;
+      case "review_finished":
+        if (review) {
+          review.status =
+            data.status === "interrupted" ? "stopped" : data.status === "completed" && review.text ? "done" : "failed";
+        }
+        review = undefined;
+        break;
+      case "trace":
+        current().trace = {
+          numbers: Number(data.numbers) || 0,
+          untraced: Array.isArray(data.untraced) ? data.untraced.map(String) : [],
+        };
+        break;
+      case "plan_approved": {
+        const item = approvals.get(text(data.approval));
+        if (item) {
+          item.plan = (data.plan as Record<string, string>) ?? item.plan;
+          item.frozen = { at: text(data.approved_at), sha256: text(data.sha256) };
+        }
+        break;
+      }
       case "user_message":
+        // A review that never said it finished (DataLab stopped) is over now.
+        if (review?.status === "running") review.status = "failed";
+        review = undefined;
         turn = { userText: text(data.text), items: [], status: "running" };
         turns.push(turn);
         byId.clear();
@@ -125,7 +173,14 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         add({ kind: "notice", tone: data.tone === "error" ? "error" : "info", text: text(data.text) });
         break;
       case "approval_requested": {
-        const item: Approval = { kind: "approval", id, question: text(data.question), state: "pending" };
+        const item: Approval = {
+          kind: "approval",
+          id,
+          approvalKind: data.kind === "analysis_plan" ? "analysis_plan" : "research_helper",
+          question: text(data.question),
+          plan: (data.plan as Record<string, string> | undefined) ?? undefined,
+          state: "pending",
+        };
         approvals.set(id, item);
         add(item);
         break;
@@ -195,6 +250,11 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         turns.push(turn);
         break;
       }
+      case "turn_done":
+        // DataLab has finished the turn, with its checkpoint and review.
+        if (review?.status === "running") review.status = "failed";
+        if (turn?.status === "running") turn.status = "completed";
+        break;
       case "stop_requested":
         add({ kind: "notice", tone: "info", text: "Stopping…" });
         break;
