@@ -14,7 +14,7 @@ import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 
-from datalab import db
+from datalab import __version__, db
 from datalab.api.conversations import build_conversations_router
 from datalab.api.safety import build_safety_router
 from datalab.config import Settings
@@ -33,7 +33,7 @@ from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
-VERSION = "0.1.0"
+VERSION = __version__
 
 # Hosts the agent-tools endpoint answers to: the local browser, and the
 # gateway container reaching the host.

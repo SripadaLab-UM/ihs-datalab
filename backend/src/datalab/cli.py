@@ -10,7 +10,10 @@ from datalab.config import load_settings
 
 
 def main(argv: list[str] | None = None) -> int:
+    from datalab import __version__
+
     parser = argparse.ArgumentParser(prog="datalab")
+    parser.add_argument("--version", action="version", version=f"datalab {__version__}")
     parser.add_argument("--profile", choices=["real", "practice"], help="default: real")
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -20,6 +23,14 @@ def main(argv: list[str] | None = None) -> int:
     trial.add_argument("question")
     trial.add_argument("--image", default="datalab-agent:dev")
     trial.add_argument("--research", action="store_true", help="a research session instead")
+    setup = commands.add_parser("setup", help="save the lab's settings and your keys")
+    setup.add_argument("--settings", type=Path, help="the lab's DataLab settings file")
+    setup.add_argument("--update", action="store_true", help="replace keys already saved")
+    remove = commands.add_parser("uninstall", help="remove DataLab's containers, keys, and data")
+    choice = remove.add_mutually_exclusive_group()
+    choice.add_argument("--delete-data", action="store_true", default=None)
+    choice.add_argument("--keep-data", dest="delete_data", action="store_false")
+    commands.add_parser("pull-images", help="download the pinned container images")
     commands.add_parser("db-check", help="connect and report what the session may do")
     safety = commands.add_parser("safety-check", help="run the Safety check and print the results")
     safety.add_argument(
@@ -44,6 +55,19 @@ def main(argv: list[str] | None = None) -> int:
         from datalab.trial import run_trial
 
         return asyncio.run(run_trial(settings, args.question, args.image, args.research))
+
+    if args.command == "setup":
+        from datalab.setup import setup as run_setup
+
+        return run_setup(args.profile or "real", args.settings, update=args.update)
+
+    if args.command == "uninstall":
+        from datalab.setup import uninstall
+
+        return uninstall(delete_data=args.delete_data)
+
+    if args.command == "pull-images":
+        return _pull_images(settings)
 
     if args.command == "db-check":
         return _db_check(settings)
@@ -87,6 +111,24 @@ def _serve(settings, *, open_browser: bool) -> int:
         log_level="warning",
         timeout_graceful_shutdown=5,
     )
+    return 0
+
+
+def _pull_images(settings) -> int:
+    import subprocess
+
+    from datalab.sessions.containers import GATEWAY_IMAGE, PROXY_IMAGE
+
+    images = [GATEWAY_IMAGE, PROXY_IMAGE]
+    if "/" in settings.agent_image:  # from a registry; a local development image isn't
+        images.insert(0, settings.agent_image)
+    else:
+        print(f"Using the local agent image {settings.agent_image} (not downloaded).")
+    for image in images:
+        print(f"Downloading {image.split('@')[0]} …", flush=True)
+        if subprocess.run(["docker", "pull", "-q", image]).returncode != 0:
+            print(f"Couldn't download {image}. Is Docker Desktop running?")
+            return 1
     return 0
 
 

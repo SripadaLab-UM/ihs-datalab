@@ -1,0 +1,120 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish a release:
+# 1. build the agent image for Intel/AMD and Apple Silicon and push it to the
+#    GitHub Container Registry;
+# 2. build the DataLab package with that image pinned by digest inside it;
+# 3. create a GitHub Release with the package, the exact dependency versions,
+#    and the installers.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE: ghcr.io/sripadalab-um/datalab-agent
+
+jobs:
+  image:
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (by digest)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: images/agent
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.platform }}
+      - name: Remember the digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ strategy.job-index }}
+          path: /tmp/digests/*
+
+  manifest:
+    needs: image
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.pin.outputs.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Combine both platforms under the version tag
+        run: |
+          docker buildx imagetools create -t "$IMAGE:${GITHUB_REF_NAME}" \
+            $(printf "$IMAGE@sha256:%s " $(ls /tmp/digests))
+      - name: Pin the combined image by digest
+        id: pin
+        run: |
+          digest=$(docker buildx imagetools inspect "$IMAGE:${GITHUB_REF_NAME}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+
+  package:
+    needs: manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: astral-sh/setup-uv@v6
+      - name: Check the tag matches the package version
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/datalab/__init__.py)
+          test "v$version" = "${GITHUB_REF_NAME%%-*}" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
+      - name: Build the package
+        env:
+          AGENT_IMAGE: ${{ needs.manifest.outputs.image }}
+        run: sh scripts/build-release.sh
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGENT_IMAGE: ${{ needs.manifest.outputs.image }}
+        run: |
+          mkdir -p assets
+          cp installer/macos/install.sh assets/install-macos.sh
+          cp installer/macos/uninstall.sh assets/uninstall-macos.sh
+          cp installer/windows/install.ps1 assets/install-windows.ps1
+          cp installer/windows/uninstall.ps1 assets/uninstall-windows.ps1
+          cp backend/dist/*.whl backend/dist/constraints.txt assets/
+          prerelease=""
+          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" $prerelease \
+            --title "DataLab $GITHUB_REF_NAME" \
+            --notes "Agent image: \`$AGENT_IMAGE\`" \
+            assets/*

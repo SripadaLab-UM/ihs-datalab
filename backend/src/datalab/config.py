@@ -88,6 +88,16 @@ PRACTICE_ORACLE = OracleSettings(
 )
 
 
+def _release_agent_image() -> str | None:
+    """The agent image a release was built for (written by scripts/build-release.sh)."""
+    release = Path(__file__).with_name("release.json")
+    if release.exists():
+        import json
+
+        return json.loads(release.read_text()).get("agent_image")
+    return None
+
+
 def default_data_dir(profile: Profile) -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / "DataLab"
@@ -117,7 +127,9 @@ def load_settings(profile: Profile | None = None) -> Settings:
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
         agent_image=os.environ.get("DATALAB_AGENT_IMAGE")
-        or raw.get("agent_image", Settings.agent_image),
+        or raw.get("agent_image")
+        or _release_agent_image()
+        or Settings.agent_image,
         model_base_url=raw.get("model_base_url", Settings.model_base_url),
         default_model=raw.get("default_model", Settings.default_model),
         port=int(raw.get("port", 8766 if profile == "practice" else 8765)),

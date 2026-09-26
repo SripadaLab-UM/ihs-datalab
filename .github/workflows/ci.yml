@@ -81,3 +81,12 @@ jobs:
       - name: Type check, test, build
         working-directory: frontend
         run: npm run typecheck && npm test && npm run build
+      - name: The release package installs cleanly and starts
+        # Catches dependencies that only the development setup provides.
+        run: |
+          sh scripts/build-release.sh
+          uv venv -q /tmp/clean --python 3.13
+          uv pip install -q --python /tmp/clean/bin/python \
+            --constraints backend/dist/constraints.txt backend/dist/*.whl
+          /tmp/clean/bin/datalab --version
+          /tmp/clean/bin/python -c "import datalab.app, datalab.safety, datalab.trial; from datalab.cli import _web_dist; assert _web_dist(), 'web UI missing from the package'"

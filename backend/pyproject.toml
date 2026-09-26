@@ -1,6 +1,6 @@
 [project]
 name = "datalab"
-version = "0.1.0"
+dynamic = ["version"]
 description = "IHS DataLab: a safe local workspace for using Codex with Intern Health Study data"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,6 +12,8 @@ dependencies = [
     "mcp>=2.2",
     "keyring>=25",
     "pyyaml>=6.0.3",
+    "httpx>=0.28",
+    "starlette>=0.48",
 ]
 
 [project.scripts]
@@ -31,8 +33,14 @@ dev = [
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
+[tool.hatch.version]
+path = "src/datalab/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/datalab"]
+# The built web UI is copied here by scripts/build-release.sh. It isn't in
+# git (see .gitignore), so it has to be listed to end up in the package.
+artifacts = ["src/datalab/web_dist/**", "src/datalab/release.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
