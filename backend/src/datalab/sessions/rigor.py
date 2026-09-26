@@ -28,8 +28,9 @@ place it doesn't.
    errors) that fit the data's structure (repeated measures, clustering)?
 6. Measures: are the tables and columns used the right ones for the
    question, and checked (not assumed)?
-7. Privacy: do the answer or outputs contain identifiers, row-level records,
-   or groups of fewer than 11 participants that weren't asked for?
+7. Privacy: do the answer or outputs contain identifiers or row-level
+   records that weren't asked for, or any count, category, or group of fewer
+   than 11 participants (unless the person set a different threshold)?
 8. Overreach: is anything called a finding or a discovery that is only
    exploratory, or stated more confidently than the evidence allows?
 

@@ -201,7 +201,11 @@ def simulate_days(rng: random.Random, p: Person, internship: date) -> None:
         weekend = d.weekday() >= 5
         steps = rng.lognormvariate(0, 0.3) * base_steps * (0.85 if intern else 1.0) * (1.1 if weekend else 1.0)
         mood = None
-        if rng.random() < mood_resp * (0.75 if intern else 1.0):
+        # In the intern year, people whose mood runs low answer less often
+        # (0.25 of their usual rate at the bottom of the range, 0.85 at the
+        # top), so a pooled average understates the within-person drop.
+        intern_resp = 0.25 + 0.6 * (base_mood - 5.5) / 2.5
+        if rng.random() < mood_resp * (intern_resp if intern else 1.0):
             mood = min(10, max(1, round(rng.gauss(base_mood - (0.7 if intern else 0), 1.4))))
         p.days.append(Day(
             d=d, tz=tz, worn=worn, steps=int(steps),
@@ -691,10 +695,41 @@ def grant(cur, cohort: str, name: str, is_table: bool) -> None:
         cur.execute(f"GRANT SELECT, UPDATE, DELETE, ALTER ON {cohort}.{qi(name)} TO IHS_2026_ROLE")
 
 
+# Tables that exist but hold no rows, as a feed not loaded yet would. The
+# rows are still generated (so nothing else changes), just not loaded.
+EMPTY_TABLES = {("IHS_2026", "GARMINHRVSUMMARY")}
+
+# Column comments, as a documented database would carry them. They're what an
+# agent can read (describe_table) about conventions the data follow.
+COLUMN_COMMENTS = {
+    ("STUDYPARTICIPANTS", "SECONDARYIDENTIFIER"): (
+        "Study participant ID. NULL for people who were screened but never enrolled; "
+        "they can still have device data."
+    ),
+    ("STUDYPARTICIPANTS", "WITHDRAWDATE"): (
+        "Date the participant withdrew, if they did. Their data before this date is kept."
+    ),
+    ("VW_IHS_PARTICIPANT_SUMMARY", "STUDY_PARTICIPANT_ID"): (
+        "Study participant ID. NULL for people who were screened but never enrolled."
+    ),
+    **{
+        (view, "STUDY_PARTICIPANT_ID"): (
+            "Study participant ID. NULL for people who were screened but never enrolled."
+        )
+        for view in ("VW_BASELINE_SURVEY", "VW_SEP_SURVEY", "VW_DEC_SURVEY", "VW_MAR_SURVEY", "VW_JUN_SURVEY")
+    },
+}
+
+
 def create_object(cur, cohort: str, name: str, obj: dict, objects: dict) -> list[tuple[str, str]]:
     cols = cohort_columns(obj, cohort)
     if obj["create_as"] == "table":
         cur.execute(f"CREATE TABLE {cohort}.{qi(name)} ({', '.join(f'{qi(n)} {t}' for n, t in cols)})")
+        for column, _ in cols:
+            comment = COLUMN_COMMENTS.get((name, column))
+            if comment:
+                text = comment.replace("'", "''")
+                cur.execute(f"COMMENT ON COLUMN {cohort}.{qi(name)}.{qi(column)} IS '{text}'")
     else:
         base_types = dict(cohort_columns(objects[obj["base"]], cohort))
         # V* views expose timezone-aware timestamps as text.
@@ -755,7 +790,8 @@ def main() -> None:
                 if name in tables:
                     unknown = set().union(*map(dict.keys, rows[name])) - all_columns if rows[name] else set()
                     assert not unknown, f"{name}: generator wrote unknown columns {unknown}"
-                    load(cur, cohort, name, cols, rows[name])
+                    if (cohort, name) not in EMPTY_TABLES:
+                        load(cur, cohort, name, cols, rows[name])
                 grant(cur, cohort, name, name in tables)
             conn.commit()
             total = sum(len(v) for v in rows.values())

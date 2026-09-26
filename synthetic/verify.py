@@ -39,6 +39,9 @@ def can_write(cur) -> bool:
         cur.connection.rollback()
 
 
+# Exists but holds no rows, like a feed not loaded yet (generate.py EMPTY_TABLES).
+MEANT_EMPTY = {"IHS_2026.GARMINHRVSUMMARY", "IHS_2026.VGARMINHRVSUMMARY"}
+
 # Quirk probes: (description, SQL returning a count that should be > 0).
 QUIRKS = [
     ("Garmin daily: participant-days with >1 row (later INSERTEDDATE wins)",
@@ -99,8 +102,10 @@ def main() -> None:
         print(f"  {'object':42}" + "".join(f"{c:>10}" for c in COHORTS))
         for name, by in counts.items():
             print(f"  {name:42}" + "".join(f"{by[c]:>10,}" if c in by else f"{'-':>10}" for c in COHORTS))
-        empty = [f"{c}.{n}" for n, by in counts.items() for c, v in by.items() if v == 0]
-        check("every object has rows", not empty, empty or "")
+        empty = {f"{c}.{n}" for n, by in counts.items() for c, v in by.items() if v == 0}
+        unexpected = sorted(empty - MEANT_EMPTY)
+        check("every object has rows (but the deliberately empty one)", not unexpected, unexpected or "")
+        check("the deliberately empty table is empty", MEANT_EMPTY <= empty, sorted(MEANT_EMPTY - empty) or "")
         check("drift: VW_DAILY_MOOD absent in IHS_2024", "IHS_2024" not in counts.get("VW_DAILY_MOOD", {}))
         check("drift: STG_SURVEYDICTIONARY replaces SURVEYDICTIONARY after 2024",
               set(counts["SURVEYDICTIONARY"]) == {"IHS_2024"} and "IHS_2024" not in counts["STG_SURVEYDICTIONARY"])

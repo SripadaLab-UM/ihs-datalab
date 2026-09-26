@@ -1,0 +1,66 @@
+# Scientific evaluations
+
+Questions with known answers on the **synthetic** database, asked through
+DataLab the way a researcher would, and graded against answers calculated
+independently (plain SQL in `expected.py`, not DataLab and not the agent).
+
+Each task is built around a trap the synthetic data carries on purpose
+(see `synthetic/README.md`, "Quirks included"):
+
+| Task | Tests |
+|---|---|
+| `enrolled_count` | Screened-but-not-enrolled rows (a denominator) |
+| `rhr_missing` | Missingness: the share, and what it's a share of |
+| `garmin_steps` | Superseded duplicate rows (one row per participant-day); n and uncertainty |
+| `cross_cohort` | Identifiers that are per cohort (no false joins) |
+| `oura_2024` | A table the cohort doesn't have (no invented numbers) |
+| `empty_hrv` | A table that exists but is empty (missing data, not a finding) |
+| `mood_change` | Within- vs between-person: low-mood interns answer less, so a pooled average understates the drop; n, uncertainty, no causal claim |
+| `phq9_sep` | Who counts as a participant in a survey; uncertainty |
+| `small_cells` | A count under 11 that must be suppressed (directly, as a percentage, or by subtraction) |
+
+What the agent can know is only what DataLab shows it. The synthetic
+database documents its conventions the way a documented database would,
+as column comments (a NULL `SECONDARYIDENTIFIER` means screened, never
+enrolled); for the real database these belong in the lab knowledge base.
+
+Still to add: a between-person question with a null answer ("do people who
+walk more report better mood?", where the person, not the day, is the
+unit), and cross-cohort pooling across schema drift.
+
+## Running
+
+```sh
+uv run --project backend python evals/run.py            # all tasks, ~20-40 min
+uv run --project backend python evals/run.py --only mood_change
+```
+
+Needs the synthetic database (`synthetic/db.sh start`), Docker, and a saved
+U-M GPT key. Stop any practice DataLab first: the runner starts its own, on
+port 8767 with a fresh data folder (removed afterwards) and a catalog
+rebuilt from the synthetic database, so eval conversations never mix with
+yours. `--repeat N` runs each task N times, for pass rates. Don't start a
+practice DataLab while it runs: its sessions would look like the run's own
+and be cleaned up with them. Plans the agent proposes are approved as written; research-helper
+questions are declined; the rigor review is off, so each answer is graded
+as given.
+
+Results go to `results/<date>-<commit>/`: `SUMMARY.md` (every answer, with
+its checks), one JSON file per task, the expected answers, and the run's
+details (commit, model, DataLab version). Commit them.
+
+## What a pass means
+
+The checks are mechanical and narrow: the right number within a stated
+tolerance, the denominator, a stated uncertainty, a suppressed cell. A pass
+is necessary, not sufficient; a person reads every answer in `SUMMARY.md`
+and notes anything the checks can't see (wrong reasoning that lands on the
+right number, a claim stated more firmly than the evidence allows).
+
+`test_graders.py` checks that each grader passes right answers, however
+they're written, and fails the traps. `expected.py --check` checks that each
+trap still separates right from wrong on freshly generated data. Both run in
+CI; the evals themselves don't (they call the model).
+
+**Re-run the set** whenever the prompts, skills, the model, or the Codex
+version change, and compare with the last committed run.

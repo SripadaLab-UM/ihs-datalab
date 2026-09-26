@@ -1,0 +1,10 @@
+# The backend's rules, except: long SQL and prose lines are fine here, and
+# the typographic minus sign (−) is deliberate: agents write it in answers.
+extend = "../backend/pyproject.toml"
+
+[lint]
+extend-ignore = ["E501", "RUF001", "RUF003"]
+
+[lint.isort]
+# The eval modules import each other by name, wherever ruff is run from.
+known-local-folder = ["expected", "tasks"]

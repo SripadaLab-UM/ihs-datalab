@@ -155,7 +155,9 @@ counts each one.
 | Garmin sleep CALENDARDATE occasionally the bed date instead of the wake date | GARMINSLEEPSUMMARY |
 | Fitbit HR-zone minutes NULL on some days (pipelines fall back to tracker minutes). 'classic' vs 'stages' sleep logs. NULL RHR/HRV. | FITBITDAILYDATA, FITBITSLEEPLOGS |
 | Missing days, multi-day sync gaps, late enrollment, dropout (~15%), WITHDRAWDATE | all device tables, STUDYPARTICIPANTS |
-| Screened-but-not-enrolled participants: NULL STUDY_PARTICIPANT_ID and SECONDARYIDENTIFIER, but they still have device data | participant tables |
+| Screened-but-not-enrolled participants: NULL STUDY_PARTICIPANT_ID and SECONDARYIDENTIFIER, but they still have device data. Column comments say so. | participant tables |
+| A table that exists but is empty (a feed not loaded yet), though the cohort has Garmin users | IHS_2026.GARMINHRVSUMMARY |
+| In the intern year, people whose mood runs low answer the daily mood question less often, so a pooled average understates the within-person drop | VW_DAILY_MOOD |
 | Numbers stored as text | HealthKit VALUE, MOOD_SCORE, ANSWERS, STG SURVEYVERSION |
 | Phone-counted HealthKit steps for some non-Apple-Watch iPhone users, so one participant-day can come from two devices | HEALTHKITSTATISTICS_DAILYSTEPS |
 | Survey version 2 for about half of Q1 respondents (2025+) | SURVEYRESULTS, dictionary |

@@ -30,3 +30,4 @@ Thumbs.db
 # Built web UI inside the Python package (release builds only)
 backend/src/datalab/web_dist/
 backend/src/datalab/release.json
+evals/results/*/server.log

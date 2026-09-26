@@ -29,6 +29,8 @@ jobs:
         run: uv run pyright
       - name: Unit tests
         run: uv run pytest -q
+      - name: Evaluation graders
+        run: uv run ruff check ../evals && uv run ruff format --check ../evals && uv run pytest -q ../evals/test_graders.py
 
   oracle:
     # The backend against a real Oracle: the synthetic database (fake data only).
@@ -47,6 +49,9 @@ jobs:
           # Dev-only password of the synthetic database (see synthetic/README.md).
           DATALAB_ORACLE_PASSWORD: datalab_ro
         run: uv sync --locked && uv run pytest -m oracle -q
+      - name: The evaluation traps still separate right from wrong
+        working-directory: backend
+        run: uv run python ../evals/expected.py --check
       - name: Safety check (adversarial, against the synthetic database), watching for DNS leaks
         working-directory: backend
         env:
