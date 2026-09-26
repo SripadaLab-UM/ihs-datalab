@@ -15,6 +15,18 @@ from datalab.sessions.runtime import TurnResult
 from tests.conftest import FakeDatabase, live_server
 
 
+class FakeContainers:
+    def __init__(self) -> None:
+        self.paused = 0
+
+    async def pause(self) -> bool:
+        self.paused += 1
+        return True
+
+    async def unpause(self) -> None:
+        pass
+
+
 class FakeRuntime:
     """Replays a scripted turn instead of running Codex in Docker."""
 
@@ -23,6 +35,7 @@ class FakeRuntime:
         self.hold = hold
         self.sent: list[str] = []
         self.stopped = False
+        self.containers = FakeContainers()
 
     def begin_turn(self) -> None:
         pass
@@ -106,15 +119,17 @@ def test_a_message_runs_a_turn_and_logs_its_events(app):
             client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"}).status_code
             == 202
         )
-        events = wait_for(client, cid, "turn_finished")
+        events = wait_for(client, cid, "checkpoint")
     assert [e["type"] for e in events] == [
         "user_message",
         "turn_started",
         "answer_delta",
         "turn_finished",
+        "checkpoint",
     ]
-    assert [e["seq"] for e in events] == [1, 2, 3, 4]
+    assert [e["seq"] for e in events] == [1, 2, 3, 4, 5]
     assert made[0].sent == ["hi"]
+    assert made[0].containers.paused == 1  # frozen while the files were saved
 
 
 def test_only_one_message_at_a_time(app):

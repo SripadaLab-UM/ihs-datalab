@@ -127,6 +127,23 @@ class ConversationStore:
             ).fetchall()
         return [Event(r[0], r[1], r[2], json.loads(r[3])) for r in rows]
 
+    def count(self, conversation_id: str, type: str) -> int:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) FROM events WHERE conversation_id = ? AND type = ?",
+                (conversation_id, type),
+            ).fetchone()
+        return row[0]
+
+    def last(self, conversation_id: str, type: str) -> Event | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT seq, created_at, type, data_json FROM events "
+                "WHERE conversation_id = ? AND type = ? ORDER BY seq DESC LIMIT 1",
+                (conversation_id, type),
+            ).fetchone()
+        return Event(row[0], row[1], row[2], json.loads(row[3])) if row else None
+
     async def wait_for_events(self, conversation_id: str, after: int, timeout: float) -> None:
         """Return once this conversation has events after `after`, or after `timeout`.
 

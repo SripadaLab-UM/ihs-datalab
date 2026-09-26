@@ -71,3 +71,19 @@ describe("notices", () => {
     expect(turn.items).toContainEqual({ kind: "notice", tone: "info", text: "starting fresh" });
   });
 });
+
+describe("workspace events", () => {
+  it("shows a restore on its own, between turns, and lists file edits", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "Edit it" }),
+      e("files_changed", { paths: ["/work/a.R", "/work/b.R"] }),
+      e("turn_finished", { status: "completed" }),
+      e("checkpoint", { number: 1 }),
+      e("files_restored", { label: "After turn 1" }),
+      e("user_message", { text: "Next" }),
+    ]);
+    expect(turns.map((t) => t.userText)).toEqual(["Edit it", "", "Next"]);
+    expect(turns[0].items).toEqual([{ kind: "files", paths: ["/work/a.R", "/work/b.R"] }]);
+    expect(turns[1].items[0]).toMatchObject({ kind: "notice", text: expect.stringContaining("after turn 1") });
+  });
+});

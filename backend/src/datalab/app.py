@@ -16,6 +16,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from datalab import __version__, db
 from datalab.api.conversations import build_conversations_router
+from datalab.api.files import Previews, build_files_router, build_preview_router
 from datalab.api.safety import build_safety_router
 from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
@@ -107,6 +108,9 @@ def create_app(
     app.include_router(
         build_conversations_router(conversations, sessions, settings.default_model, access_log)
     )
+    previews = Previews()
+    app.include_router(build_files_router(conversations, sessions, previews))
+    app.include_router(build_preview_router(previews))
     canaries = Canaries()
     app.include_router(canaries.router())
     safety = SafetyCheck(settings, tokens, canaries, model_key=model_key)

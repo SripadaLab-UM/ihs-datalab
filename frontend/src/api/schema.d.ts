@@ -145,6 +145,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Folder
+         * @description Files as of the end of the last turn (or query results, as they are).
+         */
+        get: operations["list_folder_api_conversations__conversation_id__files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/files/{root}/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Content
+         * @description A file's content for the in-app viewer: images, or the start of a text file.
+         */
+        get: operations["file_content_api_conversations__conversation_id__files__root___path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** New Preview */
+        post: operations["new_preview_api_conversations__conversation_id__previews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/checkpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Checkpoints */
+        get: operations["list_checkpoints_api_conversations__conversation_id__checkpoints_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/checkpoints/{number}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore */
+        post: operations["restore_api_conversations__conversation_id__checkpoints__number__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/safety/check": {
         parameters: {
             query?: never;
@@ -218,6 +309,23 @@ export interface components {
             /** Required */
             required: boolean;
         };
+        /** CheckpointOut */
+        CheckpointOut: {
+            /** Number */
+            number: number;
+            /** Created At */
+            created_at: string;
+            /** Label */
+            label: string;
+            /** Turn */
+            turn: number | null;
+            /** Files */
+            files: number;
+            /** Bytes */
+            bytes: number;
+            /** Skipped */
+            skipped: components["schemas"]["SkippedOut"][];
+        };
         /** ConversationOut */
         ConversationOut: {
             /** Id */
@@ -252,6 +360,20 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /** FileOut */
+        FileOut: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /** Modified */
+            modified: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "html" | "image" | "csv" | "text" | "pdf" | "other";
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -292,6 +414,21 @@ export interface components {
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh") | null;
         };
+        /** NewPreview */
+        NewPreview: {
+            /**
+             * Root
+             * @enum {string}
+             */
+            root: "outputs" | "work" | "results";
+            /** Path */
+            path: string;
+        };
+        /** PreviewOut */
+        PreviewOut: {
+            /** Url */
+            url: string;
+        };
         /** QueryRecordOut */
         QueryRecordOut: {
             /** Id */
@@ -313,6 +450,17 @@ export interface components {
             /** Message */
             message: string | null;
         };
+        /** RestoreOut */
+        RestoreOut: {
+            /** Written */
+            written: number;
+            /** Removed */
+            removed: number;
+            /** Left Alone */
+            left_alone: string[];
+            /** Not Restored */
+            not_restored: string[];
+        };
         /** SafetyReportOut */
         SafetyReportOut: {
             /** Started At */
@@ -325,6 +473,15 @@ export interface components {
             passed_strict: boolean;
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
+        };
+        /** SkippedOut */
+        SkippedOut: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+            /** Size */
+            size: number | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -633,6 +790,172 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueryRecordOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_folder_api_conversations__conversation_id__files_get: {
+        parameters: {
+            query?: {
+                root?: "outputs" | "work" | "results";
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    file_content_api_conversations__conversation_id__files__root___path__get: {
+        parameters: {
+            query?: {
+                head?: number;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+                root: "outputs" | "work" | "results";
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    new_preview_api_conversations__conversation_id__previews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewPreview"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_checkpoints_api_conversations__conversation_id__checkpoints_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckpointOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_api_conversations__conversation_id__checkpoints__number__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoreOut"];
                 };
             };
             /** @description Validation Error */

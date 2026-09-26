@@ -6,10 +6,15 @@ import { Link, useNavigate, useParams } from "react-router";
 import { api, type Mode } from "@/api/client";
 import { Chat } from "@/components/chat/Chat";
 import { Button, Panel } from "@/components/ui";
+import { type OpenFile, OpenFileContext } from "@/lib/files";
+
+import { FileViewer } from "./FileViewer";
+import { SidePanel } from "./SidePanel";
 
 export function WorkspacePage() {
   const { conversationId } = useParams();
   const [creating, setCreating] = useState(false);
+  const [open, setOpen] = useState<OpenFile | null>(null);
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
   const current = conversations.data?.find((c) => c.id === conversationId);
 
@@ -46,7 +51,9 @@ export function WorkspacePage() {
 
       <main className="min-h-0 bg-canvas">
         {current ? (
-          <Chat key={current.id} conversation={current} />
+          <OpenFileContext value={setOpen}>
+            <Chat key={current.id} conversation={current} />
+          </OpenFileContext>
         ) : (
           <div className="flex h-full items-center justify-center text-muted">
             Start a new conversation, or pick one on the left.
@@ -55,8 +62,10 @@ export function WorkspacePage() {
       </main>
 
       <aside className="min-h-0 border-l border-line bg-surface">
-        {current?.kind === "data" && <DataAccessed conversationId={current.id} />}
+        {current && <SidePanel key={current.id} conversation={current} onOpen={setOpen} />}
       </aside>
+
+      {current && open && <FileViewer conversationId={current.id} file={open} onClose={() => setOpen(null)} />}
 
       {creating && <NewConversation onClose={() => setCreating(false)} />}
     </div>
@@ -125,39 +134,5 @@ function ModeCard({ mode, selected, onSelect }: { mode: Mode; selected: boolean;
       <span className="font-medium">{mode.label}</span>
       <span className="ml-2 text-xs text-muted">{mode.kind === "data" ? "🔒 data" : "🌐 research"}</span>
     </button>
-  );
-}
-
-function DataAccessed({ conversationId }: { conversationId: string }) {
-  const queries = useQuery({
-    queryKey: ["data-accessed", conversationId],
-    queryFn: () => api.dataAccessed(conversationId),
-    refetchInterval: 3000,
-  });
-  return (
-    <Panel title="Data accessed">
-      {queries.data?.length === 0 && <p className="text-sm text-muted">No queries yet.</p>}
-      <ol className="flex flex-col gap-2">
-        {queries.data?.map((q) => (
-          <li key={q.id} className="rounded-lg border border-line p-2 text-xs">
-            <div className="flex justify-between">
-              <span className={clsx(q.status === "succeeded" ? "text-data" : q.status === "running" ? "text-accent" : "text-danger")}>
-                {q.status}
-              </span>
-              <span className="text-muted">
-                {q.row_count != null && `${q.row_count.toLocaleString()} rows · `}
-                {new Date(q.started_at).toLocaleTimeString()}
-              </span>
-            </div>
-            <div className="mt-1 font-medium">{q.tables.join(", ") || "—"}</div>
-            <details className="mt-1">
-              <summary className="cursor-pointer text-muted">SQL</summary>
-              <pre className="mt-1 whitespace-pre-wrap font-mono">{q.sql_text}</pre>
-            </details>
-            {q.message && <p className="mt-1 text-muted">{q.message}</p>}
-          </li>
-        ))}
-      </ol>
-    </Panel>
   );
 }

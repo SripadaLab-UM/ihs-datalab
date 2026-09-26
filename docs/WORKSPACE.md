@@ -222,8 +222,8 @@ The layout is the same for every mode:
 
 - The streaming chat renderer. It splits reasoning, commands, and answers,
   and renders Markdown with inline Vega-Lite charts.
-- File and HTML-report previews. HTML now opens in a sandboxed frame with no
-  network access (see [SAFETY.md](SAFETY.md)).
+- File and HTML-report previews. HTML now opens in a sandboxed frame with
+  scripts off and no network access (see [SAFETY.md](SAFETY.md)).
 - The model and reasoning picker.
 - Starter prompts per mode. The prototype's are good but Spine-specific, so
   they need rewriting.

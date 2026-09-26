@@ -59,6 +59,11 @@ class SessionPaths:
         return self.root / "oracle"
 
     @property
+    def checkpoints(self) -> Path:
+        # Outside every folder the container can see.
+        return self.root / "checkpoints"
+
+    @property
     def gateway_conf(self) -> Path:
         return self.root / "gateway.conf"
 
@@ -153,8 +158,55 @@ class SessionContainers:
         await docker("network", "rm", self.network, check=False)
 
     async def is_running(self) -> bool:
-        output = await docker("inspect", "-f", "{{.State.Running}}", self.agent, check=False)
-        return output.strip() == "true"
+        """Running and not paused: a paused agent can't run Codex."""
+        output = await docker(
+            "inspect", "-f", "{{.State.Running}} {{.State.Paused}}", self.agent, check=False
+        )
+        return output.split() == ["true", "false"]
+
+    async def stop_and_confirm(self) -> None:
+        """Stop the containers, and fail unless the agent's is really gone.
+
+        Fails closed: if Docker can't be asked, the container isn't known to
+        be gone.
+        """
+        await self.stop()
+        if await self._agent_state() is not None:
+            raise DockerError("DataLab couldn't stop the agent's container.")
+
+    async def pause(self) -> None:
+        """Freeze everything in the agent's container, or confirm it isn't running.
+
+        Raises DockerError unless nothing can run in it afterwards.
+        """
+        state = await self._agent_state()
+        if state is None or state == "not running":
+            return
+        if state == "running":
+            await docker("pause", self.agent)
+        if await self._agent_state() != "paused":
+            raise DockerError("DataLab couldn't pause the agent's container.")
+
+    async def unpause(self) -> None:
+        if await self._agent_state() == "paused":
+            await docker("unpause", self.agent)
+
+    async def _agent_state(self) -> str | None:
+        """'running', 'paused', 'not running', or None if there's no container.
+
+        Raises DockerError if Docker can't say.
+        """
+        code, out, err = await docker_status(
+            "inspect", "-f", "{{.State.Running}} {{.State.Paused}}", self.agent
+        )
+        if code != 0:
+            if "no such" in err.lower():
+                return None
+            raise DockerError(f"docker inspect failed: {err.strip()[:300]}")
+        running, paused = [*out.split(), "", ""][:2]
+        if paused == "true":
+            return "paused"
+        return "running" if running == "true" else "not running"
 
     async def open_app_server(self) -> asyncio.subprocess.Process:
         """Start `codex app-server` in the agent; talk to it over stdin/stdout."""
@@ -276,6 +328,15 @@ def render_gateway_conf(kind: SessionKind, host_port: int) -> str:
             "    }\n"
         )
     return template.replace("{mcp_location}", mcp).replace("{port}", str(host_port))
+
+
+async def docker_status(*args: str) -> tuple[int, str, str]:
+    """Run docker; return its exit code, output, and error output."""
+    process = await asyncio.create_subprocess_exec(
+        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    out, err = await process.communicate()
+    return process.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
 
 async def docker(*args: str, check: bool = True) -> str:

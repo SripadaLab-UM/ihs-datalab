@@ -15,6 +15,7 @@ export type Item =
   | { kind: "reasoning"; text: string }
   | { kind: "command"; id: string; command: string; output: string; exitCode: number | null; status: string }
   | { kind: "tool"; id: string; tool: string; server: string; status: string; arguments: unknown; error: string | null }
+  | { kind: "files"; paths: string[] }
   | { kind: "notice"; tone: "error" | "info"; text: string };
 
 export interface Turn {
@@ -120,6 +121,30 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "notice":
         add({ kind: "notice", tone: "info", text: text(data.text) });
         break;
+      case "files_changed": {
+        const paths = Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === "string") : [];
+        if (paths.length) add({ kind: "files", paths });
+        break;
+      }
+      case "files_restored": {
+        // Between turns: shown on its own, after the turn it follows.
+        const label = text(data.label).toLowerCase() || "an earlier checkpoint";
+        const leftAlone = Array.isArray(data.left_alone) ? data.left_alone.length : 0;
+        const notRestored = Array.isArray(data.not_restored) ? data.not_restored.length : 0;
+        const notice: Item = data.failed
+          ? { kind: "notice", tone: "error", text: `Restoring the files to how they were ${label} failed partway: ${text(data.error)}. The agent will be told.` }
+          : {
+              kind: "notice",
+              tone: "info",
+              text:
+                `You restored the files to how they were ${label}. The agent will be told on its next turn.` +
+                (leftAlone ? ` ${leftAlone} file${leftAlone > 1 ? "s" : ""} couldn't be checkpointed and ${leftAlone > 1 ? "were" : "was"} left as ${leftAlone > 1 ? "they were" : "it was"}.` : "") +
+                (notRestored ? ` ${notRestored} file${notRestored > 1 ? "s weren't" : " wasn't"} put back, so as not to replace ${leftAlone > 1 ? "those" : "it"}.` : ""),
+            };
+        turn = { userText: "", items: [notice], status: "completed" };
+        turns.push(turn);
+        break;
+      }
       case "stop_requested":
         add({ kind: "notice", tone: "info", text: "Stopping…" });
         break;

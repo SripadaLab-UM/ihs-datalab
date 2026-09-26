@@ -36,11 +36,14 @@ CONTENT_SECURITY_POLICY = "; ".join(
     ]
 )
 
+_CSP = b"content-security-policy"
 _SECURITY_HEADERS = [
-    (b"content-security-policy", CONTENT_SECURITY_POLICY.encode()),
+    (_CSP, CONTENT_SECURITY_POLICY.encode()),
     (b"x-content-type-options", b"nosniff"),
     (b"referrer-policy", b"no-referrer"),
     (b"cross-origin-opener-policy", b"same-origin"),
+    # No DNS lookups for links in a page: a looked-up name could carry data out.
+    (b"x-dns-prefetch-control", b"off"),
 ]
 
 
@@ -92,7 +95,12 @@ class ApiProtection:
 def _with_headers(send: Send) -> Send:
     async def wrapped(message: Message) -> None:
         if message["type"] == "http.response.start":
-            message["headers"] = [*message.get("headers", []), *_SECURITY_HEADERS]
+            headers = list(message.get("headers", []))
+            # A few routes (workspace files, previews) set a stricter policy of
+            # their own. Two policies would both apply, so keep only theirs.
+            has_policy = any(name.lower() == b"content-security-policy" for name, _ in headers)
+            extra = [h for h in _SECURITY_HEADERS if not (has_policy and h[0] == _CSP)]
+            message["headers"] = [*headers, *extra]
         await send(message)
 
     return wrapped

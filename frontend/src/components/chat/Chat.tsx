@@ -25,6 +25,16 @@ export function Chat({ conversation }: { conversation: Conversation }) {
     }
   }, [running, conversation.id, queryClient]);
 
+  // A new checkpoint or a restore changes the files the side panel shows.
+  const lastFilesEvent = events.findLast((e) => e.type === "checkpoint" || e.type === "files_restored")?.seq;
+  useEffect(() => {
+    if (lastFilesEvent === undefined) return;
+    queryClient.invalidateQueries({ queryKey: ["files", conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ["checkpoints", conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ["file-text", conversation.id] });
+    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  }, [lastFilesEvent, conversation.id, queryClient]);
+
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [events.length]);
@@ -65,7 +75,10 @@ function EmptyState({ kind }: { kind: "data" | "research" }) {
 
 function TurnView({ turn }: { turn: Turn }) {
   const answer = finalAnswer(turn);
-  const working = turn.items.filter((item) => !(item.kind === "message" && item.text === answer && answer));
+  // Notices are shown on their own, above the work log.
+  const working = turn.items.filter(
+    (item) => item.kind !== "notice" && !(item.kind === "message" && item.text === answer && answer),
+  );
   return (
     <article className="flex flex-col gap-3">
       {turn.userText && (
@@ -91,6 +104,7 @@ function WorkLog({ items, running }: { items: Item[]; running: boolean }) {
   const [open, setOpen] = useState(false);
   const commands = items.filter((i) => i.kind === "command").length;
   const tools = items.filter((i) => i.kind === "tool").length;
+  const edits = items.reduce((n, i) => n + (i.kind === "files" ? i.paths.length : 0), 0);
   const latest = [...items].reverse().find((i) => i.kind === "message");
   return (
     <div className="rounded-xl border border-line bg-surface">
@@ -100,7 +114,11 @@ function WorkLog({ items, running }: { items: Item[]; running: boolean }) {
       >
         <span className="truncate">
           {running ? "Working… " : "Worked · "}
-          {[commands && `${commands} command${commands > 1 ? "s" : ""}`, tools && `${tools} database step${tools > 1 ? "s" : ""}`]
+          {[
+            commands && `${commands} command${commands > 1 ? "s" : ""}`,
+            tools && `${tools} database step${tools > 1 ? "s" : ""}`,
+            edits && `${edits} file edit${edits > 1 ? "s" : ""}`,
+          ]
             .filter(Boolean)
             .join(", ")}
           {running && latest?.kind === "message" && latest.text && (
@@ -152,6 +170,12 @@ function WorkItem({ item }: { item: Item }) {
             {item.error ? `\n\n${item.error}` : ""}
           </pre>
         </details>
+      );
+    case "files":
+      return (
+        <p className="text-xs text-muted">
+          Edited <span className="font-mono">{item.paths.map((p) => p.replace(/^\/work\//, "")).join(", ")}</span>
+        </p>
       );
     case "notice":
       return <p className={item.tone === "error" ? "text-danger" : "text-muted"}>{item.text}</p>;

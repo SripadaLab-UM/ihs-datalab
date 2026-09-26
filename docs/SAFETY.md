@@ -116,8 +116,20 @@ access. It never gains it.
   - An app-wide Content Security Policy blocks every network request that
     isn't to DataLab itself. An image link or chart in an agent's answer
     can't send data anywhere.
-  - Agent-made HTML reports run in a sandboxed frame on a separate origin,
-    with no network access and no access to DataLab's API.
+  - Agent-made HTML reports are previewed in a sandboxed frame with **scripts
+    turned off** and a policy that allows no network requests. With scripts
+    on, a page could send data out simply by navigating itself to another
+    site, and no browser policy can stop that. Interactive reports work once
+    you export them and open them yourself.
+  - Previewed pages are cleaned first: resource hints (`dns-prefetch`,
+    `preconnect`), `<meta>` and `<base>` tags, scripts, and frames are
+    removed, since a DNS lookup of a crafted name could carry data out. DNS
+    prefetching is also switched off for the whole app. Previews are served
+    only into the viewer's frame, never as a page of their own.
+  - Workspace files shown in the viewer come from the latest checkpoint,
+    never the live folder, so the agent can't swap a file for a link to
+    somewhere else on the computer while DataLab reads it. They carry the
+    same inert policy, so opening one directly in a tab can't run anything.
   - Exported conversation reports carry the same no-network policy.
 - DataLab listens only on `127.0.0.1`, and its API requires the session
   cookie the launcher sets.
@@ -263,7 +275,13 @@ access. It never gains it.
 - Conversations, run history, and settings live in one local database in
   DataLab's data folder.
 - After each turn, the workspace is checkpointed to a host-side store the
-  agent can't write to.
+  agent can't write to. The container is paused while this happens, and
+  links in the workspace are never followed, so the agent can't trick
+  DataLab into copying a file from elsewhere on the computer. Links are kept
+  as links.
+- A rollback never deletes anything the checkpoint taken just before it
+  couldn't save (a very large file, a pipe): it's left as it is, and the
+  chat says so.
 - **Rollback restores workspace files** to how they were after a chosen turn.
   The conversation isn't rewound; the agent is told the files were restored.
   Very large files aren't checkpointed, and the rollback screen lists them.
@@ -297,4 +315,4 @@ Oracle.
 | Helper gets only the approved text | A helper container's mounts and inputs contain only the approved question |
 | Database access is read-only | After connecting, the session's enabled roles are exactly the read-only set, its system privileges are exactly `CREATE SESSION`, and it has no non-SELECT privileges on any IHS schema |
 | Right agent image | The image digest matches the pinned release |
-| Agent HTML can't phone home | A test report that tries to fetch an outside URL and call DataLab's API is blocked in the preview |
+| Agent HTML can't phone home | A test report that tries to run a script, load an outside image, refresh to an outside URL, or submit a form sends nothing in the preview |

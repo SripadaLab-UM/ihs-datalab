@@ -1,6 +1,8 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, use } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 const VegaChart = lazy(() => import("./VegaChart"));
 
@@ -11,6 +13,7 @@ const VegaChart = lazy(() => import("./VegaChart"));
  * since loading one could send data out.
  */
 export function Markdown({ text }: { text: string }) {
+  const openFile = use(OpenFileContext);
   return (
     <div className="prose-datalab">
       <ReactMarkdown
@@ -36,6 +39,15 @@ export function Markdown({ text }: { text: string }) {
             );
           },
           a({ href, children }) {
+            // Links to files in the container open them in DataLab's viewer.
+            const file = href && openFile ? workspaceFile(href) : null;
+            if (file && openFile) {
+              return (
+                <button type="button" onClick={() => openFile(file)} className="text-accent underline" title={href}>
+                  {children}
+                </button>
+              );
+            }
             return (
               <a href={href} target="_blank" rel="noreferrer noopener" className="text-accent underline">
                 {children}

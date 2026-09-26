@@ -163,17 +163,37 @@ src/datalab/
 - The host folder `sessions/<id>/work` is mounted at `/work`. Attached items
   are mounted read-only under `/inputs`. Query results go under
   `/data/oracle`, also read-only.
-- **Checkpoints.** After each turn, the host commits `/work` into a git
-  repository whose `.git` directory lives *outside* the mount, so the agent
-  can't touch it.
+- **Checkpoints.** After each turn, the host records every file in `/work`
+  in a content-addressed store in the session folder, outside every mount,
+  so the agent can't touch it. Unchanged files cost nothing extra. This is
+  DataLab's own small module (`sessions/checkpoints.py`) rather than git:
+  git would read `.gitattributes` from the agent's folder, and it would be
+  one more thing to install on Windows.
+  - The agent's container is **paused** while a checkpoint is taken, so
+    nothing can swap a file for a link mid-read. Links are recorded as links
+    and never followed, and every file opened must resolve inside `/work`.
+  - **The browser sees workspace files from the latest checkpoint**, never
+    the live folder: reading a folder the agent is changing can be raced,
+    and on Windows there's no `O_NOFOLLOW` at all. So the Outputs panel
+    updates after each turn. Query results in `/data/oracle` are DataLab's
+    own read-only files and are served directly.
+  - Each checkpoint has a small summary file and a separate contents file,
+    so listing History stays cheap. Old checkpoints aren't pruned yet (a
+    v1.1 item: a retention limit and clean-up of unused objects).
 - **What rollback restores, precisely.** It restores **files in `/work`** to
   how they were after a chosen turn. Around that:
   - The conversation itself is *not* rewound. The agent receives a note that
-    files were restored to turn N, and the chat shows the same note.
-  - Running commands are stopped first.
+    files were restored, and the chat shows the same note.
+  - The container is stopped first, which also stops running commands. It
+    starts again with the next message, and Codex resumes the thread.
+  - The current files are checkpointed first, so a rollback can be undone.
+    Anything that checkpoint couldn't save is left exactly as it is.
+  - The container must be confirmed gone before any file changes, and no
+    turn can start meanwhile (a turn being set up counts as busy).
   - Query results in `/data/oracle` are immutable, so they need no restoring.
-  - Files over a size threshold are excluded from checkpoints. The rollback
-    screen lists any that can't be restored.
+  - Files over a size threshold (100 MB) are excluded from checkpoints. The
+    rollback screen lists any that can't be restored; they are left as they
+    are.
   - We don't use Codex's own thread rollback.
 - **Knowledge edits.** `/work/kb` starts as a copy of the synced knowledge
   base. After each turn the host diffs it, and any change becomes a proposed
@@ -361,10 +381,20 @@ src/datalab/
     DataLab itself. That means no external images, scripts, fonts, or fetches,
     so a Markdown image such as `![](https://…?data=…)` or a chart's
     `data.url` can't leak anything.
-  - **Agent-made HTML** (reports, dashboards) is shown in a sandboxed iframe
-    served from a **separate origin** (its own port). It has scripts but no
-    same-origin access, no cookies, and a CSP with `connect-src 'none'`. It
-    can't call DataLab's API or the internet.
+  - **Agent-made HTML** (reports, dashboards) is shown in an iframe with
+    `sandbox=""` (no allowances) and served with a `sandbox` policy of its
+    own, from `/preview/<token>/…` capability links. **Scripts are off**: a
+    script can always navigate its own frame to an outside URL carrying
+    data, and no CSP directive blocks that. Without scripts, the page's
+    styles, images, and fonts still load from the same folder; nothing else
+    can. Meta refreshes and forms are blocked by the sandbox too. The page
+    is also cleaned server-side (`htmlclean.py`: parsed and written out
+    again without resource hints, `<meta>`, `<base>`, scripts, or frames),
+    and served only when the browser asks for it as a frame
+    (`Sec-Fetch-Dest`). (An earlier plan used a separate origin with scripts
+    on; it doesn't close the navigation hole.)
+  - **Workspace files** opened through the API are served as plain text or
+    images, with a `sandbox` policy, so they are inert even in their own tab.
   - **Exported conversation reports** embed the same "no network" CSP, so
     they stay inert when opened later in any browser.
 - **Local API protection.** The app listens on `127.0.0.1` only. The launcher
@@ -496,7 +526,9 @@ something we can use end to end ourselves.
      browser-side HTML and Markdown leak tests. For now the check verifies
      the security policy header.
 3. **Complete workspace.**
-   - Inputs, outputs, checkpoints, and rollback.
+   - Inputs, outputs, checkpoints, and rollback. (3a done 2026-09-26:
+     checkpoints and rollback, the Outputs and History panels, the file
+     viewer, and HTML previews.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

@@ -21,6 +21,8 @@ const EVENT_TYPES = [
   "error",
   "stop_requested",
   "notice",
+  "checkpoint",
+  "files_restored",
 ];
 
 /**
