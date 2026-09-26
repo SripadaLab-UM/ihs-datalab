@@ -1,0 +1,28 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Build output
+dist/
+build/
+*.egg-info/
+
+# Local DataLab data (never commit)
+.datalab/
+
+# OS
+.DS_Store
+Thumbs.db
