@@ -714,6 +714,22 @@ def load(cur, cohort: str, name: str, cols: list[tuple[str, str]], rows: list[di
         cur.executemany(sql, chunk)
 
 
+def connect_when_ready(timeout: float = 120) -> oracledb.Connection:
+    """Connect as SYSTEM, retrying while a new container finishes setting up.
+
+    Oracle Free can report healthy a little before the SYSTEM password is
+    active, so early logins may fail with ORA-01017 or ORA-12514.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            return oracledb.connect(user="SYSTEM", password=ADMIN_PWD, dsn=DSN)
+        except oracledb.DatabaseError as e:
+            if e.args[0].code not in (1017, 12514, 12520, 12528) or time.monotonic() > deadline:
+                raise
+            time.sleep(3)
+
+
 def main() -> None:
     objects, config = load_spec()
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -725,7 +741,7 @@ def main() -> None:
 
     require_local_dsn(DSN)
     t0 = time.monotonic()
-    with oracledb.connect(user="SYSTEM", password=ADMIN_PWD, dsn=DSN) as conn:
+    with connect_when_ready() as conn:
         cur = conn.cursor()
         require_synthetic_server(cur)
         reset_accounts(cur, cohorts)

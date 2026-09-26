@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 
 import keyring
+from keyring.errors import KeyringError
 
 from datalab.config import OracleSettings
 
@@ -20,9 +21,17 @@ class MissingCredential(RuntimeError):
     pass
 
 
+def _from_keychain(service: str, account: str) -> str | None:
+    # A computer with no usable keychain (e.g. a CI runner) has no saved secrets.
+    try:
+        return keyring.get_password(service, account)
+    except KeyringError:
+        return None
+
+
 def model_api_key() -> str:
     """The U-M GPT key. Only the model relay uses it; it never leaves this process."""
-    key = os.environ.get("DATALAB_MODEL_API_KEY") or keyring.get_password(
+    key = os.environ.get("DATALAB_MODEL_API_KEY") or _from_keychain(
         MODEL_KEY_SERVICE, MODEL_KEY_ACCOUNT
     )
     if not key:
@@ -35,7 +44,7 @@ def save_model_api_key(key: str) -> None:
 
 
 def oracle_password(oracle: OracleSettings) -> str:
-    password = os.environ.get("DATALAB_ORACLE_PASSWORD") or keyring.get_password(
+    password = os.environ.get("DATALAB_ORACLE_PASSWORD") or _from_keychain(
         oracle.keychain_service, oracle.user
     )
     if not password:
