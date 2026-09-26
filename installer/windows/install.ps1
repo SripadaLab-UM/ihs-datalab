@@ -54,9 +54,16 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 uv --version
 
 Step "3/6 DataLab"
-if (-not $Constraints) {
-    $Beside = Join-Path (Split-Path -Parent $Package) "constraints.txt"
-    if (Test-Path $Beside) { $Constraints = $Beside }
+$IsUrl = $Package -match '^[a-zA-Z][a-zA-Z0-9+.-]*://'
+if (-not $IsUrl) {
+    # A bare file name ("datalab-....whl") has no parent folder of its own, so
+    # resolve it first: constraints.txt is looked for next to the real file.
+    if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) { Write-Host "Package file not found: $Package"; exit 2 }
+    $Package = (Resolve-Path -LiteralPath $Package).ProviderPath
+}
+if (-not $Constraints -and -not $IsUrl) {
+    $Beside = Join-Path ([System.IO.Path]::GetDirectoryName($Package)) "constraints.txt"
+    if (Test-Path -LiteralPath $Beside) { $Constraints = $Beside }
 }
 if (-not $Constraints) { Write-Host "constraints.txt (the tested dependency versions) wasn't found. Pass -Constraints."; exit 2 }
 uv tool install --force --python 3.13 --constraints $Constraints $Package

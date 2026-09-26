@@ -14,7 +14,14 @@ from pathlib import Path
 import keyring
 from keyring.errors import KeyringError, PasswordDeleteError
 
-from datalab.config import PRACTICE_ORACLE, Profile, default_data_dir, load_settings
+from datalab.config import (
+    PRACTICE_ORACLE,
+    Profile,
+    data_dir_for,
+    default_data_dir,
+    load_settings,
+    resolve_profile,
+)
 from datalab.credentials import (
     MODEL_KEY_ACCOUNT,
     MODEL_KEY_SERVICE,
@@ -28,15 +35,22 @@ from datalab.credentials import (
 AGENT_IMAGE_REPOSITORIES = ("datalab-agent", "ghcr.io/sripadalab-um/datalab-agent")
 
 
-def setup(profile: Profile, lab_settings: Path | None, *, update: bool) -> int:
-    """Save the lab's connection settings and ask for the secrets DataLab needs."""
-    data_dir = default_data_dir(profile)
+def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -> int:
+    """Save the lab's connection settings and ask for the secrets DataLab needs.
+
+    The profile and folder are chosen as DataLab itself chooses them (the
+    --profile flag, DATALAB_PROFILE, DATALAB_DATA_DIR), so the settings land
+    where DataLab will read them.
+    """
+    profile = resolve_profile(profile)
+    data_dir = data_dir_for(profile)
     data_dir.mkdir(parents=True, exist_ok=True)
     if lab_settings is not None:
         tomllib.loads(lab_settings.read_text())  # refuse a broken file before copying it
         shutil.copyfile(lab_settings, data_dir / "settings.toml")
         print(f"Saved the lab's DataLab settings to {data_dir / 'settings.toml'}")
     settings = load_settings(profile)
+    print(f"Setting up DataLab ({profile}) in {data_dir}")
 
     if update or not _saved(model_api_key):
         key = getpass.getpass("U-M GPT API key (input hidden): ").strip()

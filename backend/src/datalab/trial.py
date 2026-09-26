@@ -16,6 +16,7 @@ import uvicorn
 
 from datalab.app import create_app
 from datalab.config import Settings
+from datalab.safety import SafetyReport
 from datalab.sessions.containers import SessionContainers, SessionPaths
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.tokens import SessionKind
@@ -127,11 +128,21 @@ async def run_safety_check(settings: Settings, *, strict: bool = False) -> int:
         print(f"{symbols[result.status]} {result.label}")
         if result.detail:
             print(f"    {result.detail}")
-    passed = report.passed_strict if strict else report.passed
-    if passed:
-        print("\nAll checks passed.")
-    elif report.passed:
-        print("\nNo failures, but some required checks couldn't be verified (strict mode).")
-    else:
-        print("\nSOME CHECKS FAILED.")
-    return 0 if passed else 1
+    print(f"\n{summary(report, strict=strict)}")
+    return 0 if (report.passed_strict if strict else report.passed) else 1
+
+
+def summary(report: SafetyReport, *, strict: bool) -> str:
+    """One line on the result. "All checks passed" only if every required check was verified."""
+    if not report.passed:
+        return "SOME CHECKS FAILED."
+    unverified = [r.label for r in report.results if r.status == "skip" and r.required]
+    if not unverified:
+        return "All checks passed."
+    what = (
+        f"{len(unverified)} required check{'s' if len(unverified) > 1 else ''} couldn't be verified"
+    )
+    listed = "; ".join(unverified)
+    if strict:
+        return f"No failures, but {what} (strict mode fails this): {listed}."
+    return f"No failures, but {what}, so this isn't a full pass: {listed}."

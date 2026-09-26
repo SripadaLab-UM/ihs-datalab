@@ -111,9 +111,19 @@ def default_data_dir(profile: Profile) -> Path:
     return base / profile
 
 
+def resolve_profile(profile: Profile | None = None) -> Profile:
+    """The profile given, else DATALAB_PROFILE, else "real"."""
+    return profile or _env_profile()
+
+
+def data_dir_for(profile: Profile) -> Path:
+    """Where a profile's data lives: DATALAB_DATA_DIR if set, else the default."""
+    return Path(os.environ.get("DATALAB_DATA_DIR") or default_data_dir(profile))
+
+
 def load_settings(profile: Profile | None = None) -> Settings:
-    profile = profile or _env_profile()
-    data_dir = Path(os.environ.get("DATALAB_DATA_DIR") or default_data_dir(profile))
+    profile = resolve_profile(profile)
+    data_dir = data_dir_for(profile)
     file = data_dir / "settings.toml"
     raw = tomllib.loads(file.read_text()) if file.exists() else {}
 

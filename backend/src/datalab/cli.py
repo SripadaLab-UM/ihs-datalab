@@ -59,7 +59,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "setup":
         from datalab.setup import setup as run_setup
 
-        return run_setup(args.profile or "real", args.settings, update=args.update)
+        return run_setup(args.profile, args.settings, update=args.update)
 
     if args.command == "uninstall":
         from datalab.setup import uninstall

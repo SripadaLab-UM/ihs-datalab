@@ -26,6 +26,7 @@ import json
 import re
 import secrets
 import shutil
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import asdict, dataclass, field
@@ -53,7 +54,12 @@ PROMISE_HOST = "The AI can't touch anything else on your computer"
 PROMISE_DATABASE = "The AI can't change or damage the research database"
 PROMISE_NETWORK = "Sensitive data only goes to approved places"
 
-_DATABASE_TIMEOUT = 30
+# Limits for connecting and for each round trip of the privileges check. An
+# Oracle login can still hang past them (a listener that accepts and never
+# answers), so the check also runs in a daemon thread that it stops waiting
+# for after _DATABASE_TIMEOUT: it never holds DataLab up, or its exit.
+_DATABASE_STEP_TIMEOUT = 10
+_DATABASE_TIMEOUT = 60
 
 
 @dataclass
@@ -442,8 +448,12 @@ class SafetyCheck:
             database = OracleDatabase(oracle, oracle_password(oracle), self._settings.limits)
             # A worker thread with a time limit, so a slow or unreachable
             # database (off the VPN, say) never stalls the rest of DataLab.
-            privileges = await asyncio.wait_for(
-                asyncio.to_thread(database.session_privileges), _DATABASE_TIMEOUT
+            if _database_worker_busy():
+                # A previous check's worker is still stuck: don't add another.
+                raise TimeoutError("the previous database check is still waiting for an answer")
+            privileges = await _in_daemon_thread(
+                lambda: database.session_privileges(timeout=_DATABASE_STEP_TIMEOUT),
+                _DATABASE_TIMEOUT,
             )
         except NotSyntheticDatabase:
             return [
@@ -722,6 +732,43 @@ class _Probe:
 
     async def inspect(self) -> dict:
         return json.loads(await docker("inspect", self.containers.agent))[0]
+
+
+_WORKER_NAME = "datalab-safety-db"
+
+
+def _database_worker_busy() -> bool:
+    return any(t.name == _WORKER_NAME and t.is_alive() for t in threading.enumerate())
+
+
+async def _in_daemon_thread[T](work: Callable[[], T], timeout: float) -> T:
+    """`work()` in a thread of its own, waited for up to `timeout` seconds.
+
+    Unlike asyncio.to_thread, a thread that never returns is abandoned, not
+    joined, so it can't stop the program from exiting.
+    """
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[T] = loop.create_future()
+
+    def settle(result: T | None, error: BaseException | None) -> None:
+        if future.done():
+            return  # the wait already gave up
+        if error is not None:
+            future.set_exception(error)
+        else:
+            future.set_result(result)  # type: ignore[arg-type]
+
+    def run() -> None:
+        try:
+            outcome: tuple[T | None, BaseException | None] = (work(), None)
+        except BaseException as error:  # handed to the waiting task
+            outcome = (None, error)
+        with contextlib.suppress(RuntimeError):  # the loop has closed
+            loop.call_soon_threadsafe(settle, *outcome)
+
+    thread = threading.Thread(target=run, name=_WORKER_NAME, daemon=True)
+    thread.start()
+    return await asyncio.wait_for(future, timeout)
 
 
 def _result(check_id: str, promise: str, label: str, ok: bool, detail: str) -> CheckResult:

@@ -1,6 +1,7 @@
 name: Release
 
 # Push a tag like v0.1.0 to publish a release:
+# 0. run all of CI on the tagged commit; stop if anything fails;
 # 1. build the agent image for Intel/AMD and Apple Silicon and push it to the
 #    GitHub Container Registry;
 # 2. build the DataLab package with that image pinned by digest inside it;
@@ -18,7 +19,27 @@ env:
   IMAGE: ghcr.io/sripadalab-um/datalab-agent
 
 jobs:
+  checks:
+    # Everything CI checks, including the adversarial Safety check and the
+    # DNS leak test, on exactly the tagged commit. Nothing is published unless
+    # it all passes.
+    uses: ./.github/workflows/ci.yml
+
+  version:
+    # Before anything is published: a tag that doesn't match the package
+    # version would push images under the wrong name.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the tag matches the package version
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/datalab/__init__.py)
+          test "v$version" = "${GITHUB_REF_NAME%%-*}" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
+
   image:
+    needs: [checks, version]
     strategy:
       matrix:
         include:
@@ -93,10 +114,6 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - uses: astral-sh/setup-uv@v6
-      - name: Check the tag matches the package version
-        run: |
-          version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/datalab/__init__.py)
-          test "v$version" = "${GITHUB_REF_NAME%%-*}" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
       - name: Build the package
         env:
           AGENT_IMAGE: ${{ needs.manifest.outputs.image }}

@@ -8,8 +8,10 @@ too-permissive change there is caught here.
 
 from __future__ import annotations
 
-# For each directive: the only sources it may contain. A directive that's
-# absent falls back to default-src, which must be exactly 'self'.
+import re
+
+# For each directive: the only sources it may contain. An absent fetch
+# directive falls back to default-src, which must be exactly 'self'.
 _ALLOWED: dict[str, set[str]] = {
     "default-src": {"'self'"},
     "script-src": {"'self'"},
@@ -25,16 +27,65 @@ _ALLOWED: dict[str, set[str]] = {
     "form-action": {"'self'", "'none'"},
     "frame-ancestors": {"'none'", "'self'"},
 }
-_REQUIRED = ("default-src", "script-src", "connect-src", "object-src", "frame-ancestors")
+# More specific directives override the ones above (CSP's fallback lists),
+# so each is held to the rules of the one it refines.
+_ALLOWED |= {
+    "script-src-elem": _ALLOWED["script-src"],
+    "script-src-attr": _ALLOWED["script-src"],
+    "style-src-elem": _ALLOWED["style-src"],
+    "style-src-attr": _ALLOWED["style-src"],
+    "child-src": _ALLOWED["frame-src"],
+    "fenced-frame-src": _ALLOWED["frame-src"],
+    "manifest-src": {"'self'"},
+    "prefetch-src": {"'self'"},
+}
+# Directives that grant no network access. Anything not named here or above
+# is a problem: a directive this doesn't know could allow a request.
+_NO_NETWORK = {
+    "sandbox", "upgrade-insecure-requests", "block-all-mixed-content",
+    "require-trusted-types-for", "trusted-types",
+}  # fmt: skip
+# form-action and frame-ancestors don't fall back to default-src, so they
+# must be present themselves.
+_REQUIRED = (
+    "default-src", "script-src", "connect-src", "object-src", "form-action", "frame-ancestors",
+)  # fmt: skip
+
+
+_ASCII_SPACE = re.compile(r"[\t\n\f\r ]+")
+_DIRECTIVE_NAME = re.compile(r"[a-z0-9-]+")
+
+
+def _ascii_lower(text: str) -> str:
+    # As browsers do: only A-Z are lowercased (Python's lower() maps more).
+    return text.translate({c: c + 32 for c in range(ord("A"), ord("Z") + 1)})
 
 
 def parse(header: str) -> dict[str, list[str]]:
+    """Directives as a browser reads them: split on ASCII spaces, first copy wins."""
     directives: dict[str, list[str]] = {}
     for part in header.split(";"):
-        words = part.split()
+        words = [w for w in _ASCII_SPACE.split(part) if w]
         if words:
-            directives.setdefault(words[0].lower(), [w.lower() for w in words[1:]])
+            directives.setdefault(_ascii_lower(words[0]), [_ascii_lower(w) for w in words[1:]])
     return directives
+
+
+def _odd_names(header: str) -> list[str]:
+    """Directive names a browser would skip, or repeats it would ignore: either can
+    hide from a check what the browser actually enforces."""
+    found, seen = [], set()
+    for part in header.split(";"):
+        words = [w for w in _ASCII_SPACE.split(part) if w]
+        if not words:
+            continue
+        name = _ascii_lower(words[0])
+        if not _DIRECTIVE_NAME.fullmatch(name):
+            found.append(f"{name!r} isn't a valid directive name")
+        elif name in seen:
+            found.append(f"{name} appears more than once")
+        seen.add(name)
+    return found
 
 
 def problems(header: str) -> list[str]:
@@ -42,11 +93,17 @@ def problems(header: str) -> list[str]:
     if not header.strip():
         return ["no security policy is sent"]
     directives = parse(header)
-    found = [f"{name} is missing" for name in _REQUIRED if name not in directives]
+    found = _odd_names(header)
+    found += [f"{name} is missing" for name in _REQUIRED if name not in directives]
     for name, sources in directives.items():
+        if name in _NO_NETWORK:
+            continue
         allowed = _ALLOWED.get(name)
         if allowed is None:
-            continue  # directives that don't grant network access (sandbox, etc.)
+            # report-uri and report-to send reports, which name blocked
+            # addresses, somewhere: not allowed either.
+            found.append(f"{name} isn't a directive this check knows is safe")
+            continue
         extra = [s for s in sources if s not in allowed]
         if extra:
             found.append(f"{name} allows {' '.join(extra)}")

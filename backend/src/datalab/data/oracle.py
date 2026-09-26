@@ -86,12 +86,15 @@ class OracleDatabase:
         self._password = password
         self._limits = limits
 
-    def connect(self) -> oracledb.Connection:
+    def connect(self, *, timeout: float | None = None) -> oracledb.Connection:
+        """A read-only session. `timeout` (seconds) also limits connecting and each round trip."""
+        extra = {"tcp_connect_timeout": timeout, "retry_count": 0} if timeout else {}
         connection = oracledb.connect(
-            user=self._settings.user, password=self._password, dsn=self._settings.dsn
+            user=self._settings.user, password=self._password, dsn=self._settings.dsn, **extra
         )
         try:
-            connection.call_timeout = int(self._limits.round_trip_timeout_seconds * 1000)
+            round_trip = timeout or self._limits.round_trip_timeout_seconds
+            connection.call_timeout = int(round_trip * 1000)
             with connection.cursor() as cursor:
                 roles = ", ".join(self._settings.read_only_roles) or "NONE"
                 cursor.execute(f"SET ROLE {roles}")
@@ -202,9 +205,9 @@ class OracleDatabase:
             size = handle.tell()
         return ExtractResult(columns, preview, rows, size, 0.0)
 
-    def session_privileges(self) -> SessionPrivileges:
+    def session_privileges(self, *, timeout: float | None = None) -> SessionPrivileges:
         """Ask the database what a DataLab session is allowed to do."""
-        connection = self.connect()
+        connection = self.connect(timeout=timeout)
         try:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT role FROM session_roles")

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The release workflow runs all of this on the tagged commit before it
+  # publishes anything.
+  workflow_call:
 
 permissions:
   contents: read
@@ -91,3 +94,32 @@ jobs:
             --constraints backend/dist/constraints.txt backend/dist/*.whl
           /tmp/clean/bin/datalab --version
           /tmp/clean/bin/python -c "import datalab.app, datalab.safety, datalab.trial; from datalab.cli import _web_dist; assert _web_dist(), 'web UI missing from the package'"
+
+  windows-installer:
+    # No Windows machine runs the full install in CI (Docker Desktop), but the
+    # installer must at least parse, and find constraints.txt next to a
+    # package given by its bare file name.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The installer parses (Windows PowerShell 5.1, as people run it)
+        shell: powershell
+        run: |
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("installer/windows/install.ps1", [ref]$null, [ref]$errors) | Out-Null
+          if ($errors) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }
+      - name: A bare package file name finds constraints.txt beside it
+        shell: powershell
+        run: |
+          $dir = New-Item -ItemType Directory -Path (Join-Path $Env:RUNNER_TEMP "pkg")
+          Set-Content (Join-Path $dir "datalab-0.0.0-py3-none-any.whl") "x"
+          Set-Content (Join-Path $dir "constraints.txt") "x"
+          Set-Location $dir
+          # Run the installer's package-resolution lines on their own.
+          $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
+          $start = $script.IndexOf('$IsUrl =')
+          $end = $script.IndexOf('if (-not $Constraints) { Write-Host')
+          $Package = "datalab-0.0.0-py3-none-any.whl"; $Constraints = ""
+          Invoke-Expression $script.Substring($start, $end - $start)
+          if ($Constraints -ne (Join-Path $dir "constraints.txt")) { Write-Host "Found: '$Constraints'"; exit 1 }
+          Write-Host "Found $Constraints"
