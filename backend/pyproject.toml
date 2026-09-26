@@ -39,8 +39,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "oracle: needs a running Oracle database (the synthetic one in CI)",
+    "docker: needs Docker and the probe image (images/probe)",
 ]
-addopts = "-m 'not oracle'"
+addopts = "-m 'not oracle and not docker'"
 
 [tool.ruff]
 line-length = 100

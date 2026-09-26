@@ -196,6 +196,22 @@ v1 ships when all of these are true on a fresh **Mac** and a fresh
    `daily_metrics_2025` give the same outputs in v1 as in the prototype, on
    the same inputs.
 
+## Planned: UI redesign (after milestone 3)
+
+The current web UI is a functional skeleton. After milestone 3, when the
+Workspace has all its real parts, the redesign runs in four steps:
+
+1. Direction from the user: what feels wrong, and reference apps.
+2. Two or three clickable mockup directions, then refine one.
+3. A small design system: type, spacing, colour tokens, components, light and
+   dark themes, and accessibility.
+4. Rebuild the Workspace on it. Later tabs (SQL Playground, Knowledge,
+   Workflows, Pipelines) are then built on the new design.
+
+Until then, UI logic (event stream, transcript, API calls) is kept separate
+from presentation, so the redesign replaces the look without touching the
+behaviour.
+
 ## To-dos before or during the build
 
 - [x] **Confirm the cohort schemas** (2026-09-26).

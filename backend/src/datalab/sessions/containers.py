@@ -20,6 +20,9 @@ from datalab.sessions.tokens import SessionKind
 log = logging.getLogger(__name__)
 
 GATEWAY_IMAGE = "nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de"
+# Research sessions only: a forward proxy to the internet (see squid.conf).
+PROXY_IMAGE = "ubuntu/squid@sha256:6a097f68bae708cedbabd6188d68c7e2e7a38cedd05a176e1cc0ba29e3bbe029"
+_PROXY_URL = "http://proxy:3128"
 # An unroutable address (TEST-NET-1): containers can resolve only names Docker
 # knows (the gateway), and nothing else, even on older Docker versions.
 _NO_DNS = "192.0.2.1"
@@ -58,6 +61,10 @@ class SessionPaths:
     @property
     def gateway_conf(self) -> Path:
         return self.root / "gateway.conf"
+
+    @property
+    def squid_conf(self) -> Path:
+        return self.root / "squid.conf"
 
     @property
     def codex_config(self) -> Path:
@@ -123,6 +130,7 @@ class SessionContainers:
         self.network = f"datalab-{short}"
         self.gateway = f"datalab-{short}-gateway"
         self.agent = f"datalab-{short}-agent"
+        self.proxy = f"datalab-{short}-proxy"
 
     async def start(self, token: str) -> None:
         """Create or restart the session's network and containers."""
@@ -131,11 +139,13 @@ class SessionContainers:
         if not await self._exists("network", self.network):
             await docker("network", "create", "--internal", *self._labels, self.network)
         await self._start_gateway()
+        if self.kind == "research":
+            await self._start_proxy()
         await self._start_agent(token)
 
     async def stop(self) -> None:
         """Stop the containers. The workspace and Codex home stay on disk."""
-        for name in (self.agent, self.gateway):
+        for name in (self.agent, self.gateway, self.proxy):
             await docker("rm", "-f", name, check=False)
 
     async def remove(self) -> None:
@@ -177,6 +187,36 @@ class SessionContainers:
         )  # fmt: skip
         await docker("network", "connect", "--alias", "gateway", self.network, self.gateway)
 
+    async def _start_proxy(self) -> None:
+        if await self._running(self.proxy):
+            return
+        await docker("rm", "-f", self.proxy, check=False)
+        self.paths.squid_conf.write_text(
+            resources.files(__package__).joinpath("squid.conf").read_text()
+        )
+        await docker(
+            "run", "-d", "--name", self.proxy,
+            *self._labels,
+            "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "SETUID",
+            "--cap-add", "SETGID", "--cap-add", "DAC_OVERRIDE",
+            "--security-opt", "no-new-privileges",
+            "--memory", "256m", "--pids-limit", "256",
+            "-v", f"{self.paths.squid_conf}:/etc/squid/squid.conf:ro",
+            PROXY_IMAGE,
+        )  # fmt: skip
+        await docker("network", "connect", "--alias", "proxy", self.network, self.proxy)
+        await self._wait_for_proxy()
+
+    async def _wait_for_proxy(self, timeout: float = 20) -> None:
+        """Squid takes a moment to start; don't hand the agent a dead proxy."""
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            logs = await docker("logs", self.proxy, check=False)
+            if "Accepting HTTP Socket connections" in logs:
+                return
+            await asyncio.sleep(0.25)
+        raise DockerError("The research session's internet proxy didn't start.")
+
     async def _start_agent(self, token: str) -> None:
         if await self._running(self.agent):
             return
@@ -186,7 +226,13 @@ class SessionContainers:
         self.paths.prepare_config_mountpoint()
         env_file = self.paths.root / ".agent.env"
         env_file.touch(mode=0o600)
-        env_file.write_text(f"DATALAB_SESSION_TOKEN={token}\n")
+        env = [f"DATALAB_SESSION_TOKEN={token}"]
+        if self.kind == "research":
+            # The internet goes through the proxy; the model goes to the gateway.
+            for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
+                env.append(f"{name}={_PROXY_URL}")
+            env += ["NO_PROXY=gateway,localhost", "no_proxy=gateway,localhost"]
+        env_file.write_text("\n".join(env) + "\n")
         mounts = [
             "-v", f"{self.paths.work}:/work",
             "-v", f"{self.paths.codex_home}:/codex-home",

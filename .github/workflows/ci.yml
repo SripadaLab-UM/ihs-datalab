@@ -44,6 +44,22 @@ jobs:
           # Dev-only password of the synthetic database (see synthetic/README.md).
           DATALAB_ORACLE_PASSWORD: datalab_ro
         run: uv sync --locked && uv run pytest -m oracle -q
+      - name: Safety check (adversarial, against the synthetic database)
+        working-directory: backend
+        env:
+          DATALAB_ORACLE_PASSWORD: datalab_ro
+          DATALAB_PROFILE: practice
+          DATALAB_DATA_DIR: ${{ runner.temp }}/datalab
+          DATALAB_AGENT_IMAGE: datalab-probe:ci
+          DATALAB_HOST: 0.0.0.0
+        run: |
+          docker build -q -t datalab-probe:ci ../images/probe
+          uv run datalab safety-check
+      - name: The Safety check catches a broken sandbox
+        working-directory: backend
+        env:
+          DATALAB_HOST: 0.0.0.0
+        run: uv run pytest -m docker -q
 
   frontend:
     runs-on: ubuntu-latest

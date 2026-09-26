@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import os
 import socket
 import threading
 import time
@@ -114,7 +115,9 @@ def live_server(app) -> Iterator[str]:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # In CI (Linux), containers reach the host through the Docker bridge.
+    host = os.environ.get("DATALAB_HOST", "127.0.0.1")
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     deadline = time.time() + 10

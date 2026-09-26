@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
+import { SettingsPage } from "@/features/settings/SettingsPage";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 
 import { ComingSoon, Shell } from "./Shell";
@@ -22,7 +23,7 @@ export function App() {
             <Route path="workflows" element={<ComingSoon name="Workflows" />} />
             <Route path="pipelines" element={<ComingSoon name="Pipelines" />} />
             <Route path="knowledge" element={<ComingSoon name="Knowledge" />} />
-            <Route path="settings" element={<ComingSoon name="Settings & Safety" />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="signed-out" element={<SignedOut />} />
           </Route>
         </Routes>

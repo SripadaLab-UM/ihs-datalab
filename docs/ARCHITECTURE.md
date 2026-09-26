@@ -485,6 +485,16 @@ something we can use end to end ourselves.
    CI. A **minimal installer and upgrade rehearsal on Mac and Windows** is
    included, since Windows Docker networking could break the design and we
    should find out early.
+   - 2a–2c done 2026-09-26: the runtime, the conversations API, and the
+     web UI.
+   - 2d done 2026-09-26:
+     - the Safety check (Settings & Safety screen, `datalab safety-check`,
+       and CI);
+     - research sessions with internet through Squid;
+     - a CI test that the check catches a deliberately leaky sandbox.
+     Still to add to the adversarial suite: the tcpdump DNS leak test, and
+     browser-side HTML and Markdown leak tests. For now the check verifies
+     the security policy header.
 3. **Complete workspace.**
    - Inputs, outputs, checkpoints, and rollback.
    - Export destinations and conversation export.

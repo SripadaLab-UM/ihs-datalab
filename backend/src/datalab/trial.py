@@ -84,3 +84,26 @@ async def _print_event(kind: str, data: dict[str, Any]) -> None:
         )
     elif kind == "error":
         print(f"\n\033[31merror: {data.get('message')}\033[0m", file=sys.stderr)
+
+
+async def run_safety_check(settings: Settings) -> int:
+    """Start DataLab in this process, run the Safety check, print the results."""
+    app = create_app(settings)
+    server = uvicorn.Server(
+        uvicorn.Config(app, host=settings.host, port=settings.port, log_level="warning")
+    )
+    serving = asyncio.create_task(server.serve())
+    while not server.started:
+        await asyncio.sleep(0.05)
+    try:
+        report = await app.state.safety.run()
+    finally:
+        server.should_exit = True
+        await serving
+    symbols = {"pass": "\033[32m✓\033[0m", "fail": "\033[31m✗\033[0m", "skip": "\033[33m-\033[0m"}
+    for result in report.results:
+        print(f"{symbols[result.status]} {result.label}")
+        if result.detail:
+            print(f"    {result.detail}")
+    print("\nAll checks passed." if report.passed else "\nSOME CHECKS FAILED.")
+    return 0 if report.passed else 1

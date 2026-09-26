@@ -21,6 +21,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
+from datalab.credentials import MissingCredential
 from datalab.relay.policy import Refused, check_responses_request
 from datalab.sessions.tokens import SessionTokens, bearer_token
 
@@ -44,7 +45,10 @@ def build_relay_router(
     async def models(request: Request) -> Response:
         if tokens.resolve(bearer_token(request.headers.get("authorization"))) is None:
             return _refused(401, "unknown session")
-        return await _forward(client, "GET", f"{base_url}/models", None, api_key())
+        key = _key_or_none(api_key)
+        if key is None:
+            return _refused(503, "no U-M GPT key is saved in DataLab")
+        return await _forward(client, "GET", f"{base_url}/models", None, key)
 
     @router.post("/responses")
     async def responses(request: Request) -> Response:
@@ -59,7 +63,10 @@ def build_relay_router(
         except Refused as refusal:
             log.warning("relay refused a request from session %s: %s", access.session_id, refusal)
             return _refused(403, str(refusal))
-        return await _forward(client, "POST", f"{base_url}/responses", raw, api_key())
+        key = _key_or_none(api_key)
+        if key is None:
+            return _refused(503, "no U-M GPT key is saved in DataLab")
+        return await _forward(client, "POST", f"{base_url}/responses", raw, key)
 
     @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def everything_else(path: str) -> Response:
@@ -90,6 +97,13 @@ async def _forward(
         headers=passed,
         background=BackgroundTask(upstream.aclose),
     )
+
+
+def _key_or_none(api_key: Callable[[], str]) -> str | None:
+    try:
+        return api_key()
+    except MissingCredential:
+        return None
 
 
 def _refused(status: int, reason: str) -> JSONResponse:

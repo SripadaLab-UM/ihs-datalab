@@ -21,6 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     trial.add_argument("--image", default="datalab-agent:dev")
     trial.add_argument("--research", action="store_true", help="a research session instead")
     commands.add_parser("db-check", help="connect and report what the session may do")
+    commands.add_parser("safety-check", help="run the Safety check and print the results")
 
     catalog = commands.add_parser("catalog", help="build the schema catalog (metadata only)")
     catalog.add_argument("--out", type=Path, required=True, help="catalog folder to write")
@@ -43,6 +44,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "db-check":
         return _db_check(settings)
+
+    if args.command == "safety-check":
+        import asyncio
+
+        from datalab.trial import run_safety_check
+
+        return asyncio.run(run_safety_check(settings))
 
     if args.command == "catalog":
         return _build_catalog(settings, args)

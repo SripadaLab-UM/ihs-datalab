@@ -116,10 +116,14 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle=oracle,
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
-        agent_image=raw.get("agent_image", Settings.agent_image),
+        agent_image=os.environ.get("DATALAB_AGENT_IMAGE")
+        or raw.get("agent_image", Settings.agent_image),
         model_base_url=raw.get("model_base_url", Settings.model_base_url),
         default_model=raw.get("default_model", Settings.default_model),
         port=int(raw.get("port", 8766 if profile == "practice" else 8765)),
+        # CI only: on Linux, containers reach the host through the Docker
+        # bridge, so DataLab must listen beyond 127.0.0.1 there.
+        host=os.environ.get("DATALAB_HOST", Settings.host),
     )
 
 

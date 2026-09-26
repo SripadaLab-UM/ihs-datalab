@@ -16,6 +16,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from datalab import db
 from datalab.api.conversations import build_conversations_router
+from datalab.api.safety import build_safety_router
 from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
 from datalab.data.access_log import AccessLog
@@ -24,6 +25,7 @@ from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.relay import build_relay_router
+from datalab.safety import SafetyCheck
 from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -104,6 +106,9 @@ def create_app(
     app.include_router(
         build_conversations_router(conversations, sessions, settings.default_model, access_log)
     )
+    safety = SafetyCheck(settings, tokens, model_key=model_key)
+    app.state.safety = safety
+    app.include_router(build_safety_router(safety, settings.data_dir / "logs" / "safety-last.json"))
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     browser = browser or BrowserSession()
     app.state.browser = browser

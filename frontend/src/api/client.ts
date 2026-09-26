@@ -7,6 +7,8 @@ export type Conversation = Schemas["ConversationOut"];
 export type Mode = Schemas["ModeOut"];
 export type QueryRecord = Schemas["QueryRecordOut"];
 export type Effort = NonNullable<Schemas["NewMessage"]["effort"]>;
+export type SafetyReport = Schemas["SafetyReportOut"];
+export type CheckResult = Schemas["CheckResultOut"];
 
 export interface Health {
   status: string;
@@ -57,4 +59,6 @@ export const api = {
     }),
   stop: (id: string) => request<Conversation>(`/api/conversations/${id}/stop`, { method: "POST" }),
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
+  lastSafetyReport: () => request<SafetyReport | null>("/api/safety/last"),
+  runSafetyCheck: () => request<SafetyReport>("/api/safety/check", { method: "POST" }),
 };
