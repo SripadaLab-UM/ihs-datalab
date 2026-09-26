@@ -212,6 +212,24 @@ Until then, UI logic (event stream, transcript, API calls) is kept separate
 from presentation, so the redesign replaces the look without touching the
 behaviour.
 
+## Open decisions (waiting on the lab, noted 2026-09-26)
+
+- [ ] **Attached folders that contain credentials files** (`.env`,
+      `auth.json`, …): today DataLab attaches them and lists what it found
+      as a warning. Refuse such folders instead?
+- [ ] **Full claim-to-evidence provenance** (each number linked to its
+      query, script, and output; the "How was this made?" view): placed in
+      milestone 8. Sooner?
+- [ ] **The enrolment rule on the real database.** In the synthetic data a
+      NULL study ID (`SECONDARYIDENTIFIER`, `STUDY_PARTICIPANT_ID`) means
+      screened, never enrolled. Is that true of the real IHS data? It goes
+      into the lab knowledge base (milestone 5) once confirmed.
+- [ ] **What "the 2025 cohort" means in an analysis.** The evaluation
+      graders read it as enrolled participants only (screened-but-not-
+      enrolled people excluded). Confirm, or the mood task needs regrading.
+- [ ] **Accepting milestone 3.** Demonstrated end to end on 2026-09-26
+      (docs/acceptance/2026-09-26-milestone-3.md); acceptance is the lab's.
+
 ## To-dos before or during the build
 
 - [x] **Confirm the cohort schemas** (2026-09-26).
