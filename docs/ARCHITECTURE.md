@@ -30,24 +30,24 @@ see [PRODUCT.md](../PRODUCT.md) and the other docs in this folder.
 │  Browser ── http://127.0.0.1:<port> ──┐                                │
 │                                       ▼                                │
 │  ┌──────────────── DataLab (one Python process) ────────────────────┐  │
-│  │  Web UI (static)   REST + SSE API      MCP endpoint (/mcp)       │  │
-│  │  Sessions ─ Codex adapter ─ checkpoints     Data service ─ audit │  │
-│  │  Workflows runner   Git sync   Exports   Safety check            │  │
-│  │  SQLite · keychain (U-M key, Oracle password, GitHub token)      │  │
-│  └───────┬──────────────────────────────────────────┬───────────────┘  │
-│          │ docker CLI                               │ python-oracledb  │
-│          ▼                                          ▼                  │
-│  ┌──── Docker Desktop ─────────────────────┐  Oracle (over VPN)        │
-│  │ per-session internal network            │                           │
-│  │  ┌──────────────┐    ┌────────────────┐ │                           │
-│  │  │ Agent        │───▶│ Gateway        │─┼──▶ U-M GPT (adds key)     │
-│  │  │ codex        │    │ data: model +  │─┼──▶ DataLab /mcp only      │
-│  │  │ app-server   │    │  /mcp only     │ │                           │
-│  │  │ /work /inputs│    │ research: +    │─┼──▶ internet (not host/LAN)│
-│  │  └──────────────┘    │  internet      │ │                           │
-│  │                      └────────────────┘ │                           │
+│  │  Web UI (static)   REST + SSE API                                │  │
+│  │  Model relay (/relay/v1): validates requests, adds U-M key ──────┼──┼──▶ U-M GPT
+│  │  Agent tools (/mcp)   Data service ─ audit ──────────────────────┼──┼──▶ Oracle (VPN)
+│  │  Sessions ─ Codex adapter ─ checkpoints   Workflows runner       │  │
+│  │  Git sync   Exports   Safety check   SQLite · keychain           │  │
+│  └───────┬───────────────────────────────▲──────────────────────────┘  │
+│          │ docker CLI                    │ host.docker.internal        │
+│          ▼                               │ (/relay and /mcp only)      │
+│  ┌──── Docker Desktop ───────────────────┼─────┐                       │
+│  │ per-session internal network          │     │                       │
+│  │  ┌──────────────┐    ┌────────────────┴───┐ │                       │
+│  │  │ Agent        │───▶│ Gateway (nginx)    │ │                       │
+│  │  │ codex        │    │ routes /v1 → relay │ │                       │
+│  │  │ app-server   │    │ routes /mcp → host │ │                       │
+│  │  │ /work /inputs│    │ research: + Squid ─┼─┼──▶ internet (not host/LAN)
+│  │  └──────────────┘    └────────────────────┘ │                       │
 │  │  Workflow R steps: agent image, --network none                      │
-│  └─────────────────────────────────────────┘                           │
+│  └─────────────────────────────────────────────┘                       │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -74,6 +74,7 @@ src/datalab/
                     pipelines, knowledge, exports, settings, safety
   sessions/         container lifecycle, Codex app-server adapter, event log,
                     checkpoints, workspace files
+  relay/            model relay: session tokens, request validation, key injection
   gateway/          per-session network setup; gateway config templates
   data/             Oracle client, SQL check, catalog, audit log, MCP server,
                     synthetic backend
@@ -91,33 +92,63 @@ src/datalab/
 
 - **One container per conversation.** It is started on the first message and
   stopped when idle. It restarts transparently on the next message.
-- **Codex runs as `codex app-server`** inside the container. The host talks to
-  it over stdio with JSON-RPC, through `docker exec -i`. That gives us threads,
-  turns, streaming items, **interrupt**, **resume**, and approval requests
-  the UI can answer.
+  Containers run with `--init` (so orphaned processes are reaped),
+  `--dns 192.0.2.1` (see §4), non-root, and with capabilities dropped.
+- **Codex runs as `codex app-server --strict-config`** inside the container.
+  The host talks to it over stdio with JSON-RPC, through `docker exec -i`.
+  The protocol provides threads, turns, streaming items, interrupt, resume,
+  and approval requests the UI can answer. The sequence was verified in the
+  spike on 0.157.1:
+  1. `initialize`, then `initialized`;
+  2. `thread/start` with `developerInstructions`;
+  3. `turn/start`, streaming until `turn/completed`;
+  4. `turn/interrupt` and `thread/resume` as needed.
+- **Stop must kill commands too.** In 0.157.1, `turn/interrupt` ends the turn
+  but *not* the shell commands it started. After an interrupt, the adapter
+  kills the turn's process groups inside the container. On startup it sweeps
+  any orphans left behind.
 - **`CODEX_HOME` is per session,** on the host, and mounted into the
-  container. Its generated `config.toml` sets:
-  - the model provider pointing at the gateway (`http://gateway/v1`, with a
-    dummy key);
-  - the `ihs-data` MCP server at `http://gateway/mcp`, with a per-session
-    token;
-  - memories, telemetry, and update checks off;
-  - web search, plugins, and browser use off in data sessions.
-
-  Codex's own session files survive container restarts, so conversations can
-  resume.
-- **Mode instructions** are passed as developer instructions on
+  container. It holds conversation content (session files and a local log),
+  so it counts as study data and lives in the session folder. Its generated
+  `config.toml` sets:
+  - `model_provider` pointing at `http://gateway/v1`, with
+    `env_key` set to the **session token** (§4), never the real key;
+  - the `ihs-data` MCP server at `http://gateway/mcp`, with the same token;
+  - `approval_policy = { granular = { mcp_elicitations = true, … } }` and
+    `default_tools_approval_mode = "approve"`, so only DataLab's own approval
+    requests reach the user. `never` would silently decline them;
+  - analytics, feedback, otel, history, and update checks off;
+  - features that open new channels off: memories, apps and plugins,
+    browser and computer use, image generation, multi-agent, and realtime.
+    Web search is also off in data sessions. Most of these are on by default,
+    so all are listed explicitly.
+- **Mode instructions** are passed as `developerInstructions` on
   `thread/start`. The base `AGENTS.md` and the app skills are baked into the
   image. Lab skills come from the knowledge base copy through Codex's extra
   skill roots.
 - **Event log.** Every event is stored in SQLite with a sequence number:
   answer text, reasoning, commands, tool calls, approvals, and outputs. The
   browser follows over SSE and can **reattach from any point**. Closing a tab
-  or switching views never kills a turn, and **Stop** sends a real
-  `turn/interrupt`. Both were prototype problems.
+  or switching views never kills a turn. Both were prototype problems.
+- **If DataLab stops mid-turn,** the turn is marked interrupted on restart.
+  The conversation resumes normally, which the spike verified.
 - **The adapter is small.** It turns app-server notifications into our event
-  types. It is written against a pinned app-server schema, regenerated
-  whenever the Codex version changes.
+  types. It is written against a pinned app-server schema, regenerated with
+  `codex app-server generate-json-schema` whenever the Codex version changes.
+
+### 2b. Rigor features
+
+- **Analysis plans** are structured records in SQLite: fields, status, and a
+  frozen hash. The agent drafts one through a `propose_plan` tool on `/mcp`.
+  The UI shows it as an approval card, as with the research helper. Later
+  turns record whether they were per plan or off-plan.
+- **Tracing** joins three things that are already recorded: the event log
+  (commands and outputs), the audit log (queries), and checkpoints (files).
+  After each final answer, a small checker in DataLab's own code flags
+  numbers that match no query or output.
+- **Rigor review** uses app-server `review/start` with the rigor checklist as
+  custom instructions, run before the final answer when the toggle is on.
+  Nothing new is needed in the container.
 
 ### 3. Workspace and checkpoints
 
@@ -126,37 +157,86 @@ src/datalab/
   `/data/oracle`, also read-only.
 - **Checkpoints.** After each turn, the host commits `/work` into a git
   repository whose `.git` directory lives *outside* the mount, so the agent
-  can't touch it. Rollback restores from that commit. Very large files are
-  excluded and noted, so checkpoints stay fast.
+  can't touch it.
+- **What rollback restores, precisely.** It restores **files in `/work`** to
+  how they were after a chosen turn. Around that:
+  - The conversation itself is *not* rewound. The agent receives a note that
+    files were restored to turn N, and the chat shows the same note.
+  - Running commands are stopped first.
+  - Query results in `/data/oracle` are immutable, so they need no restoring.
+  - Files over a size threshold are excluded from checkpoints. The rollback
+    screen lists any that can't be restored.
+  - We don't use Codex's own thread rollback.
 - **Knowledge edits.** `/work/kb` starts as a copy of the synced knowledge
   base. After each turn the host diffs it, and any change becomes a proposed
   edit card.
 
-### 4. Gateway and networks
+### 4. Model relay, gateway, and networks
 
-- For each session, DataLab creates an **internal Docker network**, which has
-  no route out. The agent joins only that network. The session-type gateway
-  also joins it.
-- **Data gateway.** A stock **nginx** image with a generated config. It does
-  exactly two things:
-  - reverse-proxies `/v1` to U-M GPT, adding the key;
-  - reverse-proxies `/mcp` to DataLab.
-  Nothing else answers.
-- **Research gateway.** The same nginx for `/v1`, plus an off-the-shelf forward
-  proxy (e.g. Squid) for general internet access. The forward proxy denies
-  the host, private address ranges, and DataLab's `/mcp`.
-- The key reaches the gateway from the host at start-up, through a mounted
-  secret file. It is never put in the agent container.
-- **DNS.** The agent container gets no working upstream DNS. It can resolve
-  only `gateway`, so DNS can't be used to leak data. The spike verifies this
-  first, because Docker's embedded DNS can forward queries even on internal
-  networks.
+- **Model relay (in the host app).** All model traffic ends at
+  `/relay/v1` in DataLab:
+  - Each session's Codex uses a **session token** as its API key. The relay
+    looks the token up, which tells it the session and its type. It then
+    swaps in the real U-M key from the keychain. **The real key never leaves
+    the host process.** No container or file holds it.
+  - The relay allows only what Codex needs:
+    - `GET /v1/models`;
+    - `POST /v1/responses` with `store: false`;
+    - tools of type function or custom, or client-side tool search;
+    - images only as inline `data:` URLs;
+    - only known request fields.
+  - Everything else is refused, including:
+    - **hosted tools** such as web search, remote MCP, and code
+      interpreter;
+    - **URLs the provider would fetch** (image or file URLs);
+    - background or stored responses;
+    - other endpoints.
+  - Research sessions get the same rules, plus hosted web search.
+  - The spike showed why this matters. Bypassing Codex, a request sent
+    straight through a blind proxy got U-M to run web search, call a remote
+    MCP server, and run code. Each of those is a way out for data.
+  - Responses stream straight through. The relay adds no buffering.
+- **Gateway (stock nginx).** It is a pure router with no secrets:
+  - `/v1/*` goes to DataLab's relay;
+  - `/mcp` goes to DataLab's agent tools;
+  - everything else gets a 404.
+
+  It reaches the host through `host.docker.internal`, which on Docker Desktop
+  reaches services bound to `127.0.0.1` (verified on Mac).
+- **Networks.** For each session, DataLab creates an **internal Docker
+  network**, which has no route out. The agent joins only that network. The
+  gateway joins it and the normal bridge.
+- **Research sessions** add **Squid** as a forward proxy for the internet
+  (verified in the spike). It is started with `-n` so it doesn't do reverse
+  lookups. Its deny rules come *first* and cover the host, private and
+  link-local ranges, IP-encoding tricks, and container names. Both
+  `HTTPS_PROXY` and lowercase `https_proxy` are set. Squid is restarted,
+  never reconfigured in place.
+- **DNS.** On Docker 29, an internal network's resolver answers only container
+  names; external names fail and the queries never leave (verified with
+  tcpdump). As a second layer for older engines, containers also get
+  `--dns 192.0.2.1`, an unroutable address. The adversarial suite includes the
+  tcpdump leak test.
+- **Session tokens** are random and scoped to one session. They are revoked
+  when the session ends. A token only works through the relay and `/mcp`, and
+  only for its own session.
 
 ### 5. Data service
 
 - **`python-oracledb` in thin mode.** No Oracle client install is needed.
-  Each query uses a fresh connection with `SET TRANSACTION READ ONLY` and a
-  call timeout, and the transaction is always rolled back.
+  Each query uses a fresh connection with `SET TRANSACTION READ ONLY`, and the
+  transaction is always rolled back.
+- **Guardrails** (in v1):
+  - **Deadlines.** `call_timeout` only limits each database round trip, so
+    every query also has an **end-to-end deadline**. On expiry, DataLab calls
+    `connection.cancel()` and closes the connection.
+  - **Extraction caps.** Each query may return at most a set number of rows
+    and bytes. Going above that needs an explicit OK from the user, not the
+    agent.
+  - **Disk-space check** before and during writing. A query stops cleanly,
+    removing partial output, if space runs low.
+  - **Concurrency.** Few queries run at once across the whole app, and only a
+    limited number of containers run at once.
 - **SQL check with `sqlglot`.** SQL is parsed properly in the Oracle dialect,
   replacing the prototype's regex. The check:
   - requires a single `SELECT`/`WITH` statement;
@@ -164,18 +244,18 @@ src/datalab/
     schema allowlist;
   - raises advisory warnings, such as `SELECT *` or a join with no join
     condition.
-- **Results** stream to CSV in the session's `/data/oracle` folder. A preview
-  goes back to the agent. A concurrency limit and row caps on previews
-  protect the database.
+- **Results** stream to CSV in the session's `/data/oracle` folder. Each
+  result is immutable once written. A preview goes back to the agent.
 - **Catalog** is built from the `generated/schema/` metadata for every cohort.
   It powers `search_catalog`, `describe_table`, and the SQL Playground
   browser.
 - **Audit log.** Every query appends one metadata-only row (see
   [SAFETY.md](SAFETY.md)). The same rows feed the Data accessed panel.
-- **MCP server.** The official MCP Python SDK, with streamable HTTP, mounted
-  at `/mcp`. It exposes `search_catalog`, `describe_table`, `query`, and
-  `ask_research_helper`. The per-session token decides which workspace
-  results land in.
+- **Agent tools (`/mcp`).** The official MCP Python SDK, with streamable HTTP.
+  It exposes `search_catalog`, `describe_table`, `query`,
+  `ask_research_helper`, and `propose_plan`, plus the metadata helpers: join
+  paths, concept lookup, cohort plan draft, and survey dictionary search. The
+  session token decides which workspace results land in.
 - **Backends.** `oracle` (real) and `synthetic`. The synthetic backend is an
   **Oracle Database Free** container seeded by our generator, so the SQL
   dialect matches reality. It is used for development, CI, evals, and
@@ -183,26 +263,43 @@ src/datalab/
 
 ### 6. Research helper
 
-- The `ask_research_helper` MCP call parks the request in an approval queue,
-  and the UI shows the card. The MCP call **waits**; Codex's tool timeout
-  pauses while it waits.
+- The `ask_research_helper` tool sends an MCP **elicitation** to Codex. Codex
+  forwards it to our client as `mcpServer/elicitation/request`, and the UI
+  shows the approval card. Behaviour verified in the spike:
+  - the tool **waits**; Codex's tool timeout pauses, and waits of 30 s and
+    150 s were tested;
+  - **decline** returns cleanly to the agent;
+  - **Stop** while pending ends the turn. Codex sends `serverRequest/resolved`,
+    which withdraws the card.
+- Gotcha: Codex rejects an elicitation schema with a top-level `title`, which
+  the MCP SDK adds by default. We send a plain `type`/`properties`/`required`
+  schema.
 - When approved, the host starts a temporary research-session container with
   only the approved text. It runs one `codex exec`, collects the answer and
   any files, and destroys the container. The result returns to the waiting
   call.
+- If DataLab restarts while an approval is pending, the turn ends as
+  interrupted, and the card disappears.
 
 ### 7. Workflows runner
 
 - Workflow files are parsed and validated with Pydantic, which also gives
   clear errors in the editor.
-- **Steps run on the host, in order:**
-  - SQL steps go through the data service. They are audited and the database
-    password is never exposed.
-  - R and pipeline steps run in the **agent image** with `--network none`.
-    No Codex runs in them. Inputs are mounted read-only, and only declared
-    outputs come back.
-  - QC checks run on the host.
+- **Steps run in order:**
+  - SQL steps go through the data service, with the same guardrails and
+    audit. The database password is never exposed.
+  - R, pipeline, and **custom R QC** steps run in the **agent image** with
+    `--network none`. No Codex runs in them. Inputs are mounted read-only,
+    and only declared outputs come back.
+  - Built-in QC checks, such as row counts, required columns, and unique
+    keys, run in DataLab's own trusted code.
   - Delivery copies files to the destination.
+- **Run records** capture everything needed to replay a run: the workflow file
+  and repo commit, the agent image digest, parameters, each SQL statement with
+  its binds, random seeds, output checksums, and the **extracted inputs**,
+  which are kept in the run folder.
+  - **Run again** re-extracts from today's database.
+  - **Replay** reruns the processing on the original inputs.
 - Each run gets a folder and a run record in SQLite. A run keeps going if the
   browser closes.
 
@@ -213,15 +310,24 @@ src/datalab/
 - Credentials come from the GitHub App's user token, which is kept in the
   keychain and passed to git through a credential helper. The token never goes
   on disk in plain text, and never enters a container.
-- **Save & share** runs these steps:
-  1. run the check
-  2. commit with the user's name
-  3. fetch
-  4. rebase
-  5. push
-
-  If another person changed the same lines, it shows a plain two-version
-  screen instead.
+- **The checks are DataLab's own code.** The knowledge-base check and the
+  workflow-file check ship with DataLab. DataLab never runs a script taken
+  from a repo on the host. Repo tests, such as `ihsDataR`'s R tests, run in a
+  no-network container.
+- **Save & share binds to exactly what was reviewed:**
+  1. Run the checks, including the participant-data scan, on the proposed
+     change. For pipelines, run the tests too.
+  2. Commit with the user's name.
+  3. Fetch and rebase onto the latest `main`.
+  4. **If anyone else's change landed in between**, re-run the checks on the
+     rebased result, and the pipeline tests if any pipeline files changed.
+     Show the user what changed before pushing.
+  5. Push the exact commit that passed. Record the test result against that
+     commit.
+- The participant-data scan covers workflow files too, since SQL literals,
+  comments, and parameter defaults could contain IDs.
+- If another person changed the same lines, a plain two-version screen appears
+  instead.
 
 ### 9. Frontend (`frontend/`)
 
@@ -238,6 +344,21 @@ src/datalab/
 - Structure: `app/` (shell, routes), `components/` (shared), and
   `features/<tab>/` (one folder per tab).
 - **The chat component is built once** and used by every tab.
+- **The browser is part of the boundary.** Content made by the agent must not
+  be able to send data out when a user views it:
+  - **An app-wide Content Security Policy** allows network requests only to
+    DataLab itself. That means no external images, scripts, fonts, or fetches,
+    so a Markdown image such as `![](https://…?data=…)` or a chart's
+    `data.url` can't leak anything.
+  - **Agent-made HTML** (reports, dashboards) is shown in a sandboxed iframe
+    served from a **separate origin** (its own port). It has scripts but no
+    same-origin access, no cookies, and a CSP with `connect-src 'none'`. It
+    can't call DataLab's API or the internet.
+  - **Exported conversation reports** embed the same "no network" CSP, so
+    they stay inert when opened later in any browser.
+- **Local API protection.** The app listens on `127.0.0.1` only. The launcher
+  opens it with a one-time token that sets a session cookie, so other local
+  programs or web pages can't drive DataLab's API.
 
 ### 10. Images (`images/`)
 
@@ -267,11 +388,18 @@ src/datalab/
   - workflows: run and read run records;
   - knowledge pages;
   - the Safety check and diagnostics.
-- **Scopes.** Connector tokens are created in Settings and carry a scope,
-  `full` or `metadata`. A single dependency on every API route enforces it.
-  `full` is only possible in the practice profile. This is also how we build
-  and test DataLab: an outside agent drives the practice instance end to end,
-  including the UI in a browser.
+- **Scopes.** Connector tokens are created in Settings and carry a scope. A
+  single dependency on every API route enforces it. **In v1, connectors exist
+  only in the practice profile** (scope `full`). Real-profile access with a
+  `metadata` scope is deferred until its exact fields and error handling are
+  specified. This is also how we build and test DataLab: an outside agent
+  drives the practice instance end to end, including the UI in a browser.
+- **Practice really is synthetic-only.** In the practice profile:
+  - you can't attach host files or folders; bundled synthetic fixtures are
+    available instead;
+  - export destinations are limited to a disposable practice exports folder;
+  - Dropbox and the lab repos' write access are unavailable.
+  So nothing real can find its way in.
 - The connector MCP endpoint is distinct from the agent-facing `/mcp`. The
   agent-facing endpoint is reachable only through a session's gateway. The
   connector endpoint is reachable only on the host loopback.
@@ -299,9 +427,19 @@ excluding tests. The prototype was roughly 29k and 23k.
 - **Integration, in CI:** the real app against a synthetic Oracle Free
   container and real Docker. A scripted Codex conversation exercises every
   tool.
-- **Safety:** the Safety check suite, plus the adversarial test (escape the
-  network, read the host, write to Oracle, find keys). Both run in CI on every
-  change, not only at release.
+- **Safety:** the Safety check suite, plus the adversarial test. Both run in
+  CI on every change, not only at release. The adversarial test attempts to:
+  - escape the network, including DNS lookups watched with tcpdump;
+  - send hosted-tool and URL-fetch requests straight to the relay;
+  - read the host;
+  - write to Oracle;
+  - find keys;
+  - exfiltrate through an HTML preview or a Markdown image.
+- **Upgrade and rollback:** CI upgrades a data folder from the previous
+  release, rolls it back, and checks that nothing is lost.
+- **Prototype comparison (release check):** the 8 default workflows and
+  `daily_metrics_2025` run in both the prototype and v1, and their outputs
+  must match. This is a one-off validation, not a feature.
 - **Evals:** a dozen representative research tasks on synthetic data. They
   are run manually before releases and after any change to prompts, skills, or
   the Codex version.
@@ -311,15 +449,24 @@ excluding tests. The prototype was roughly 29k and 23k.
 v1 is one release, built through internal milestones. Each milestone ends in
 something we can use end to end ourselves.
 
-0. **Spike.** Current Codex CLI, `app-server`, and the nginx gateway with a
-   dummy key against U-M GPT; an approval request answered by our code;
-   the DNS lockdown; host reachability from Docker Desktop. Run on Mac, with
-   a quick check on Windows.
+0. **Spike** ✅ done 2026-09-26, on Mac. It confirmed:
+   - app-server with Codex 0.157.1;
+   - the nginx gateway, the DNS lockdown, and host reachability;
+   - elicitation approvals, including decline and stop;
+   - resume after a restart;
+   - the Squid research proxy.
+
+   It also found the hosted-tool bypass, fixed by the relay, and the
+   interrupt-doesn't-kill-commands issue, fixed in the adapter. Evidence is
+   in [spikes/2026-09-26-codex-gateway](../spikes/2026-09-26-codex-gateway/README.md).
 1. **Foundations.** Repo, CI, and lockfiles. A first synthetic dataset, and
    the data service with SQL check, audit log, and MCP.
-2. **First data session.** A conversation starts a container, Codex answers
-   a question about synthetic data, and the chat streams in the new UI. The
-   Safety check and adversarial test run in CI.
+2. **First data session, installed on both platforms.** A conversation
+   starts a container, Codex answers a question about synthetic data, and the
+   chat streams in the new UI. The Safety check and adversarial test run in
+   CI. A **minimal installer and upgrade rehearsal on Mac and Windows** is
+   included, since Windows Docker networking could break the design and we
+   should find out early.
 3. **Complete workspace.**
    - Inputs, outputs, checkpoints, and rollback.
    - Export destinations and conversation export.
@@ -334,7 +481,8 @@ something we can use end to end ourselves.
    - The runner and both tabs.
    - Moving `ihsDataR` over, with its history.
    - The default workflows.
-7. **Distribution.** Mac and Windows installers, updates and rollback, the
-   uninstaller, and the release pipeline. Test on the Windows machine.
+7. **Distribution polish.** Complete the installers, updates and rollback
+   with database backup, the uninstaller, and the release pipeline. Test on
+   the Windows machine.
 8. **Finish.** Evals, the USER_GUIDE, a dry run with one or two colleagues,
    and the definition of done.

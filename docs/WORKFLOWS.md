@@ -115,9 +115,10 @@ objects first, then runs the pipeline.
   is saved as a CSV.
 - **`r`**: a short inline R script.
 - **`pipeline`**: runs a pipeline from `ihsDataR`.
-- **`qc`**: built-in checks. These are row counts, required columns, no
-  missing values, unique keys, and an optional custom R check. A failure
-  stops the run before anything is delivered.
+- **`qc`**: built-in checks, which run as DataLab's own code: row counts,
+  required columns, no missing values, and unique keys. There is also an
+  optional **custom R check**, which runs in the no-network container like any
+  other R step. A failure stops the run before anything is delivered.
 
 - **`deliver`** happens once, at the end, and only after every QC check has
   passed. It copies files to a configured destination folder, such as
@@ -132,12 +133,21 @@ objects first, then runs the pipeline.
 - Where steps run:
   - SQL steps run through the host data service. The database password is
     never exposed.
-  - R and pipeline steps run in a container with **no network**. Their
-    inputs are mounted read-only, and only the declared outputs come back.
-- Each run keeps a **run record**: the workflow and the exact repo commit,
-  the parameters, a fingerprint of each query, each output's checksum, the
-  QC results, and where the files were delivered. Re-running the same commit
-  with the same parameters reproduces the run.
+  - R, pipeline, and custom QC steps run in a container with **no network**.
+    Their inputs are mounted read-only, and only the declared outputs come
+    back.
+- Each run keeps a **run record** with everything needed to reproduce it:
+  - the workflow file and exact repo commit;
+  - the agent image digest;
+  - the parameters, and each SQL statement with its bind values;
+  - random seeds;
+  - the **extracted inputs** themselves, kept in the run folder;
+  - output checksums, QC results, and where files were delivered.
+- **Two ways to repeat a run.** The database keeps changing, since cohorts
+  are ongoing, so these are different things:
+  - **Run again** re-extracts from today's database, giving new results.
+  - **Replay** reruns the processing on the original extracted inputs,
+    reproducing the original results exactly.
 - Run history and outputs stay on the user's machine. Only workflow
   *definitions* go to GitHub. Runs contain study data; definitions never do.
 
@@ -177,6 +187,12 @@ Each bespoke request, such as SensorKit preprocessing, follows the same path:
 3. **Wrap** it in a workflow for repeatable runs and delivery.
 4. **Record** what was learned in the knowledge base: recipe, QC rules,
    quirks, and verified queries.
+
+## Release check against the prototype
+
+Before v1 ships, the 8 default workflows and `daily_metrics_2025` are run in
+both the prototype and v1 on the same inputs, and their outputs must match.
+This is a one-off validation, not a user-facing feature.
 
 ## Carried over from the prototype
 

@@ -81,24 +81,102 @@ The container has deliberately few locations:
 | `/inputs` | Files and folders you attached | No |
 | `/data/oracle` | Query results written by DataLab's data service | No |
 
+## Scientific rigor
+
+Evidence from 2026 shapes these features:
+
+- A *PNAS* study ran about 5,000 AI analyst runs on one dataset. Its
+  conclusions ranged from negative to positive effects, depending largely on
+  how the agent was steered.
+- A study of Codex itself on 11 real datasets found that 6 had conclusions the
+  evidence didn't support, and that Codex's confidence didn't track the
+  stability of its results.
+
+On observational health data, the value is in making the agent's work
+**planned, traceable, and checked**, not in making it more autonomous.
+
+### Analysis plans
+
+- Before touching outcome data for a new question, the agent writes a short
+  **analysis plan**:
+  - the question and estimand;
+  - exposure, outcome, and covariates;
+  - cohorts and exclusions;
+  - the decision points it expects, such as how to handle missing days.
+- It appears as a card. You can edit and **approve** it, and it is then
+  frozen with a timestamp.
+- Later work is labelled **per plan** or **exploratory (off-plan)**, in the chat
+  and in exported reports.
+- Plans are saved with the conversation and included in conversation exports.
+- In Analysis mode this is the default workflow. In other modes the agent
+  proposes a plan when a question calls for one.
+
+### Claim-to-evidence tracing
+
+- Every number, table, and figure in an answer links to what produced it:
+  the query in the Data accessed log, the script, and the command output.
+- Every file in Outputs has a **How was this made?** view showing the same
+  chain.
+- DataLab already records every piece of this: the event log, the data access
+  log, and the checkpoints. The feature ties them together.
+- After each final answer, DataLab flags numbers that don't trace to any
+  query or output.
+
+### Rigor review (toggle)
+
+- A **Rigor review** switch in the conversation header. It is **on by
+  default in Analysis mode** and off in the other modes.
+- When on, Codex's built-in review mode runs before the final answer, using a
+  rigor checklist. The checklist favours mechanical checks over opinions:
+  - Are claims traced?
+  - Did the analysis follow the approved plan, and is off-plan work labelled?
+  - Is causal language unjustified?
+  - Are sample sizes reported before and after exclusions?
+- The review's findings appear under the answer. The agent fixes what it can
+  and reports the rest.
+
+### Research helpers carried over from the prototype
+
+These ship in the agent image as app skills with bundled scripts, or as
+extra `ihs-data` tools. They are all metadata-only or work on local files:
+
+- **`profile-data`**: a quick profile of a data file (columns, types,
+  missingness).
+- **`render-report`**: Markdown to HTML, Word, or PDF.
+- **Figure templates** for publication-quality figures.
+- **Join paths**: how two tables connect, from key metadata and participant-ID
+  conventions.
+- **Concept lookup**: from a plain-language concept to candidate tables and
+  columns.
+- **Cohort plan draft**: criteria, tables, and open ambiguities for a cohort
+  request, before any query runs.
+- **Survey dictionary search**: the wording of survey questions and their
+  answer codes, from the public data dictionaries. The dictionaries are also
+  added to the knowledge base's `generated/` folder.
+
 ## Tools
 
-In a data session, the agent gets two tools. It has no others.
+In a data session, the agent gets one tool server, `ihs-data`, and no
+others. Its tools:
 
-- **`ihs-data`**, which reaches Oracle through DataLab:
+- **Data:**
   - `search_catalog`: find tables and columns.
   - `describe_table`: columns, types, comments, and knowledge-base notes.
   - `query`: read-only SQL. It returns a preview and writes the full result
-    as a CSV to `/data/oracle`. SQL checks and warnings are built in.
-- **`ask_research_helper`**: the approval-gated lookup described in
+    as a CSV to `/data/oracle`. SQL checks, warnings, and guardrails are
+    built in.
+- **Metadata helpers:** join paths, concept lookup, cohort plan draft, and
+  survey dictionary search (see above).
+- **`propose_plan`:** an analysis plan for you to approve.
+- **`ask_research_helper`:** the approval-gated lookup described in
   [SAFETY.md](SAFETY.md).
 
-Both tools are served **directly by the DataLab app** through Codex's native
+These tools are served **directly by the DataLab app** through Codex's native
 support for HTTP MCP servers. Nothing extra runs in the container. Each
 session has its own token, so each session's results land only in its own
 workspace. The prototype ran seven custom servers inside the container.
 
-Research sessions get neither tool. They get web search and ordinary
+Research sessions get none of these tools. They get web search and ordinary
 internet access instead.
 
 ## App layout: tabs for things, one shared chat
@@ -130,7 +208,10 @@ The layout is the same for every mode:
   - **Inputs**: attach files and folders, read-only.
   - **Outputs**: preview files and HTML reports, and **Export** them to a
     destination.
-  - **History**: turn checkpoints, with roll back.
+  - **History**: turn checkpoints. **Roll back** restores the workspace files
+    to how they were after a chosen turn. The conversation isn't rewound, and
+    the agent is told its files were restored. Very large files aren't
+    checkpointed; the screen lists any that can't be restored.
   - **Data accessed**: every query the agent ran in this conversation (tables,
     time, rows, result file). Metadata only. See [SAFETY.md](SAFETY.md).
 - **Header:** session badge (🔒 or 🌐), mode, model and reasoning level,
@@ -141,7 +222,8 @@ The layout is the same for every mode:
 
 - The streaming chat renderer. It splits reasoning, commands, and answers,
   and renders Markdown with inline Vega-Lite charts.
-- File and HTML-report previews.
+- File and HTML-report previews. HTML now opens in a sandboxed frame with no
+  network access (see [SAFETY.md](SAFETY.md)).
 - The model and reasoning picker.
 - Starter prompts per mode. The prototype's are good but Spine-specific, so
   they need rewriting.

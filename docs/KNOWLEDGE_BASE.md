@@ -51,8 +51,8 @@ generated/schema/    Oracle catalog metadata (tables, columns, types, comments),
 generated/drift.md   cross-year differences: tables and columns added,
                      removed, or renamed between cohorts
 .agents/skills/      how agents use and maintain the knowledge base (below)
-tools/check.py       the consistency and safety check
-.github/workflows/   runs the check on every push
+.github/workflows/   runs DataLab's knowledge-base check on every push (the check
+                     itself ships with DataLab; it is not a script in this repo)
 ```
 
 ## Page format
@@ -61,14 +61,19 @@ tools/check.py       the consistency and safety check
 ---
 id: steps_day
 kind: feature            # source | table | feature | qc | cohort | query | decision | paper
-status: validated        # draft | validated | deprecated
+status: reviewed         # draft | reviewed | deprecated
 summary: Daily step count combined across Fitbit, Garmin, and Apple Watch.
-evidence:                # where the claim comes from: code, paper, query, person
-  - code: ihsDataR/R/feature_steps.R
-  - legacy: AggregateDailyMetrics_2024.R, lines 120–188
+evidence:                # typed: what kind of support each claim has
+  - schema: IHS_2025.VFITBITDAILYDATA.TRACKERSTEPS    # the column exists and means this
+  - code: ihs-pipelines@a1b2c3d ihsDataR/R/feature_steps.R   # how it's computed (pinned commit)
+  - legacy: reference/2024/AggregateDailyMetrics_2024.R#L120-188
+  - paper: 10.1038/s41746-021-00400-z                # used this way in published work
+limitations:
+  - Oura isn't included in 2025 (see decisions/oura-steps-2025).
 related: [sources/fitbit, sources/garmin, qc/midnight-spanning-sleep]
 cohorts: [2024, 2025]    # which years this page applies to
-updated: 2026-09-26
+reviewed_by: yfang       # filled in by DataLab when a person saves; agents can't set it
+reviewed_on: 2026-09-26
 ---
 
 # steps_day
@@ -78,9 +83,20 @@ Plain-language explanation, caveats, and worked examples …
 
 The rules are deliberately few:
 
-- **Status matters.** Agents treat `validated` pages as fact. They must say
-  when they rely on a `draft` page.
-- **Every page has evidence.** "The model said so" is never enough.
+- **Status says whether a person has reviewed the page. It doesn't say that
+  every claim on it is proven.**
+  - Agents prefer `reviewed` pages.
+  - They say when they rely on a `draft` page.
+  - They weigh a claim by the **kind of evidence** behind it. "The column
+    exists" (schema), "this is how the code computes it" (code), "the SQL was
+    checked" (query), and "it was used this way in a paper" (paper) are
+    different strengths of support.
+- **Every page has typed evidence and states its limitations.** "The model
+  said so" is never enough.
+- **Only people review.** `reviewed_by` and `reviewed_on` are filled in by
+  DataLab from the person saving. When an agent's proposal would change a
+  page's status, the diff card highlights it so it can't slip through
+  unnoticed.
 - **Say which years.** Tables, columns, and rules drift between cohorts, so
   pages state which cohorts they apply to, and note differences.
 - **No participant-level data, ever.** That means no IDs, no per-person dates,
@@ -93,9 +109,9 @@ Codex loads a small amount of guidance automatically and reads the rest on
 demand. It doesn't need a search server at this size.
 
 - **`AGENTS.md`** (always loaded) tells the agent the knowledge base exists at
-  `/kb`, what the rules are, and to start from `index.md`.
+  `/work/kb`, what the rules are, and to start from `index.md`.
 - **Skills** carry the procedures. Each is loaded only when relevant:
-  - `kb-use`: find relevant pages via `index.md` and grep, prefer `validated`,
+  - `kb-use`: find relevant pages via `index.md` and grep, prefer `reviewed`,
     and cite page ids in answers.
   - `kb-propose`: when the agent learns something durable (a quirk, a rule,
     a verified query), write or update a page in the proposed format and run
@@ -132,9 +148,13 @@ Other sessions only see a change after it has been saved and pushed. That is
 also what keeps data-session material from reaching research sessions
 unreviewed (see [SAFETY.md](SAFETY.md)).
 
-## The check (`tools/check.py`)
+## The check
 
-It runs in DataLab before every save and on GitHub after every push.
+The check is **DataLab's own code**, never a script from this repo. That
+means an edit to the knowledge base can't change what runs on anyone's
+computer. It runs in DataLab before every save, again after a rebase if
+someone else's change landed in between, and in GitHub Actions after every
+push. There it uses the same published check.
 
 - Front matter is valid, and ids are unique and match file names.
 - `related` and `evidence` links resolve.
@@ -143,6 +163,8 @@ It runs in DataLab before every save and on GitHub after every push.
 - Participant-data heuristics catch things that look like study IDs, dates
   next to IDs, long numeric lists, or pasted tables. A hit **blocks the
   save** until a person confirms it's a false positive.
+- Status changes, and edits to `reviewed_by` or `reviewed_on` that didn't
+  come from DataLab's save flow, are flagged.
 - It regenerates `index.md`.
 
 ## Codex memories: off
@@ -171,6 +193,10 @@ The spine's roughly 157 entries map onto the new folders:
 
 - A one-time conversion script generates the pages. A person reviews the
   result before the first commit.
+- The Spine's statuses and evidence are carried over faithfully, not
+  flattened. A Spine `validated` entry becomes `reviewed` only where its
+  evidence supports that, and the evidence is kept typed. Spine `candidate`
+  entries become `draft`.
 - The Oracle metadata export becomes the first `generated/schema/`.
 - Summaries of the lab papers seed `papers/`.
 

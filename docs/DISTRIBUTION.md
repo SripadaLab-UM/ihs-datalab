@@ -59,9 +59,20 @@ containers.
   pill says **Update available**, with the release notes.
 - **Update and restart** installs the new version alongside the current one,
   pulls the new images, restarts, and runs the Safety check.
-- If anything fails, DataLab stays on the previous version. It is kept, so
-  rolling back is instant.
-- Updates never touch the data folder. It stays separate from the app.
+- If anything fails, DataLab stays on the previous version, which is kept.
+- **Updates never touch your work files.** Conversations, workspaces, runs,
+  and repos are left alone. The one thing an update may change is DataLab's
+  database, when a new version needs a new layout. Before that happens:
+  - DataLab **backs up the database** to `backups/<version>/`;
+  - migrations run only forward, and each one is tested in CI by upgrading a
+    real data folder from the previous release;
+  - **rolling back** to the previous version restores that backup. Anything
+    recorded after the update, such as new conversations, is listed first so
+    the user knows what the rollback drops. The files themselves stay on
+    disk;
+  - if an update is interrupted, for example by a crash or power loss, the
+    next start detects the half-finished state and finishes or undoes it
+    before opening.
 
 This replaces the prototype's approach of fast-forwarding a git checkout,
 which needed seven safety gates. There is no checkout on users' machines to
@@ -75,6 +86,7 @@ protect.
 
 ```
 datalab.sqlite         conversations, workflow runs, settings
+backups/<version>/     database backup taken before each update's migration
 sessions/<id>/         each conversation's workspace, checkpoints, and query results
 runs/<id>/             each workflow run's files and run record
 repos/ihs-knowledge/   the lab knowledge base (git)

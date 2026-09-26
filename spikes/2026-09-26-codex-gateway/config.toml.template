@@ -1,0 +1,64 @@
+# Codex 0.157.1 config for a DataLab *data* session (spike).
+model = "gpt-5.5"
+model_provider = "umgpt"
+model_reasoning_effort = "low"
+
+# The container is the sandbox; Codex's own Linux sandbox (landlock/bwrap)
+# needs privileges we drop, so run commands unsandboxed inside the box.
+sandbox_mode = "danger-full-access"
+
+# Commands never prompt; MCP elicitations DO get forwarded to the client.
+approval_policy = { granular = { sandbox_approval = false, rules = false, mcp_elicitations = true, request_permissions = false, skill_approval = false } }
+
+check_for_update_on_startup = false
+web_search = "disabled"
+hide_agent_reasoning = false
+
+[analytics]
+enabled = false
+
+[feedback]
+enabled = false
+
+[otel]
+exporter = "none"
+log_user_prompt = false
+
+[history]
+persistence = "none"
+
+[features]
+memories = false
+apps = false
+plugins = false
+remote_plugin = false
+browser_use = false
+browser_use_external = false
+in_app_browser = false
+computer_use = false
+image_generation = false
+multi_agent = false
+realtime_conversation = false
+tool_suggest = false
+skill_mcp_dependency_install = false
+workspace_dependencies = false
+daemon_auto_start = false
+goals = false
+auth_elicitation = false
+
+[model_providers.umgpt]
+name = "U-M GPT via DataLab gateway"
+base_url = "http://gateway/v1"
+env_key = "UMGPT_DUMMY_KEY"
+wire_api = "responses"
+request_max_retries = 2
+stream_max_retries = 2
+stream_idle_timeout_ms = 300000
+
+[mcp_servers.ihs-data]
+url = "http://gateway/mcp"
+bearer_token_env_var = "IHS_MCP_TOKEN"
+startup_timeout_sec = 20
+tool_timeout_sec = 15
+# per-tool approval: let the data tools run without Codex's own prompt
+default_tools_approval_mode = "approve"

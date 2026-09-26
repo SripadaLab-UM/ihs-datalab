@@ -21,7 +21,7 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 | Decision | Notes |
 |---|---|
 | Codex only, OpenAI models on U-M GPT | No Claude, no Anthropic translation |
-| No custom LLM proxy | One small gateway container enforces the network allowlist and adds the U-M GPT key to requests, so no container holds the key |
+| No custom LLM proxy | A stock gateway container enforces the network allowlist. A small model relay in the host app adds the key (see below), so no container holds it |
 | Docker Desktop is required | Acceptable to all users |
 | Safety promises are internal | Written for colleagues and future maintainers: short and plain |
 | "No data loss" covers both researchers' work and source data | Local files untouchable unless attached; the Oracle database is read-only and protected from load |
@@ -41,7 +41,10 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 | Mac and Windows are both in v1 | Install is one pasted command, then a launcher. Pinned images are pulled, not built. Updates happen in the app and can be rolled back. See [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md) |
 | The app repo and images are public; the lab repos are private | No environment-specific details in public code. GitHub sign-in goes through an org GitHub App scoped to the two private repos |
 | One complete v1 release for colleagues | We build in internal milestones and test them ourselves. Colleagues keep using the prototype until v1 is ready |
-| Outside AI tools can connect (MCP server + CLI) | They get full access on the **practice** (synthetic-only) instance and **metadata only** on real data. The app enforces this per token. Used to build, test, and automate DataLab |
+| Outside AI tools can connect (MCP server + CLI) | v1: **practice instance only** (synthetic data), with full access. Real-instance access (metadata only) is deferred. The app enforces this per token. Used to build, test, and automate DataLab |
+| Resource guardrails are in v1 | End-to-end query deadline with real cancellation, extraction size caps (bigger needs an explicit OK), a disk-space check, caps on concurrent queries and containers, and stopping idle containers. Performance extras wait for v1.1 |
+| Model traffic goes through a validating relay in the host app | The real U-M key never leaves DataLab's process. Containers use per-session tokens. The relay refuses hosted tools and provider-side URL fetches in data sessions. The gateway is a secret-free router. This came from the spike and the external review |
+| Science features in v1: analysis plans, claim tracing, rigor review toggle, and prototype research helpers | Evidence shows agents' main risk on observational data is analytic flexibility and overclaiming. v1 invests in planned, traceable, reviewable work rather than autonomy. Cohort-confirmation runs, the robustness battery, and IHS rigor skills are deferred |
 | Export is a user action only | The one exception is a workflow the user approved, which writes to its configured destination |
 | PHI is allowed on local disks | Users' machines are PHI-approved. Cleanup of internal data exists for tidiness, not as a safety control |
 | Exports go to user-chosen local folders | Dated subfolders with a manifest, so no mess is left behind |
@@ -62,13 +65,18 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 **Safety platform**
 - One sealed container per conversation, with two session types: 🔒 Data and
   🌐 Research.
-- The gateway, which enforces the network allowlist and adds the U-M GPT key,
-  so no container holds a key.
+- The gateway, which enforces the network allowlist, and the model relay, which
+  validates requests and adds the U-M GPT key. No container holds a key.
 - Read-only attachments, turn checkpoints, and rollback.
 - The research helper, with an approval card for every question.
 - The Safety check screen.
 - The Data accessed panel for each conversation, backed by a local
   metadata-only audit log.
+- Resource guardrails:
+  - query deadlines with real cancellation;
+  - extraction caps;
+  - a disk-space check;
+  - caps on concurrent queries and containers, with idle containers stopped.
 
 **Workspace**
 - **Workspace tab**:
@@ -78,6 +86,14 @@ use an AI agent on sensitive IHS data, safely. It replaces the
   - model and reasoning picker, Stop, and saved conversations;
   - "Open research session".
 - **Export conversation** as a self-contained HTML report.
+- **Scientific rigor** (see [docs/WORKSPACE.md](docs/WORKSPACE.md)):
+  - analysis plans, approved and frozen before outcome analysis;
+  - claim-to-evidence tracing, including "How was this made?";
+  - a Rigor review toggle, on by default in Analysis mode.
+- **Research helpers from the prototype:**
+  - file profiling, report rendering, and figure templates;
+  - join paths, concept lookup, and cohort plan drafts;
+  - survey dictionary search.
 - **SQL Playground**: SQL editor, results preview, catalog browser for all
   cohorts, and docked chat.
 - **Knowledge tab**:
@@ -123,8 +139,8 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 
 **Outside AI connectors**
 - An MCP server and a `datalab` CLI, over the same API as the UI.
-- Scoped tokens: `full` on the practice profile, `metadata` on real data,
-  enforced on every route.
+- Scoped tokens, enforced on every route. v1 enables connectors on the
+  practice profile only.
 - A practice profile with its own data folder and the synthetic backend.
 
 **Docs**
@@ -140,12 +156,18 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 - Pipelines that take a cohort parameter, instead of 2025 being built in.
 - Local search for the knowledge base, if it outgrows `index.md` and grep.
 - A usage or cost display, and personal notes or memory.
-- Large-data handling:
-  - Parquet results and DuckDB in the agent image;
-  - size warnings before very large extracts;
-  - stopping idle containers automatically, and a limit on how many
-    containers run at once.
+- Large-data performance extras: Parquet results, DuckDB in the agent
+  image, and size warnings before very large extracts.
+- Outside-AI connector access to a real-data instance (metadata scope).
 - Signed native installers or a desktop-app wrapper.
+- Considered for science and not in v1:
+  - explore-on-some-cohorts / confirm-on-another runs;
+  - an automated robustness battery (specification curves, stability checks,
+    negative controls);
+  - IHS-specific rigor skills;
+  - independent re-implementations of a result;
+  - notebook-style provenance (marimo);
+  - formal multiple-testing control.
 - New research pipelines such as SensorKit preprocessing. These are content
   built *with* v1, not app features.
 
@@ -170,6 +192,9 @@ v1 ships when all of these are true on a fresh **Mac** and a fresh
    Both changes are saved, attributed, and revertible, and the check is green.
 6. **Updates.** Updating from 1.0.0 to 1.0.1 works, and so does rolling back.
 7. **Quality.** CI is green: lint, type checks, Python, frontend, and R tests.
+8. **Parity with the prototype.** The 8 default workflows and
+   `daily_metrics_2025` give the same outputs in v1 as in the prototype, on
+   the same inputs.
 
 ## To-dos before or during the build
 
@@ -183,10 +208,17 @@ v1 ships when all of these are true on a fresh **Mac** and a fresh
       their Oracle grants and database logs show who ran what. The shared
       service account would remain a fallback. v1 continues with the shared
       account.
-- [ ] **Early technical spike.** Confirm that a current Codex CLI runs through
-      `app-server` and the gateway, using a dummy key, against U-M GPT,
-      including an approval request answered by our UI. The prototype proved
-      only the `codex exec`, custom-proxy, 0.139 version of this.
+- [x] **Early technical spike** (done 2026-09-26, on Mac).
+      - Confirmed: Codex 0.157.1 over `app-server`, the gateway, the DNS
+        lockdown, approval requests (including decline and stop), resume
+        after a restart, and the Squid research proxy.
+      - Found, with fixes designed:
+        - the hosted-tool bypass, fixed by the model relay in the host app;
+        - Stop doesn't kill running commands, fixed by the adapter killing
+          them itself.
+      - Windows is still to test, in milestone 2.
+      - The prototype's capability audit had already exercised `app-server`
+        compaction; the spike added the rest.
 - [ ] **Keep git history when splitting repos.** Move `ihsDataR` and the
       Spine content into their new repos with their commit history intact.
 

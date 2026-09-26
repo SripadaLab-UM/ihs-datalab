@@ -74,12 +74,9 @@ Other AI tools, such as Claude, can connect to DataLab to use and test it.
 They are **not** approved for study data, so what they can reach depends on
 which DataLab they connect to:
 
-- The **practice** DataLab has only synthetic data. Outside tools can do
-  everything there.
-- A **real-data** DataLab gives outside tools metadata only: app health,
-  Safety check results, the knowledge base, and workflow definitions. They
-  never get conversations, query results, or outputs. Connections are off
-  unless you turn them on.
+- The **practice** DataLab has only synthetic data, and you can't attach
+  your own files to it. Outside tools can do everything there.
+- A **real-data** DataLab doesn't accept outside tools at all in v1.
 
 ## What DataLab does *not* promise
 
@@ -111,7 +108,19 @@ access. It never gains it.
   stores, or another conversation's workspace.
 - Model-written code runs only inside containers, never in DataLab's host
   process.
-- Workflow R steps run in a separate container with no network.
+- **The host runs only DataLab's own code.** Scripts from the lab repos, such
+  as pipeline tests, custom QC checks, and workflow R steps, run in a
+  container with no network. The knowledge-base and workflow checks are part
+  of DataLab itself, not files taken from a repo.
+- **The browser is part of the boundary.**
+  - An app-wide Content Security Policy blocks every network request that
+    isn't to DataLab itself. An image link or chart in an agent's answer
+    can't send data anywhere.
+  - Agent-made HTML reports run in a sandboxed frame on a separate origin,
+    with no network access and no access to DataLab's API.
+  - Exported conversation reports carry the same no-network policy.
+- DataLab listens only on `127.0.0.1`, and its API requires the session
+  cookie the launcher sets.
 
 ### Database safety
 
@@ -120,34 +129,61 @@ access. It never gains it.
   logs.
 - The Oracle account has SELECT-only grants. This is the real guarantee;
   everything else is a second layer.
-- Each query runs in a `READ ONLY` transaction with a call timeout. Only
-  `SELECT`/`WITH` statements are accepted.
-- Previews are row-capped, and few queries may run at once, so the production
-  database can't be overloaded.
+- Each query runs in a `READ ONLY` transaction. Only `SELECT`/`WITH`
+  statements are accepted; the SQL is parsed, not pattern-matched.
+- **Guardrails protect the database and the laptop:**
+  - an end-to-end deadline that really cancels the query in Oracle;
+  - caps on rows and bytes per extraction, which only the user, not the
+    agent, can raise;
+  - a disk-space check;
+  - limits on how many queries and containers run at once.
 - Research-session containers get no data-service route and no data mounts.
 
 ### Network and credentials
 
-- Agent containers sit on an internal Docker network with no route out. The
-  only exit is one small **gateway** container. The gateway:
-  - adds the U-M GPT key to model requests, so **no container ever holds the
-    key** and Codex gets a dummy value;
-  - in **data sessions**, allows only U-M GPT and DataLab's data service, and
-    refuses everything else, including DNS lookups for other hosts;
-  - in **research sessions**, also allows the general internet, but never the
-    data service.
-- Codex telemetry and update checks are off. Hosted web search is off in data
-  sessions, because search queries leave the approved boundary.
-- Codex **memories** are off. Otherwise Codex would write summaries of past
-  sessions to disk, outside review, where they could reach other sessions.
-  Each session gets its own Codex home folder; none is ever shared across
+- **The real U-M GPT key never leaves DataLab's host process.** No container
+  and no file holds it.
+  - Each session's Codex gets a **session token** instead.
+  - All model requests go to DataLab's **model relay**, which checks the
+    token, validates the request, and only then adds the real key.
+- **The relay allows only the request shapes Codex needs.** It refuses:
+  - hosted tools (web search, remote MCP servers, code interpreter);
+  - URLs the provider would fetch (image or file links);
+  - stored or background responses;
+  - other endpoints.
+
+  Research sessions are additionally allowed hosted web search. This matters
+  because the U-M endpoint *does* run hosted tools if asked, and code in a
+  container could ask directly, bypassing Codex's own settings. The spike
+  demonstrated this.
+- **Agent containers sit on an internal Docker network with no route out.**
+  Their only exit is a small **gateway** that holds no secrets:
+  - **data sessions:** the gateway forwards only to the relay and to DataLab's
+    agent tools;
+  - **research sessions:** the gateway also has a forward proxy to the general
+    internet, which refuses the host, private networks, and DataLab's tools.
+- **DNS.** Containers can resolve only `gateway`. Queries for other names
+  never leave the machine; this was verified with a packet capture.
+- **Codex settings.** Telemetry, update checks, and history are off. Every
+  feature that opens a new channel is switched off explicitly, since most are
+  on by default:
+  - memories;
+  - plugins and apps;
+  - browser and computer use;
+  - image generation;
+  - multi-agent;
+  - realtime.
+
+  Hosted web search is off in data sessions too. Codex memories in particular
+  would store summaries of past sessions where they could reach other
   sessions.
-- Other Codex features that open new channels are off in data sessions:
-  plugins/apps, browser and computer use, and web search.
-- The Codex CLI version is pinned in the agent image and upgraded
+- **Codex home folders.** Each session gets its own. It contains
+  conversation content, so it is treated as study data and never shared
+  across sessions.
+- **Pinned Codex version.** It is fixed in the agent image and upgraded
   deliberately.
-- Data sessions can't install packages from the internet. The agent image
-  ships with a curated R/Python toolkit.
+- **No internet package installs.** Data sessions can't install packages from
+  the internet, so the agent image ships with a curated R/Python toolkit.
 
 ### Research helper
 
@@ -191,27 +227,30 @@ access. It never gains it.
 
 - DataLab exposes its features to outside tools through an MCP server and a
   `datalab` CLI. Both use the same API as the UI, and every request carries a
-  connector token.
-- The host app enforces each token's scope on every request. The client is
-  never trusted to limit itself.
-  - **Practice profile** (synthetic backend only): full scope.
-  - **Real profile:** off by default. It can be enabled with scope
-    `metadata`, which allows health, Safety check results, knowledge-base
-    pages, workflow definitions, and diagnostics. Every endpoint that returns
-    conversation content, query results, outputs, or run files rejects a
-    `metadata` token.
-- The practice and real profiles have separate data folders, and the practice
-  profile can only use the synthetic backend. A practice instance therefore
-  never holds real data.
-- The Safety check verifies that a `metadata` token is refused by every
-  content endpoint.
+  connector token whose scope the host app enforces on every route.
+- **v1: practice profile only.**
+  - The practice profile has its own data folder and uses only the synthetic
+    backend.
+  - It can't attach host files. It can't use real export destinations, only a
+    disposable practice folder.
+  - It has no write access to the lab repos.
+
+  A practice instance therefore can't hold real data, even by accident.
+- **Real-profile connectors are deferred** until the exact permitted fields,
+  operations, and error handling are specified. Even "metadata" can leak
+  through error messages or SQL in workflow files.
 
 ### Work preservation and storage
 
 - Conversations, run history, and settings live in one local database in
   DataLab's data folder.
 - After each turn, the workspace is checkpointed to a host-side store the
-  agent can't write to. Rollback restores from that store.
+  agent can't write to.
+- **Rollback restores workspace files** to how they were after a chosen turn.
+  The conversation isn't rewound; the agent is told the files were restored.
+  Very large files aren't checkpointed, and the rollback screen lists them.
+- Before an app update changes the database, DataLab **backs it up**. Rolling
+  back to the previous version restores that backup.
 - DataLab writes only to:
   - **its data folder**, which is internal (see
     [DISTRIBUTION.md](DISTRIBUTION.md) for the layout);
@@ -230,7 +269,8 @@ Oracle.
 
 | Check | How it's tested |
 |---|---|
-| Data session can't reach the internet | A request from inside a container to an outside host fails |
+| Data session can't reach the internet | A request from inside a container to an outside host fails, and an outside DNS name doesn't resolve |
+| Hosted tools are refused | A web-search, remote-MCP, or image-URL request sent straight to the relay from a data container is rejected |
 | U-M GPT is reachable | The model list loads from inside a container |
 | No key in containers | Container environment and config have no U-M GPT key or Oracle password |
 | No unexpected mounts | `docker inspect` mounts match the expected set |
@@ -239,4 +279,4 @@ Oracle.
 | Helper gets only the approved text | A helper container's mounts and inputs contain only the approved question |
 | Database access is read-only | Account privileges contain no write grants, and the session is read-only |
 | Right agent image | The image digest matches the pinned release |
-| Outside connectors can't read content | A `metadata`-scope token is refused by every content endpoint |
+| Agent HTML can't phone home | A test report that tries to fetch an outside URL and call DataLab's API is blocked in the preview |
