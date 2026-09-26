@@ -147,3 +147,18 @@ def test_practice_samples_ship_with_datalab():
     samples = practice_samples()
     assert (samples / "sleep_diary_sample.csv").is_file()
     assert (samples / "r_helpers").is_dir()
+
+
+def test_credentials_inside_an_attached_folder_are_pointed_out(tmp_path):
+    from datalab.sessions.inputs import credential_files_in
+
+    app = tmp_path / "app"
+    (app / "config").mkdir(parents=True)
+    (app / ".env").write_text("KEY=x")
+    (app / "config" / "auth.json").write_text("{}")
+    (app / "data.csv").write_text("a\n1\n")
+    (app / "linked").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / ".netrc").write_text("x")  # not followed
+    assert credential_files_in(app) == ([".env", "config/auth.json"], True)
+    assert credential_files_in(app, limit=1)[1] is False

@@ -67,7 +67,9 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
         {files.data?.map((file) => (
           <li key={file.path}>
             <button
-              onClick={() => onOpen({ root: "outputs", path: file.path, kind: file.kind, size: file.size })}
+              onClick={() =>
+                onOpen({ root: "outputs", path: file.path, kind: file.kind, size: file.size, checkpoint: file.checkpoint })
+              }
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-sunken"
               title={file.path}
             >

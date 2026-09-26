@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
-import { api, type Conversation, type FileRoot } from "@/api/client";
+import { api, type Conversation, type FileRoot, type WorkspaceFile } from "@/api/client";
 import { Button, Modal } from "@/components/ui";
 import { formatBytes } from "@/lib/csv";
 
@@ -25,7 +25,14 @@ export function ExportDialog({
   const destinations = useQuery({ queryKey: ["destinations"], queryFn: api.destinations });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
-  const checkpoints = useQuery({ queryKey: ["checkpoints", conversation.id], queryFn: () => api.checkpoints(conversation.id) });
+  // The listing the person chooses from, frozen when it first loads: the files
+  // exported are exactly the versions shown, even if the agent saves new ones.
+  const [shown, setShown] = useState<{ checkpoint: number | null; files: WorkspaceFile[] } | null>(null);
+  const listed = outputs.data ? { checkpoint: outputs.data[0]?.checkpoint ?? null, files: outputs.data } : null;
+  useEffect(() => {
+    if (!shown && listed) setShown(listed);
+  }, [shown, listed]);
+  const newer = shown && listed && listed.checkpoint !== shown.checkpoint;
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [rawHtml, setRawHtml] = useState(false);
   const [report, setReport] = useState(withReport);
@@ -47,8 +54,8 @@ export function ExportDialog({
         reportBody = { html: await buildReport(conversation, events, queries, { includeWork, practice }), css: REPORT_CSS };
       }
       const files = [...chosen].map((path) => ({ root: "outputs" as FileRoot, path }));
-      // The files as listed when the dialog opened: nothing newer slips in.
-      return api.export(conversation.id, destinationId, files, reportBody, checkpoints.data?.[0]?.number, rawHtml);
+      // The versions listed: never "whatever is latest" at the moment of export.
+      return api.export(conversation.id, destinationId, files, reportBody, shown?.checkpoint ?? undefined, rawHtml);
     },
   });
 
@@ -94,18 +101,40 @@ export function ExportDialog({
           <div>
             <div className="flex items-center justify-between">
               <p className="font-medium">Files from outputs/</p>
-              {(outputs.data?.length ?? 0) > 0 && (
+              {(shown?.files.length ?? 0) > 0 && (
                 <button
                   className="text-xs text-accent underline"
-                  onClick={() => setPicked(chosen.size ? new Set() : new Set(outputs.data?.map((f) => f.path)))}
+                  onClick={() => setPicked(chosen.size ? new Set() : new Set(shown?.files.map((f) => f.path)))}
                 >
                   {chosen.size ? "Select none" : "Select all"}
                 </button>
               )}
             </div>
-            {outputs.data?.length === 0 && <p className="text-xs text-muted">No output files yet.</p>}
+            {shown?.checkpoint != null && (
+              <p className="text-xs text-muted" data-testid="export-version">
+                As saved at checkpoint {shown.checkpoint}.
+              </p>
+            )}
+            {newer && (
+              <p className="mt-1 rounded-lg bg-research-soft px-2 py-1 text-xs text-research" role="status">
+                The agent has saved newer files since you opened this.{" "}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => {
+                    // A different version is a different choice: pick again.
+                    setShown(listed);
+                    setPicked(new Set());
+                  }}
+                >
+                  Show the newer files
+                </button>{" "}
+                (you'll choose again).
+              </p>
+            )}
+            {shown?.files.length === 0 && <p className="text-xs text-muted">No output files yet.</p>}
             <ul className="mt-1 flex max-h-56 flex-col gap-0.5 overflow-y-auto">
-              {outputs.data?.map((file) => (
+              {shown?.files.map((file) => (
                 <li key={file.path}>
                   <label className="flex items-center gap-2">
                     <input type="checkbox" checked={chosen.has(file.path)} onChange={() => toggle(file.path)} />
@@ -156,7 +185,9 @@ export function ExportDialog({
             <Button onClick={onClose}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={run.isPending || !destinationId || (!report && chosen.size === 0)}
+              disabled={
+                run.isPending || !destinationId || (!report && chosen.size === 0) || (chosen.size > 0 && shown?.checkpoint == null)
+              }
               onClick={() => run.mutate()}
             >
               {run.isPending ? "Exporting…" : "Export"}

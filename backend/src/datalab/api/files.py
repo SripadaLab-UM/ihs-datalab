@@ -80,6 +80,9 @@ class FileOut(BaseModel):
     size: int
     modified: str
     kind: Kind
+    # The checkpoint this listing is of (none for query results, which are
+    # listed as they are). Views and exports of the file ask for this one.
+    checkpoint: int | None = None
 
 
 class SkippedOut(BaseModel):
@@ -110,10 +113,12 @@ class RestoreOut(BaseModel):
 class NewPreview(BaseModel):
     root: Root
     path: str
+    checkpoint: int | None = None  # the latest if not given
 
 
 class PreviewOut(BaseModel):
     url: str
+    checkpoint: int
 
 
 @dataclass(frozen=True)
@@ -182,27 +187,38 @@ def build_files_router(
     def prefix(root: Root) -> str:
         return "outputs/" if root == "outputs" else ""
 
-    def saved_files(conversation_id: str, root: Root) -> tuple[Checkpoints, dict[str, Entry]]:
-        """The workspace files under `root` in the latest checkpoint, by path under it."""
+    def saved_files(
+        conversation_id: str, root: Root, checkpoint: int | None = None
+    ) -> tuple[Checkpoints, int | None, dict[str, Entry]]:
+        """The workspace files under `root` in one checkpoint (the latest if not given),
+        by path under it, with that checkpoint's number."""
         checkpoints = sessions.checkpoints(conversation_id)
-        latest = checkpoints.latest()
-        if latest is None:
-            return checkpoints, {}
+        chosen = checkpoints.latest() if checkpoint is None else checkpoints.get(checkpoint)
+        if chosen is None:
+            if checkpoint is not None:
+                raise HTTPException(404, "No such checkpoint.")
+            return checkpoints, None, {}
         start = prefix(root)
-        return checkpoints, {
-            rel[len(start) :]: entry
-            for rel, entry in checkpoints.entries(latest.number).items()
-            if rel.startswith(start)
-        }
+        return (
+            checkpoints,
+            chosen.number,
+            {
+                rel[len(start) :]: entry
+                for rel, entry in checkpoints.entries(chosen.number).items()
+                if rel.startswith(start)
+            },
+        )
 
-    def open_file(conversation_id: str, root: Root, path: str) -> int:
+    def open_file(
+        conversation_id: str, root: Root, path: str, checkpoint: int | None = None
+    ) -> int:
         try:
             check_relative(path)
         except UnsafePath as error:
             raise HTTPException(404, "No such file.") from error
         if root == "results":
             return _open_result(sessions.paths(conversation_id).oracle_results, path)
-        checkpoints, files = saved_files(conversation_id, root)
+        checkpoints, _, files = saved_files(conversation_id, root, checkpoint)
         entry = files.get(path)
         if entry is None:
             raise HTTPException(404, "No such file (files appear here after each turn).")
@@ -212,13 +228,14 @@ def build_files_router(
     def list_folder(conversation_id: str, root: Root = "outputs") -> list[FileOut]:
         """Files as of the end of the last turn (or query results, as they are)."""
         conversation_or_404(conversation_id)
+        number: int | None = None
         if root == "results":
             listed = [
                 (rel, info.st_size, info.st_mtime)
                 for rel, info in list_files(sessions.paths(conversation_id).oracle_results)
             ]
         else:
-            _, files = saved_files(conversation_id, root)
+            _, number, files = saved_files(conversation_id, root)
             listed = [(rel, e.size, e.modified) for rel, e in files.items()]
         return [
             FileOut(
@@ -226,6 +243,7 @@ def build_files_router(
                 size=size,
                 modified=datetime.fromtimestamp(modified, UTC).isoformat(timespec="seconds"),
                 kind=kind_of(rel),
+                checkpoint=None if root == "results" else number,
             )
             for rel, size, modified in sorted(listed)
         ]
@@ -236,13 +254,14 @@ def build_files_router(
         root: Root,
         path: str,
         head: int = Query(default=_DEFAULT_HEAD, ge=1, le=16 * 1024**2),
+        checkpoint: int | None = None,
     ) -> Response:
         """A file's content for the in-app viewer: images, or the start of a text file."""
         conversation_or_404(conversation_id)
         kind = kind_of(path)
         if kind not in ("image", "csv", "text", "html"):
             raise HTTPException(415, "DataLab can't preview this kind of file.")
-        fd = open_file(conversation_id, root, path)
+        fd = open_file(conversation_id, root, path, checkpoint)
         with os.fdopen(fd, "rb") as source:
             if kind == "image":
                 data = source.read(_MAX_IMAGE_BYTES + 1)
@@ -270,11 +289,11 @@ def build_files_router(
         conversation_or_404(conversation_id)
         if body.root == "results" or kind_of(body.path) != "html":
             raise HTTPException(422, "Only HTML outputs can be previewed.")
-        checkpoints, files = saved_files(conversation_id, body.root)
-        if body.path not in files:
+        checkpoints, number, files = saved_files(conversation_id, body.root, body.checkpoint)
+        if number is None or body.path not in files:
             raise HTTPException(404, "No such file (files appear here after each turn).")
         token = previews.grant(_Grant(files, checkpoints, prefix(body.root)))
-        return PreviewOut(url=f"/preview/{token}/{quote(body.path)}")
+        return PreviewOut(url=f"/preview/{token}/{quote(body.path)}", checkpoint=number)
 
     @router.get("/checkpoints")
     def list_checkpoints(conversation_id: str) -> list[CheckpointOut]:

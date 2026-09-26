@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,7 @@ from datalab.exports import (
     export,
     report_document,
     safe_name,
+    svg_is_inert,
 )
 from datalab.sessions.checkpoints import UnsafePath, open_workspace_file
 
@@ -147,7 +149,8 @@ def test_windows_trailing_dots_and_utf16_svgs_dont_slip_through(tmp_path, output
     utf16 = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
     (outputs / "trick.svg").write_bytes(b"\xff\xfe" + utf16.encode("utf-16-le"))
     (outputs / "plot.svg").write_text(
-        '<?xml version="1.0" encoding="utf-8"?><svg><defs><path id="g1" d="M0"/></defs>'
+        '<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg"'
+        ' xmlns:xlink="http://www.w3.org/1999/xlink"><defs><path id="g1" d="M0"/></defs>'
         '<use xlink:href="#g1"/><image xlink:href="data:image/png;base64,AA"/></svg>'
     )
     destination = tmp_path / "out"
@@ -159,3 +162,55 @@ def test_windows_trailing_dots_and_utf16_svgs_dont_slip_through(tmp_path, output
     assert "<script" not in (files / "page.html").read_text()
     assert (files / "trick.svg.txt").exists()
     assert (files / "plot.svg").exists()  # matplotlib-style SVGs stay usable
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_a_real_matplotlib_chart_is_static():
+    assert svg_is_inert((FIXTURES / "matplotlib-chart.svg").read_bytes())
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        # From the Milestone 3 review: both reached a server when opened from disk.
+        '<style>@\\69mport "http://127.0.0.1:9/c";</style>',
+        '<image width="9" height="9"><set attributeName="href" to="http://127.0.0.1:9/s"'
+        ' begin="0s"/></image>',
+        '<animate attributeName="href" to="http://x/a"/>',
+        '<a href="https://x/"><text>x</text></a>',
+        '<rect fill="u\\72l(http://x/f)"/>',
+        '<rect style="fill:url(http://x/f)"/>',
+        "<rect filter=\"url( 'https://x/f')\"/>",
+        '<image href="http://x/i.png"/>',
+        '<image href="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="/>',
+        '<use href="https://x/sprite.svg#a"/>',
+        '<filter><feImage href="https://x/i"/></filter>',
+        '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml">x</div></foreignObject>',
+        '<x:script xmlns:x="http://www.w3.org/2000/svg">1</x:script>',
+        '<rect onload="fetch(1)"/>',
+        "<style>@font-face { font-family: f; src: url(https://x/f.woff) }</style>",
+        '<text cursor="url(https://x/c.cur), auto">x</text>',
+        '<metadata><svg:set xmlns:svg="http://www.w3.org/2000/svg" to="http://x"/></metadata>',
+        # CSS after a child of <style> is still part of the stylesheet.
+        '<style><tspan/>@import "http://x/i.css";</style>',
+        "<style><g/>@font-face{font-family:x;src:url(http://x/f)}</style>",
+    ],
+)
+def test_anything_that_could_load_is_not_static(body):
+    svg = f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">{body}</svg>'
+    assert not svg_is_inert(svg.encode()), body
+
+
+@pytest.mark.parametrize(
+    "svg",
+    [
+        '<?xml-stylesheet href="https://x/s.css"?><svg xmlns="http://www.w3.org/2000/svg"/>',
+        '<!DOCTYPE svg [<!ENTITY e SYSTEM "https://x/e">]><svg xmlns="http://www.w3.org/2000/svg">&e;</svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect></svg>',
+        "<html><body>not an svg</body></html>",
+    ],
+)
+def test_odd_documents_are_not_static(svg):
+    assert not svg_is_inert(svg.encode())

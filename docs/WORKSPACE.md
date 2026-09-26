@@ -1,7 +1,10 @@
 # Scientific workspace
 
-Status: **draft** for v1. This is a proposal under discussion and has not been
-implemented.
+Status: **partly implemented** (milestone 3). Each feature below is marked
+**built** (implemented and covered by automated tests), **partial**, or
+**planned**. "Built" doesn't mean accepted: acceptance needs the end-to-end
+journeys and scientific evaluations in [ARCHITECTURE.md](ARCHITECTURE.md)
+(Milestone 3 acceptance).
 
 The workspace is where researchers work with the agent. It is built on top of
 the safety platform ([SAFETY.md](SAFETY.md)) and the lab knowledge base
@@ -100,7 +103,12 @@ Evidence from 2026 shapes these features:
 On observational health data, the value is in making the agent's work
 **planned, traceable, and checked**, not in making it more autonomous.
 
-### Analysis plans
+### Analysis plans (built)
+
+What this guarantees: the plan the person approved is recorded, frozen, and
+hashed. It is a record of intent, not a gate: nothing stops the agent from
+running an off-plan query; it's asked to label such work exploratory, and
+the rigor review checks that it did.
 
 - Before touching outcome data for a new question, the agent writes a short
   **analysis plan**:
@@ -116,7 +124,15 @@ On observational health data, the value is in making the agent's work
 - In Analysis mode this is the default workflow. In other modes the agent
   proposes a plan when a question calls for one.
 
-### Claim-to-evidence tracing
+### Claim-to-evidence tracing (partial)
+
+Built: after each final answer, DataLab checks whether each number in it
+appears (allowing rounding and percentages) in that turn's command output,
+query results, or data files in `outputs/`, and flags the ones that don't.
+That shows a number came from *some* output, not that it's the right
+statistic from the right analysis.
+
+Planned (milestone 8): the full chain below.
 
 - Every number, table, and figure in an answer links to what produced it:
   the query in the Data accessed log, the script, and the command output.
@@ -124,14 +140,16 @@ On observational health data, the value is in making the agent's work
   chain.
 - DataLab already records every piece of this: the event log, the data access
   log, and the checkpoints. The feature ties them together.
-- After each final answer, DataLab flags numbers that don't trace to any
-  query or output.
 
-### Rigor review (toggle)
+### Rigor review (toggle) (built)
+
+What this guarantees: a second pass by the same model against a checklist.
+It's a prompt for the person's own judgement, not independent statistical
+validation, and its findings can be wrong in either direction.
 
 - A **Rigor review** switch in the conversation header. It is **on by
   default in Analysis mode** and off in the other modes.
-- When on, Codex's built-in review mode runs before the final answer, using a
+- When on, Codex's built-in review mode runs after the answer, using a
   rigor checklist. The checklist favours mechanical checks over opinions:
   - Are claims traced?
   - Did the analysis follow the approved plan, and is off-plan work labelled?

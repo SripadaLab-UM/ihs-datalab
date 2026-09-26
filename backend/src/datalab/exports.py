@@ -29,6 +29,7 @@ from typing import Any
 
 from datalab import __version__
 from datalab.htmlclean import clean_fragment
+from datalab.svgcheck import is_static_svg
 
 MANIFEST = "datalab-export.json"
 # The agent's files go in here, apart from DataLab's report and manifest.
@@ -43,16 +44,6 @@ _ACTIVE_TYPES = {
     "xht", "svgz", "scf", "jnlp", "wsc", "sct", "website", "ps1xml", "psc1", "docm", "dotm",
     "xlsm", "xltm", "xlam", "pptm", "potm", "ppam", "sldm", "appref-ms",
 }  # fmt: skip
-# In an SVG, anything that can run, load, or link elsewhere.
-_SVG_ACTIVE = re.compile(
-    r"<[\w:.-]*(script|foreignobject|iframe|embed|object|handler|listener)\b"
-    r"|\son[\w-]*\s*="
-    # An href anywhere but within the file (#…) or to an embedded image.
-    r"|href\s*=\s*(?:\"\s*(?!#|data:image/)|'\s*(?!#|data:image/)|(?![\"'#]|data:image/))"
-    r"|<!entity|<\?xml-stylesheet|url\(\s*[\"']?(?!#|data:)"
-    r"|@import|javascript:|image-set",
-    re.IGNORECASE,
-)
 _XML_ENCODING = re.compile(r"<\?xml[^>]*encoding\s*=\s*[\"']([^\"']+)", re.IGNORECASE)
 
 # Exported conversation reports can't load or send anything, wherever they're opened.
@@ -248,7 +239,7 @@ def svg_is_inert(data: bytes) -> bool:
         "ascii",
     ):
         return False
-    return not _SVG_ACTIVE.search(text)
+    return is_static_svg(text)
 
 
 def inert_page(source: str, sibling: Callable[[str], bytes | None] | None = None) -> bytes:

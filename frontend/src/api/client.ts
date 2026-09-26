@@ -82,18 +82,19 @@ export const api = {
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
   files: (id: string, root: FileRoot = "outputs") =>
     request<WorkspaceFile[]>(`/api/conversations/${id}/files?root=${root}`),
-  /** Where the viewer loads a file from (images are shown straight from this). */
-  fileUrl: (id: string, root: FileRoot, path: string) =>
-    `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}`,
-  fileText: async (id: string, root: FileRoot, path: string) => {
-    const response = await fetch(api.fileUrl(id, root, path));
+  /** Where the viewer loads a file from (images are shown straight from this), as of one checkpoint. */
+  fileUrl: (id: string, root: FileRoot, path: string, checkpoint?: number | null) =>
+    `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}` +
+    (checkpoint != null ? `?checkpoint=${checkpoint}` : ""),
+  fileText: async (id: string, root: FileRoot, path: string, checkpoint?: number | null) => {
+    const response = await fetch(api.fileUrl(id, root, path, checkpoint));
     if (!response.ok) throw new ApiError(response.status, "This file can't be shown.");
     return { text: await response.text(), truncated: response.headers.get("x-datalab-truncated") === "1" };
   },
-  preview: (id: string, root: FileRoot, path: string) =>
-    request<{ url: string }>(`/api/conversations/${id}/previews`, {
+  preview: (id: string, root: FileRoot, path: string, checkpoint?: number | null) =>
+    request<{ url: string; checkpoint: number }>(`/api/conversations/${id}/previews`, {
       method: "POST",
-      body: JSON.stringify({ root, path }),
+      body: JSON.stringify({ root, path, checkpoint: checkpoint ?? null }),
     }),
   checkpoints: (id: string) => request<Checkpoint[]>(`/api/conversations/${id}/checkpoints`),
   restore: (id: string, number: number) =>

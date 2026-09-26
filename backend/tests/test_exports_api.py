@@ -49,10 +49,20 @@ def test_practice_exports_only_to_its_own_folder(settings, catalog):
             json={
                 "destination_id": "practice",
                 "files": [{"root": "outputs", "path": "table.csv"}],
+                "checkpoint": shown(client, cid),
                 "report": {"html": "<h1>Hi</h1><a href='https://x'>x</a><script>1</script>"},
             },
         )
         assert result.status_code == 201
+        # Files are exported only as a listing showed them, never "whatever is latest".
+        unpinned = client.post(
+            f"/api/conversations/{cid}/exports",
+            json={
+                "destination_id": "practice",
+                "files": [{"root": "outputs", "path": "table.csv"}],
+            },
+        )
+        assert unpinned.status_code == 422
         folder = settings.data_dir / "practice-exports"
         [export] = list(folder.iterdir())
         assert (export / "files" / "outputs" / "table.csv").read_text() == "a\n1\n"  # checkpoint
@@ -62,6 +72,7 @@ def test_practice_exports_only_to_its_own_folder(settings, catalog):
         manifest = json.loads((export / MANIFEST).read_text())
         assert manifest["conversation"]["title"] == "Sleep study"
         assert manifest["contains_study_data"] is False  # practice data is synthetic
+        assert manifest["checkpoint"] == shown(client, cid)
         events = client.get(f"/api/conversations/{cid}/events").json()
         assert events[-1]["type"] == "exported"
 
@@ -88,6 +99,7 @@ def test_real_destinations_come_from_the_picker(real_settings, catalog, monkeypa
             json={
                 "destination_id": added.json()["id"],
                 "files": [{"root": "outputs", "path": "table.csv"}],
+                "checkpoint": shown(client, cid),
             },
         ).json()
         assert exported["folder"].startswith(str(dropbox))
@@ -99,12 +111,17 @@ def test_real_destinations_come_from_the_picker(real_settings, catalog, monkeypa
             json={
                 "destination_id": added.json()["id"],
                 "files": [{"root": "outputs", "path": "nope.csv"}],
+                "checkpoint": shown(client, cid),
             },
         )
         assert missing.status_code == 404
         bogus = client.post(
             f"/api/conversations/{cid}/exports",
-            json={"destination_id": "dest_x", "files": [{"root": "outputs", "path": "table.csv"}]},
+            json={
+                "destination_id": "dest_x",
+                "files": [{"root": "outputs", "path": "table.csv"}],
+                "checkpoint": shown(client, cid),
+            },
         )
         assert bogus.status_code == 404
         assert client.delete(f"/api/export-destinations/{added.json()['id']}").status_code == 204
@@ -145,6 +162,7 @@ def test_a_destination_replaced_by_a_link_is_refused(real_settings, catalog, mon
             json={
                 "destination_id": destination,
                 "files": [{"root": "outputs", "path": "table.csv"}],
+                "checkpoint": shown(client, cid),
             },
         )
         assert refused.status_code == 422
@@ -167,9 +185,15 @@ def test_an_exported_page_keeps_its_own_images(settings, catalog):
             json={
                 "destination_id": "practice",
                 "files": [{"root": "outputs", "path": "report.html"}],
+                "checkpoint": shown(client, cid),
             },
         )
         [export] = list((settings.data_dir / "practice-exports").iterdir())
         page = (export / "files" / "outputs" / "report.html").read_text()
         assert page.count("data:image/png;base64,iVBORw") == 1
         assert "https://x" not in page and "passwd" not in page
+
+
+def shown(client, cid: str) -> int:
+    """The checkpoint the outputs listing shows, as the export dialog sends it."""
+    return client.get(f"/api/conversations/{cid}/files").json()[0]["checkpoint"]

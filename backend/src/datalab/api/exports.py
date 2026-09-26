@@ -166,6 +166,9 @@ def build_exports_router(
                 "mode": conversation.mode,
                 "model": conversation.model,
             },
+            # Which saved version of the workspace the files are from (the
+            # History panel's numbering).
+            "checkpoint": body.checkpoint,
         }
         report = body.report
 
@@ -208,7 +211,10 @@ def _sources(
 ):
     """What to copy: workspace files from the checkpoint shown, results as they are."""
     checkpoints = sessions.checkpoints(conversation_id)
-    chosen = checkpoints.get(checkpoint) if checkpoint is not None else checkpoints.latest()
+    if checkpoint is None and any(f.root != "results" for f in files):
+        # The person chose files as a listing showed them: exactly those.
+        raise HTTPException(422, "Say which checkpoint's files to export.")
+    chosen = checkpoints.get(checkpoint) if checkpoint is not None else None
     if checkpoint is not None and chosen is None:
         raise HTTPException(404, "No such checkpoint.")
     saved = checkpoints.entries(chosen.number) if chosen else {}

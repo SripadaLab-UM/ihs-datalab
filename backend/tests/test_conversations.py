@@ -176,7 +176,9 @@ def test_only_one_message_at_a_time(app):
         assert second.status_code == 409
         client.post(f"/api/conversations/{cid}/stop")
         events = wait_for(client, cid, "turn_finished")
-    assert events[-1]["data"]["status"] == "interrupted"
+    # turn_done may already follow it: look for the turn's own end.
+    finished = [e for e in events if e["type"] == "turn_finished"]
+    assert finished[-1]["data"]["status"] == "interrupted"
     assert "stop_requested" in [e["type"] for e in events]
 
 

@@ -155,6 +155,33 @@ def check_attachable(
     return real, kind
 
 
+def credential_files_in(folder: Path, *, limit: int = 20_000) -> tuple[list[str], bool]:
+    """Credential-like files inside a folder, by path under it, and whether the look was complete.
+
+    An attached folder is mounted whole (read-only still lets the agent read
+    everything), so the person is told what it contains. Links aren't followed;
+    the look stops after `limit` entries, however they're spread out.
+    """
+    found: list[str] = []
+    seen = 0
+    pending = [folder]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    seen += 1
+                    if seen > limit:
+                        return sorted(found), False
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+                    elif entry.name.lower() in _CREDENTIAL_FILES:
+                        found.append(os.path.relpath(entry.path, folder))
+        except OSError:
+            continue  # unreadable here: nothing the agent could read either
+    return sorted(found), True
+
+
 def recheck(attachment: Attachment, *, protected: list[Path]) -> str | None:
     """Why an attachment can't be mounted now, or None if it can.
 

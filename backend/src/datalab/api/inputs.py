@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Literal
@@ -18,6 +19,7 @@ from datalab.sessions.inputs import (
     InputKind,
     NotAttachable,
     check_attachable,
+    credential_files_in,
     practice_samples,
 )
 from datalab.sessions.manager import Busy, SessionManager
@@ -47,6 +49,9 @@ class Refused(BaseModel):
 class AttachResult(BaseModel):
     added: list[AttachmentOut]
     refused: list[Refused]
+    # What the person should know about what they attached (credential files
+    # inside a folder, for example).
+    warnings: list[str] = []
 
 
 def out(attachment: Attachment) -> AttachmentOut:
@@ -139,7 +144,8 @@ def build_inputs_router(
                 "input_attached",
                 {"items": [{"path": a.container_path, "kind": a.kind} for a in added]},
             )
-        return AttachResult(added=[out(a) for a in added], refused=refused)
+        warnings = await asyncio.to_thread(_folder_warnings, added)
+        return AttachResult(added=[out(a) for a in added], refused=refused, warnings=warnings)
 
     @router.delete("/conversations/{conversation_id}/inputs/{attachment_id}", status_code=204)
     async def detach(conversation_id: str, attachment_id: str) -> None:
@@ -163,3 +169,24 @@ def build_inputs_router(
             )
 
     return router
+
+
+def _folder_warnings(added: list[Attachment]) -> list[str]:
+    warnings = []
+    for attachment in added:
+        if attachment.kind != "folder":
+            continue
+        found, complete = credential_files_in(Path(attachment.host_path))
+        if found:
+            shown = ", ".join(found[:5]) + (f" and {len(found) - 5} more" if len(found) > 5 else "")
+            warnings.append(
+                f"{attachment.name} contains what look like credentials files ({shown}). "
+                "The agent can read everything in an attached folder. Remove it and attach "
+                "just the files it needs if that's not what you want."
+            )
+        elif not complete:
+            warnings.append(
+                f"{attachment.name} is large, so DataLab couldn't check all of it for "
+                "credentials files. The agent can read everything in it."
+            )
+    return warnings

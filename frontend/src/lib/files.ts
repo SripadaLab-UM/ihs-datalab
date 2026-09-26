@@ -10,6 +10,8 @@ export interface OpenFile {
   path: string;
   kind: FileKind;
   size?: number;
+  /** The checkpoint it was listed from; the viewer pins the latest if not given. */
+  checkpoint?: number | null;
 }
 
 const TEXT = new Set([

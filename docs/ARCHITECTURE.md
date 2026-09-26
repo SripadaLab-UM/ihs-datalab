@@ -574,10 +574,30 @@ something we can use end to end ourselves.
      approval card to the throwaway research container. 3f done the same
      day: analysis plans, claim tracing, and the rigor review. 3g done the
      same day: the join_paths and find_concept metadata tools, confirmed
-     external links, and the leak tests above. Milestone 3 is complete.)
+     external links, and the leak tests above.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.
+   - **Status: implemented and tested automatically; not yet accepted.**
+     Acceptance (3h) needs, on the practice profile, recorded against a
+     commit:
+     - the journey discover tables → approve a plan → analyse → inspect a
+       chart → revise it → restore a checkpoint → export exactly the
+       reviewed version, through the UI, including a Stop and a restart;
+     - the research helper approved, edited, declined, and cancelled;
+     - a first scientific evaluation set with answers calculated
+       independently from the synthetic data: participant counts,
+       missingness, cross-cohort joins, duplicate rows, empty tables, and
+       within- versus between-person analyses, checking denominators,
+       exclusions, uncertainty, and interpretation. Re-run when prompts,
+       skills, the model, or the Codex version change.
+
+   | Milestone | Implemented | Tested automatically | Demonstrated end to end | Accepted |
+   |---|---|---|---|---|
+   | 0 Spike | yes | n/a | yes (Mac) | yes |
+   | 1 Foundations | yes | yes | yes | yes |
+   | 2 First data session, both platforms | yes | yes (CI, Linux) | Mac only; Windows fresh install pending | no |
+   | 3 Complete workspace | yes | yes | in parts (practice profile, Chrome) | no (3h) |
 4. **SQL Playground.**
 5. **Knowledge.**
    - GitHub App sign-in and repo sync.
@@ -590,5 +610,8 @@ something we can use end to end ourselves.
 7. **Distribution polish.** Complete the installers, updates and rollback
    with database backup, the uninstaller, and the release pipeline. Test on
    the Windows machine.
-8. **Finish.** Evals, the USER_GUIDE, a dry run with one or two colleagues,
-   and the definition of done.
+8. **Finish.** Evals (growing from 3h's set), full claim-to-evidence
+   provenance (each number linked to its query, script, and output, and the
+   "How was this made?" view; milestone 3 only checks that numbers appear in
+   the turn's outputs), the USER_GUIDE, a dry run with one or two
+   colleagues, and the definition of done.

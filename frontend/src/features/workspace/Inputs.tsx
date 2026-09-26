@@ -9,6 +9,7 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
   const queryClient = useQueryClient();
   const inputs = useQuery({ queryKey: ["inputs", conversation.id], queryFn: () => api.inputs(conversation.id) });
   const [refused, setRefused] = useState<{ path: string; reason: string }[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["inputs", conversation.id] });
   const attach = useMutation({
     mutationFn: async (request: { source: "files" | "folder" | "sample"; sample?: string }) => {
@@ -18,12 +19,13 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
           "This is a research session, which has the internet. Anything you attach may be sent to websites. Attach anyway?",
         )
       ) {
-        return { added: [], refused: [] };
+        return { added: [], refused: [], warnings: [] };
       }
       return api.attach(conversation.id, request.source, request.sample);
     },
     onSuccess: (result) => {
       setRefused(result.refused);
+      setWarnings(result.warnings ?? []);
       refresh();
     },
   });
@@ -33,7 +35,8 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted">
-        The agent can read these at <code className="font-mono">/inputs</code> but can't change them.
+        The agent can read these at <code className="font-mono">/inputs</code> but can't change them. An attached
+        folder is shared whole, including anything added to it later.
         {conversation.kind === "research" && (
           <span className="text-research"> This is a research session: anything attached may reach the internet.</span>
         )}
@@ -54,6 +57,11 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
       {conversation.busy && <p className="text-xs text-muted">You can attach once the agent has finished.</p>}
       {attach.error && <p className="text-xs text-danger">{attach.error.message}</p>}
       {detach.error && <p className="text-xs text-danger">{detach.error.message}</p>}
+      {warnings.map((warning) => (
+        <p key={warning} className="rounded-lg bg-research-soft px-2 py-1 text-xs text-research" role="alert">
+          {warning}
+        </p>
+      ))}
       {refused.map((r) => (
         <p key={r.path} className="text-xs text-danger">
           Not attached: {r.reason}

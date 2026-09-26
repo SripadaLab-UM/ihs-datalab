@@ -355,3 +355,33 @@ def test_exports_drop_css_that_still_loads_after_cleaning(css):
 def test_exports_keep_ordinary_quoted_text():
     cleaned = clean_fragment('<style>p::before { content: "Note: x" }</style>', offline=True)
     assert 'content: "Note: x"' in cleaned
+
+
+def test_views_and_previews_follow_the_checkpoint_they_were_listed_from(settings, catalog):
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = new_conversation(client)
+        report = workspace(app, cid) / "outputs" / "report.html"
+        report.write_text("<p>first version</p>")
+        checkpoint(app, cid)
+        [listed] = client.get(f"/api/conversations/{cid}/files").json()
+        first = listed["checkpoint"]
+        report.write_text("<p>second version</p>")
+        checkpoint(app, cid)
+
+        def preview(number):
+            body = {"root": "outputs", "path": "report.html", "checkpoint": number}
+            made = client.post(f"/api/conversations/{cid}/previews", json=body).json()
+            return made["checkpoint"], client.get(made["url"], headers=FRAME).text
+
+        # The version the person was shown, not whatever is newest.
+        shown, page = preview(first)
+        assert shown == first and "first version" in page
+        latest, page = preview(None)
+        assert latest == first + 1 and "second version" in page
+        text = client.get(
+            f"/api/conversations/{cid}/files/outputs/report.html", params={"checkpoint": first}
+        ).text
+        assert "first version" in text
+        missing = {"root": "outputs", "path": "report.html", "checkpoint": 99}
+        assert client.post(f"/api/conversations/{cid}/previews", json=missing).status_code == 404

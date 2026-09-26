@@ -114,6 +114,11 @@ access. It never gains it.
   folders, private app data (`~/.ssh`, `~/Library`, `AppData`, and so on,
   except cloud-synced folders such as Dropbox), and DataLab's own data folder,
   which would expose other conversations.
+- **An attached folder is shared whole.** The agent can read every file in it,
+  including files added later (read-only stops changes, not reading).
+  Credentials files are refused when attached on their own; inside a folder
+  they can't be, so DataLab lists any it finds when the folder is attached,
+  and the person can remove the folder and attach only what's needed.
 - Adding or removing an attachment restarts the conversation's container on
   its next message, because mounts are fixed when a container starts. The
   agent is told what changed.
@@ -341,7 +346,13 @@ access. It never gains it.
     `.hta`, `.command`, …) get `.txt` added. Web pages are exported as inert
     copies (cleaned, their own images embedded, and a policy that blocks
     every request), unless the person ticks "keep web pages exactly as the
-    agent made them". An SVG with anything active in it gets `.txt` added.
+    agent made them". An SVG keeps its name only if every element,
+    attribute, and bit of CSS in it is on a short list of static drawing
+    features (shapes, text, gradients, filters, links within the file, and
+    embedded PNG/JPEG/GIF/WebP images); anything else, or anything that
+    doesn't parse, gets `.txt` added. It's an allowlist because an SVG can
+    spell a request in too many ways (animation, CSS escapes, presentation
+    attributes) for a list of bad patterns to keep up.
     Every exported file is marked as downloaded (Mark of the Web on Windows,
     the quarantine flag on a Mac), so the computer treats it with the same
     caution as a file from the internet.

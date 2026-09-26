@@ -465,6 +465,11 @@ export interface components {
             added: components["schemas"]["AttachmentOut"][];
             /** Refused */
             refused: components["schemas"]["Refused"][];
+            /**
+             * Warnings
+             * @default []
+             */
+            warnings: string[];
         };
         /** AttachmentOut */
         AttachmentOut: {
@@ -592,6 +597,8 @@ export interface components {
              * @enum {string}
              */
             kind: "html" | "image" | "csv" | "text" | "pdf" | "other";
+            /** Checkpoint */
+            checkpoint?: number | null;
         };
         /** FileRef */
         FileRef: {
@@ -687,11 +694,15 @@ export interface components {
             root: "outputs" | "work" | "results";
             /** Path */
             path: string;
+            /** Checkpoint */
+            checkpoint?: number | null;
         };
         /** PreviewOut */
         PreviewOut: {
             /** Url */
             url: string;
+            /** Checkpoint */
+            checkpoint: number;
         };
         /** QueryRecordOut */
         QueryRecordOut: {
@@ -1210,6 +1221,7 @@ export interface operations {
         parameters: {
             query?: {
                 head?: number;
+                checkpoint?: number | null;
             };
             header?: never;
             path: {
