@@ -73,6 +73,13 @@ function TurnView({ turn }: { turn: Turn }) {
           {turn.userText}
         </div>
       )}
+      {turn.items
+        .filter((item) => item.kind === "notice")
+        .map((item, index) => (
+          <p key={index} className={item.kind === "notice" && item.tone === "error" ? "text-sm text-danger" : "rounded-lg bg-sunken px-3 py-2 text-sm text-muted"}>
+            {item.kind === "notice" ? item.text : null}
+          </p>
+        ))}
       {working.length > 0 && <WorkLog items={working} running={turn.status === "running"} />}
       {answer && <Markdown text={answer} />}
       {turn.status === "interrupted" && <p className="text-sm text-muted">Stopped.</p>}

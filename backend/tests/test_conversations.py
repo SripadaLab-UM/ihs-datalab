@@ -24,6 +24,9 @@ class FakeRuntime:
         self.sent: list[str] = []
         self.stopped = False
 
+    def begin_turn(self) -> None:
+        pass
+
     async def send(self, text: str, *, effort: str | None = None) -> TurnResult:
         self.sent.append(text)
         await self.emit("turn_started", {"turn_id": "t1"})

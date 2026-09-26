@@ -59,6 +59,7 @@ class SessionManager:
             raise Busy("The agent is still working on the previous message.")
         await self._make_room(keep=conversation.id)
         runtime = self._runtime(conversation)
+        runtime.begin_turn()
         self._last_used[conversation.id] = time.monotonic()
         self._store.append(conversation.id, "user_message", {"text": text})
         self._turns[conversation.id] = asyncio.create_task(
@@ -81,6 +82,7 @@ class SessionManager:
             runtime_paths,
             agent_image=self._settings.agent_image,
             host_port=self._settings.port,
+            profile=self._settings.profile,
         ).remove()
         self._store.delete(conversation_id)
         shutil.rmtree(runtime_paths.root, ignore_errors=True)
@@ -120,6 +122,7 @@ class SessionManager:
                     paths,
                     agent_image=self._settings.agent_image,
                     host_port=self._settings.port,
+                    profile=self._settings.profile,
                 ),
                 self._tokens,
                 model=conversation.model,

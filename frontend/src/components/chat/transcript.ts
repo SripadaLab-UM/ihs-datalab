@@ -117,6 +117,9 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "error":
         add({ kind: "notice", tone: "error", text: text(data.message) || "Something went wrong." });
         break;
+      case "notice":
+        add({ kind: "notice", tone: "info", text: text(data.text) });
+        break;
       case "stop_requested":
         add({ kind: "notice", tone: "info", text: "Stopping…" });
         break;

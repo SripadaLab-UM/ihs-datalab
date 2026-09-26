@@ -1,0 +1,193 @@
+"""SessionRuntime against a fake Codex app-server (tests/fake_app_server.py).
+
+These cover the paths that are easy to get wrong: Stop before the turn has
+started, Codex crashing mid-turn, recovery after a crash, and a thread that
+can't be resumed.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+from datalab.sessions.containers import SessionPaths
+from datalab.sessions.runtime import SessionRuntime
+from datalab.sessions.tokens import SessionTokens
+
+FAKE_SERVER = Path(__file__).with_name("fake_app_server.py")
+
+
+class FakeContainers:
+    """Records what the runtime asks Docker to do; runs the fake app-server."""
+
+    def __init__(self, log: Path, mode: str = "normal", start_delay: float = 0) -> None:
+        self.log = log
+        self.mode = mode
+        self.start_delay = start_delay
+        self.running = False
+        self.tokens: list[str] = []
+        self.stops = 0
+
+    async def start(self, token: str) -> None:
+        await asyncio.sleep(self.start_delay)
+        self.tokens.append(token)
+        self.running = True
+
+    async def stop(self) -> None:
+        self.stops += 1
+        self.running = False
+
+    async def is_running(self) -> bool:
+        return self.running
+
+    async def kill_turn_processes(self) -> None:
+        pass
+
+    async def open_app_server(self) -> asyncio.subprocess.Process:
+        env = {**os.environ, "FAKE_MODE": self.mode, "FAKE_LOG": str(self.log)}
+        return await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(FAKE_SERVER),
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+
+    def requests(self) -> list[str]:
+        if not self.log.exists():
+            return []
+        return [json.loads(line)["method"] for line in self.log.read_text().splitlines()]
+
+
+def make(tmp_path: Path, containers: FakeContainers, tokens: SessionTokens | None = None):
+    events: list[tuple[str, dict]] = []
+
+    async def emit(kind: str, data: dict) -> None:
+        events.append((kind, data))
+
+    runtime = SessionRuntime(
+        "c_test",
+        "data",
+        SessionPaths(tmp_path / "session"),
+        containers,  # type: ignore[arg-type]
+        tokens or SessionTokens(),
+        model="gpt-test",
+        developer_instructions="Be brief.",
+        tool_timeout_seconds=60,
+        emit=emit,
+    )
+    return runtime, events
+
+
+async def test_a_turn_completes_and_config_is_outside_the_agent_folders(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl")
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    result = await runtime.send("hi")
+    assert result.status == "completed"
+    assert ("answer_delta", {"id": "m1", "text": "done"}) in events
+    paths = runtime.paths
+    assert paths.codex_config.exists()
+    # DataLab never writes config into a folder the agent can change.
+    assert not (paths.codex_home / "config.toml").exists()
+    await runtime.close()
+
+
+async def test_stop_while_starting_prevents_the_turn(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", start_delay=0.3)
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    sending = asyncio.create_task(runtime.send("do a lot of work"))
+    await asyncio.sleep(0.05)  # still starting the container
+    await runtime.stop_turn()
+    result = await asyncio.wait_for(sending, 5)
+    assert result.status == "interrupted"
+    assert "turn/start" not in containers.requests()
+    assert ("turn_finished", {"status": "interrupted"}) in events
+    await runtime.close()
+
+
+async def test_stop_during_a_turn_interrupts_it(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", mode="slow")
+    runtime, _ = make(tmp_path, containers)
+    runtime.begin_turn()
+    sending = asyncio.create_task(runtime.send("long job"))
+    for _ in range(100):
+        if "turn/start" in containers.requests():
+            break
+        await asyncio.sleep(0.02)
+    await runtime.stop_turn()
+    result = await asyncio.wait_for(sending, 5)
+    assert result.status == "interrupted"
+    assert "turn/interrupt" in containers.requests()
+    await runtime.close()
+
+
+async def test_a_crash_mid_turn_ends_the_turn(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl", mode="crash")
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    result = await asyncio.wait_for(runtime.send("hi"), 5)  # doesn't hang
+    assert result.status == "failed"
+    assert any(kind == "turn_finished" and data["status"] == "failed" for kind, data in events)
+    assert not runtime.busy
+    await runtime.close()
+
+
+async def test_recovery_restarts_the_container_with_a_live_token(tmp_path):
+    tokens = SessionTokens()
+    containers = FakeContainers(tmp_path / "log.jsonl", mode="crash")
+    runtime, _ = make(tmp_path, containers, tokens)
+    runtime.begin_turn()
+    await asyncio.wait_for(runtime.send("first"), 5)
+
+    containers.mode = "normal"
+    runtime.begin_turn()
+    result = await asyncio.wait_for(runtime.send("second"), 5)
+    assert result.status == "completed"
+    # The container was restarted, not reused, and holds a token that still works.
+    assert containers.stops >= 2
+    assert len(containers.tokens) == 2
+    assert tokens.resolve(containers.tokens[-1]) is not None
+    assert tokens.resolve(containers.tokens[0]) is None
+    await runtime.close()
+
+
+async def test_a_failed_resume_is_visible(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl")
+    runtime, _ = make(tmp_path, containers)
+    runtime.begin_turn()
+    await runtime.send("first")
+    await runtime.close()
+
+    # A new runtime for the same conversation, whose saved thread can't be resumed.
+    containers.mode = "no_resume"
+    again, events = make(tmp_path, containers)
+    again.begin_turn()
+    result = await again.send("second")
+    assert result.status == "completed"
+    assert any(kind == "notice" and "starting fresh" in data["text"] for kind, data in events)
+    await again.close()
+
+
+@pytest.fixture(autouse=True)
+def _quiet(caplog):
+    caplog.set_level("ERROR")
+
+
+def test_a_planted_symlink_is_removed_not_followed(tmp_path):
+    outside = tmp_path / "precious.txt"
+    outside.write_text("keep me")
+    paths = SessionPaths(tmp_path / "session")
+    paths.create()
+    (paths.codex_home / "config.toml").symlink_to(outside)
+    paths.prepare_config_mountpoint()
+    assert outside.read_text() == "keep me"
+    target = paths.codex_home / "config.toml"
+    assert target.is_file() and not target.is_symlink()

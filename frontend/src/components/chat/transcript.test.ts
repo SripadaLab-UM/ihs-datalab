@@ -64,3 +64,10 @@ describe("buildTranscript", () => {
     expect(command.kind === "command" && command.output.length).toBe(20_000);
   });
 });
+
+describe("notices", () => {
+  it("shows a notice from the backend", () => {
+    const [turn] = buildTranscript([e("user_message", { text: "hi" }), e("notice", { text: "starting fresh" })]);
+    expect(turn.items).toContainEqual({ kind: "notice", tone: "info", text: "starting fresh" });
+  });
+});

@@ -152,7 +152,6 @@ def _contains_function_call(node: exp.Dot) -> bool:
 def _referenced_tables(
     statement: exp.Expr, allowed_schemas: frozenset[str]
 ) -> tuple[TableRef, ...]:
-    cte_names = {cte.alias_or_name.upper() for cte in statement.find_all(exp.CTE)}
     refs: set[TableRef] = set()
     for table in statement.find_all(exp.Table):
         name = table.name
@@ -160,7 +159,7 @@ def _referenced_tables(
             raise SqlRejected("Database links and cross-database references aren't allowed.")
         schema = table.db.upper()
         if not schema:
-            if name.upper() in cte_names or name.upper() == "DUAL":
+            if name.upper() == "DUAL" or name.upper() in _ctes_in_scope(table):
                 continue
             raise SqlRejected(
                 f"Qualify every table with its cohort schema, for example IHS_2025.{name.upper()}."
@@ -169,6 +168,34 @@ def _referenced_tables(
             raise SqlRejected(f"The schema {schema} isn't available to DataLab.")
         refs.add(TableRef(schema=schema, name=name.upper()))
     return tuple(sorted(refs, key=str))
+
+
+def _ctes_in_scope(table: exp.Table) -> set[str]:
+    """The CTE names an unqualified table reference can actually mean.
+
+    Only WITH clauses that enclose the reference count. Inside a CTE's own
+    body, only the CTEs defined before it (and itself, for recursive CTEs)
+    are visible. Any other unqualified name would be resolved by Oracle as a
+    real object, so it must not be skipped here.
+    """
+    visible: set[str] = set()
+    child: exp.Expr = table
+    node = table.parent
+    while node is not None:
+        if isinstance(node, exp.With):
+            ctes = [c for c in node.expressions if isinstance(c, exp.CTE)]
+            if isinstance(child, exp.CTE) and child in ctes:
+                visible |= {c.alias_or_name.upper() for c in ctes[: ctes.index(child) + 1]}
+            else:
+                visible |= {c.alias_or_name.upper() for c in ctes}
+        # sqlglot 30 stores the WITH clause as "with_" (older versions: "with").
+        elif (with_ := node.args.get("with_") or node.args.get("with")) is not None and (
+            child is not with_
+        ):
+            # The reference is in the main query of a statement with a WITH clause.
+            visible |= {c.alias_or_name.upper() for c in with_.expressions}
+        child, node = node, node.parent
+    return visible
 
 
 def _warnings(statement: exp.Expr) -> tuple[str, ...]:

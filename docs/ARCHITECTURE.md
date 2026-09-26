@@ -107,6 +107,14 @@ src/datalab/
   but *not* the shell commands it started. After an interrupt, the adapter
   kills the turn's process groups inside the container. On startup it sweeps
   any orphans left behind.
+- **Host code never trusts agent-writable folders.** The agent can plant
+  symlinks in `/work` and `/codex-home`.
+  - DataLab never writes a file into those folders. The Codex config lives
+    outside them and is mounted read-only over `config.toml`, so the agent
+    also can't change its own configuration.
+  - When DataLab reads from them, for example to list outputs or export
+    files, it resolves paths and refuses anything that leads outside the
+    session folder.
 - **`CODEX_HOME` is per session,** on the host, and mounted into the
   container. It holds conversation content (session files and a local log),
   so it counts as study data and lives in the session folder. Its generated

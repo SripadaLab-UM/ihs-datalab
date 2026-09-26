@@ -40,6 +40,8 @@ class AppServerClient:
         self._on_server_request = on_server_request
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
+        # Resolves when Codex exits, so a turn waiting on it can't hang forever.
+        self.closed: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         self._reader = asyncio.create_task(self._read_messages())
         self._stderr = asyncio.create_task(self._drain_stderr())
         self._tasks: set[asyncio.Task[None]] = set()
@@ -99,6 +101,8 @@ class AppServerClient:
                 await self._dispatch(message)
         finally:
             self._fail_pending(AppServerError("Codex stopped unexpectedly."))
+            if not self.closed.done():
+                self.closed.set_result(None)
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         if "method" not in message:

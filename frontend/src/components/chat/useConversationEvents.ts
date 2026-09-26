@@ -20,6 +20,7 @@ const EVENT_TYPES = [
   "usage",
   "error",
   "stop_requested",
+  "notice",
 ];
 
 /**

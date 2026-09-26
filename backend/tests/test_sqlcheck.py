@@ -125,3 +125,35 @@ class TestRejected:
 
     def test_unparseable(self):
         assert "parsed" in rejected("SELEC a FORM t")
+
+
+class TestCteScope:
+    """An unqualified name is only a CTE if a WITH clause around it defines it."""
+
+    def test_cte_chain_is_allowed(self):
+        result = ok(
+            "WITH a AS (SELECT id FROM IHS_2025.T), b AS (SELECT id FROM a) SELECT * FROM b"
+        )
+        assert result.tables == (TableRef("IHS_2025", "T"),)
+
+    def test_cte_in_subquery_and_union(self):
+        ok("SELECT * FROM (WITH a AS (SELECT 1 x FROM dual) SELECT x FROM a)")
+        ok("WITH a AS (SELECT 1 x FROM dual) SELECT x FROM a UNION ALL SELECT x FROM a")
+
+    def test_nested_cte_does_not_hide_an_outer_reference(self):
+        assert "Qualify" in rejected(
+            "SELECT * FROM (WITH all_users AS (SELECT 1 x FROM dual) "
+            "SELECT x FROM all_users) a, all_users"
+        )
+
+    def test_a_cte_body_cannot_use_a_later_cte_name(self):
+        # Oracle resolves `b` in the first CTE as a real object, not the later CTE.
+        assert "Qualify" in rejected(
+            "WITH a AS (SELECT * FROM b), b AS (SELECT 1 x FROM dual) SELECT * FROM a"
+        )
+
+    def test_sibling_subquery_ctes_are_not_visible(self):
+        assert "Qualify" in rejected(
+            "SELECT * FROM (WITH s AS (SELECT 1 x FROM dual) SELECT x FROM s) p, "
+            "(SELECT x FROM s) q"
+        )

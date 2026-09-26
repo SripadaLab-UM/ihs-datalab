@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from datalab.sessions import codex_config
-from datalab.sessions.appserver import AppServerClient
+from datalab.sessions.appserver import AppServerClient, AppServerError
 from datalab.sessions.containers import SessionContainers, SessionPaths
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
 
@@ -65,18 +65,27 @@ class SessionRuntime:
         self._client: AppServerClient | None = None
         self._thread_id: str | None = self._saved_thread_id()
         self._turn: _Turn | None = None
+        self._stop_requested = False
         self._lock = asyncio.Lock()
 
     @property
     def busy(self) -> bool:
         return self._turn is not None
 
+    def begin_turn(self) -> None:
+        """Call before scheduling `send`, so a Stop that arrives early still counts."""
+        self._stop_requested = False
+
     async def send(self, text: str, *, effort: str | None = None) -> TurnResult:
         """Run one turn and wait for it to finish, emitting events as it goes."""
         async with self._lock:
             await self._ensure_started()
             assert self._client is not None and self._thread_id is not None
-            self._turn = _Turn()
+            if self._stop_requested:
+                # Stopped while the container was starting: don't begin the work.
+                await self._emit("turn_finished", {"status": "interrupted"})
+                return TurnResult("", "interrupted")
+            self._turn = turn = _Turn()
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
                 "input": [{"type": "text", "text": text, "text_elements": []}],
@@ -85,20 +94,23 @@ class SessionRuntime:
                 params["effort"] = effort
             try:
                 response = await self._client.request("turn/start", params)
-                self._turn.id = (response.get("turn") or {}).get("id")
-                return await self._turn.done
+                turn.id = (response.get("turn") or {}).get("id")
+                if self._stop_requested:
+                    await self._interrupt(turn)
+                return await self._wait_for(turn, self._client)
             finally:
                 self._turn = None
 
     async def stop_turn(self) -> None:
-        """Stop the running turn, including any commands it started."""
+        """Stop the running turn, including any commands it started.
+
+        If the turn hasn't started yet (the container is still starting), the
+        request is remembered and `send` stops before doing any work.
+        """
+        self._stop_requested = True
         turn = self._turn
-        if turn is None or self._client is None or self._thread_id is None or turn.id is None:
-            return
-        await self._client.request(
-            "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}, timeout=30
-        )
-        await self.containers.kill_turn_processes()
+        if turn is not None and turn.id is not None:
+            await self._interrupt(turn)
 
     async def close(self) -> None:
         """Stop Codex and the containers. The workspace stays on disk."""
@@ -108,13 +120,34 @@ class SessionRuntime:
         await self.containers.stop()
         self._tokens.revoke_session(self.session_id)
 
+    async def _interrupt(self, turn: _Turn) -> None:
+        if self._client is None or self._thread_id is None or turn.id is None:
+            return
+        await self._client.request(
+            "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}, timeout=30
+        )
+        await self.containers.kill_turn_processes()
+
+    async def _wait_for(self, turn: _Turn, client: AppServerClient) -> TurnResult:
+        """The turn's result, or a failure if Codex exits before finishing it."""
+        await asyncio.wait({turn.done, client.closed}, return_when=asyncio.FIRST_COMPLETED)
+        if turn.done.done():
+            return turn.done.result()
+        message = "The agent stopped unexpectedly. Send your message again to continue."
+        await self._emit("turn_finished", {"status": "failed", "error": message})
+        return TurnResult(turn.id or "", "failed", message)
+
     # Starting -------------------------------------------------------------
 
     async def _ensure_started(self) -> None:
         if self._client and self._client.alive and await self.containers.is_running():
             return
+        # (Re)start everything together: a container that is still running
+        # holds the previous session token, which is revoked below.
         if self._client:
             await self._client.close()
+            self._client = None
+        await self.containers.stop()
         self._tokens.revoke_session(self.session_id)
         token = self._tokens.issue(
             SessionAccess(
@@ -122,7 +155,7 @@ class SessionRuntime:
             )
         )
         self.paths.create()
-        (self.paths.codex_home / "config.toml").write_text(
+        self.paths.codex_config.write_text(
             codex_config.render(
                 self.kind, model=self._model, tool_timeout_seconds=self._tool_timeout
             )
@@ -142,8 +175,17 @@ class SessionRuntime:
             try:
                 await self._client.request("thread/resume", {"threadId": self._thread_id, **common})
                 return
-            except Exception:
-                log.warning("couldn't resume thread for %s; starting a new one", self.session_id)
+            except AppServerError as error:
+                # Say so: otherwise the conversation looks intact on screen
+                # while the agent has silently lost everything said earlier.
+                log.warning("couldn't resume thread for %s: %s", self.session_id, error)
+                await self._emit(
+                    "notice",
+                    {
+                        "text": "The agent couldn't restore its memory of this conversation, "
+                        "so it's starting fresh. Repeat any context it needs."
+                    },
+                )
         response = await self._client.request("thread/start", {"model": self._model, **common})
         self._thread_id = (response.get("thread") or {}).get("id")
         if not self._thread_id:

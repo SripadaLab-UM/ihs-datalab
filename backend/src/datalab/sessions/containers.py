@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import shutil
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -22,6 +24,9 @@ GATEWAY_IMAGE = "nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e591939
 # knows (the gateway), and nothing else, even on older Docker versions.
 _NO_DNS = "192.0.2.1"
 _LABEL = "datalab.session"
+# Which DataLab profile owns a container, so a practice instance's cleanup
+# never touches a real instance's sessions (or the other way round).
+_PROFILE_LABEL = "datalab.profile"
 
 # Stops commands a turn left running after an interrupt. Codex 0.157.1 ends
 # the turn but not the shell commands it started (found in the spike).
@@ -54,9 +59,35 @@ class SessionPaths:
     def gateway_conf(self) -> Path:
         return self.root / "gateway.conf"
 
+    @property
+    def codex_config(self) -> Path:
+        # Kept outside the agent's folders and mounted read-only: DataLab
+        # never writes into a folder the agent can change (it could plant a
+        # symlink there to redirect the write), and the agent can't edit its
+        # own configuration.
+        return self.root / "codex-config.toml"
+
     def create(self) -> None:
         for folder in (self.work, self.work / "outputs", self.codex_home, self.oracle_results):
             folder.mkdir(parents=True, exist_ok=True)
+
+    def prepare_config_mountpoint(self) -> None:
+        """Make sure codex-home/config.toml is a plain file Docker can mount over.
+
+        Docker Desktop can't create the mount point itself inside a bind
+        mount. Only call this while the agent's container is stopped. If the
+        agent left a symlink here, the link itself is removed (its target is
+        never touched), and the placeholder is created without following links.
+        """
+        target = self.codex_home / "config.toml"
+        if target.is_symlink() or (target.exists() and not target.is_file()):
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+        if not target.exists():
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+            os.close(os.open(target, flags, 0o644))
 
 
 @dataclass(frozen=True)
@@ -75,6 +106,7 @@ class SessionContainers:
         *,
         agent_image: str,
         host_port: int,
+        profile: str,
         limits: ContainerLimits | None = None,
     ) -> None:
         self.session_id = session_id
@@ -83,6 +115,10 @@ class SessionContainers:
         self.agent_image = agent_image
         self.host_port = host_port
         self.limits = limits or ContainerLimits()
+        self._labels = [
+            "--label", f"{_LABEL}={session_id}",
+            "--label", f"{_PROFILE_LABEL}={profile}",
+        ]  # fmt: skip
         short = session_id.replace("_", "-")[-24:]
         self.network = f"datalab-{short}"
         self.gateway = f"datalab-{short}-gateway"
@@ -93,14 +129,7 @@ class SessionContainers:
         self.paths.create()
         self.paths.gateway_conf.write_text(render_gateway_conf(self.kind, self.host_port))
         if not await self._exists("network", self.network):
-            await docker(
-                "network",
-                "create",
-                "--internal",
-                "--label",
-                f"{_LABEL}={self.session_id}",
-                self.network,
-            )
+            await docker("network", "create", "--internal", *self._labels, self.network)
         await self._start_gateway()
         await self._start_agent(token)
 
@@ -136,7 +165,7 @@ class SessionContainers:
         await docker("rm", "-f", self.gateway, check=False)
         await docker(
             "run", "-d", "--name", self.gateway,
-            "--label", f"{_LABEL}={self.session_id}",
+            *self._labels,
             "--add-host", "host.docker.internal:host-gateway",
             "--read-only", "--tmpfs", "/var/cache/nginx", "--tmpfs", "/var/run",
             "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "SETUID",
@@ -154,18 +183,20 @@ class SessionContainers:
         await docker("rm", "-f", self.agent, check=False)
         # The token goes in a private env file, not on a command line where
         # other programs on this computer could see it.
+        self.paths.prepare_config_mountpoint()
         env_file = self.paths.root / ".agent.env"
         env_file.touch(mode=0o600)
         env_file.write_text(f"DATALAB_SESSION_TOKEN={token}\n")
         mounts = [
             "-v", f"{self.paths.work}:/work",
             "-v", f"{self.paths.codex_home}:/codex-home",
+            "-v", f"{self.paths.codex_config}:/codex-home/config.toml:ro",
         ]  # fmt: skip
         if self.kind == "data":
             mounts += ["-v", f"{self.paths.oracle_results}:/data/oracle:ro"]
         await docker(
             "run", "-d", "--name", self.agent,
-            "--label", f"{_LABEL}={self.session_id}",
+            *self._labels,
             "--network", self.network,
             "--dns", _NO_DNS,
             "--init",
@@ -212,13 +243,12 @@ async def docker(*args: str, check: bool = True) -> str:
     return out.decode(errors="replace")
 
 
-async def remove_all_session_containers() -> None:
-    """Clean up containers and networks a previous DataLab run left behind."""
-    ids = (await docker("ps", "-aq", "--filter", f"label={_LABEL}", check=False)).split()
+async def remove_all_session_containers(profile: str) -> None:
+    """Clean up this profile's containers and networks left by a previous run."""
+    owned = f"label={_PROFILE_LABEL}={profile}"
+    ids = (await docker("ps", "-aq", "--filter", owned, check=False)).split()
     if ids:
         await docker("rm", "-f", *ids, check=False)
-    networks = (
-        await docker("network", "ls", "-q", "--filter", f"label={_LABEL}", check=False)
-    ).split()
+    networks = (await docker("network", "ls", "-q", "--filter", owned, check=False)).split()
     if networks:
         await docker("network", "rm", *networks, check=False)
