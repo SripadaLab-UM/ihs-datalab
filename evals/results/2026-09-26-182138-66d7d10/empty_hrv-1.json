@@ -1,0 +1,48 @@
+{
+  "task": "empty_hrv",
+  "mode": "extraction",
+  "prompt": "How many nights of Garmin HRV data does the 2026 cohort have?",
+  "tests": "a table that exists but is empty (a feed not loaded yet)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says it's empty",
+      "passed": true,
+      "detail": "IHS_2026.GARMINHRVSUMMARY has 0 rows"
+    },
+    {
+      "name": "missing data, not a finding",
+      "passed": true,
+      "detail": "the cohort has 9 Garmin users: the HRV feed just isn't loaded"
+    }
+  ],
+  "answer": "The 2026 cohort currently has **0 nights of Garmin HRV data** in the dedicated Garmin HRV summary table/view.\n\nCatalog evidence: `search_catalog(\"Garmin HRV\", IHS_2026)` found `IHS_2026.GARMINHRVSUMMARY` and `IHS_2026.VGARMINHRVSUMMARY`. `describe_table` showed `CALENDARDATE` is `DATE`, and HRV fields `LASTNIGHTAVG` and `LASTNIGHT5MINHIGH` are `NUMBER`.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(LASTNIGHTAVG) AS rows_with_lastnightavg,\n  COUNT(LASTNIGHT5MINHIGH) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY\n```\n\nPurpose: profile the base HRV table. Row count returned: 1 summary row; all counts were 0. Result file: `/data/oracle/q_20260926T182736_7eb596.csv`.\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(LASTNIGHTAVG) AS rows_with_lastnightavg,\n  COUNT(LASTNIGHT5MINHIGH) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY\n```\n\nPurpose: verify the companion view. Row count returned: 1 summary row; all counts were 0. Result file: `/data/oracle/q_20260926T182741_705932.csv`.\n\nOutput copy: `/work/outputs/garmin_hrv_2026_count.csv`  \nData dictionary: `/work/outputs/garmin_hrv_2026_count_dictionary.md`\n\nAssumption: \u201cnights\u201d means participant-night records in the Garmin HRV summary source. Since both the table and view have zero rows, duplicate handling does not affect the answer. Double-check only if you expected 2026 Garmin data to have been loaded under a different non-HRV table or a later pipeline refresh.",
+  "finished": true,
+  "seconds": 39.73252201080322,
+  "approvals": [],
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(LASTNIGHTAVG) AS rows_with_lastnightavg,\n  COUNT(LASTNIGHT5MINHIGH) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY",
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CALENDARDATE) AS rows_with_calendar_date,\n  COUNT(LASTNIGHTAVG) AS rows_with_lastnightavg,\n  COUNT(LASTNIGHT5MINHIGH) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(CALENDARDATE) AS min_calendar_date,\n  MAX(CALENDARDATE) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY"
+  ],
+  "usage": {
+    "total": {
+      "totalTokens": 100513,
+      "inputTokens": 97715,
+      "cachedInputTokens": 49152,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 2798,
+      "reasoningOutputTokens": 866
+    },
+    "last": {
+      "totalTokens": 15296,
+      "inputTokens": 14608,
+      "cachedInputTokens": 5632,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 688,
+      "reasoningOutputTokens": 141
+    },
+    "modelContextWindow": 258400
+  },
+  "conversation": "c_00d69aaa7fa02703",
+  "attempt": 1
+}

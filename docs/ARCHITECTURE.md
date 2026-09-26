@@ -578,9 +578,9 @@ something we can use end to end ourselves.
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.
-   - **Status: implemented and tested automatically; not yet accepted.**
-     Acceptance (3h) needs, on the practice profile, recorded against a
-     commit:
+   - **Status: implemented, tested, and demonstrated (3h, 2026-09-26);
+     acceptance pending the lab's review.** 3h recorded, on the practice
+     profile, against a commit:
      - the journey discover tables → approve a plan → analyse → inspect a
        chart → revise it → restore a checkpoint → export exactly the
        reviewed version, through the UI, including a Stop and a restart;
@@ -597,7 +597,7 @@ something we can use end to end ourselves.
    | 0 Spike | yes | n/a | yes (Mac) | yes |
    | 1 Foundations | yes | yes | yes | yes |
    | 2 First data session, both platforms | yes | yes (CI, Linux) | Mac only; Windows fresh install pending | no |
-   | 3 Complete workspace | yes | yes | in parts (practice profile, Chrome) | no (3h) |
+   | 3 Complete workspace | yes | yes | yes, 2026-09-26 ([acceptance](acceptance/2026-09-26-milestone-3.md), [evals](../evals/results/)) | pending the lab's review |
 4. **SQL Playground.**
 5. **Knowledge.**
    - GitHub App sign-in and repo sync.

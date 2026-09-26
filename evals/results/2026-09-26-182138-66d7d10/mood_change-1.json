@@ -1,0 +1,76 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": true,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Preliminary pilot result, following the approved plan: daily mood was lower during internship than before internship in the 2025 cohort pilot subset. The estimated within-person change was `-0.74` mood points, 95% CI `-0.88 to -0.60`, across 11 pilot participants with data in both periods. This is descriptive, not causal.\n\nI created the pilot report here: `/work/outputs/2025_daily_mood_pilot_report.html`  \nSource script: `/work/analyze_2025_daily_mood.R`\n\nPilot and coverage notes:\n- Table used: `IHS_2025.VW_DAILY_MOOD`\n- Mood dates spanned `2025-04-01` to `2026-07-01`\n- Full table coverage: `26,405` mood rows, `150` participants\n- Full estimable within-person sample is expected to be `149` participants with at least one valid pre and during mood observation; also `149` meet the planned >=3 days per period sensitivity\n- Pilot extraction: `2,182` rows, 11 participants\n- Mood scores parsed numerically; pilot observed range was 2 to 10, while full aggregate range was 1 to 10\n- Duplicate participant-days existed in the pilot and were averaged as planned\n\nSQL/query provenance:\n- `q_20260926T182833_174ab5`: full-cohort aggregate coverage, 1 row\n- `q_20260926T182839_acb07e`: pilot row-level extraction, 2,182 rows\n- `q_20260926T182937_c55f75`: full-cohort estimable sample and score-range aggregate, 1 row\n- One intermediate aggregate query failed due to a SQL scoping error and produced no result; I corrected it in `q_20260926T182937_c55f75`.\n\nReady to scale the exact frozen pilot pipeline to the full 2025 cohort now? Choices: run the full planned analysis, or pause here with the pilot only.",
+  "finished": true,
+  "seconds": 112.0827009677887,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_40096aa05f2e451f",
+      "plan": {
+        "question": "Did daily mood change from before internship to during the intern year in the 2025 cohort, and by how much?",
+        "estimand": "Primary estimand: the within-person mean change in daily mood score, defined as each participant's mean daily mood during the intern-year period minus that participant's mean daily mood before internship, then averaged across participants who have at least one valid daily mood observation in both periods. Secondary descriptive estimand: the difference in pooled daily mood means between periods, with participant-clustered uncertainty to account for repeated days.",
+        "exposure": "Period indicator based on MOOD_STARTDATE from IHS_2025.VW_DAILY_MOOD: pre-internship before 2025-07-01 and during-internship from 2025-07-01 onward. The exact available date range will be reported. The July 1 boundary is an analyst choice reflecting the usual internship start date unless a reviewed cohort-specific date rule is available.",
+        "outcome": "Daily mood score from IHS_2025.VW_DAILY_MOOD.MOOD_SCORE. Because the column is VARCHAR2, I will validate numeric parsing, observed values/range, missingness, and duplicate participant-day records before analysis.",
+        "covariates": "No covariate adjustment for the primary estimate, because the question is a descriptive within-person pre/post change. I will not imply causality. If coverage varies strongly by period, I will report it and may add an exploratory sensitivity that weights participants equally via participant-period means, which is already the primary estimand.",
+        "cohort": "IHS_2025 daily mood records in IHS_2025.VW_DAILY_MOOD. Include enrolled/identified participants with valid participant identifier, valid mood date, and numeric daily mood score. Primary analysis includes participants with at least one valid mood day before 2025-07-01 and at least one valid mood day on/after 2025-07-01. Pilot will use a reproducible subset of participants to test extraction and code, then I will ask before scaling to the full cohort.",
+        "decisions": "After approval, I will first run a pilot on a reproducible participant subset. I will check row counts, participants, date range, numeric conversion failures, duplicate participant-day rows, missingness, impossible values, period coverage, and participants contributing within-person pre/post variation. If duplicate participant-day mood records occur, I will average valid numeric scores within participant-day before computing period means and report how often this happens. I will report mean change with a 95% confidence interval across participant-level changes; I will also report median/IQR of participant changes and sensitivity to requiring at least 3 valid days per period if coverage allows. Any analyses beyond these will be labeled exploratory off-plan."
+      }
+    }
+  ],
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participant_count,\n  MIN(CAST(MOOD_STARTDATE AS DATE)) AS min_mood_start_date,\n  MAX(CAST(MOOD_STARTDATE AS DATE)) AS max_mood_start_date,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS missing_participant_id_rows,\n  SUM(CASE WHEN MOOD_STARTDATE IS NULL THEN 1 ELSE 0 END) AS missing_startdate_rows,\n  SUM(CASE WHEN MOOD_SCORE IS NULL OR TRIM(MOOD_SCORE) IS NULL THEN 1 ELSE 0 END) AS missing_mood_score_rows,\n  SUM(CASE WHEN MOOD_SCORE IS NOT NULL AND NOT REGEXP_LIKE(TRIM(MOOD_SCORE), '^-?[0-9]+(\\.[0-9]+)?$') THEN 1 ELSE 0 END) AS nonnumeric_mood_score_rows,\n  COUNT(DISTINCT CASE WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN PARTICIPANTIDENTIFIER END) AS pre_participants,\n  COUNT(DISTINCT CASE WHEN CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-07-01' THEN PARTICIPANTIDENTIFIER END) AS during_participants,\n  COUNT(DISTINCT CASE WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN PARTICIPANTIDENTIFIER END) AS participants_with_pre\nFROM IHS_2025.VW_DAILY_MOOD",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  USERID,\n  CAST(MOOD_STARTDATE AS DATE) AS mood_start_date,\n  CAST(MOOD_ENDDATE AS DATE) AS mood_end_date,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE ORA_HASH(PARTICIPANTIDENTIFIER, 99) < 10",
+    "WITH valid AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TRUNC(CAST(MOOD_STARTDATE AS DATE)) AS mood_day,\n    CASE\n      WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN 'pre'\n      ELSE 'during'\n    END AS period,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS mood_score_num\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_STARTDATE IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND REGEXP_LIKE(TRIM(MOOD_SCORE), '^-?[0-9]+(\\.[0-9]+)?$')\n), participant_coverage AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(DISTINCT CASE WHEN period = 'pre' THEN mood_day END) AS pre_days,\n    COUNT(DISTINCT CASE WHEN period = 'during' THEN mood_day END) AS during_days\n  FROM valid\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  COUNT(*) AS valid_participants,\n  SUM(CASE WHEN pre_days > 0 THEN 1 ELSE 0 END) AS participants_with_pre,\n  SUM(CASE WHEN during_days > 0 THEN 1 ELSE 0 END) AS participants_with_during,\n  SUM(CASE WHEN pre_days > 0 AND during_days > 0 THEN 1 ELSE 0 END) AS participants_with_both_periods,\n  SUM(CASE WHEN pre_days >= 3 AND during_days >= 3 THEN 1 ELSE 0 END) AS participants_with_3_days_both_periods,\n  MIN(pre_days) AS min_pre_days,\n  MAX(pre_days) AS max_pre_days,\n  MIN(during_days) AS min_during_days,\n  MAX(during_days) AS max_during_days,\n  MIN(mood_score_num) AS min_mood_score,\n  MAX(mood_score_num) AS max_mood_score\nFROM participant_coverage\nCROSS JOIN (SELECT MIN(mood_score_num) AS min_mood_score, MAX(mood_score_num) AS max_mood_score FROM valid)",
+    "WITH valid AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TRUNC(CAST(MOOD_STARTDATE AS DATE)) AS mood_day,\n    CASE\n      WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN 'pre'\n      ELSE 'during'\n    END AS period,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS mood_score_num\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_STARTDATE IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND REGEXP_LIKE(TRIM(MOOD_SCORE), '^-?[0-9]+(\\.[0-9]+)?$')\n), participant_coverage AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(DISTINCT CASE WHEN period = 'pre' THEN mood_day END) AS pre_days,\n    COUNT(DISTINCT CASE WHEN period = 'during' THEN mood_day END) AS during_days\n  FROM valid\n  GROUP BY PARTICIPANTIDENTIFIER\n), score_range AS (\n  SELECT MIN(mood_score_num) AS min_mood_score, MAX(mood_score_num) AS max_mood_score\n  FROM valid\n)\nSELECT\n  COUNT(*) AS valid_participants,\n  SUM(CASE WHEN pre_days > 0 THEN 1 ELSE 0 END) AS participants_with_pre,\n  SUM(CASE WHEN during_days > 0 THEN 1 ELSE 0 END) AS participants_with_during,\n  SUM(CASE WHEN pre_days > 0 AND during_days > 0 THEN 1 ELSE 0 END) AS participants_with_both_periods,\n  SUM(CASE WHEN pre_days >= 3 AND during_days >= 3 THEN 1 ELSE 0 END) AS participants_with_3_days_both_periods,\n  MIN(pre_days) AS min_pre_days,\n  MAX(pre_days) AS max_pre_days,\n  MIN(during_days) AS min_during_days,\n  MAX(during_days) AS max_during_days,\n  score_range.min_mood_score,\n  score_range.max_mood_score\nFROM participant_coverage\nCROSS JOIN score_range\nGROUP BY score_range.min_mood_score, score_range.max_mood_score"
+  ],
+  "usage": {
+    "total": {
+      "totalTokens": 239635,
+      "inputTokens": 229751,
+      "cachedInputTokens": 113664,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 9884,
+      "reasoningOutputTokens": 2289
+    },
+    "last": {
+      "totalTokens": 26546,
+      "inputTokens": 25701,
+      "cachedInputTokens": 12800,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 845,
+      "reasoningOutputTokens": 412
+    },
+    "modelContextWindow": 258400
+  },
+  "conversation": "c_7a2cae6edf7e467d",
+  "attempt": 1
+}

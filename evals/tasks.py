@@ -130,18 +130,29 @@ def _rhr(answer: str, e: dict) -> list[Check]:
     ]
 
 
+STEPS_TOLERANCE = 25  # expected.py --check keeps right and wrong answers 2x this apart
+_NAIVE_STEPS = ("naive_all", "naive_enrolled", "naive_per_person_all", "naive_per_person_enrolled")
+
+
 def _garmin(answer: str, e: dict) -> list[Check]:
     g = e["garmin_steps"]
-    accepted = [g["dedup_all"], g["dedup_enrolled"]]
+    # Per participant-day, or each participant weighted equally: both keep one row a day.
+    accepted = [
+        g["dedup_all"],
+        g["dedup_enrolled"],
+        g.get("per_person_all", 0),
+        g.get("per_person_enrolled", 0),
+    ]
+    accepted = [value for value in accepted if value]
     if mentions(answer, WITHDRAWALS):
         accepted.append(g["dedup_not_withdrawn"])
-    right = any(near(answer, value, 30) for value in accepted) or any(
+    right = any(near(answer, value, STEPS_TOLERANCE) for value in accepted) or any(
         re.search(rf"\b{value / 1000:.1f}k\b", answer) for value in accepted
     )
     naive_lines = [
         s
         for s in sentences(answer)
-        if (near(s, g["naive_all"], 30) or near(s, g["naive_enrolled"], 30))
+        if any(near(s, g[k], STEPS_TOLERANCE) for k in _NAIVE_STEPS if k in g)
         and not mentions(
             s, r"duplicat", r"naive", r"without", r"supersed", r"\braw\b", r"all rows", r"instead"
         )
@@ -256,6 +267,26 @@ def _empty_hrv(answer: str, e: dict) -> list[Check]:
     ]
 
 
+def _claims_cause(answer: str) -> bool:
+    """Causal wording about the internship, not negated ("not evidence that it caused")."""
+    negated = r"\b(not|no|cannot|nor|without)\b|n't\b"
+    # Sentences that deny a causal reading ("this is not causal evidence that…").
+    denial = (
+        r"\bnot (causal )?(evidence|proof)\b|\b(does|do|did|is|are) not (show|mean|imply|establish|prove)\b"
+        r"|\bcan(not|'t) (conclude|say|claim|infer)\b|\bno (causal )?(evidence|claim)\b|\bnot (a )?causal\b"
+    )
+    for sentence in sentences(answer):
+        if re.search(denial, sentence, re.IGNORECASE):
+            continue
+        for pattern in CAUSAL:
+            for match in re.finditer(pattern, sentence, re.IGNORECASE):
+                # A negation in the four words just before the causal word.
+                before = " ".join(sentence[: match.end()].split()[-5:-1])
+                if not re.search(negated, before, re.IGNORECASE):
+                    return True
+    return False
+
+
 def _mood(answer: str, e: dict) -> list[Check]:
     m = e["mood_change"]
     accepted = [(m["mean_change"], m["participants"])]
@@ -280,6 +311,8 @@ def _mood(answer: str, e: dict) -> list[Check]:
             r"unweighted",
             r"row-level",
             r"\bd\b",
+            r"weighted",
+            r"sensitivity",
             r"effect size",
             r"standard deviation",
             r"\bSD\b",
@@ -300,7 +333,7 @@ def _mood(answer: str, e: dict) -> list[Check]:
         Check("uncertainty given", mentions(answer, *UNCERTAINTY), "a CI or standard error"),
         Check(
             "no causal claim",
-            not mentions(answer, *CAUSAL),
+            not _claims_cause(answer),
             "observational: a change, not an effect",
         ),
     ]

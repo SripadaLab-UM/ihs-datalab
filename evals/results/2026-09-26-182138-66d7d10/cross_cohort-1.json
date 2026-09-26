@@ -1,0 +1,47 @@
+{
+  "task": "cross_cohort",
+  "mode": "extraction",
+  "prompt": "How many participants are in both the 2024 and the 2025 cohorts?",
+  "tests": "identifiers that are per cohort",
+  "passed": true,
+  "checks": [
+    {
+      "name": "no false overlap",
+      "passed": true,
+      "detail": "0 identifiers are shared; they're per cohort, so the honest answer is none, or that they can't be linked (not a linkage on DOB or ID digits)"
+    }
+  ],
+  "answer": "**Answer**\n\nI understood the question as: count people who appear in both the `IHS_2024` and `IHS_2025` cohorts.\n\nResult: **0 participants** were found in both cohorts. This was true when checked by `PARTICIPANTIDENTIFIER`, by enrolled study ID, and by normalized email address.\n\nCatalog evidence: `search_catalog` found `VW_IHS_PARTICIPANT_SUMMARY` and `STUDYPARTICIPANTS` in both `IHS_2024` and `IHS_2025`. I checked columns with `describe_table`: `PARTICIPANTIDENTIFIER` is `VARCHAR2(15)`, `STUDY_PARTICIPANT_ID` is `NUMBER(10)` in the summary view, and `EMAILADDRESS` plus `SECONDARYIDENTIFIER` are present in `STUDYPARTICIPANTS`.\n\nFiles:\n- `/work/outputs/ihs_2024_2025_participant_overlap_count.csv`\n- `/work/outputs/ihs_2024_2025_participant_overlap_data_dictionary.md`\n\nSQL run:\n\n```sql\n-- Profile participant summary IDs\nSELECT ... FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\nUNION ALL\nSELECT ... FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n```\nRows returned: 2. Both cohorts had 150 distinct `PARTICIPANTIDENTIFIER`s.\n\n```sql\n-- Profile source participant table IDs\nSELECT ... FROM IHS_2024.STUDYPARTICIPANTS\nUNION ALL\nSELECT ... FROM IHS_2025.STUDYPARTICIPANTS\n```\nRows returned: 2. Both cohorts had 150 distinct `PARTICIPANTIDENTIFIER`s; enrolled study IDs were 139 in 2024 and 136 in 2025.\n\n```sql\n-- Overlap by PARTICIPANTIDENTIFIER\nSELECT COUNT(*) AS overlapping_participants_by_participantidentifier\nFROM (...) p2024\nINNER JOIN (...) p2025\n  ON p2024.PARTICIPANTIDENTIFIER = p2025.PARTICIPANTIDENTIFIER\n```\nRows returned: 1. Count: 0.\n\n```sql\n-- Overlap by STUDY_PARTICIPANT_ID\nSELECT COUNT(*) AS overlapping_participants_by_study_participant_id\nFROM (...) p2024\nINNER JOIN (...) p2025\n  ON p2024.STUDY_PARTICIPANT_ID = p2025.STUDY_PARTICIPANT_ID\n```\nRows returned: 1. Count: 0.\n\n```sql\n-- Final person-level overlap by normalized email\nSELECT COUNT(*) AS overlapping_participants_by_normalized_email\nFROM (...) p2024\nINNER JOIN (...) p2025\n  ON p2024.normalized_emailaddress = p2025.normalized_emailaddress\n```\nRows returned: 1. Count: 0.\n\nCaveat to double-check: I used normalized email as the person-level linkage key after cohort IDs showed no overlap. If there is a separate master cross-cohort linkage table, that would be the strongest source to confirm this count.",
+  "finished": true,
+  "seconds": 66.99836230278015,
+  "approvals": [],
+  "queries": [
+    "SELECT\n  'IHS_2024.VW_IHS_PARTICIPANT_SUMMARY' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id\nFROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\nUNION ALL\nSELECT\n  'IHS_2025.VW_IHS_PARTICIPANT_SUMMARY' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY",
+    "SELECT\n  'IHS_2024.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n  COUNT(SECONDARYIDENTIFIER) AS nonnull_secondaryidentifier,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_secondaryidentifier\nFROM IHS_2024.STUDYPARTICIPANTS\nUNION ALL\nSELECT\n  'IHS_2025.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n  COUNT(SECONDARYIDENTIFIER) AS nonnull_secondaryidentifier,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_secondaryidentifier\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "SELECT\n  COUNT(*) AS overlapping_participants_by_participantidentifier\nFROM (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n) p2024\nINNER JOIN (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n) p2025\n  ON p2024.PARTICIPANTIDENTIFIER = p2025.PARTICIPANTIDENTIFIER",
+    "SELECT\n  COUNT(*) AS overlapping_participants_by_study_participant_id\nFROM (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n) p2024\nINNER JOIN (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n) p2025\n  ON p2024.STUDY_PARTICIPANT_ID = p2025.STUDY_PARTICIPANT_ID",
+    "SELECT\n  'IHS_2024.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(EMAILADDRESS) AS nonnull_emailaddress,\n  COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS distinct_normalized_emailaddress\nFROM IHS_2024.STUDYPARTICIPANTS\nUNION ALL\nSELECT\n  'IHS_2025.STUDYPARTICIPANTS' AS source_table,\n  COUNT(*) AS row_count,\n  COUNT(EMAILADDRESS) AS nonnull_emailaddress,\n  COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS distinct_normalized_emailaddress\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "SELECT\n  COUNT(*) AS overlapping_participants_by_normalized_email\nFROM (\n  SELECT DISTINCT LOWER(TRIM(EMAILADDRESS)) AS normalized_emailaddress\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE EMAILADDRESS IS NOT NULL\n) p2024\nINNER JOIN (\n  SELECT DISTINCT LOWER(TRIM(EMAILADDRESS)) AS normalized_emailaddress\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE EMAILADDRESS IS NOT NULL\n) p2025\n  ON p2024.normalized_emailaddress = p2025.normalized_emailaddress"
+  ],
+  "usage": {
+    "total": {
+      "totalTokens": 205629,
+      "inputTokens": 201308,
+      "cachedInputTokens": 90624,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 4321,
+      "reasoningOutputTokens": 1244
+    },
+    "last": {
+      "totalTokens": 21862,
+      "inputTokens": 20888,
+      "cachedInputTokens": 5632,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 974,
+      "reasoningOutputTokens": 305
+    },
+    "modelContextWindow": 258400
+  },
+  "conversation": "c_263e1b55be029304",
+  "attempt": 1
+}

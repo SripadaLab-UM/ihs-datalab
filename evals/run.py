@@ -37,7 +37,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).parent))
 import expected as answer_key
-from tasks import TASKS
+from tasks import TASKS, Check
 
 ROOT = Path(__file__).resolve().parent.parent
 PORT = 8767
@@ -182,6 +182,9 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
     approvals: list[dict] = []
     answered: set[str] = set()
     stopped_at: float | None = None
+    follow_up = ""
+    follow_up_after = 0  # the seq after which the follow-up turn's events start
+    turn_began = begun
     while True:
         # Only what's new: the API returns events a page (1,000) at a time.
         while page := _get(
@@ -207,9 +210,20 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
                     **data,
                 }
             )
-        if any(e["type"] == "turn_done" for e in events):
+        done = [e for e in events if e["type"] == "turn_done"]
+        if done and not follow_up and _asks_to_continue(events):
+            # Analysis mode pilots first and asks before the full run; a
+            # researcher would say go ahead. Once, and recorded.
+            follow_up = FOLLOW_UP
+            follow_up_after = events[-1]["seq"]
+            turn_began = time.time()  # the full run gets its own time budget
+            client.post(
+                f"/api/conversations/{cid}/messages", json={"text": follow_up, "effort": effort}
+            ).raise_for_status()
+            continue
+        if done and (not follow_up or len(done) >= 2):
             break
-        if stopped_at is None and time.time() - begun > TURN_TIMEOUT:
+        if stopped_at is None and time.time() - turn_began > TURN_TIMEOUT:
             client.post(f"/api/conversations/{cid}/stop")
             stopped_at = time.time()
         if stopped_at is not None and time.time() - stopped_at > 60:
@@ -217,15 +231,26 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
         time.sleep(3)
 
     finished = stopped_at is None and any(e["type"] == "turn_done" for e in events)
-    answers = [e["data"] for e in events if e["type"] == "answer" and e["data"].get("text")]
+    # After a follow-up, only the full run's answer counts, never the pilot's.
+    answers = [
+        e["data"]
+        for e in events
+        if e["type"] == "answer" and e["data"].get("text") and e["seq"] > follow_up_after
+    ]
     # The final answer; a turn that finished without phases ends on its last message.
     final = [a for a in answers if a.get("phase") == "final_answer"]
     if not final and any(e["type"] == "turn_done" for e in events):
         final = [a for a in answers if a.get("phase") is None][-1:]
     answer = final[-1]["text"] if final else ""
     checks = task.grade(answer, expected) if answer else []
+    # Graded on the first turn, and the answer says it's only a pilot.
+    if not follow_up and re.search(_PILOT_ONLY, answer[:600], re.IGNORECASE):
+        checks.append(Check("ran in full", False, "the answer is a pilot or preliminary result"))
     queries = _get(client, f"/api/conversations/{cid}/data-accessed")
-    usage = [e["data"] for e in events if e["type"] == "usage"]
+    usage = [e for e in events if e["type"] == "usage"]
+    # The last usage report of each turn (the pilot's, then the full run's).
+    per_turn = [u["data"] for u in usage if u["seq"] <= follow_up_after][-1:] if follow_up else []
+    per_turn += [u["data"] for u in usage if u["seq"] > follow_up_after][-1:]
     return {
         "task": task.id,
         "mode": task.mode,
@@ -238,17 +263,45 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
         "finished": finished,
         "seconds": time.time() - begun,
         "approvals": approvals,
+        "follow_up": follow_up,
         "queries": [q.get("sql_text") for q in queries],
-        "usage": usage[-1] if usage else None,
+        "usage": per_turn,
         "conversation": cid,
     }
+
+
+# What a researcher says when the agent pauses after a pilot: nothing about
+# the answer, and self-contained, so the second answer stands on its own.
+FOLLOW_UP = (
+    "Yes, go ahead as you recommend and finish the full analysis, then give me the final "
+    "answer to my original question."
+)
+_ASKS = (
+    r"\b(pilot|scale|full (analysis|cohort|run|sample)|proceed|go ahead|continue|all (\d+ )?participants"
+    r"|everyone|whole cohort|rest of|shall I|should I|want me to|would you like)\b"
+)
+
+
+# An answer that labels itself a pilot (not one that mentions an earlier pilot).
+_PILOT_ONLY = (
+    r"\b(pilot|preliminary) (results?|findings?|estimates?|analysis)\b|\bthis (is|was) (a|the) pilot\b"
+    r"|\bpilot (of|on|with) \d+|\bpilot subset\b"
+)
+
+
+def _asks_to_continue(events: list[dict]) -> bool:
+    """Whether the turn ended by asking the person whether to go on (after a pilot)."""
+    answers = [e["data"]["text"] for e in events if e["type"] == "answer" and e["data"].get("text")]
+    ending = answers[-1][-400:] if answers else ""
+    said_pilot = any(re.search(r"\b(pilot|preliminary)\b", a, re.IGNORECASE) for a in answers)
+    return said_pilot and "?" in ending and bool(re.search(_ASKS, ending, re.IGNORECASE))
 
 
 def _failed(task, attempt: int, error: str) -> dict:
     return {
         "task": task.id, "mode": task.mode, "prompt": task.prompt, "tests": task.tests,
         "passed": False, "checks": [], "answer": f"(the run failed: {error})", "finished": False,
-        "seconds": 0.0, "approvals": [], "queries": [], "usage": None, "conversation": None,
+        "seconds": 0.0, "approvals": [], "follow_up": "", "queries": [], "usage": None, "conversation": None,
         "attempt": attempt,
     }  # fmt: skip
 
@@ -288,6 +341,8 @@ def _summary(info: dict, results: list[dict]) -> str:
         lines += ["", f"## {r['task']} (run {r['attempt']})", "", f"> {r['prompt']}", ""]
         for c in r["checks"]:
             lines.append(f"- {'✓' if c['passed'] else '✗'} **{c['name']}**: {c['detail']}")
+        if r.get("follow_up"):
+            lines.append(f"- The agent paused to ask; the runner replied: “{r['follow_up']}”")
         for a in r["approvals"]:
             verdict = "approved" if a["approved"] else "declined"
             lines.append(f"- {a['kind'].replace('_', ' ')} {verdict} (HTTP {a['status']})")

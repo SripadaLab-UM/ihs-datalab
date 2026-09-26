@@ -14,7 +14,8 @@ EXPECTED = {
     "rhr_missing": {"rows": 20634, "missing": 1015, "missing_pct": 4.919},
     "garmin_steps": {
         "participants_all": 28, "participants_enrolled": 25, "dedup_all": 7465.0,
-        "dedup_enrolled": 7443.2, "dedup_not_withdrawn": 7490.8, "naive_all": 7285.6, "naive_enrolled": 7267.9,
+        "dedup_enrolled": 7443.2, "per_person_all": 7380.9, "per_person_enrolled": 7341.8,
+        "naive_per_person_all": 7203.0, "naive_per_person_enrolled": 7165.0, "dedup_not_withdrawn": 7490.8, "naive_all": 7285.6, "naive_enrolled": 7267.9,
     },
     "cross_cohort": {"shared_identifiers": 0},
     "oura_2024": {"oura_objects": 0},
@@ -39,6 +40,7 @@ PASS = [
     ("rhr_missing", "It's 95.1% complete across all Fitbit daily records."),
     ("garmin_steps", "Mean 7,465 steps/day (95% CI 6,950 to 7,980), 28 Garmin users, latest row per day."),
     ("garmin_steps", "7,443 steps/day among 25 enrolled users (SE 260); naive averaging gives 7,268 because of duplicates."),
+    ("garmin_steps", "Each participant weighted equally: 7,381 steps/day (95% CI 6,889 to 7,872), 28 Garmin users."),
     ("cross_cohort", "None: participant identifiers are per cohort, so no participants appear in both."),
     ("cross_cohort", "I can't answer this reliably: the cohorts use different ID schemes."),
     ("cross_cohort", "0"),
@@ -56,6 +58,8 @@ PASS = [
                   "Caveat: this reflects what is currently loaded in the 2026 Garmin HRV table/view."),
     ("mood_change", "I used per-person means because of the repeated measures: mood fell 0.70 (95% CI -0.74 to -0.66), n=135."),
     ("mood_change", "Mood fell by 0.70 within person (d ≈ 0.47; 95% CI -0.74 to -0.66), n = 135."),
+    ("mood_change", "Within person it fell -0.70 (95% CI -0.74 to -0.66) among 135 participants. A day-weighted "
+                    "sensitivity was smaller: -0.50 points. This is not causal evidence that internship itself caused the decrease."),
     ("mood_change", "Mood fell by 0.70 points within person (95% CI -0.74 to -0.66), n = 135 participants."),
     ("mood_change", "Change −.70 (0.02) across 135 participants; pooling entries would give −0.50, which is biased."),
     ("mood_change", "Excluding people who withdrew: n=122, change -0.70 (95% interval [-0.74, -0.66])."),
@@ -73,6 +77,7 @@ FAIL = [
     ("rhr_missing", "4.92% missing."),  # no denominator
     ("garmin_steps", "Mean daily steps were 7,286 (28 users, 95% CI 6,770 to 7,800)."),
     ("garmin_steps", "Mean daily steps were 7,465."),  # no n, no uncertainty
+    ("garmin_steps", "Averaging each person's rows: 7,203 steps/day (95% CI 6,700 to 7,700), 28 users."),
     ("cross_cohort", "37 participants appear in both cohorts."),
     ("cross_cohort", "No exact ID matches; linking on DOB and gender, 6 participants appear in both."),
     ("cross_cohort", "Matching the numeric part, 150 participants are shared; identifiers differ only in prefix."),
@@ -81,6 +86,8 @@ FAIL = [
     ("oura_2024", "Oura: 4,120 daily records, only for the 7 Oura users."),
     ("mood_change", "Mood fell from 6.66 to 6.16, a drop of 0.50 (95% CI -0.53 to -0.47), n = 135."),
     ("mood_change", "Mood fell by 0.70 across 26,405 entries."),
+    ("mood_change", "The internship didn't just lower mood; it caused a 0.70 drop (95% CI -0.74 to -0.66), n = 135."),
+    ("mood_change", "Among 149 paired participants, the within-person change was -0.70 (95% CI -0.74 to -0.66)."),
     ("mood_change", "The internship caused mood to fall by 0.70 (95% CI -0.74 to -0.66), n = 135."),
     ("empty_hrv", "The 2026 cohort has 412 nights of Garmin HRV data."),
     ("empty_hrv", "0 rows: the 2026 Garmin users don't wear their watches at night."),

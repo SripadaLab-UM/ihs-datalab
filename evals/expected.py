@@ -53,6 +53,19 @@ def compute() -> dict[str, dict]:
             "PARTICIPANTIDENTIFIER, CALENDARDATE ORDER BY INSERTEDDATE DESC) RN "
             f"FROM IHS_2025.GARMINDAILYSUMMARY WHERE {window}"
         )
+        # Each participant weighted equally: the mean of person means.
+        per_person_all, per_person_enrolled = one(
+            f"SELECT AVG(m), AVG(CASE WHEN e = 1 THEN m END) FROM (SELECT g.PARTICIPANTIDENTIFIER, AVG(g.STEPS) m, "
+            "MAX(CASE WHEN p.SECONDARYIDENTIFIER IS NOT NULL THEN 1 ELSE 0 END) e "
+            f"FROM ({latest}) g LEFT JOIN IHS_2025.STUDYPARTICIPANTS p ON p.PARTICIPANTIDENTIFIER = g.PARTICIPANTIDENTIFIER "
+            "WHERE g.RN = 1 GROUP BY g.PARTICIPANTIDENTIFIER)"
+        )
+        naive_person_all, naive_person_enrolled = one(
+            "SELECT AVG(m), AVG(CASE WHEN e = 1 THEN m END) FROM (SELECT g.PARTICIPANTIDENTIFIER, AVG(g.STEPS) m, "
+            "MAX(CASE WHEN p.SECONDARYIDENTIFIER IS NOT NULL THEN 1 ELSE 0 END) e "
+            "FROM IHS_2025.GARMINDAILYSUMMARY g LEFT JOIN IHS_2025.STUDYPARTICIPANTS p "
+            f"ON p.PARTICIPANTIDENTIFIER = g.PARTICIPANTIDENTIFIER WHERE {window} GROUP BY g.PARTICIPANTIDENTIFIER)"
+        )
         dedup_all, garmin_people = one(
             f"SELECT AVG(STEPS), COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM ({latest}) WHERE RN = 1"
         )
@@ -161,9 +174,13 @@ def compute() -> dict[str, dict]:
             "participants_all": garmin_people,
             "participants_enrolled": garmin_enrolled_people,
             "dedup_all": float(dedup_all),
+            "per_person_all": float(per_person_all),
+            "per_person_enrolled": float(per_person_enrolled),
             "dedup_enrolled": float(dedup_enrolled),
             "naive_all": float(naive_all),
             "naive_enrolled": float(naive_enrolled),
+            "naive_per_person_all": float(naive_person_all),
+            "naive_per_person_enrolled": float(naive_person_enrolled),
             "dedup_not_withdrawn": float(dedup_stayed),
         },
         "cross_cohort": {"shared_identifiers": shared},
@@ -200,11 +217,15 @@ def check(e: dict) -> list[str]:
     if e["enrolled_count"]["enrolled"] == e["enrolled_count"]["total_rows"]:
         problems.append("no screened-but-not-enrolled participants")
     g = e["garmin_steps"]
-    if (
-        min(abs(g["dedup_all"] - g["naive_all"]), abs(g["dedup_enrolled"] - g["naive_enrolled"]))
-        < 90
-    ):
-        problems.append("Garmin duplicates barely move the mean (under 3x the 30-step tolerance)")
+    rights = [g["dedup_all"], g["dedup_enrolled"], g["per_person_all"], g["per_person_enrolled"]]
+    wrongs = [
+        g["naive_all"],
+        g["naive_enrolled"],
+        g["naive_per_person_all"],
+        g["naive_per_person_enrolled"],
+    ]
+    if min(abs(r - w) for r in rights for w in wrongs) < 50:
+        problems.append("a right and a wrong Garmin mean are within 2x the 25-step tolerance")
     m = e["mood_change"]
     if abs(m["mean_change"] - m["pooled_change"]) < 0.12:
         problems.append("pooled and within-person mood changes are too close to tell apart")
