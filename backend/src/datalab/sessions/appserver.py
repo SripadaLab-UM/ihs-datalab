@@ -20,7 +20,9 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 Notification = Callable[[str, dict[str, Any]], Awaitable[None]]
-ServerRequest = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+# (method, params, request id): Codex refers to the request by its id later,
+# for example when it withdraws one (serverRequest/resolved).
+ServerRequest = Callable[[str, dict[str, Any], Any], Awaitable[dict[str, Any]]]
 
 
 class AppServerError(RuntimeError):
@@ -125,7 +127,9 @@ class AppServerClient:
 
     async def _answer(self, message: dict[str, Any]) -> None:
         try:
-            result = await self._on_server_request(message["method"], message.get("params") or {})
+            result = await self._on_server_request(
+                message["method"], message.get("params") or {}, message["id"]
+            )
             await self._send({"id": message["id"], "result": result})
         except Exception as error:  # a failed answer must not stop the session
             log.exception("failed to answer %s", message["method"])

@@ -27,6 +27,10 @@ const EVENT_TYPES = [
   "input_removed",
   "exported",
   "input_unavailable",
+  "approval_requested",
+  "approval_answered",
+  "approval_withdrawn",
+  "helper_answered",
 ];
 
 /**

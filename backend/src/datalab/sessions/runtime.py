@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from datalab.sessions import codex_config
+from datalab.sessions.approvals import Approvals
 from datalab.sessions.appserver import AppServerClient, AppServerError
 from datalab.sessions.containers import SessionContainers, SessionPaths
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
@@ -52,6 +53,7 @@ class SessionRuntime:
         developer_instructions: str,
         tool_timeout_seconds: int,
         emit: Emit,
+        approvals: Approvals | None = None,
     ) -> None:
         self.session_id = session_id
         self.kind: SessionKind = kind
@@ -67,6 +69,8 @@ class SessionRuntime:
         self._turn: _Turn | None = None
         self._stop_requested = False
         self._lock = asyncio.Lock()
+        self._approvals = approvals
+        self._requests: dict[Any, str] = {}  # Codex request id -> approval id
 
     @property
     def busy(self) -> bool:
@@ -114,6 +118,9 @@ class SessionRuntime:
 
     async def close(self) -> None:
         """Stop Codex and the containers. The workspace stays on disk."""
+        # Revoked first, so nothing can open a new question while closing.
+        self._tokens.revoke_session(self.session_id)
+        await self._withdraw()
         if self._client:
             await self._client.close()
             self._client = None
@@ -133,6 +140,7 @@ class SessionRuntime:
         await asyncio.wait({turn.done, client.closed}, return_when=asyncio.FIRST_COMPLETED)
         if turn.done.done():
             return turn.done.result()
+        await self._withdraw()
         message = "The agent stopped unexpectedly. Send your message again to continue."
         await self._emit("turn_finished", {"status": "failed", "error": message})
         return TurnResult(turn.id or "", "failed", message)
@@ -203,9 +211,14 @@ class SessionRuntime:
     # Codex -> DataLab events ------------------------------------------------
 
     async def _on_notification(self, method: str, params: dict[str, Any]) -> None:
+        if method == "serverRequest/resolved":
+            # Codex withdrew a request it had sent (for example, on Stop).
+            await self._withdraw(params.get("requestId"))
         event = _to_event(method, params)
         if event:
             await self._emit(*event)
+        if method == "turn/completed":
+            await self._withdraw()
         if method == "turn/completed" and self._turn and not self._turn.done.done():
             turn = params.get("turn") or {}
             error = turn.get("error")
@@ -217,14 +230,68 @@ class SessionRuntime:
                 )
             )
 
-    async def _on_request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
-        # DataLab's own approval flows (the research helper) arrive here as MCP
-        # elicitations; they are added in a later milestone. Nothing else
-        # should ask, given the approval policy, so decline anything that does.
-        log.warning("declining unexpected request from Codex: %s", method)
-        if method == "mcpServer/elicitation/request":
-            return {"action": "decline"}
-        return {"decision": "decline"}
+    async def _on_request(
+        self, method: str, params: dict[str, Any], request_id: Any
+    ) -> dict[str, Any]:
+        """Codex asking DataLab something. Only DataLab's own approvals are answered.
+
+        The research helper's tool (data/agent_tools.py) asks for approval with
+        an MCP elicitation, which Codex forwards here. The question and the
+        person's decision live in DataLab's own record (approvals.py); this
+        reply only lets Codex carry on once the person has decided.
+        """
+        approval_id = _approval_id(method, params)
+        pending = (
+            self._approvals.get(approval_id, self.session_id)
+            if approval_id and self._approvals
+            else None
+        )
+        if pending is None:
+            # Nothing else should ask, given the approval policy: decline it.
+            log.warning("declining unexpected request from Codex: %s", method)
+            if method == "mcpServer/elicitation/request":
+                return {"action": "decline"}
+            return {"decision": "decline"}
+        self._requests[request_id] = pending.id
+        if not pending.shown:
+            pending.shown = True
+            await self._emit(
+                "approval_requested",
+                {"id": pending.id, "kind": "research_helper", "question": pending.question},
+            )
+        try:
+            approved, _ = await asyncio.shield(pending.decision)
+        finally:
+            self._requests.pop(request_id, None)
+        return {"action": "accept", "content": {}} if approved else {"action": "decline"}
+
+    async def _withdraw(self, request_id: Any = None) -> None:
+        """Withdraw pending approvals: the one Codex resolved itself, or all of them."""
+        if self._approvals is None:
+            return
+        approval_id = None
+        if request_id is not None:
+            approval_id = self._requests.get(request_id)
+            if approval_id is None:
+                return
+        for withdrawn in self._approvals.withdraw(self.session_id, approval_id):
+            await self._emit("approval_withdrawn", {"id": withdrawn})
+
+
+def _approval_id(method: str, params: dict[str, Any]) -> str | None:
+    """The approval an elicitation is about, if it's DataLab's own request."""
+    if method != "mcpServer/elicitation/request" or params.get("serverName") != "ihs-data":
+        return None
+    if (params.get("_meta") or {}).get("codex_approval_kind"):
+        return None  # a Codex tool-call prompt, not DataLab's
+    try:
+        message = json.loads(params.get("message") or "")
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(message, dict) or message.get("datalab") != "research_helper":
+        return None
+    approval = message.get("approval")
+    return approval if isinstance(approval, str) else None
 
 
 def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:

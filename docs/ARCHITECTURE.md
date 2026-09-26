@@ -313,9 +313,17 @@ src/datalab/
   the MCP SDK adds by default. We send a plain `type`/`properties`/`required`
   schema.
 - When approved, the host starts a temporary research-session container with
-  only the approved text. It runs one `codex exec`, collects the answer and
-  any files, and destroys the container. The result returns to the waiting
-  call.
+  only the approved text (`sessions/helper.py`): its own empty workspace, no
+  attachments, no query results, no route to the data tools, the research
+  proxy for the internet. It runs one `codex exec` with a time limit,
+  collects the answer (text only in v1), and destroys the container and its
+  folder. The result returns to the waiting call, and the answer is shown
+  under the approval card.
+- The approval request carries a small JSON message
+  (`{"datalab": "research_helper", "question": …}`) from DataLab's own
+  `ihs-data` server; anything else Codex forwards is declined without
+  asking. The runtime maps Codex's request id to the card, so
+  `serverRequest/resolved` (Stop) and the end of a turn withdraw it.
 - If DataLab restarts while an approval is pending, the turn ends as
   interrupted, and the card disappears.
 
@@ -546,7 +554,8 @@ something we can use end to end ourselves.
      3d done the same day: the four modes' full instructions and starter
      prompts, the sql-extraction, statistical-review, and academic-figures
      skills, and the model picker, with the relay allowing only approved
-     models.)
+     models. 3e done the same day: the research helper, from the
+     approval card to the throwaway research container.)
    - Export destinations and conversation export.
    - Modes and skills, the Data accessed panel.
    - Research sessions and the research helper.

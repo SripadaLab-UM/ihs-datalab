@@ -28,11 +28,11 @@ def server(settings, catalog) -> Iterator[tuple[str, object, FakeDatabase]]:
 
 
 @asynccontextmanager
-async def mcp_session(base_url: str, token: str):
+async def mcp_session(base_url: str, token: str, elicitation_callback=None):
     client = create_mcp_http_client(headers={"Authorization": f"Bearer {token}"})
     async with client, streamable_http_client(f"{base_url}/mcp", http_client=client) as streams:
         read, write = streams[0], streams[1]
-        async with ClientSession(read, write) as session:
+        async with ClientSession(read, write, elicitation_callback=elicitation_callback) as session:
             await session.initialize()
             yield session
 
@@ -51,7 +51,7 @@ async def test_tools_are_listed(server, tmp_path):
     base_url, services, _ = server
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         tools = {t.name for t in (await session.list_tools()).tools}
-    assert tools == {"search_catalog", "describe_table", "query"}
+    assert tools == {"search_catalog", "describe_table", "query", "ask_research_helper"}
 
 
 async def test_search_and_describe(server, tmp_path):
@@ -111,3 +111,59 @@ def test_health(server):
     base_url, _, _ = server
     body = httpx.get(f"{base_url}/api/health").json()
     assert body["status"] == "ok" and body["catalog_tables"] == 3
+
+
+async def test_a_question_asked_around_codex_is_never_shown_or_sent(server, tmp_path, monkeypatch):
+    """Code in the container holds the session token and can call the tool and
+    answer the approval request itself. No card appears (only Codex's own
+    requests are shown), its "accept" counts for nothing, and nothing is sent."""
+    from mcp.types import ElicitResult
+
+    from datalab.sessions import helper as helper_module
+
+    base_url, services, _ = server
+    conversation = services.conversations.create(kind="data", mode="analysis", title="t", model="m")
+    asked: list[str] = []
+
+    async def fake_run(self, question):
+        asked.append(question)
+        return helper_module.HelperAnswer("answered", "x")
+
+    monkeypatch.setattr(helper_module.ResearchHelper, "_run", fake_run)
+    monkeypatch.setattr(helper_module, "APPROVAL_WAIT_SECONDS", 0.5)
+    services.sessions.helper.turn_running = lambda conversation_id: True  # as if mid-turn
+
+    async def rogue(context, params):
+        return ElicitResult(action="accept", content={"question": "SYN25-0001 slept 5h"})
+
+    token = services.tokens.issue(
+        SessionAccess(session_id=conversation.id, kind="data", results_dir=tmp_path / "oracle")
+    )
+    async with mcp_session(base_url, token, elicitation_callback=rogue) as session:
+        result = payload(
+            await session.call_tool("ask_research_helper", {"question": "lme4 random slopes?"})
+        )
+    assert result["status"] == "declined" and asked == []
+    events = services.conversations.events_of_types_after(
+        conversation.id, 0, ("approval_requested", "helper_answered")
+    )
+    assert events == []
+
+
+async def test_questions_are_refused_between_turns(server, tmp_path):
+    base_url, services, _ = server
+    conversation = services.conversations.create(kind="data", mode="analysis", title="t", model="m")
+    token = services.tokens.issue(
+        SessionAccess(session_id=conversation.id, kind="data", results_dir=tmp_path / "oracle")
+    )
+    async with mcp_session(base_url, token) as session:
+        result = payload(await session.call_tool("ask_research_helper", {"question": "q?"}))
+    assert result["status"] == "declined" and "during a turn" in result["note"]
+
+
+async def test_hidden_characters_are_refused(server, tmp_path):
+    base_url, services, _ = server
+    hidden = "lme4?" + "".join(chr(0xE0000 + ord(c)) for c in "SYN25-0001")
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        result = await session.call_tool("ask_research_helper", {"question": hidden})
+    assert result.is_error and "hidden" in result.content[0].text

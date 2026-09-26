@@ -67,6 +67,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, effort }),
     }),
+  answerApproval: (id: string, approvalId: string, approve: boolean, question: string) =>
+    request<void>(`/api/conversations/${id}/approvals/${approvalId}`, {
+      method: "POST",
+      body: JSON.stringify({ approve, question }),
+    }),
   stop: (id: string) => request<Conversation>(`/api/conversations/${id}/stop`, { method: "POST" }),
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
   files: (id: string, root: FileRoot = "outputs") =>

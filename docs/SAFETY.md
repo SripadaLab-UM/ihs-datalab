@@ -234,6 +234,19 @@ access. It never gains it.
   user can edit.
 - Nothing is sent until the user approves. Declining returns a "declined"
   result to the agent.
+- **The approval is kept on the host.** The question and the person's
+  decision are recorded in DataLab itself; the approval card comes from that
+  record, and the helper uses only the text stored there. Codex is told the
+  outcome so it can carry on, but nothing the agent's side says counts as
+  approval: code in the container holds the session token and could answer
+  an approval request itself.
+- The question must be plain text the person can see: hidden characters
+  (zero-width, direction marks, tag characters) are refused, padding is
+  collapsed, and it is at most 1,000 characters, shown in full.
+- The helper's answer is labelled as internet content that must never be
+  followed as instructions, and capped at 30 KB. At most two helpers run at
+  once, one per conversation, and each is cleaned up even if its call is
+  cancelled.
 - When approved, DataLab starts a temporary research-session container. It gets
   only the approved text: no history, no files, no data-service route.
 - The helper returns text and, optionally, files, which count as research →

@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from datalab.relay.policy import model_allowed
+from datalab.sessions.approvals import Unshowable
 from datalab.sessions.manager import Busy, SessionManager
 from datalab.sessions.modes import MODES
 from datalab.sessions.store import Conversation, ConversationStore
@@ -38,6 +39,12 @@ class ConversationOut(BaseModel):
 class NewMessage(BaseModel):
     text: str = Field(min_length=1, max_length=100_000)
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
+
+
+class ApprovalAnswer(BaseModel):
+    approve: bool
+    # The question as the person left it: they may edit it before sending.
+    question: str = Field(default="", max_length=4000)  # checked again, more strictly
 
 
 class EventOut(BaseModel):
@@ -155,6 +162,19 @@ def build_conversations_router(
         conversation = get_or_404(conversation_id)
         await sessions.stop(conversation_id)
         return out(conversation)
+
+    @router.post("/conversations/{conversation_id}/approvals/{approval_id}", status_code=204)
+    async def answer_approval(conversation_id: str, approval_id: str, body: ApprovalAnswer) -> None:
+        """Approve (maybe edited) or decline a research-helper question."""
+        get_or_404(conversation_id)
+        try:
+            sessions.answer_approval(conversation_id, approval_id, body.approve, body.question)
+        except KeyError as error:
+            raise HTTPException(
+                409, "This request isn't waiting for an answer any more."
+            ) from error
+        except Unshowable as error:
+            raise HTTPException(422, str(error)) from error
 
     @router.get("/conversations/{conversation_id}/events")
     def list_events(conversation_id: str, after: int = 0) -> list[EventOut]:

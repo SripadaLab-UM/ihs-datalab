@@ -33,7 +33,10 @@ from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
+from datalab.sessions import helper
+from datalab.sessions.approvals import Approvals
 from datalab.sessions.containers import remove_all_session_containers
+from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import AttachmentStore
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -79,10 +82,16 @@ def create_app(
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
-    sessions = SessionManager(settings, conversations, tokens, attachments=attachments)
+    approvals = Approvals()
+    sessions = SessionManager(
+        settings, conversations, tokens, attachments=attachments, approvals=approvals
+    )
     services = Services(settings, data, catalog, tokens, access_log, conversations, sessions)
 
-    agent_tools = build_agent_tools(data, catalog, tokens)
+    research_helper = ResearchHelper(settings, tokens, approvals, conversations.append)
+    research_helper.turn_running = sessions.turn_running
+    sessions.helper = research_helper
+    agent_tools = build_agent_tools(data, catalog, tokens, research_helper)
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
         transport_security=TransportSecuritySettings(
@@ -100,6 +109,7 @@ def create_app(
         if manage_containers:
             # Containers from a previous run that didn't shut down cleanly.
             await remove_all_session_containers(settings.profile)
+            await helper.remove_leftovers(settings)
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
             yield

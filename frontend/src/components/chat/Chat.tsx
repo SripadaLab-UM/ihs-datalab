@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Conversation, type Effort } from "@/api/client";
 import { Button, SessionBadge } from "@/components/ui";
 
+import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
@@ -55,7 +56,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         <div className="mx-auto flex max-w-3xl flex-col gap-6">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
-            <TurnView key={index} turn={turn} />
+            <TurnView key={index} turn={turn} conversationId={conversation.id} />
           ))}
           <div ref={bottom} />
         </div>
@@ -93,11 +94,12 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
   );
 }
 
-function TurnView({ turn }: { turn: Turn }) {
+function TurnView({ turn, conversationId }: { turn: Turn; conversationId: string }) {
   const answer = finalAnswer(turn);
-  // Notices are shown on their own, above the work log.
+  // Notices and approval cards are shown on their own, above the work log.
   const working = turn.items.filter(
-    (item) => item.kind !== "notice" && !(item.kind === "message" && item.text === answer && answer),
+    (item) =>
+      item.kind !== "notice" && item.kind !== "approval" && !(item.kind === "message" && item.text === answer && answer),
   );
   return (
     <article className="flex flex-col gap-3">
@@ -114,6 +116,9 @@ function TurnView({ turn }: { turn: Turn }) {
           </p>
         ))}
       {working.length > 0 && <WorkLog items={working} running={turn.status === "running"} />}
+      {turn.items.map((item) =>
+        item.kind === "approval" ? <ApprovalCard key={item.id} conversationId={conversationId} approval={item} /> : null,
+      )}
       {answer && <Markdown text={answer} />}
       {turn.status === "interrupted" && <p className="text-sm text-muted">Stopped.</p>}
     </article>
@@ -191,6 +196,8 @@ function WorkItem({ item }: { item: Item }) {
           </pre>
         </details>
       );
+    case "approval":
+      return null;
     case "files":
       return (
         <p className="text-xs text-muted">

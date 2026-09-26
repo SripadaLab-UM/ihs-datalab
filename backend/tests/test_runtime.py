@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from datalab.sessions.approvals import Approvals
 from datalab.sessions.containers import SessionPaths
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.tokens import SessionTokens
@@ -68,7 +69,12 @@ class FakeContainers:
         return [json.loads(line)["method"] for line in self.log.read_text().splitlines()]
 
 
-def make(tmp_path: Path, containers: FakeContainers, tokens: SessionTokens | None = None):
+def make(
+    tmp_path: Path,
+    containers: FakeContainers,
+    tokens: SessionTokens | None = None,
+    approvals: Approvals | None = None,
+):
     events: list[tuple[str, dict]] = []
 
     async def emit(kind: str, data: dict) -> None:
@@ -84,6 +90,7 @@ def make(tmp_path: Path, containers: FakeContainers, tokens: SessionTokens | Non
         developer_instructions="Be brief.",
         tool_timeout_seconds=60,
         emit=emit,
+        approvals=approvals,
     )
     return runtime, events
 
@@ -194,3 +201,77 @@ def test_a_planted_symlink_is_removed_not_followed(tmp_path):
     assert outside.read_text() == "keep me"
     target = paths.codex_home / "config.toml"
     assert target.is_file() and not target.is_symlink()
+
+
+async def _wait_for_event(events, kind, timeout=5.0):
+    for _ in range(int(timeout / 0.02)):
+        found = [data for k, data in events if k == kind]
+        if found:
+            return found[-1]
+        await asyncio.sleep(0.02)
+    raise AssertionError(f"no {kind} event")
+
+
+def helper_runtime(tmp_path, monkeypatch, mode="elicit"):
+    approvals = Approvals()
+    containers = FakeContainers(tmp_path / "log.jsonl", mode)
+    runtime, events = make(tmp_path, containers, approvals=approvals)
+    return runtime, events, approvals
+
+
+async def test_codex_waits_for_the_persons_decision_on_the_host(tmp_path, monkeypatch):
+    runtime, events, approvals = helper_runtime(tmp_path, monkeypatch)
+    pending = approvals.open("c_test", "How do lme4 random slopes work?")
+    monkeypatch.setenv("FAKE_APPROVAL", pending.id)
+    runtime.begin_turn()
+    turn = asyncio.create_task(runtime.send("look it up"))
+    # The card appears once Codex forwards the request, with the host's text.
+    card = await _wait_for_event(events, "approval_requested")
+    assert card == {
+        "id": pending.id,
+        "kind": "research_helper",
+        "question": "How do lme4 random slopes work?",
+    }
+    await asyncio.sleep(0.2)
+    assert not turn.done()  # Codex is still waiting
+    approvals.answer("c_test", pending.id, True, "Random slopes in lme4?")
+    assert (await asyncio.wait_for(turn, 5)).status == "completed"
+    assert ("answer_delta", {"id": "m2", "text": "accept"}) in events
+    await runtime.close()
+
+
+async def test_stop_withdraws_a_pending_question(tmp_path, monkeypatch):
+    runtime, events, approvals = helper_runtime(tmp_path, monkeypatch)
+    pending = approvals.open("c_test", "q")
+    monkeypatch.setenv("FAKE_APPROVAL", pending.id)
+    runtime.begin_turn()
+    turn = asyncio.create_task(runtime.send("look it up"))
+    await asyncio.sleep(0.3)
+    await runtime.stop_turn()
+    assert (await asyncio.wait_for(turn, 5)).status == "interrupted"
+    assert (await _wait_for_event(events, "approval_withdrawn"))["id"] == pending.id
+    assert pending.decision.result() == (False, "")
+    with pytest.raises(KeyError):
+        approvals.answer("c_test", pending.id, True, "too late")
+    await runtime.close()
+
+
+async def test_requests_that_arent_datalabs_own_are_declined(tmp_path, monkeypatch):
+    runtime, events, approvals = helper_runtime(tmp_path, monkeypatch, mode="elicit_other")
+    pending = approvals.open("c_test", "q")
+    monkeypatch.setenv("FAKE_APPROVAL", pending.id)
+    runtime.begin_turn()
+    await asyncio.wait_for(runtime.send("look it up"), 5)
+    assert ("answer_delta", {"id": "m2", "text": "decline"}) in events
+    await runtime.close()
+
+
+async def test_another_conversations_approval_is_declined(tmp_path, monkeypatch):
+    runtime, events, approvals = helper_runtime(tmp_path, monkeypatch)
+    elsewhere = approvals.open("c_other", "q")
+    monkeypatch.setenv("FAKE_APPROVAL", elsewhere.id)
+    runtime.begin_turn()
+    await asyncio.wait_for(runtime.send("look it up"), 5)
+    assert ("answer_delta", {"id": "m2", "text": "decline"}) in events
+    assert not elsewhere.decision.done()
+    await runtime.close()

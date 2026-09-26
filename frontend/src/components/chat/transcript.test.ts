@@ -96,3 +96,20 @@ it("shows attaching and removing inputs between turns", () => {
   ]);
   expect(turns[1].items[0]).toMatchObject({ kind: "notice", text: expect.stringContaining("/inputs/data.csv") });
 });
+
+
+it("tracks a research-helper approval from request to answer", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "look it up" }),
+    e("approval_requested", { id: "ap1", question: "lme4 slopes?" }),
+    e("approval_answered", { id: "ap1", approved: true, question: "Random slopes in lme4?" }),
+    e("helper_answered", { approval: "ap1", status: "answered", answer: "Use (1 + x | id)." }),
+    e("approval_requested", { id: "ap2", question: "again?" }),
+    e("turn_finished", { status: "interrupted" }),
+  ]);
+  const approvals = turns[0].items.filter((i) => i.kind === "approval");
+  expect(approvals).toMatchObject([
+    { id: "ap1", state: "approved", sent: "Random slopes in lme4?", answer: "Use (1 + x | id)." },
+    { id: "ap2", state: "withdrawn" },
+  ]);
+});

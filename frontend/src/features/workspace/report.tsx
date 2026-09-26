@@ -124,6 +124,15 @@ function Report({
                 {item.kind === "notice" ? item.text : null}
               </p>
             ))}
+          {turn.items.map((item) =>
+            item.kind === "approval" ? (
+              <p key={item.id} className="muted">
+                Research helper question{" "}
+                {{ approved: "sent", declined: "not sent (declined)", withdrawn: "withdrawn", pending: "not answered" }[item.state]}:{" "}
+                <em>{item.sent ?? item.question}</em>
+              </p>
+            ) : null,
+          )}
           {options.includeWork && <Work turn={turn} />}
           {finalAnswer(turn) && <Answer text={finalAnswer(turn)} charts={charts} />}
         </section>
@@ -169,6 +178,8 @@ function Work({ turn }: { turn: Turn }) {
             return <pre key={i}>{`${item.tool} ${JSON.stringify(item.arguments, null, 2)}`}</pre>;
           case "files":
             return <p key={i} className="muted">Edited {item.paths.join(", ")}</p>;
+          case "approval":
+            return null; // shown with the turn, work or not
           default:
             return null;
         }

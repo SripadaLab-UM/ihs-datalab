@@ -18,8 +18,10 @@ from typing import Any
 
 from datalab.config import Settings, default_data_dir
 from datalab.sessions import modes
+from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
+from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import (
     AttachmentStore,
     is_sample,
@@ -48,7 +50,11 @@ class SessionManager:
         idle_seconds: float = 30 * 60,
         max_running: int = 3,
         attachments: AttachmentStore | None = None,
+        approvals: Approvals | None = None,
     ) -> None:
+        self._approvals = approvals or Approvals()
+        # The research helper, so Stop and close can stop its work too (set by the app).
+        self.helper: ResearchHelper | None = None
         self._settings = settings
         self._store = store
         self._tokens = tokens
@@ -177,7 +183,20 @@ class SessionManager:
         finally:
             self._restoring.discard(conversation.id)
 
+    def answer_approval(
+        self, conversation_id: str, approval_id: str, approved: bool, question: str
+    ) -> None:
+        """The person's decision on a research-helper question, recorded on the host."""
+        sent = self._approvals.answer(conversation_id, approval_id, approved, question)
+        self._store.append(
+            conversation_id,
+            "approval_answered",
+            {"id": approval_id, "approved": approved, "question": sent if approved else None},
+        )
+
     async def stop(self, conversation_id: str) -> None:
+        if self.helper is not None:
+            self.helper.cancel(conversation_id)
         runtime = self._runtimes.get(conversation_id)
         if runtime and self.is_busy(conversation_id):
             self._store.append(conversation_id, "stop_requested", {})
@@ -326,6 +345,7 @@ class SessionManager:
                 developer_instructions=modes.instructions(conversation.mode),
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
+                approvals=self._approvals,
             )
             self._runtimes[conversation.id] = runtime
         return runtime
@@ -368,7 +388,13 @@ class SessionManager:
             await self._shutdown(oldest)
             running.remove(oldest)
 
+    def turn_running(self, conversation_id: str) -> bool:
+        task = self._turns.get(conversation_id)
+        return task is not None and not task.done()
+
     async def _shutdown(self, conversation_id: str) -> None:
+        if self.helper is not None:
+            self.helper.cancel(conversation_id)
         task = self._turns.pop(conversation_id, None)
         if task and not task.done():
             task.cancel()

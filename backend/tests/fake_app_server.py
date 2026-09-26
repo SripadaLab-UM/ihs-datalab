@@ -4,7 +4,9 @@ It speaks the same JSON-RPC-over-lines protocol. FAKE_MODE picks a behaviour:
 - normal: a turn streams one answer and completes;
 - slow: a turn keeps running until interrupted;
 - crash: the process exits in the middle of a turn;
-- no_resume: thread/resume fails.
+- no_resume: thread/resume fails;
+- elicit: a turn asks for a research-helper approval and answers with the reply;
+- elicit_other: a turn sends an approval request that isn't DataLab's.
 Every request received is appended to FAKE_LOG, one JSON object per line.
 """
 
@@ -34,6 +36,13 @@ for line in sys.stdin:
                 json.dumps({"method": message["method"], "params": message.get("params")}) + "\n"
             )
     method, request_id = message.get("method"), message.get("id")
+    if method is None and request_id == 900:
+        # DataLab's reply to our approval request.
+        result = message.get("result") or {}
+        notify("item/started", item={"type": "agentMessage", "id": "m2", "phase": "final_answer"})
+        notify("item/agentMessage/delta", itemId="m2", delta=str(result.get("action")))
+        notify("turn/completed", turn={"id": "turn-1", "status": "completed"})
+        continue
     if request_id is None:
         continue
     if method == "initialize":
@@ -48,6 +57,17 @@ for line in sys.stdin:
     elif method == "turn/start":
         send({"id": request_id, "result": {"turn": {"id": "turn-1"}}})
         notify("turn/started", turn={"id": "turn-1"})
+        if MODE in ("elicit", "elicit_other"):
+            text = {"datalab": "research_helper", "approval": os.environ.get("FAKE_APPROVAL", "")}
+            server = "ihs-data" if MODE == "elicit" else "someone-else"
+            send(
+                {
+                    "id": 900,
+                    "method": "mcpServer/elicitation/request",
+                    "params": {"serverName": server, "message": json.dumps(text), "mode": "form"},
+                }
+            )
+            continue
         if MODE == "crash":
             time.sleep(0.1)
             sys.exit(1)
@@ -59,6 +79,8 @@ for line in sys.stdin:
             notify("turn/completed", turn={"id": "turn-1", "status": "completed"})
     elif method == "turn/interrupt":
         send({"id": request_id, "result": {}})
+        if MODE == "elicit":
+            notify("serverRequest/resolved", requestId=900)
         notify("turn/completed", turn={"id": "turn-1", "status": "interrupted"})
     else:
         send({"id": request_id, "result": {}})

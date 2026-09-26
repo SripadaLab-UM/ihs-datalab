@@ -1,4 +1,5 @@
 // Turns a conversation's event log into what the chat shows.
+import type { Approval } from "./ApprovalCard";
 //
 // The event log (see backend sessions/runtime.py) is a flat, append-only list:
 // user messages, streamed answer text, reasoning, commands, tool calls, and
@@ -16,6 +17,7 @@ export type Item =
   | { kind: "command"; id: string; command: string; output: string; exitCode: number | null; status: string }
   | { kind: "tool"; id: string; tool: string; server: string; status: string; arguments: unknown; error: string | null }
   | { kind: "files"; paths: string[] }
+  | Approval
   | { kind: "notice"; tone: "error" | "info"; text: string };
 
 export interface Turn {
@@ -30,6 +32,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   const turns: Turn[] = [];
   let turn: Turn | undefined;
   const byId = new Map<string, Item>();
+  const approvals = new Map<string, Approval>();
 
   const current = (): Turn => {
     if (!turn) {
@@ -121,6 +124,33 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "notice":
         add({ kind: "notice", tone: data.tone === "error" ? "error" : "info", text: text(data.text) });
         break;
+      case "approval_requested": {
+        const item: Approval = { kind: "approval", id, question: text(data.question), state: "pending" };
+        approvals.set(id, item);
+        add(item);
+        break;
+      }
+      case "approval_answered": {
+        const item = approvals.get(id);
+        if (item) {
+          item.state = data.approved ? "approved" : "declined";
+          if (data.approved) item.sent = text(data.question);
+        }
+        break;
+      }
+      case "approval_withdrawn": {
+        const item = approvals.get(id);
+        if (item && item.state === "pending") item.state = "withdrawn";
+        break;
+      }
+      case "helper_answered": {
+        const item = approvals.get(text(data.approval));
+        if (item) {
+          item.answer = text(data.answer);
+          item.answerStatus = text(data.status);
+        }
+        break;
+      }
       case "input_unavailable":
         add({ kind: "notice", tone: "error", text: `Not attached this time: ${text(data.reason)}.` });
         break;
@@ -169,6 +199,14 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         add({ kind: "notice", tone: "info", text: "Stopping…" });
         break;
       case "turn_finished": {
+        // A question still waiting when the turn ends can't be answered any more.
+        for (const approval of approvals.values()) {
+          if (approval.state === "pending") approval.state = "withdrawn";
+          if (approval.state === "approved" && !approval.answer) {
+            approval.answer = "No answer came back.";
+            approval.answerStatus = "failed";
+          }
+        }
         const status = text(data.status);
         current().status =
           status === "interrupted" || status === "failed" ? status : "completed";
