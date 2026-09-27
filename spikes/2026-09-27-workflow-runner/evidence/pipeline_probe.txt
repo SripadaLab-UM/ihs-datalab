@@ -1,0 +1,12 @@
+== build: R CMD INSTALL from a read-only source into a writable library (no network)
+** building package indices
+* DONE (fakeDataR)
+build took 1.092724000 s
+== source tree checksum before 6bcbf812750eb24c, after 6bcbf812750eb24c
+== run the pipeline from the read-only library
+exit=0
+run took .612157000 s
+"DEVICE","week","mean_steps"
+"apple","2025-W14",7638.86153846154
+"apple","2025-W15",7461.73417721519
+{  "status": "ok",  "step": "metrics",  "counts": {    "rows_in": 1200  },  "messages": [],  "checks": [],  "r_version": "R version 4.6.1 (2026-06-24)"}

@@ -1,0 +1,8 @@
+consistent: OK
+undeclared join: Step extract reads IHS_2025.PARTICIPANTS, which isn't in `reads:`.
+undeclared in a subquery: Step extract reads IHS_2024.PARTICIPANTS, which isn't in `reads:`.
+CTE names are not objects: OK
+unqualified table: Step extract: VFITBITDAILYDATA isn't schema-qualified: write SCHEMA.VFITBITDAILYDATA.; IHS_2025.VFITBITDAILYDATA is in `reads:` but no step reads it.
+declared but unused: IHS_2025.GARMIN_DAILY is in `reads:` but no step reads it.
+database link: Step extract: IHS_2025.VFITBITDAILYDATA@OTHERDB: database links aren't allowed.; IHS_2025.VFITBITDAILYDATA is in `reads:` but no step reads it.
+pipeline: ["Pipeline daily_metrics_2025 reads IHS_2025.VGARMINDAILY, which isn't in `reads:`."]

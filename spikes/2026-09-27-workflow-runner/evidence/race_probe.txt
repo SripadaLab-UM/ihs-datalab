@@ -1,0 +1,3 @@
+same path, deleted and recreated each time: 9 of 10 mounts failed
+a new path each time: 0 of 10 mounts failed
+stale path recovered: yes, a few minutes later (checked by hand after the run)

@@ -1,0 +1,3 @@
+applied: 0001_queries.sql, 0002_conversations.sql, 0003_attachments.sql, 0004_exports.sql, 0005_rigor.sql + draft 0008
+DestinationStore.add after 0008: FAILS (table export_destinations has 5 columns but 4 values were supplied); its INSERT must name columns
+stored run run_20260927T110059_4c7e20: runs=1 steps=5 deliveries=1

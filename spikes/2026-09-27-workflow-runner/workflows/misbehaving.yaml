@@ -1,0 +1,25 @@
+name: misbehaving
+description: An R step that tries to smuggle things back; only declared outputs may return.
+reads:
+  - IHS_SYN.DAILY_WEARABLE
+parameters:
+  start_date: { type: date, default: "2025-04-01" }
+  end_date:   { type: date, default: "2025-04-08" }
+steps:
+  - id: extract
+    sql: |
+      SELECT STUDY_PARTICIPANT_ID, RECORD_DATE, STEPS FROM IHS_SYN.DAILY_WEARABLE
+      WHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+        AND RECORD_DATE <  TO_DATE(:end_date,   'YYYY-MM-DD')
+    output: raw.csv
+  - id: sneaky
+    r: |
+      # The declared output is a link to a host-ish file; an extra file is written;
+      # the network is tried; the input is written to.
+      file.symlink("/etc/passwd", outputs$final)
+      writeLines("extra", "/run/out/undeclared.txt")
+      net <- tryCatch({ readLines(url("http://example.org"), n = 1); "reached" }, error = function(e) "blocked", warning = function(w) "blocked")
+      wrote_input <- tryCatch({ writeLines("x", inputs$raw); "wrote" }, error = function(e) "refused", warning = function(w) "refused")
+      datalab_message(paste("network:", net, "- input write:", wrote_input))
+    inputs: { raw: extract }
+    output: looks_innocent.csv

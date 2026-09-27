@@ -1,0 +1,10 @@
+# What the pipeline reads. DataLab extracts exactly these (through the data
+# service, with the workflow's parameters as binds) before the step runs, into
+# /run/in/oracle/<SCHEMA>.<OBJECT>.csv. The pipeline has no other way to data.
+name: weekly_steps
+reads:
+  - object: IHS_SYN.DAILY_WEARABLE
+    columns: [STUDY_PARTICIPANT_ID, RECORD_DATE, DEVICE, STEPS]
+    where: RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD') AND RECORD_DATE < TO_DATE(:end_date, 'YYYY-MM-DD')
+parameters: [start_date, end_date]
+outputs: { weekly: weekly_steps.csv }

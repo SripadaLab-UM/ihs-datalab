@@ -1,0 +1,92 @@
+name: wearable_weekly_summary
+description: Weekly steps by device for the fake cohort, small cells suppressed.
+
+# Proposed: every Oracle object the workflow reads, SCHEMA.OBJECT. The SQL
+# steps are checked against this list; pipeline steps get exactly these
+# objects extracted for them and nothing else.
+reads:
+  - IHS_SYN.DAILY_WEARABLE
+
+parameters:
+  start_date: { type: date, default: "2025-04-01" }
+  end_date:   { type: date, default: "2025-06-01" }
+  min_cell:   { type: integer, default: 11 }
+  suppress_small_cells: { type: boolean, default: true }
+
+steps:
+  - id: extract
+    sql: |
+      SELECT STUDY_PARTICIPANT_ID, RECORD_DATE, DEVICE, STEPS, RESTING_HR, SLEEP_MINUTES
+      FROM IHS_SYN.DAILY_WEARABLE
+      WHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+        AND RECORD_DATE <  TO_DATE(:end_date,   'YYYY-MM-DD')
+      ORDER BY STUDY_PARTICIPANT_ID, RECORD_DATE
+    output: daily_raw.csv
+
+  - id: check_raw
+    qc:
+      file: extract
+      min_rows: 1
+      required_columns: [STUDY_PARTICIPANT_ID, RECORD_DATE, DEVICE, STEPS]
+      unique_by: [STUDY_PARTICIPANT_ID, RECORD_DATE]
+      max_missing: { STEPS: 0.15, RESTING_HR: 0.15 }
+
+  - id: summary
+    r: |
+      suppressMessages(library(dplyr))
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      x$week <- format(as.Date(substr(x$RECORD_DATE, 1, 10)), "%G-W%V")
+      boot_ci <- function(v, B = 200) {
+        v <- v[!is.na(v)]
+        if (length(v) < 2) return(c(NA_real_, NA_real_))
+        m <- replicate(B, mean(sample(v, replace = TRUE)))
+        unname(quantile(m, c(0.025, 0.975)))
+      }
+      out <- x |>
+        group_by(DEVICE, week) |>
+        summarise(
+          n_participants = n_distinct(STUDY_PARTICIPANT_ID),
+          n_days = n(),
+          steps_missing = mean(is.na(STEPS)),
+          mean_steps = mean(STEPS, na.rm = TRUE),
+          ci = list(boot_ci(STEPS)),
+          .groups = "drop"
+        ) |>
+        arrange(DEVICE, week)
+      out$steps_ci_low <- vapply(out$ci, `[`, numeric(1), 1)
+      out$steps_ci_high <- vapply(out$ci, `[`, numeric(1), 2)
+      out$ci <- NULL
+      small <- out$n_participants < params$min_cell
+      if (isTRUE(params$suppress_small_cells)) {
+        cols <- c("n_participants", "n_days", "steps_missing", "mean_steps",
+                  "steps_ci_low", "steps_ci_high")
+        out[small, cols] <- NA
+      }
+      out$suppressed <- small & isTRUE(params$suppress_small_cells)
+      write.csv(out, outputs$final, row.names = FALSE, na = "")
+      datalab_count("rows_in", nrow(x))
+      datalab_count("rows_out", nrow(out))
+      datalab_count("small_cells", sum(small))
+    inputs: { raw: extract }
+    output: weekly_by_device.csv
+
+  - id: check_summary
+    qc:
+      file: summary
+      min_rows: 1
+      unique_by: [DEVICE, week]
+      small_cells: { count_column: n_participants, min: $min_cell }
+
+  - id: plausible
+    qc:
+      r: |
+        s <- read.csv(inputs$summary)
+        bad <- sum(!is.na(s$mean_steps) & (s$mean_steps < 0 | s$mean_steps > 50000))
+        datalab_check("plausible_mean_steps", bad == 0, observed = bad, expected = 0,
+                      message = sprintf("%d rows with implausible mean steps", bad))
+      inputs: { summary: summary }
+
+deliver:
+  destination: practice-folder
+  folder: wearable_weekly_summary
+  files: [summary]

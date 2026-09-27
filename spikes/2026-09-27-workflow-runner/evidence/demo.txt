@@ -1,0 +1,95 @@
+### 1. run (source as of 2025-05-31, end_date 2025-08-01)
+run_20260927T110059_4c7e20 [run] succeeded
+  extract        sql        succeeded  0.01s  daily_raw.csv 970bbdd649eb (2440 rows) 
+  check_raw      qc_builtin succeeded   0.0s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  0.91s  weekly_by_device.csv f2a15206a9bc (27 rows) 
+  check_summary  qc_builtin succeeded   0.0s   min_rows=pass unique_by=pass small_cells=pass
+  plausible      qc_custom  succeeded   0.4s   plausible_mean_steps=pass
+  delivery: {'destination_id': 'dest_bc70230cfdd2', 'destination_name': 'practice-folder', 'destination_path': '/Users/ataxali/work/ihs_datalab-spike-runner/spikes/2026-09-27-workflow-runner/runs/destinations/practice', 'folder': '/Users/ataxali/work/ihs_datalab-spike-runner/spikes/2026-09-27-workflow-runner/runs/destinations/practice/wearable_weekly_summary/2026-09-27 0701 wearable_weekly_summary run_20260927T110059_4c7e20', 'files': ['files/weekly_by_device.csv'], 'manifest_sha256': 'ac13bba7b7af4caed149c7d3495b017044b5de8b12ccb7ddb409f028f2cfd0a8'}
+
+### 2. replay of runs/run_20260927T110059_4c7e20
+run_20260927T110100_3c0e6e [replay] succeeded
+  extract        sql        succeeded   0.0s  daily_raw.csv 970bbdd649eb (2440 rows) 
+  check_raw      qc_builtin succeeded   0.0s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  0.68s  weekly_by_device.csv f2a15206a9bc (27 rows) 
+  check_summary  qc_builtin succeeded   0.0s   min_rows=pass unique_by=pass small_cells=pass
+  plausible      qc_custom  succeeded  0.34s   plausible_mean_steps=pass
+  delivery: {'skipped': 'not delivered (replay)'}
+  compared with run_20260927T110059_4c7e20: IDENTICAL
+    {'step': 'extract', 'output': 'daily_raw.csv', 'a': '970bbdd649eb', 'b': '970bbdd649eb', 'identical': True}
+    {'step': 'check_raw', 'output': '(qc checks)', 'identical': True}
+    {'step': 'summary', 'output': 'weekly_by_device.csv', 'a': 'f2a15206a9bc', 'b': 'f2a15206a9bc', 'identical': True}
+    {'step': 'summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'check_summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'plausible', 'output': '(qc checks)', 'identical': True}
+
+### 3. replay again
+run_20260927T110102_23ac56 [replay] succeeded
+  extract        sql        succeeded   0.0s  daily_raw.csv 970bbdd649eb (2440 rows) 
+  check_raw      qc_builtin succeeded   0.0s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  0.76s  weekly_by_device.csv f2a15206a9bc (27 rows) 
+  check_summary  qc_builtin succeeded   0.0s   min_rows=pass unique_by=pass small_cells=pass
+  plausible      qc_custom  succeeded   0.4s   plausible_mean_steps=pass
+  delivery: {'skipped': 'not delivered (replay)'}
+  compared with run_20260927T110059_4c7e20: IDENTICAL
+    {'step': 'extract', 'output': 'daily_raw.csv', 'a': '970bbdd649eb', 'b': '970bbdd649eb', 'identical': True}
+    {'step': 'check_raw', 'output': '(qc checks)', 'identical': True}
+    {'step': 'summary', 'output': 'weekly_by_device.csv', 'a': 'f2a15206a9bc', 'b': 'f2a15206a9bc', 'identical': True}
+    {'step': 'summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'check_summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'plausible', 'output': '(qc checks)', 'identical': True}
+
+### 4. replay with a different seed (control: the seed matters)
+run_20260927T110104_42df31 [replay] succeeded
+  extract        sql        succeeded   0.0s  daily_raw.csv 970bbdd649eb (2440 rows) 
+  check_raw      qc_builtin succeeded   0.0s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  1.05s  weekly_by_device.csv 69b5c8dd50e9 (27 rows) 
+  check_summary  qc_builtin succeeded   0.0s   min_rows=pass unique_by=pass small_cells=pass
+  plausible      qc_custom  succeeded  0.48s   plausible_mean_steps=pass
+  delivery: {'skipped': 'not delivered (replay)'}
+  compared with run_20260927T110059_4c7e20: DIFFERENT
+    {'step': 'extract', 'output': 'daily_raw.csv', 'a': '970bbdd649eb', 'b': '970bbdd649eb', 'identical': True}
+    {'step': 'check_raw', 'output': '(qc checks)', 'identical': True}
+    {'step': 'summary', 'output': 'weekly_by_device.csv', 'a': 'f2a15206a9bc', 'b': '69b5c8dd50e9', 'identical': False}
+    {'step': 'summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'check_summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'plausible', 'output': '(qc checks)', 'identical': True}
+
+### 5. run again on today's (later) data
+run_20260927T110106_4bf2b4 [run_again] succeeded
+  extract        sql        succeeded  0.01s  daily_raw.csv 366800cd8415 (4240 rows) 
+  check_raw      qc_builtin succeeded  0.01s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  0.85s  weekly_by_device.csv 1b10ecdcdf82 (48 rows) 
+  check_summary  qc_builtin succeeded   0.0s   min_rows=pass unique_by=pass small_cells=pass
+  plausible      qc_custom  succeeded  0.36s   plausible_mean_steps=pass
+  delivery: {'destination_id': 'dest_8c582fd551e7', 'destination_name': 'practice-folder', 'destination_path': '/Users/ataxali/work/ihs_datalab-spike-runner/spikes/2026-09-27-workflow-runner/runs/destinations/practice', 'folder': '/Users/ataxali/work/ihs_datalab-spike-runner/spikes/2026-09-27-workflow-runner/runs/destinations/practice/wearable_weekly_summary/2026-09-27 0701 wearable_weekly_summary run_20260927T110106_4bf2b4', 'files': ['files/weekly_by_device.csv'], 'manifest_sha256': 'c8ee5e343806c9ede64021846799c5c4058579b4da136932c18a8311328597de'}
+  compared with run_20260927T110059_4c7e20: DIFFERENT
+    {'step': 'extract', 'output': 'daily_raw.csv', 'a': '970bbdd649eb', 'b': '366800cd8415', 'identical': False}
+    {'step': 'check_raw', 'output': '(qc checks)', 'identical': False}
+    {'step': 'summary', 'output': 'weekly_by_device.csv', 'a': 'f2a15206a9bc', 'b': '1b10ecdcdf82', 'identical': False}
+    {'step': 'summary', 'output': '(qc checks)', 'identical': True}
+    {'step': 'check_summary', 'output': '(qc checks)', 'identical': False}
+    {'step': 'plausible', 'output': '(qc checks)', 'identical': True}
+
+### 6. small cells not suppressed: QC fails, nothing is delivered
+run_20260927T110107_ecc0f7 [run] failed
+  extract        sql        succeeded  0.01s  daily_raw.csv 970bbdd649eb (2440 rows) 
+  check_raw      qc_builtin succeeded   0.0s   min_rows=pass required_columns=pass max_missing:STEPS=pass max_missing:RESTING_HR=pass unique_by=pass
+  summary        r          succeeded  0.75s  weekly_by_device.csv 0911cc6eb208 (27 rows) 
+  check_summary  qc_builtin failed      0.0s   min_rows=pass unique_by=pass small_cells=fail
+  plausible      qc         skipped        s   
+  delivery: {'skipped': 'a step failed'}
+
+### 7. a misbehaving step
+run_20260927T110109_6f3fad [run] failed
+  extract        sql        succeeded   0.0s  raw.csv 6f5e8caf50f0 (280 rows) 
+  sneaky         r          failed      0.4s   
+  delivery: None
+{'status': 'failed', 'exit_code': 0, 'missing_outputs': ['looks_innocent.csv'], 'undeclared_files_dropped': 1}
+[{'level': 'info', 'text': 'network: blocked - input write: refused'}]
+outputs folder: 0 files
+
+### 8. delivered folders
+runs/destinations/practice/wearable_weekly_summary/2026-09-27 0700 wearable_weekly_summary run_20260927T110027_0b24b3/datalab-export.json
+runs/destinations/practice/wearable_weekly_summary/2026-09-27 0701 wearable_weekly_summary run_20260927T110059_4c7e20/datalab-export.json
+runs/destinations/practice/wearable_weekly_summary/2026-09-27 0701 wearable_weekly_summary run_20260927T110106_4bf2b4/datalab-export.json
