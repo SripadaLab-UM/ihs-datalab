@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/plan-schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Plan Schema
+         * @description The kinds of analysis plan and their sections, for the plan card.
+         */
+        get: operations["get_plan_schema_api_plan_schema_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/models": {
         parameters: {
             query?: never;
@@ -497,7 +517,7 @@ export interface components {
             question: string;
             /** Plan */
             plan?: {
-                [key: string]: string;
+                [key: string]: unknown;
             } | null;
         };
         /** AttachResult */
@@ -740,6 +760,57 @@ export interface components {
             /** Checkpoint */
             checkpoint?: number | null;
         };
+        /** PlanLimitsOut */
+        PlanLimitsOut: {
+            /** Section */
+            section: number;
+            /** Title */
+            title: number;
+            /** Rationale */
+            rationale: number;
+            /** Additional */
+            additional: number;
+            /** Plan */
+            plan: number;
+        };
+        /** PlanSchemaOut */
+        PlanSchemaOut: {
+            /** Schema Version */
+            schema_version: number;
+            /** Sections */
+            sections: components["schemas"]["PlanSectionOut"][];
+            /** Core */
+            core: string[];
+            /** Modules */
+            modules: string[];
+            /** Types */
+            types: components["schemas"]["PlanTypeOut"][];
+            limits: components["schemas"]["PlanLimitsOut"];
+        };
+        /** PlanSectionOut */
+        PlanSectionOut: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
+            /** Guidance */
+            guidance: string;
+        };
+        /** PlanTypeOut */
+        PlanTypeOut: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Summary */
+            summary: string;
+            /** Required */
+            required: string[];
+            /** Optional */
+            optional: string[];
+            /** Checks */
+            checks: string;
+        };
         /** PreviewOut */
         PreviewOut: {
             /** Url */
@@ -856,6 +927,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModeOut"][];
+                };
+            };
+        };
+    };
+    get_plan_schema_api_plan_schema_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanSchemaOut"];
                 };
             };
         };

@@ -30,6 +30,7 @@ from datalab.sessions.inputs import (
     practice_samples,
     recheck,
 )
+from datalab.sessions.plan_schema import review_checks
 from datalab.sessions.plans import PlanStore, as_text
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.store import Conversation, ConversationStore, Event
@@ -657,11 +658,12 @@ class SessionManager:
             for e in events
             if e.type == "tool_call" and e.data.get("tool") == "query"
         ]
-        plans = [as_text(p) for p in self.plans.list(conversation_id)] if self.plans else []
+        plans = self.plans.list(conversation_id) if self.plans else []
         context = rigor.instructions(
             answer=str(answer.data.get("text", "")) if answer else "",
             question=question,
-            plans=plans,
+            plans=[as_text(p) for p in plans],
+            checks=review_checks(plans[-1].content) if plans else [],
             queries=[q for q in queries if q],
         )
         self._store.append(conversation_id, "review_started", {})

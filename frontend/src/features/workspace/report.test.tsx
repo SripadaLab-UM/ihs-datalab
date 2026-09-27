@@ -61,3 +61,34 @@ it("shows the commands the agent ran but never their output, which can hold rows
   expect(html).not.toContain("P-0001");
   expect(html).not.toContain("P-0002");
 });
+
+it("exports the approved plan whole, with its type, labels, and the person's own sections", async () => {
+  const plan = {
+    schema_version: 2,
+    analysis_type: "data_quality",
+    analysis_type_label: "Data quality or coverage",
+    rationale: "It asks how complete the data are.",
+    sections: [
+      { kind: "question_and_purpose", label: "Question and purpose", content: "How complete is Garmin coverage?" },
+      { kind: "additional", label: "Devices", content: "Garmin\nonly." },
+    ],
+  };
+  const html = await buildReport(
+    conversation,
+    [
+      { seq: 1, type: "user_message", data: { text: "Coverage?" } },
+      { seq: 2, type: "approval_requested", data: { id: "ap1", kind: "analysis_plan", plan } },
+      { seq: 3, type: "approval_answered", data: { id: "ap1", approved: true } },
+      { seq: 4, type: "plan_approved", data: { approval: "ap1", plan, approved_at: "2026-09-26T12:00:00Z", sha256: "abcdef012345" } },
+      { seq: 5, type: "user_message", data: { text: "Older?" } },
+      { seq: 6, type: "approval_requested", data: { id: "ap0", kind: "analysis_plan", plan: { question: "Sleep?", cohort: "IHS_2024" } } },
+      { seq: 7, type: "approval_answered", data: { id: "ap0", approved: true } },
+      { seq: 8, type: "plan_approved", data: { approval: "ap0", plan: { question: "Sleep?", cohort: "IHS_2024" }, approved_at: "2026-09-01T12:00:00Z", sha256: "0123456789ab" } },
+    ],
+    [],
+    { includeWork: false },
+  );
+  expect(html).toContain("Data quality or coverage. It asks how complete the data are.");
+  expect(html).toContain("<em>Devices</em>: <span class=\"pre\">Garmin\nonly.</span>");
+  expect(html).toContain("<em>Cohort, time window, and exclusions</em>");
+});

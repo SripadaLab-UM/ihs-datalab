@@ -197,3 +197,48 @@ async def test_hidden_characters_are_refused(server, tmp_path):
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         result = await session.call_tool("ask_research_helper", {"question": hidden})
     assert result.is_error and "hidden" in result.content[0].text
+
+
+PLAN_ARGS = {
+    "analysis_type": "data_quality",
+    "question_and_purpose": "How complete is Garmin coverage by month?",
+    "data_and_scope": "IHS_2025 interns with a Garmin, July to June.",
+    "checks_and_limitations": "Days with a sync but no data can't be told from no wear.",
+    "deliverables": "A table of coverage by month.",
+    "rationale": "The question is about how complete the data are.",
+    "sections": {
+        "expected_structure": "One row per intern-day.",
+        "assessment": "Share of expected days present, by month.",
+        "flag_handling": "Counted and reported; nothing dropped.",
+    },
+    "additional_sections": [{"title": "Devices", "content": "Garmin only."}],
+}
+
+
+async def test_a_well_formed_plan_gets_as_far_as_the_turn_check(server, tmp_path):
+    """Between turns a plan isn't shown, but only after it's been checked."""
+    base_url, services, _ = server
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        tools = {t.name: t for t in (await session.list_tools()).tools}
+        result = payload(await session.call_tool("propose_plan", PLAN_ARGS))
+    assert result["status"] == "not approved" and "during a turn" in result["note"]
+    description = tools["propose_plan"].description or ""
+    assert "data_quality (Data quality or coverage)" in description
+
+
+@pytest.mark.parametrize(
+    ("change", "says"),
+    [
+        ({"analysis_type": "causal"}, "analysis_type must be one of"),
+        ({"sections": {"expected_structure": "x"}}, "Assessment method"),
+        ({"sections": {**PLAN_ARGS["sections"], "question_and_purpose": "x"}}, "twice"),
+        ({"deliverables": "Report\u200b"}, "hidden"),
+    ],
+)
+async def test_a_plan_that_isnt_well_formed_is_refused_with_a_reason(
+    server, tmp_path, change, says
+):
+    base_url, services, _ = server
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        result = await session.call_tool("propose_plan", {**PLAN_ARGS, **change})
+    assert result.is_error and says in result.content[0].text

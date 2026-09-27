@@ -1,0 +1,519 @@
+"""The kinds of analysis plan, and the sections each one has.
+
+One registry, versioned. The plan check below, the `propose_plan` tool's
+description, the chat's plan card (through /api/plan-schema), and the rigor
+review all read it, so there's no second list of sections to drift.
+
+Every plan has four core sections. Its type adds the sections that matter
+for that kind of question, and add-on sections cover things that apply
+across types (repeated observations, timing, missing data) when they apply.
+Up to three sections of the agent's or the person's own hold anything else.
+
+A plan that passes these checks is well formed and reviewable. That doesn't
+make the analysis appropriate or correct: the person and the review judge
+that. Safety rules (privacy, exports, the database) are enforced elsewhere
+and never depend on what a plan says.
+
+Plans approved before this registry existed are version 1: seven fixed
+parts (V1_LABELS). They're read and shown exactly as they were frozen.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Any
+
+from datalab.sessions.approvals import Unshowable, visible_text
+
+SCHEMA_VERSION = 2
+ADDITIONAL = "additional"  # the kind of a section with its own title
+
+MAX_SECTION = 2000
+MAX_TITLE = 80
+MAX_RATIONALE = 300
+MAX_ADDITIONAL = 3
+MAX_SECTIONS = 20
+# All of a plan's text together. One or two screens is the aim; this keeps a
+# plan reviewable and lets the rigor review see every plan whole.
+MAX_PLAN = 12000
+
+
+class PlanInvalid(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class Section:
+    kind: str
+    label: str
+    guidance: str  # what to write in it
+    review: str = ""  # for an add-on: what the rigor review checks when it's in the plan
+
+
+@dataclass(frozen=True)
+class AnalysisType:
+    id: str
+    label: str
+    summary: str  # when it fits
+    required: tuple[str, ...]
+    optional: tuple[str, ...]
+    checks: str  # what its Checks and limitations section must address
+    review: str  # what the rigor review checks for this type
+
+
+CORE = (
+    Section(
+        "question_and_purpose",
+        "Question and purpose",
+        "The question in plain words, and what the answer will help decide.",
+    ),
+    Section(
+        "data_and_scope",
+        "Data and scope",
+        "Cohorts and population, time window, tables and columns, the unit of analysis, and "
+        "who or what is included or excluded. Say which of these you've checked and which "
+        "are assumptions.",
+    ),
+    Section(
+        "checks_and_limitations",
+        "Checks and limitations",
+        "The checks this question needs before its results can be interpreted, the "
+        "limitations you expect, and choices still open. Specific to this question, not "
+        "boilerplate.",
+    ),
+    Section(
+        "deliverables",
+        "Deliverables",
+        "What you'll produce (a report, figure, table, or dataset) and how you'll know it's done.",
+    ),
+)
+
+TYPE_SECTIONS = (
+    Section(
+        "measures",
+        "Measures and summaries",
+        "Each measure, with its table and column, and how it's defined and summarised.",
+    ),
+    Section(
+        "comparison",
+        "Comparison groups",
+        "The groups compared, the reference group, and how differences are shown.",
+    ),
+    Section(
+        "target_quantity",
+        "Target quantity (estimand)",
+        "Exactly what's estimated and the claim it supports: for example, the within-person "
+        "association between nightly sleep and next-day mood. Say plainly whether the "
+        "question is about cause and effect.",
+    ),
+    Section(
+        "method",
+        "Method and adjustment",
+        "The analysis method, each adjustment variable and why it's there, and how "
+        "uncertainty is estimated.",
+    ),
+    Section(
+        "prediction_target",
+        "Prediction target and horizon",
+        "What's predicted, for whom, and how far ahead.",
+    ),
+    Section(
+        "available_information",
+        "Information available at prediction time",
+        "The predictors, and why each would be known at the moment a prediction is made.",
+    ),
+    Section(
+        "validation",
+        "Validation and performance",
+        "How the model is validated (how the data are split, and how leakage is prevented), "
+        "the performance measures, and what would count as useful.",
+    ),
+    Section(
+        "expected_structure",
+        "Expected structure and rules",
+        "What the data should look like: the expected records and ranges, and the rules "
+        "they're checked against.",
+    ),
+    Section(
+        "assessment",
+        "Assessment method",
+        "How each rule is checked and how coverage or completeness is measured and broken "
+        "down (by month, cohort, or device, for example).",
+    ),
+    Section(
+        "flag_handling",
+        "Flagged records",
+        "What happens to records that break a rule: how they're counted and reported, and "
+        "whether any are excluded or corrected.",
+    ),
+    Section(
+        "approach",
+        "Proposed approach",
+        "The approach, and why it suits this question and these data.",
+    ),
+)
+
+MODULES = (
+    Section(
+        "repeated_observations",
+        "Repeated observations",
+        "How several observations per person (or per day or device) are handled in the "
+        "estimates and their uncertainty.",
+        "Repeated observations: do the estimates and their uncertainty account for several "
+        "observations per person, as the plan says?",
+    ),
+    Section(
+        "temporal_alignment",
+        "Timing and alignment",
+        "How measures are lined up in time (which night goes with which day, time zones, "
+        "lags), and what happens with gaps.",
+        "Timing: are measures lined up in time as the plan says, with no later information "
+        "used for an earlier moment?",
+    ),
+    Section(
+        "cross_cohort",
+        "Comparability across cohorts",
+        "Whether measures mean the same thing in each cohort (instruments, devices, years), "
+        "and how differences are handled.",
+        "Cohorts: are cohorts compared only on measures the plan shows are comparable, with "
+        "differences handled as it says?",
+    ),
+    Section(
+        "missing_data",
+        "Missing data",
+        "How much is expected to be missing, why it may be missing, and how it's handled.",
+        "Missing data: is the amount missing reported, and handled as the plan says?",
+    ),
+    Section(
+        "sensitivity",
+        "Sensitivity analyses",
+        "The discretionary choices whose effect on the result will be checked, and how.",
+        "Sensitivity: were the sensitivity analyses the plan names run and reported?",
+    ),
+    Section(
+        "pilot_to_full",
+        "Pilot, then full run",
+        "What the pilot covers, what it must show before the full run, and what would change "
+        "the plan.",
+        "Pilot: did the full run start only once the pilot showed what the plan asked of it?",
+    ),
+)
+
+TYPES = (
+    AnalysisType(
+        "describe",
+        "Describe or compare",
+        "Describe measures, or compare them across groups, without estimating an effect or "
+        "predicting.",
+        required=("measures",),
+        optional=("comparison",),
+        checks="How the summaries could mislead (small groups, uneven coverage), and keeping "
+        "comparisons descriptive.",
+        review="Description: are the summaries the plan names reported, with group sizes, and "
+        "without claims of association or cause?",
+    ),
+    AnalysisType(
+        "association",
+        "Association or estimation",
+        "Estimate how one thing relates to another.",
+        required=("target_quantity", "measures", "method"),
+        optional=(),
+        checks="Uncertainty that fits the data's dependence structure, and confounding. If the "
+        "question implies cause and effect, what this design can and can't support.",
+        review="Estimation: is what was estimated the target quantity the plan names, with the "
+        "adjustment and uncertainty it describes?",
+    ),
+    AnalysisType(
+        "prediction",
+        "Prediction",
+        "Predict an outcome from information available earlier.",
+        required=("prediction_target", "available_information", "validation"),
+        optional=(),
+        checks="How validation prevents information leakage, from the future or from the "
+        "test data into fitting.",
+        review="Prediction: was performance measured on data kept out of fitting, as the plan "
+        "says, using only information available at prediction time?",
+    ),
+    AnalysisType(
+        "data_quality",
+        "Data quality or coverage",
+        "Check completeness, coverage, or whether the data follow expected rules.",
+        required=("expected_structure", "assessment", "flag_handling"),
+        optional=(),
+        checks="What these checks can't detect.",
+        review="Data quality: were the rules the plan names checked, and flagged records "
+        "counted and handled as it says?",
+    ),
+    AnalysisType(
+        "other",
+        "Other analysis",
+        "Anything the types above don't fit. Name what else it needs in additional sections.",
+        required=("approach",),
+        optional=(),
+        checks="Whatever this approach needs checked before its results are interpreted.",
+        review="",
+    ),
+)
+
+SECTIONS: dict[str, Section] = {s.kind: s for s in (*CORE, *TYPE_SECTIONS, *MODULES)}
+TYPES_BY_ID: dict[str, AnalysisType] = {t.id: t for t in TYPES}
+_CORE_KINDS = tuple(s.kind for s in CORE)
+_MODULE_KINDS = tuple(s.kind for s in MODULES)
+
+# Version 1: the fixed parts every plan had, with the labels they were shown with.
+V1_LABELS: dict[str, str] = {
+    "question": "Question",
+    "estimand": "Estimand (what exactly is estimated)",
+    "exposure": "Exposure or predictor",
+    "outcome": "Outcome",
+    "covariates": "Covariates and adjustment",
+    "cohort": "Cohort, time window, and exclusions",
+    "decisions": "Decisions expected along the way",
+}
+
+_TOP_FIELDS = {"schema_version", "analysis_type", "analysis_type_label", "rationale", "sections"}
+_SECTION_FIELDS = {"kind", "label", "content"}
+# Content that says nothing: a required section needs a reason instead.
+_PLACEHOLDER = re.compile(r"(n/?a|none|not applicable|tbd|to be decided|-+|\.+)\.?", re.I)
+
+
+def allowed_kinds(analysis_type: AnalysisType) -> tuple[str, ...]:
+    """The registered sections a plan of this type can have, in the order they're shown."""
+    return (*_CORE_KINDS, *analysis_type.required, *analysis_type.optional, *_MODULE_KINDS)
+
+
+def required_kinds(analysis_type: AnalysisType) -> tuple[str, ...]:
+    return (*_CORE_KINDS, *analysis_type.required)
+
+
+def clean_plan(raw: Any) -> dict[str, Any]:
+    """A version-2 plan as it will be shown, approved, and hashed, or PlanInvalid.
+
+    The result has the registry's labels written in, so a frozen plan shows
+    exactly as it was approved even if the registry changes later, and its
+    sections in a fixed order: core, the type's own, add-ons, then the
+    additional sections in the order given.
+    """
+    if not isinstance(raw, dict):
+        raise PlanInvalid("A plan must be a set of named parts.")
+    unknown = sorted(set(raw) - _TOP_FIELDS)
+    if unknown:
+        raise PlanInvalid(f"A plan has no part called {unknown[0]!r}.")
+    version = raw.get("schema_version")
+    if version != SCHEMA_VERSION or isinstance(version, bool):
+        raise PlanInvalid(f"A new plan must have schema_version {SCHEMA_VERSION}.")
+    analysis_type = TYPES_BY_ID.get(str(raw.get("analysis_type")))
+    if analysis_type is None:
+        raise PlanInvalid(f"A plan's analysis_type must be one of: {', '.join(TYPES_BY_ID)}.")
+    if raw.get("analysis_type_label", analysis_type.label) != analysis_type.label:
+        raise PlanInvalid("The plan's analysis_type_label doesn't match its type.")
+    rationale = _text(raw.get("rationale", ""), "rationale")
+    if len(rationale) > MAX_RATIONALE:
+        raise PlanInvalid(f"The plan's rationale is longer than {MAX_RATIONALE} characters.")
+
+    sections = raw.get("sections", [])
+    if not isinstance(sections, list):
+        raise PlanInvalid("A plan's sections must be a list.")
+    if len(sections) > MAX_SECTIONS:
+        raise PlanInvalid(f"A plan can have at most {MAX_SECTIONS} sections.")
+    allowed = allowed_kinds(analysis_type)
+    registered: dict[str, str] = {}
+    additional: list[dict[str, str]] = []
+    for section in sections:
+        kind, label, content = _section_parts(section)
+        if kind == ADDITIONAL:
+            additional.append(_additional(label, content, additional))
+            continue
+        known = SECTIONS.get(kind)
+        if known is None:
+            raise PlanInvalid(
+                f"There's no plan section called {kind!r}. Use an additional section, with "
+                "its own title, for anything the registered sections don't cover."
+            )
+        if kind not in allowed:
+            owners = [t.label for t in TYPES if kind in (*t.required, *t.optional)]
+            raise PlanInvalid(
+                f"{known.label} is a section of {' and '.join(owners)} plans, not "
+                f"{analysis_type.label}. Change the type, or use an additional section."
+            )
+        if kind in registered:
+            raise PlanInvalid(f"The plan has its {known.label} section twice.")
+        if label is not None and label != known.label:
+            raise PlanInvalid(f"The {kind} section's label must be {known.label!r}.")
+        registered[kind] = _content(content, known.label)
+
+    missing = [SECTIONS[k].label for k in required_kinds(analysis_type) if not registered.get(k)]
+    if missing:
+        raise PlanInvalid(
+            f"A {analysis_type.label} plan needs these sections written: {', '.join(missing)}. "
+            "If one can't be settled yet, say so there and say what it depends on."
+        )
+    ordered = [
+        {"kind": k, "label": SECTIONS[k].label, "content": registered[k]}
+        for k in allowed
+        if registered.get(k)  # an optional section left empty isn't shown
+    ]
+    plan = {
+        "schema_version": SCHEMA_VERSION,
+        "analysis_type": analysis_type.id,
+        "analysis_type_label": analysis_type.label,
+        "rationale": rationale,
+        "sections": ordered + additional,
+    }
+    size = len(rationale) + sum(len(s["label"]) + len(s["content"]) for s in plan["sections"])
+    if size > MAX_PLAN:
+        raise PlanInvalid(
+            f"The plan is {size} characters, more than the {MAX_PLAN} a plan can be. Keep "
+            "each section to what the person needs to review."
+        )
+    return plan
+
+
+def _section_parts(section: Any) -> tuple[str, str | None, Any]:
+    if not isinstance(section, dict):
+        raise PlanInvalid("Each plan section must have a kind and its content.")
+    unknown = sorted(set(section) - _SECTION_FIELDS)
+    if unknown:
+        raise PlanInvalid(f"A plan section has no part called {unknown[0]!r}.")
+    kind, label = section.get("kind"), section.get("label")
+    if not isinstance(kind, str):
+        raise PlanInvalid("Each plan section needs its kind.")
+    if label is not None and not isinstance(label, str):
+        raise PlanInvalid("A plan section's label must be text.")
+    return kind, label, section.get("content", "")
+
+
+def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) -> dict[str, str]:
+    title = _text(label or "", "additional section's title")
+    if not title:
+        raise PlanInvalid("An additional section needs a title.")
+    if "\n" in title or len(title) > MAX_TITLE:
+        raise PlanInvalid(f"A section title must be one line of at most {MAX_TITLE} characters.")
+    taken = {s.label.casefold() for s in SECTIONS.values()} | {
+        s["label"].casefold() for s in earlier
+    }
+    if title.casefold() in taken:
+        raise PlanInvalid(f"The plan already has a section called {title!r}.")
+    if len(earlier) >= MAX_ADDITIONAL:
+        raise PlanInvalid(f"A plan can have at most {MAX_ADDITIONAL} additional sections.")
+    body = _content(content, title)
+    if not body:
+        raise PlanInvalid(f"The section {title!r} is empty. Write it, or remove it.")
+    return {"kind": ADDITIONAL, "label": title, "content": body}
+
+
+def _content(value: Any, label: str) -> str:
+    text = _text(value, label)
+    if len(text) > MAX_SECTION:
+        raise PlanInvalid(f"The plan's {label} is longer than {MAX_SECTION} characters.")
+    if _PLACEHOLDER.fullmatch(text):
+        raise PlanInvalid(
+            f"The plan's {label} says only {text!r}. Say why it doesn't apply, or leave it out "
+            "if it's optional."
+        )
+    return text
+
+
+def _text(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise PlanInvalid(f"The plan's {label} must be text.")
+    # The person reviews this text, so all of it must be visible.
+    try:
+        return visible_text(value)
+    except Unshowable as error:
+        raise PlanInvalid(f"The plan's {label}: {error}") from error
+
+
+def sections_of(content: dict[str, Any]) -> list[tuple[str, str]]:
+    """A frozen plan of either version, as (label, text) pairs, in order."""
+    if content.get("schema_version") == SCHEMA_VERSION:
+        return [(s["label"], s["content"]) for s in content.get("sections", [])]
+    return [(label, content[name]) for name, label in V1_LABELS.items() if content.get(name)]
+
+
+def type_label(content: dict[str, Any]) -> str:
+    """The plan's type, as shown ("" for a version-1 plan, which had none)."""
+    return str(content.get("analysis_type_label", ""))
+
+
+def review_checks(content: dict[str, Any]) -> list[str]:
+    """What the rigor review checks for this plan's type and add-on sections."""
+    analysis_type = TYPES_BY_ID.get(str(content.get("analysis_type")))
+    if content.get("schema_version") != SCHEMA_VERSION or analysis_type is None:
+        return []
+    kinds = {s["kind"] for s in content.get("sections", [])}
+    checks = [analysis_type.review] if analysis_type.review else []
+    return checks + [m.review for m in MODULES if m.kind in kinds]
+
+
+def card_schema() -> dict[str, Any]:
+    """The registry, for the chat's plan card."""
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "sections": [
+            {"kind": s.kind, "label": s.label, "guidance": s.guidance} for s in SECTIONS.values()
+        ],
+        "core": list(_CORE_KINDS),
+        "modules": list(_MODULE_KINDS),
+        "types": [
+            {
+                "id": t.id,
+                "label": t.label,
+                "summary": t.summary,
+                "required": list(t.required),
+                "optional": list(t.optional),
+                "checks": t.checks,
+            }
+            for t in TYPES
+        ],
+        "limits": {
+            "section": MAX_SECTION,
+            "title": MAX_TITLE,
+            "rationale": MAX_RATIONALE,
+            "additional": MAX_ADDITIONAL,
+            "plan": MAX_PLAN,
+        },
+    }
+
+
+def tool_description() -> str:
+    """How to write a plan, for the propose_plan tool."""
+
+    def line(kind: str) -> str:
+        section = SECTIONS[kind]
+        return f"  - {kind} ({section.label}): {section.guidance}"
+
+    lines = [
+        "Propose an analysis plan for the person to approve, before touching outcome data.",
+        "",
+        "Pick the one type that fits the question best, and say why in `rationale` (one "
+        "sentence). Don't invent parts that don't apply: a descriptive or data-quality "
+        "question has no exposure or outcome. If the question asks whether X affects Y, "
+        "decide what claim is intended, and ask the person first when that changes the work.",
+        "",
+        "Every plan has four core sections, each its own argument:",
+        *(line(k) for k in _CORE_KINDS),
+        "",
+        "Types (analysis_type), and the sections each adds, given in `sections` by kind:",
+    ]
+    for t in TYPES:
+        lines.append(f"- {t.id} ({t.label}): {t.summary}")
+        lines.extend(line(k) + " (required)" for k in t.required)
+        lines.extend(line(k) + " (when it applies)" for k in t.optional)
+        lines.append(f"  Checks and limitations must address: {t.checks}")
+    lines += [
+        "",
+        "Add-on sections for any type, in `sections` too. Add one only when it applies:",
+        *(line(k) for k in _MODULE_KINDS),
+        "",
+        f"additional_sections: up to {MAX_ADDITIONAL}, each a title and content, for what the "
+        "sections above don't cover.",
+        f"Write short prose or bullets. Limits: {MAX_SECTION} characters a section, "
+        f"{MAX_PLAN} for the whole plan, plain visible text only. A required section that "
+        "can't be settled yet says so and what it depends on; \"N/A\" alone isn't accepted.",
+        "",
+        "The person may edit the plan before approving it. Once approved it is frozen: label "
+        "any later work outside it as exploratory, and propose a new plan if it must change.",
+    ]
+    return "\n".join(lines)

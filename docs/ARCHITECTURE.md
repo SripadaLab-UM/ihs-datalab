@@ -152,7 +152,15 @@ src/datalab/
   appears when Codex forwards the request, the person may edit any part, and
   the approved version is frozen in SQLite (`plans`) with a timestamp and a
   hash. The agent gets the approved text back and is told to label off-plan
-  work as exploratory.
+  work as exploratory. The plan types and their sections live in one
+  versioned registry (`sessions/plan_schema.py`): it checks plans (types,
+  required sections, duplicates, hidden text, size limits), writes the
+  tool's description, is served to the card at `/api/plan-schema`, and adds
+  the type's checks to the rigor review. A version-2 plan stores its schema
+  version, type, labels, and section order in `content_json`, so the hash
+  covers them and a frozen plan shows as approved even if the registry
+  changes; version-1 plans (seven fixed parts) are read as they were, with
+  their original hashes. No migration was needed.
 - **Tracing** (`sessions/tracing.py`). After each completed turn, DataLab
   takes the numbers in the final answer (leaving out code, links, dates,
   years, small counts, and confidence levels) and looks for each, allowing
@@ -167,8 +175,9 @@ src/datalab/
   default in Analysis mode. After each completed turn, DataLab runs
   app-server `review/start` (inline, custom instructions). Review mode starts
   without the conversation's history, so the instructions carry the
-  question, the approved plans, the queries run, and the answer, fenced and
-  marked as data. It's skipped when a turn did no work and states no
+  question, the approved plans (whole: every valid plan fits, and anything
+  longer is marked as cut), the queries run, and the answer, fenced and
+  marked as data, plus the checks for the latest plan's type. It's skipped when a turn did no work and states no
   numbers. The review's text (the `exitedReviewMode` item) is shown under
   the answer, with a button to ask the agent to address it; the review can
   be stopped like a turn. (Codex 0.157 answers `review/start` with a

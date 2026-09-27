@@ -1,10 +1,11 @@
 """Analysis plans: written before the outcome data is touched, approved, then frozen.
 
 In Analysis mode, before looking at outcomes for a new question, the agent
-proposes a short plan (the question and estimand, exposure, outcome,
-covariates, cohort and exclusions, and the decisions it expects to make).
-The person edits and approves it in the chat; it's then frozen with a
-timestamp and a hash, and later work is labelled per plan or exploratory.
+proposes a short plan: four core sections, plus the sections its type of
+analysis needs (plan_schema.py). The person edits and approves it in the
+chat; it's then frozen with a timestamp and a hash, and later work is
+labelled per plan or exploratory. Plans frozen before plan types existed
+(version 1) are kept, and hashed, exactly as they were.
 """
 
 from __future__ import annotations
@@ -18,23 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from datalab.sessions.approvals import Unshowable, visible_text
-
-# The plan's parts, in order, with the label the card shows.
-FIELDS: dict[str, str] = {
-    "question": "Question",
-    "estimand": "Estimand (what exactly is estimated)",
-    "exposure": "Exposure or predictor",
-    "outcome": "Outcome",
-    "covariates": "Covariates and adjustment",
-    "cohort": "Cohort, time window, and exclusions",
-    "decisions": "Decisions expected along the way",
-}
-MAX_FIELD = 2000
-
-
-class PlanInvalid(ValueError):
-    pass
+from datalab.sessions.plan_schema import sections_of, type_label
 
 
 @dataclass(frozen=True)
@@ -42,7 +27,7 @@ class Outcome:
     """A plan that wasn't approved: what to tell the agent, and any edits."""
 
     note: str
-    suggested: dict[str, str] | None = None
+    suggested: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -50,41 +35,23 @@ class Plan:
     id: str
     conversation_id: str
     approved_at: str
-    content: dict[str, str]
+    content: dict[str, Any]
     sha256: str
 
 
-def clean_plan(raw: Any) -> dict[str, str]:
-    """A plan with exactly the known fields, as trimmed text."""
-    if not isinstance(raw, dict):
-        raise PlanInvalid("A plan must be a set of named parts.")
-    plan: dict[str, str] = {}
-    for name in FIELDS:
-        value = raw.get(name, "")
-        if not isinstance(value, str):
-            raise PlanInvalid(f"The plan's {name} must be text.")
-        # The person reviews this text, so all of it must be visible.
-        try:
-            value = visible_text(value)
-        except Unshowable as error:
-            raise PlanInvalid(f"The plan's {name}: {error}") from error
-        if len(value) > MAX_FIELD:
-            raise PlanInvalid(f"The plan's {name} is longer than {MAX_FIELD} characters.")
-        plan[name] = value
-    if not plan["question"]:
-        raise PlanInvalid("A plan needs its question.")
-    return plan
-
-
-def plan_hash(content: dict[str, str]) -> str:
+def plan_hash(content: dict[str, Any]) -> str:
+    # Unchanged since version 1, so every frozen plan's hash still checks out.
+    # A version-2 plan's content holds its schema version, type, labels, and
+    # section order, so the hash covers all of those.
     return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
 
 
 def as_text(plan: Plan) -> str:
     lines = [f"Approved analysis plan (frozen {plan.approved_at}, sha256 {plan.sha256[:12]}):"]
-    for name, label in FIELDS.items():
-        if plan.content.get(name):
-            lines.append(f"- {label}: {plan.content[name]}")
+    if kind := type_label(plan.content):
+        rationale = plan.content.get("rationale")
+        lines.append(f"- Type: {kind}" + (f" ({rationale})" if rationale else ""))
+    lines.extend(f"- {label}: {text}" for label, text in sections_of(plan.content))
     return "\n".join(lines)
 
 
@@ -93,7 +60,7 @@ class PlanStore:
         self._db = db
         self._lock = threading.Lock()
 
-    def approve(self, conversation_id: str, content: dict[str, str]) -> Plan:
+    def approve(self, conversation_id: str, content: dict[str, Any]) -> Plan:
         plan = Plan(
             id=f"pl_{secrets.token_hex(6)}",
             conversation_id=conversation_id,
@@ -130,7 +97,7 @@ class PlanDesk:
         self.turn_running: Any = lambda conversation_id: True
 
     async def propose(
-        self, conversation_id: str, content: dict[str, str], elicit: Any
+        self, conversation_id: str, content: dict[str, Any], elicit: Any
     ) -> Plan | Outcome:
         """The approved (maybe edited) plan, or why there isn't one."""
         if not self.turn_running(conversation_id):

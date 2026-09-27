@@ -90,7 +90,7 @@ class Pending:
     conversation_id: str
     kind: str  # "research_helper" or "analysis_plan"
     question: str = ""  # a research-helper question
-    plan: dict[str, str] | None = None  # an analysis plan
+    plan: dict[str, Any] | None = None  # an analysis plan
     # Set once Codex has forwarded the request: only then is it shown for review.
     shown: bool = False
     # (approved, what was approved: the question's text, or the plan as JSON)
@@ -115,7 +115,7 @@ class Approvals:
         question: str = "",
         *,
         kind: str = "research_helper",
-        plan: dict[str, str] | None = None,
+        plan: dict[str, Any] | None = None,
     ) -> Pending:
         pending = Pending(f"ap_{secrets.token_hex(8)}", conversation_id, kind, question, plan)
         self._pending[pending.id] = pending
@@ -141,7 +141,7 @@ class Approvals:
             raise KeyError(approval_id)
         approved_value = ""
         if pending.kind == "analysis_plan":
-            from datalab.sessions.plans import PlanInvalid, clean_plan
+            from datalab.sessions.plan_schema import PlanInvalid, clean_plan
 
             if approved:
                 # The plan to freeze, as the person left it.

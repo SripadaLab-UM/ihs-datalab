@@ -153,6 +153,26 @@ it("shows an approved plan as frozen", () => {
   });
 });
 
+it("keeps a version-2 plan whole, its own sections included", () => {
+  const plan = {
+    schema_version: 2,
+    analysis_type: "describe",
+    analysis_type_label: "Describe or compare",
+    rationale: "",
+    sections: [
+      { kind: "question_and_purpose", label: "Question and purpose", content: "Sleep?" },
+      { kind: "additional", label: "Devices", content: "Fitbit only." },
+    ],
+  };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan }),
+    e("approval_answered", { id: "ap1", approved: true }),
+    e("plan_approved", { approval: "ap1", plan, approved_at: "2026-09-26T12:00:00Z", sha256: "abc" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({ plan, frozen: { sha256: "abc" } });
+});
+
 it("a review that never finished doesn't swallow later turns", () => {
   const turns = buildTranscript([
     e("user_message", { text: "one" }),

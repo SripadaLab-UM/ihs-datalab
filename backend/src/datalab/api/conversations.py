@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from datalab.relay.policy import model_allowed
+from datalab.sessions import plan_schema
 from datalab.sessions.approvals import Unshowable
 from datalab.sessions.manager import (
     CONTINUE_TEXT,
@@ -20,7 +21,7 @@ from datalab.sessions.manager import (
     SessionManager,
 )
 from datalab.sessions.modes import MODES
-from datalab.sessions.plans import PlanInvalid
+from datalab.sessions.plan_schema import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
 
@@ -74,8 +75,9 @@ class ApprovalAnswer(BaseModel):
     approve: bool
     # The question as the person left it: they may edit it before sending.
     question: str = Field(default="", max_length=4000)  # checked again, more strictly
-    # Or, for an analysis plan, its parts as the person left them.
-    plan: dict[str, str] | None = None
+    # Or, for an analysis plan, the plan as the person left it. Checked in
+    # full by plan_schema.clean_plan, which explains what's wrong.
+    plan: dict[str, Any] | None = None
 
 
 class EventOut(BaseModel):
@@ -103,6 +105,38 @@ class ModeOut(BaseModel):
     kind: Literal["data", "research"]
     description: str
     starters: list[str]
+
+
+class PlanSectionOut(BaseModel):
+    kind: str
+    label: str
+    guidance: str
+
+
+class PlanTypeOut(BaseModel):
+    id: str
+    label: str
+    summary: str
+    required: list[str]
+    optional: list[str]
+    checks: str
+
+
+class PlanLimitsOut(BaseModel):
+    section: int
+    title: int
+    rationale: int
+    additional: int
+    plan: int
+
+
+class PlanSchemaOut(BaseModel):
+    schema_version: int
+    sections: list[PlanSectionOut]
+    core: list[str]
+    modules: list[str]
+    types: list[PlanTypeOut]
+    limits: PlanLimitsOut
 
 
 class ModelsOut(BaseModel):
@@ -157,6 +191,11 @@ def build_conversations_router(
             )
             for m in MODES.values()
         ]
+
+    @router.get("/plan-schema")
+    def get_plan_schema() -> PlanSchemaOut:
+        """The kinds of analysis plan and their sections, for the plan card."""
+        return PlanSchemaOut(**plan_schema.card_schema())
 
     @router.get("/models")
     async def list_models() -> ModelsOut:

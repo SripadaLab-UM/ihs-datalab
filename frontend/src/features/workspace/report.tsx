@@ -8,6 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { Conversation, QueryRecord } from "@/api/client";
+import { isV2, planSections, planTypeLabel } from "@/components/chat/plan";
 import { buildTranscript, finalAnswer, type ConversationEvent, type Turn } from "@/components/chat/transcript";
 
 export interface ReportOptions {
@@ -134,13 +135,17 @@ function Report({
                   </span>
                 </p>
                 <ul>
-                  {Object.entries(item.plan ?? {})
-                    .filter(([, value]) => value)
-                    .map(([name, value]) => (
-                      <li key={name}>
-                        <em>{name}</em>: {value}
-                      </li>
-                    ))}
+                  {planTypeLabel(item.plan) && (
+                    <li>
+                      <em>Type</em>: {planTypeLabel(item.plan)}
+                      {isV2(item.plan) && item.plan.rationale ? `. ${item.plan.rationale}` : ""}
+                    </li>
+                  )}
+                  {planSections(item.plan).map(({ label, content }, i) => (
+                    <li key={i}>
+                      <em>{label}</em>: <span className="pre">{content}</span>
+                    </li>
+                  ))}
                 </ul>
               </div>
             ) : item.kind === "approval" && item.approvalKind === "research_helper" ? (
@@ -251,6 +256,7 @@ th { background: #f7f7f9; }
 .link { text-decoration: underline dotted; }
 .query { margin-top: 1rem; }
 .plan { border: 1px solid #c7c9f9; border-radius: 8px; padding: 0.5rem 0.75rem; margin: 0.75rem 0; }
+.plan .pre { white-space: pre-wrap; }
 img { max-width: 100%; }
 `;
 

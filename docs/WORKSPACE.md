@@ -111,13 +111,30 @@ running an off-plan query; it's asked to label such work exploratory, and
 the rigor review checks that it did.
 
 - Before touching outcome data for a new question, the agent writes a short
-  **analysis plan**:
-  - the question and estimand;
-  - exposure, outcome, and covariates;
-  - cohorts and exclusions;
-  - the decision points it expects, such as how to handle missing days.
-- It appears as a card. You can edit and **approve** it, and it is then
-  frozen with a timestamp.
+  **analysis plan**. Every plan has four core sections: question and purpose,
+  data and scope, checks and limitations, and deliverables. The agent picks
+  the type of analysis that fits the question, and says why, and the type
+  adds the sections that matter for it:
+  - **Describe or compare**: measures and summaries; comparison groups.
+  - **Association or estimation**: the target quantity (estimand); measures;
+    method and adjustment.
+  - **Prediction**: the target and horizon; the information available at
+    prediction time; validation and performance.
+  - **Data quality or coverage**: the expected structure and rules; how
+    they're assessed; what happens to flagged records.
+  - **Other**: the proposed approach.
+  Add-on sections (repeated observations, timing, comparability across
+  cohorts, missing data, sensitivity analyses, pilot then full run) are
+  included only when they apply, and up to three sections of the agent's or
+  your own cover anything else. A descriptive or data-quality plan has no
+  exposure or outcome to invent.
+- It appears as a card. You can edit any section, add or remove optional
+  ones, and **approve** it; it is then frozen with a timestamp and a hash
+  that cover everything shown. For a different type of analysis, choose
+  **Not yet** and say which. A plan that passes DataLab's checks is well
+  formed; that doesn't make the analysis right.
+- Plans approved before plan types existed keep their original seven parts,
+  labels, and hash.
 - Later work is labelled **per plan** or **exploratory (off-plan)**, in the chat
   and in exported reports.
 - Plans are saved with the conversation and included in conversation exports.

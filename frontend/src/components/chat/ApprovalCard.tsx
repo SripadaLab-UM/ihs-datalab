@@ -7,116 +7,20 @@ import clsx from "clsx";
 import { Button, Chip, Icon } from "@/components/ui";
 
 import { Markdown } from "./Markdown";
+import type { AnyPlan } from "./plan";
+import { PlanCard } from "./PlanCard";
 
 export interface Approval {
   kind: "approval";
   id: string;
   approvalKind: "research_helper" | "analysis_plan";
   question: string;
-  plan?: Record<string, string>;
+  plan?: AnyPlan;
   frozen?: { at: string; sha256: string };
   state: "pending" | "approved" | "declined" | "withdrawn";
   sent?: string;
   answer?: string;
   answerStatus?: string;
-}
-
-// The plan's parts, as the backend names them (sessions/plans.py FIELDS).
-const PLAN_FIELDS: [string, string][] = [
-  ["question", "Question"],
-  ["estimand", "Estimand (what exactly is estimated)"],
-  ["exposure", "Exposure or predictor"],
-  ["outcome", "Outcome"],
-  ["covariates", "Covariates and adjustment"],
-  ["cohort", "Cohort, time window, and exclusions"],
-  ["decisions", "Decisions expected along the way"],
-];
-
-/** An analysis plan to approve (and edit) before the agent touches outcome data. */
-function PlanCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
-  const [plan, setPlan] = useState<Record<string, string>>(approval.plan ?? {});
-  const answer = useMutation({
-    mutationFn: (approve: boolean) => api.answerApproval(conversationId, approval.id, approve, "", plan),
-  });
-  const decided = answer.isPending || answer.isSuccess;
-  const shown = approval.frozen ? (approval.plan ?? plan) : plan;
-  // Decided: the plan folds to its question and status; the exact frozen text is a click away.
-  const [showPlan, setShowPlan] = useState(false);
-  return (
-    <div className={clsx("border-l py-1 pl-5", approval.state === "pending" ? "border-you" : "border-line")}>
-      <div className="flex flex-wrap items-baseline gap-2.5">
-        <p className="font-serif text-[21px]">Analysis plan</p>
-        {approval.state === "pending" && <Chip tone="you">needs you</Chip>}
-        {approval.frozen && (
-          <Chip tone="good" title={`sha256 ${approval.frozen.sha256}`}>
-            <Icon name="lock" size={11} /> frozen {new Date(approval.frozen.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
-            {approval.frozen.sha256.slice(0, 8)}
-          </Chip>
-        )}
-      </div>
-      {approval.state === "pending" ? (
-        <>
-          <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
-            Before looking at outcome data, the agent writes down what it will do. Edit anything, then approve it: it's
-            frozen, and later work is labelled as following it or exploratory.
-          </p>
-          <div className="mt-4 flex flex-col gap-4">
-            {PLAN_FIELDS.map(([name, label]) => (
-              <label key={name} className="block">
-                <span className="dl-label">{label}</span>
-                <textarea
-                  value={plan[name] ?? ""}
-                  onChange={(e) => setPlan({ ...plan, [name]: e.target.value })}
-                  rows={Math.max(2, Math.ceil((plan[name] ?? "").length / 90) + (plan[name] ?? "").split("\n").length - 1)}
-                  className="mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink"
-                />
-              </label>
-            ))}
-          </div>
-          {answer.error && <p className="mt-2 text-[13px] text-danger">{answer.error.message}</p>}
-          <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={() => answer.mutate(false)} disabled={decided}>
-              Not yet
-            </Button>
-            <Button variant="primary" onClick={() => answer.mutate(true)} disabled={decided || !plan.question?.trim()}>
-              Approve plan
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          {shown.question && <p className="mt-1 max-w-[60ch] font-serif text-[16px] leading-relaxed">{shown.question}</p>}
-          <button
-            type="button"
-            onClick={() => setShowPlan(!showPlan)}
-            aria-expanded={showPlan}
-            className="mt-2 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
-          >
-            {showPlan ? "Hide the plan" : approval.frozen ? "Show the frozen plan" : "Show the plan"}
-          </button>
-          {showPlan && (
-            <dl className="mt-3 grid gap-x-5 gap-y-2.5 font-serif text-[16px] sm:grid-cols-[10rem_1fr]">
-              {PLAN_FIELDS.filter(([name]) => shown[name]).map(([name, label]) => (
-                <div key={name} className="contents">
-                  <dt className="dl-label sm:pt-1.5">{label}</dt>
-                  <dd className="whitespace-pre-wrap leading-relaxed">{shown[name]}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-          <p className="mt-3 font-sans text-[12.5px] text-muted">
-            {approval.frozen
-              ? `Approved by you and frozen ${new Date(approval.frozen.at).toLocaleString()}. Later work is labelled as following it or exploratory.`
-              : approval.state === "declined"
-                ? "Not approved. The agent will ask what to change."
-                : approval.state === "withdrawn"
-                  ? "Withdrawn (the turn stopped)."
-                  : "Approved."}
-          </p>
-        </>
-      )}
-    </div>
-  );
 }
 
 /**
