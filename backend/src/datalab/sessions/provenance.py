@@ -245,6 +245,12 @@ class Version:
     number: int
     turn: int | None
     label: str
+    review: bool = False  # taken after the turn's rigor review (checkpoints.Checkpoint.review)
+
+    @property
+    def after_review(self) -> bool:
+        # Checkpoints saved before the flag existed say so only in their label.
+        return self.review or self.label.endswith(_REVIEW_LABEL)
 
 
 def file_chain(
@@ -255,7 +261,8 @@ def file_chain(
     queries: list[Any],
     read: Callable[[Any, int], bytes],
 ) -> dict[str, Any]:
-    """How the file at `path` (in /work) came to be as it is in the latest checkpoint.
+    """How the file at `path` (in /work) came to be as it is in the last of `versions`
+    (the latest checkpoint, or the one the person is looking at).
 
     From the checkpoints (newest first, reading each one's files only while
     the content is the same): the one that first saved its current content,
@@ -279,13 +286,20 @@ def file_chain(
         if entry is None or entry.sha256 != current.sha256:
             break
         made = version
-    in_review = made.label.endswith(_REVIEW_LABEL)
+    in_review = made.after_review
+    # Saved after the review, but the turn's own checkpoint wasn't saved: this
+    # one holds the turn's changes too, so both its and the review's commands count.
+    turn_not_saved = in_review and not any(
+        v.turn == made.turn and not v.after_review and v.number < made.number for v in versions
+    )
     chain: dict[str, Any] = {
         "path": path,
         "found": True,
         "checkpoint": made.number,
         "turn": made.turn,
         "in_review": in_review,
+        "turn_not_saved": turn_not_saved,
+        "as_of": versions[-1].number,  # the checkpoint whose version of the file this is
         "commands": [],
         "more_commands": 0,
         "edited_directly": False,
@@ -301,7 +315,10 @@ def file_chain(
         )
         return chain
 
-    commands = turn.review_commands if in_review else turn.commands
+    if turn_not_saved:
+        commands = turn.commands + turn.review_commands
+    else:
+        commands = turn.review_commands if in_review else turn.commands
     made_entries = entries(made.number)
     # Every script those commands ran, as it was then.
     scripts: dict[str, str] = {}  # path -> its text (read only to see what it names)
@@ -342,7 +359,12 @@ def file_chain(
         for c in listed
     ]
     chain["more_commands"] = max(0, len(commands) - len(listed))
-    chain["edited_directly"] = path in (turn.review_changed if in_review else turn.changed)
+    changed = (
+        turn.changed + turn.review_changed
+        if turn_not_saved
+        else (turn.review_changed if in_review else turn.changed)
+    )
+    chain["edited_directly"] = path in changed
     ordered = naming_scripts + [s for s in scripts if s not in naming_scripts]
     chain["scripts"] = [
         {"path": s, "sha256": made_entries[s].sha256, "names_file": s in naming_scripts}
@@ -386,6 +408,8 @@ def _summary(chain: dict[str, Any], named: int, through: int, seen: int, command
     after = (
         f"turn {chain['turn']}'s rigor review" if chain["in_review"] else f"turn {chain['turn']}"
     )
+    if chain["turn_not_saved"]:
+        after += " (the turn's own checkpoint wasn't saved, so it may be the turn's change)"
     said = (
         f"Its current content was first saved in the checkpoint after {after} (checkpoint "
         f"{chain['checkpoint']})."
@@ -414,7 +438,7 @@ def _summary(chain: dict[str, Any], named: int, through: int, seen: int, command
         said += " No commands ran then."
     return said + (
         " DataLab doesn't see which command writes a file inside the workspace, and this "
-        "describes the file as the latest checkpoint saved it, not as it may be now."
+        f"describes the file as checkpoint {chain['as_of']} saved it, not as it may be now."
     )
 
 

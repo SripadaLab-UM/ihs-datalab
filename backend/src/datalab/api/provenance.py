@@ -76,6 +76,9 @@ class FileProvenanceOut(BaseModel):
     checkpoint: int | None = None
     turn: int | None = None
     in_review: bool = False  # first saved after the turn's rigor review, not the turn
+    # ...and the turn's own checkpoint wasn't saved, so the turn's commands are listed too.
+    turn_not_saved: bool = False
+    as_of: int | None = None  # the checkpoint whose version of the file this describes
     commands: list[ChainCommandOut] = []
     more_commands: int = 0
     edited_directly: bool = False
@@ -105,8 +108,11 @@ def build_provenance_router(services: ProvenanceServices) -> APIRouter:
     router = APIRouter(prefix="/api/conversations/{conversation_id}", tags=["provenance"])
 
     @router.get("/provenance/{path:path}")
-    def file_provenance(conversation_id: str, path: str) -> FileProvenanceOut:
-        """How a workspace file (a path in /work, such as outputs/fig1.png) was made."""
+    def file_provenance(
+        conversation_id: str, path: str, checkpoint: int | None = None
+    ) -> FileProvenanceOut:
+        """How a workspace file (a path in /work, such as outputs/fig1.png) was made, as
+        `checkpoint` saved it (the latest if not given: what the viewer is showing)."""
         if store.get(conversation_id) is None:
             raise HTTPException(404, "No such conversation.")
         try:
@@ -115,7 +121,13 @@ def build_provenance_router(services: ProvenanceServices) -> APIRouter:
             raise HTTPException(404, "No such file.") from error
         checkpoints = sessions.checkpoints(conversation_id)
         # The summaries are small; a checkpoint's files are read only when needed.
-        versions = [Version(c.number, c.turn, c.label) for c in checkpoints.list()]
+        versions = [
+            Version(c.number, c.turn, c.label, c.review)
+            for c in checkpoints.list()
+            if checkpoint is None or c.number <= checkpoint
+        ]
+        if checkpoint is not None and (not versions or versions[-1].number != checkpoint):
+            raise HTTPException(404, "No such checkpoint.")
         loaded: dict[int, dict[str, Any]] = {}
 
         def entries(number: int) -> dict[str, Any]:

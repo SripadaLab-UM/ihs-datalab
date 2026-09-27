@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api, type Checkpoint, type Conversation, type WorkspaceFile } from "@/api/client";
 import { shortTable } from "@/components/chat/activity";
+import { SHOW_QUERY } from "@/components/chat/provenance";
 import { Button, Chip, EmptyNote, FileGlyph, Icon, Modal, Tabs } from "@/components/ui";
 import { formatBytes } from "@/lib/csv";
 import type { OpenFile } from "@/lib/files";
@@ -16,6 +17,17 @@ type Tab = "inputs" | "outputs" | "history" | "data";
 /** The Workspace's right-hand column: what the agent made, checkpoints, and data it read. */
 export function SidePanel({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
   const [tab, setTab] = useState<Tab>("outputs");
+  // A query to show, when a number's sources or "How was this made?" asks for
+  // one: each ask is new (the same query again scrolls to it again).
+  const [shown, setShown] = useState<{ id: string } | null>(null);
+  useEffect(() => {
+    const show = (event: Event) => {
+      setTab("data");
+      setShown({ id: String((event as CustomEvent<{ id: string }>).detail?.id ?? "") });
+    };
+    window.addEventListener(SHOW_QUERY, show);
+    return () => window.removeEventListener(SHOW_QUERY, show);
+  }, []);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const tabs: { id: Tab; label: string }[] = [
     { id: "outputs", label: "Outputs" },
@@ -30,7 +42,7 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
         {tab === "inputs" && <Inputs conversation={conversation} practice={health.data?.profile === "practice"} />}
         {tab === "outputs" && <Outputs conversation={conversation} onOpen={onOpen} />}
         {tab === "history" && <History conversation={conversation} />}
-        {tab === "data" && <DataAccessed conversationId={conversation.id} onOpen={onOpen} />}
+        {tab === "data" && <DataAccessed conversationId={conversation.id} onOpen={onOpen} shown={shown} />}
       </div>
     </div>
   );
@@ -273,12 +285,32 @@ function RestoreDialog({
   );
 }
 
-function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOpen: (file: OpenFile) => void }) {
+function DataAccessed({
+  conversationId,
+  onOpen,
+  shown,
+}: {
+  conversationId: string;
+  onOpen: (file: OpenFile) => void;
+  shown?: { id: string } | null;
+}) {
   const queries = useQuery({
     queryKey: ["data-accessed", conversationId],
     queryFn: () => api.dataAccessed(conversationId),
     refetchInterval: 3000,
   });
+  const loaded = queries.data !== undefined;
+  // The entry asked for: scrolled to, focused, and outlined for a few seconds.
+  const [lit, setLit] = useState<string | null>(null);
+  useEffect(() => {
+    if (!shown || !loaded) return;
+    const entry = document.getElementById(`query-${shown.id}`);
+    entry?.scrollIntoView?.({ block: "center" });
+    entry?.focus({ preventScroll: true });
+    setLit(shown.id);
+    const done = window.setTimeout(() => setLit(null), 4000);
+    return () => window.clearTimeout(done);
+  }, [shown, loaded]);
   if (queries.data?.length === 0) {
     return (
       <EmptyNote icon="db" title="No queries yet">
@@ -293,7 +325,13 @@ function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOp
       </p>
       <ol className="flex flex-col gap-2">
         {queries.data?.map((q) => (
-          <li key={q.id} className="rounded-[4px] border border-line bg-surface p-3 text-xs">
+          <li
+            key={q.id}
+            id={`query-${q.id}`}
+            tabIndex={-1}
+            onBlur={() => setLit(null)}
+            className={clsx("rounded-[4px] border bg-surface p-3 text-xs outline-none", q.id === lit ? "border-ink" : "border-line")}
+          >
             <div className="flex items-center gap-2">
               <span
                 aria-hidden

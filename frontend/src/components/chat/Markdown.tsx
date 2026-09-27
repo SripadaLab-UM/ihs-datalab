@@ -1,10 +1,18 @@
-import { createContext, lazy, Suspense, use } from "react";
+import { type ComponentProps, createContext, lazy, Suspense, use, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ExternalLink } from "./ExternalLink";
+import { NumberSources, type SourceLinks } from "./NumberSources";
+import { markNumbers, type NumberSource } from "./provenance";
+
+/** An answer's numbers, each with where it appears, and how to open those places. */
+export interface AnswerNumbers {
+  sources: Map<string, NumberSource[]>;
+  links: SourceLinks;
+}
 
 const VegaChart = lazy(() => import("./VegaChart"));
 // Code inside a block (```) stays code, even on one line: only inline code opens files.
@@ -17,13 +25,20 @@ const InBlock = createContext(false);
  * since loading one could send data out. Other links open only after the
  * person has seen the full address and confirmed.
  */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, numbers }: { text: string; numbers?: AnswerNumbers }) {
   const openFile = use(OpenFileContext);
+  // The same plugin while the numbers are the same, however often the chat re-renders.
+  const keys = numbers ? [...numbers.sources.keys()].join("\u0000") : "";
+  const marked = useMemo(() => (keys ? [markNumbers(keys.split("\u0000"))] : []), [keys]);
   return (
+    <NumbersContext value={numbers}>
     <div className="prose-datalab">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        rehypePlugins={marked}
         components={{
+          // One component for good (not one per render), so an open popover stays open.
+          span: NumberSpan,
           pre({ children }) {
             return (
               <InBlock value={true}>
@@ -87,5 +102,19 @@ export function Markdown({ text }: { text: string }) {
         {text}
       </ReactMarkdown>
     </div>
+    </NumbersContext>
   );
+}
+
+// The answer's numbers, for the spans markNumbers made.
+const NumbersContext = createContext<AnswerNumbers | undefined>(undefined);
+
+/** A span in an answer: a number the answer states is shown with where it appears. */
+function NumberSpan({ node: _node, ...props }: ComponentProps<"span"> & { node?: unknown }) {
+  const numbers = use(NumbersContext);
+  const number = (props as Record<string, unknown>)["data-number"];
+  if (numbers && typeof number === "string") {
+    return <NumberSources text={number} sources={numbers.sources.get(number) ?? []} links={numbers.links} />;
+  }
+  return <span {...props} />;
 }

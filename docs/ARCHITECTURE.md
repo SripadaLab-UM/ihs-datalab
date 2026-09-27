@@ -241,6 +241,19 @@ own slot, and the shared modules offer extension points:
   not research-helper answers or plans. Clock times and dates are ignored.
   The chat says how many numbers were found and lists the rest. It's an aid:
   a coincidental match passes, and a correct derived number is flagged.
+- **Provenance** (`sessions/provenance.py`, `api/provenance.py`). The runtime
+  keeps, beside that evidence, where each piece came from (a command by its
+  event id, a query by its access-log id, shown in the Queries tab; in memory only, and not a
+  review's), read through `SessionManager.turn_sources`. An after-turn hook
+  matches the answer's numbers against it and the turn checkpoint's output
+  data files (`tracing.trace_sources`: one sorted list of values, so it's
+  linear in the evidence) and appends a `provenance` event: each number's
+  sources (capped) and the output files the answer names. `GET
+  /api/conversations/{id}/provenance/{path}` builds a file's chain on
+  demand from the checkpoint summaries (reading checkpoints' files only
+  back to the one that first saved the current content), that turn's
+  events alone, and the access log. Neither returns command output or
+  query rows.
 - **Rigor review** (`sessions/rigor.py`). A per-conversation switch, on by
   default in Analysis mode. After each completed turn, DataLab runs
   app-server `review/start` (inline, custom instructions). Review mode starts
