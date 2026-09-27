@@ -31,20 +31,26 @@ param(
     [switch]$Yes,
     # Windows starts the installer with this after the restart.
     [switch]$Resume,
-    # Internal: the one part that runs as administrator (step 1).
+    # Internal: the one part that runs as administrator (step 1). It only ever
+    # runs from a checked copy of this script held in memory; see Invoke-AdminPart.
     [switch]$Prepare,
     [string]$ForUserSid = "",
-    [string]$ResultFile = ""
+    [string]$WorkDir = ""
 )
 $ErrorActionPreference = "Stop"
+# The text of this script as it's running, for the administrator part (see
+# Invoke-AdminPart). Empty when the script wasn't started from its file.
+$ScriptText = $MyInvocation.MyCommand.ScriptContents
 $UvVersion = "0.12.19"
-# Pinned downloads, checked before they run.
+# Pinned downloads, checked (SHA-256 and publisher's signature) before they run.
 $WslVersion = "2.7.14"
 $WslMsiUrl = "https://github.com/microsoft/WSL/releases/download/2.7.14/wsl.2.7.14.0.x64.msi"
 $WslMsiSha256 = "db084e536279a59e90a26ec598d8aa8a4dff8309f41d078fd06242953ac1ebcd"
+$WslPublisher = "O=Microsoft Corporation"
 $DockerVersion = "4.77.0"
 $DockerUrl = "https://desktop.docker.com/win/main/amd64/228796/Docker%20Desktop%20Installer.exe"
 $DockerSha256 = "5b866599f0de9208f4594d64aa33658fa55cbdd64e0db13648cffe12c91795d2"
+$DockerPublisher = "O=Docker Inc"
 $DockerAgreement = "https://www.docker.com/legal/docker-subscription-service-agreement/"
 
 $StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
@@ -52,10 +58,15 @@ $ResumeFile = Join-Path $StateDir "installer-resume.json"
 $ResumeTask = "DataLab setup (continue after restart)"
 $ResumeShortcut = Join-Path ([Environment]::GetFolderPath("Startup")) "DataLab setup.lnk"
 $DockerDesktop = Join-Path $Env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+# Docker Desktop's Windows service. Docker Desktop starts without an
+# administrator only when this service starts by itself (--always-run-service).
+$DockerService = "com.docker.service"
 $WslExe = Join-Path $Env:ProgramFiles "WSL\wsl.exe"
 # The group Docker Desktop creates for the people allowed to use it; its SID
 # differs per computer, so it's matched by name.
 $DockerUsers = "docker-users"
+# The administrator part's folder: "<ProgramData>\DataLab-setup-<random>".
+$AdminFolderPrefix = "DataLab-setup-"
 
 function Step($text) { Write-Host "`n== $text ==" -ForegroundColor Cyan }
 function Say($text) { Write-Host "   $text" }
@@ -112,13 +123,36 @@ function Test-CanUseDocker {
 
 # Whether this account is in docker-users already (Docker Desktop's own
 # installer adds the account that runs it), even if it needs a new sign-in to
-# take effect. Matched by SID, so no domain controller is needed; if the group
-# can't be read, the administrator part checks again.
+# take effect. Matched by SID, so no domain controller is needed. $null if the
+# group can't be read (the administrator part then checks again).
 function Test-InDockerUsers($sid) {
     try {
         $members = Get-LocalGroupMember -Group $DockerUsers -ErrorAction Stop
-    } catch { return $false }
+    } catch { return $null }
     return [bool]($members | Where-Object { $_.SID.Value -eq $sid })
+}
+
+# Whether Docker Desktop is installed but its service starts only for an
+# administrator (installed without --always-run-service). A service turned
+# off altogether ("Disabled") is left alone: that's IT's choice.
+function Test-DockerServiceManual {
+    if (-not (Test-Path $DockerDesktop)) { return $false }
+    $service = Get-Service $DockerService -ErrorAction SilentlyContinue
+    return [bool]($service -and "$($service.StartType)" -eq "Manual")
+}
+
+# Deletes a folder and what's in it without following links out of it: a link
+# is removed, never what it points to. Whatever can't be deleted stays.
+function Remove-Tree($path) {
+    foreach ($child in @(Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue)) {
+        $isLink = [bool]($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+        if ($child.PSIsContainer -and -not $isLink) { Remove-Tree $child.FullName }
+        try {
+            if ($child.PSIsContainer) { [System.IO.Directory]::Delete($child.FullName, $false) }
+            else { [System.IO.File]::Delete($child.FullName) }
+        } catch { Write-Verbose "Couldn't remove $($child.FullName): $_" }
+    }
+    try { [System.IO.Directory]::Delete($path, $false) } catch { Write-Verbose "Couldn't remove ${path}: $_" }
 }
 
 # A Docker Desktop that was uninstalled (or crashed) can leave its socket files
@@ -127,6 +161,11 @@ function Test-InDockerUsers($sid) {
 # still be moved, so each folder holding them is renamed aside and Docker makes
 # a fresh one. Only while Docker Desktop isn't running at all.
 function Clear-StaleDockerSockets {
+    # Folders an earlier run moved aside: Docker doesn't use them any more, and
+    # after a restart their files can usually be deleted.
+    $moved = @(Get-Item (Join-Path $Env:LOCALAPPDATA "Docker\run.stale-*"),
+        (Join-Path $Env:LOCALAPPDATA "docker-secrets-engine.stale-*") -Force -ErrorAction SilentlyContinue)
+    foreach ($folder in $moved) { Remove-Tree $folder.FullName }
     if (Get-Process "com.docker.backend", "Docker Desktop" -ErrorAction SilentlyContinue) { return }
     # Docker's own Linux VM, left running by a Docker Desktop that crashed or was
     # killed: the next start waits for it to shut down, times out ("waiting for
@@ -142,63 +181,130 @@ function Clear-StaleDockerSockets {
         try {
             Rename-Item -LiteralPath $path -NewName "$(Split-Path $path -Leaf).stale-$stamp" -ErrorAction Stop
             Say "(Moved aside some files an earlier Docker Desktop left behind in $folder.)"
-        } catch {}
+        } catch { Write-Verbose "Couldn't move $path aside: $_" }
     }
 }
 
-function Save-Download($url, $sha256, $file) {
+# Downloads a pinned file and checks it before it's used: its SHA-256, and
+# that it's signed by its publisher.
+function Save-Download($url, $sha256, $publisher, $file) {
     Say "Downloading $([System.Uri]::UnescapeDataString(($url -split '/')[-1]))..."
     $ProgressPreference = "SilentlyContinue"  # the progress bar makes big downloads much slower
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file
-    $actual = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+    $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $sha256) {
-        Remove-Item $file -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
         throw "The download of $url didn't match its expected checksum, so it wasn't run."
     }
-}
-
-# Opens the installer again after the next sign-in. A logon task for this
-# account, not a RunOnce entry: managed Windows machines were seen skipping
-# RunOnce entirely. If the task can't be made, a Startup-folder shortcut does it.
-function Register-Resume {
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -Resume"
-    try {
-        $me = "$Env:USERDOMAIN\$Env:USERNAME"
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
-        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
-        $trigger.Delay = "PT20S"  # let the desktop finish appearing first
-        $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-        # Laptops: by default a task doesn't start on battery.
-        $options = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-            -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
-        Register-ScheduledTask -TaskName $ResumeTask -Action $action -Trigger $trigger -Principal $principal `
-            -Settings $options -Force -ErrorAction Stop | Out-Null
-    } catch {
-        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($ResumeShortcut)
-        $link.TargetPath = "powershell.exe"
-        $link.Arguments = $arguments
-        $link.Save()
+    $signature = Get-AuthenticodeSignature -LiteralPath $file
+    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch [regex]::Escape($publisher)) {
+        Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
+        throw "The download of $url isn't signed by its publisher ($publisher), so it wasn't run."
     }
 }
 
-function Unregister-Resume {
-    Unregister-ScheduledTask -TaskName $ResumeTask -Confirm:$false -ErrorAction SilentlyContinue
-    Remove-Item $ResumeShortcut -ErrorAction SilentlyContinue
+# The SHA-256 of some bytes, written the same way as in the command that starts
+# the administrator part (Invoke-AdminPart).
+function Get-BytesHash([byte[]]$bytes) {
+    return [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes))
 }
 
 # ---------------------------------------------------------------------------
 # The administrator part. Runs in its own window, started from step 1 below.
 # ---------------------------------------------------------------------------
+
+# Its working folder: new, in ProgramData, and usable only by SYSTEM and
+# Administrators, so nothing running as the person can change a download
+# between its check and its run, add files beside an installer, or redirect
+# what's written there. It's made with those permissions in one step (never
+# looser, even briefly), then checked; anything unexpected stops the
+# administrator part before it does anything.
+function New-ProtectedFolder($path) {
+    $system = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
+    $admins = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    # A file's owner may always change its permissions, and Windows can make
+    # the person the owner of what an elevated window creates. With this rule
+    # an owner gets only what it gives: reading the permissions.
+    $ownerRights = New-Object System.Security.Principal.SecurityIdentifier("S-1-3-4")
+    $inherit = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
+    $none = [System.Security.AccessControl.PropagationFlags]::None
+    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)  # nothing inherited from ProgramData
+    $security.SetOwner($admins)
+    foreach ($who in $system, $admins) {
+        $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $who, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, $none, $allow)))
+    }
+    $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $ownerRights, [System.Security.AccessControl.FileSystemRights]::ReadPermissions, $inherit, $none, $allow)))
+
+    if (Test-Path -LiteralPath $path) { throw "The folder $path already exists, so it can't be trusted." }
+    $null = [System.IO.Directory]::CreateDirectory($path, $security)
+
+    $item = Get-Item -LiteralPath $path -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw "$path is a link, not a folder." }
+    $acl = Get-Acl -LiteralPath $path
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    $allowed = @($system.Value, $admins.Value, $ownerRights.Value)
+    $others = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
+        Where-Object { $_.IdentityReference.Value -notin $allowed })
+    $wrongOwner = $owner -notin @($system.Value, $admins.Value)
+    $notEmpty = @(Get-ChildItem -LiteralPath $path -Force).Count -ne 0
+    if ($wrongOwner -or -not $acl.AreAccessRulesProtected -or $others.Count -ne 0 -or $notEmpty) {
+        throw "The folder $path didn't get the expected permissions (owner $owner), so it wasn't used."
+    }
+}
+
+# Once the administrator part is completely done, lets the person read its
+# result and log, and remove the folder. Nothing elevated uses it after this.
+function Grant-ResultToPerson($folder, [string[]]$files) {
+    $person = New-Object System.Security.Principal.SecurityIdentifier($ForUserSid)
+    $noInherit = [System.Security.AccessControl.InheritanceFlags]::None
+    $none = [System.Security.AccessControl.PropagationFlags]::None
+    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    $rights = [System.Security.AccessControl.FileSystemRights]
+    $access = [System.Security.AccessControl.AccessControlSections]::Access
+    foreach ($file in $files) {
+        if (-not (Test-Path -LiteralPath $file)) { continue }
+        $item = Get-Item -LiteralPath $file -Force
+        $acl = $item.GetAccessControl($access)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $person, ($rights::Read -bor $rights::Delete), $noInherit, $none, $allow)))
+        $item.SetAccessControl($acl)
+    }
+    $item = Get-Item -LiteralPath $folder -Force
+    $acl = $item.GetAccessControl($access)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $person, ($rights::ListDirectory -bor $rights::ReadAttributes -bor $rights::Delete -bor $rights::Synchronize),
+        $noInherit, $none, $allow)))
+    $item.SetAccessControl($acl)
+}
+
 if ($Prepare) {
     $Host.UI.RawUI.WindowTitle = "DataLab setup (administrator part)"
     $result = @{ ok = $false; restart = $false; error = "" }
-    Start-Transcript -Path ([System.IO.Path]::ChangeExtension($ResultFile, ".log")) | Out-Null
+    $ready = $false
+    $resultFile = Join-Path $WorkDir "result.json"
+    $logFile = Join-Path $WorkDir "setup.log"
     try {
+        $expected = Join-Path $Env:ProgramData $AdminFolderPrefix
+        if (-not $WorkDir.StartsWith($expected, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Unexpected working folder: $WorkDir"
+        }
+        New-ProtectedFolder $WorkDir
+        $ready = $true
+        Set-Location -LiteralPath $WorkDir
+        Start-Transcript -Path $logFile | Out-Null
+        # The installers unpack into TEMP: keep that inside the protected
+        # folder too, not in the person's own temp folder.
+        $temp = Join-Path $WorkDir "temp"
+        New-Item -ItemType Directory $temp | Out-Null
+        $Env:TEMP = $temp; $Env:TMP = $temp
+
         Write-Host "DataLab setup: the administrator part" -ForegroundColor Cyan
         Write-Host "Please leave this window open. It closes by itself when it's done."
         Write-Host "The downloads are large (about 900 MB), so this can take 10 minutes or more."
-        $downloads = Join-Path $Env:TEMP "datalab-installer"
-        New-Item -ItemType Directory -Force $downloads | Out-Null
 
         Step "Turning on the Windows features WSL needs"
         foreach ($name in "Microsoft-Windows-Subsystem-Linux", "VirtualMachinePlatform") {
@@ -214,13 +320,13 @@ if ($Prepare) {
         if (Test-Path $WslExe) {
             Good "WSL is already installed."
         } else {
-            $msi = Join-Path $downloads "wsl.$WslVersion.x64.msi"
-            Save-Download $WslMsiUrl $WslMsiSha256 $msi
+            $msi = Join-Path $WorkDir "wsl.$WslVersion.x64.msi"
+            Save-Download $WslMsiUrl $WslMsiSha256 $WslPublisher $msi
             Say "Installing WSL $WslVersion..."
-            $install = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/norestart" -Wait -PassThru
+            $install = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/norestart" `
+                -WorkingDirectory $WorkDir -Wait -PassThru
             if ($install.ExitCode -eq 3010) { $result.restart = $true }
             elseif ($install.ExitCode -ne 0) { throw "Installing WSL failed (msiexec exit code $($install.ExitCode))." }
-            Remove-Item $msi -ErrorAction SilentlyContinue
             Good "Installed WSL."
         }
 
@@ -228,20 +334,34 @@ if ($Prepare) {
         if (Test-Path $DockerDesktop) {
             Good "Docker Desktop is already installed."
         } else {
-            $installer = Join-Path $downloads "Docker Desktop Installer.exe"
-            Save-Download $DockerUrl $DockerSha256 $installer
-            $signature = Get-AuthenticodeSignature $installer
-            if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "O=Docker Inc") {
-                throw "The Docker Desktop installer isn't signed by Docker, so it wasn't run."
-            }
+            $installer = Join-Path $WorkDir "Docker Desktop Installer.exe"
+            Save-Download $DockerUrl $DockerSha256 $DockerPublisher $installer
             Say "Installing Docker Desktop $DockerVersion (this takes a few minutes, with no progress shown)..."
             # --always-run-service: Docker Desktop can then start without an administrator.
             $install = Start-Process $installer -ArgumentList "install", "--quiet", "--accept-license", `
-                "--backend=wsl-2", "--always-run-service" -Wait -PassThru
+                "--backend=wsl-2", "--always-run-service" -WorkingDirectory $WorkDir -Wait -PassThru
             if ($install.ExitCode -ne 0) { throw "Installing Docker Desktop failed (exit code $($install.ExitCode))." }
-            Remove-Item $installer -ErrorAction SilentlyContinue
             Good "Installed Docker Desktop."
             $result.restart = $true
+        }
+
+        Step "Letting Docker Desktop start without an administrator"
+        # A Docker Desktop installed earlier without --always-run-service has a
+        # service that only an administrator can start.
+        $service = Get-Service $DockerService -ErrorAction SilentlyContinue
+        $startType = "$($service.StartType)"
+        if (-not $service) {
+            Note "Docker Desktop's service ($DockerService) wasn't found; Docker Desktop may ask for an administrator when it starts."
+        } elseif ($startType -eq "Disabled") {
+            Note "Docker Desktop's service is turned off on this computer (by IT, most likely), so it was left as it is."
+        } elseif ($startType -ne "Automatic") {
+            Set-Service -Name $DockerService -StartupType Automatic
+            Good "Docker Desktop's service now starts by itself."
+        } else {
+            Good "Docker Desktop's service already starts by itself."
+        }
+        if ($service -and $startType -ne "Disabled" -and -not $result.restart) {
+            Start-Service -Name $DockerService -ErrorAction SilentlyContinue
         }
 
         Step "Letting you use Docker"
@@ -262,10 +382,19 @@ if ($Prepare) {
     } catch {
         $result.error = "$_"
         Write-Host "`nSomething went wrong: $_" -ForegroundColor Red
-        Read-Host "Press Enter to close this window (the main installer window explains what to do)"
+        if ($Yes) { Start-Sleep -Seconds 10 }
+        else { Read-Host "Press Enter to close this window (the main installer window explains what to do)" }
     } finally {
-        $result | ConvertTo-Json | Set-Content -Encoding UTF8 $ResultFile
-        Stop-Transcript | Out-Null
+        # Only into the folder this part made itself; without it, nothing is written.
+        if ($ready) {
+            $result | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $resultFile
+            Stop-Transcript | Out-Null
+            # The downloads and unpacked installers aren't needed any more.
+            Get-ChildItem -LiteralPath $WorkDir -Force |
+                Where-Object { $_.FullName -notin @($resultFile, $logFile) } |
+                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Grant-ResultToPerson $WorkDir @($resultFile, $logFile)
+        }
     }
     if ($result.ok) { exit 0 } else { exit 1 }
 }
@@ -274,12 +403,71 @@ if ($Prepare) {
 # The installer, run as the person installing.
 # ---------------------------------------------------------------------------
 $Host.UI.RawUI.WindowTitle = "DataLab setup"
+$MySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+
+# One installer at a time: after a restart, the logon task, the Startup-folder
+# shortcut and a run started by hand could otherwise overlap.
+$createdNew = $false
+$SetupLock = [System.Threading.Mutex]::new($false, "Local\IHS-DataLab-setup", [ref]$createdNew)
+if (-not $createdNew) {
+    $SetupLock.Dispose()
+    Write-Host ""
+    Write-Host "The DataLab installer is already open in another window. Carry on there," -ForegroundColor Yellow
+    Write-Host "or close that window and run the installer again." -ForegroundColor Yellow
+    exit 3
+}
+
+# Opens the installer again after the next sign-in. A logon task for this
+# account, not a RunOnce entry: managed Windows machines were seen skipping
+# RunOnce entirely. If the task can't be made, a Startup-folder shortcut does
+# it. The account is given by its SID: its name would need the domain controller.
+function Register-Resume {
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -Resume"
+    try {
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $MySid
+        $trigger.Delay = "PT20S"  # let the desktop finish appearing first
+        $principal = New-ScheduledTaskPrincipal -UserId $MySid -LogonType Interactive -RunLevel Limited
+        # Laptops: by default a task doesn't start on battery.
+        $options = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+        Register-ScheduledTask -TaskName $ResumeTask -Action $action -Trigger $trigger -Principal $principal `
+            -Settings $options -Force -ErrorAction Stop | Out-Null
+    } catch {
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($ResumeShortcut)
+        $link.TargetPath = "powershell.exe"
+        $link.Arguments = $arguments
+        $link.Save()
+    }
+}
+
+function Unregister-Resume {
+    Unregister-ScheduledTask -TaskName $ResumeTask -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-Item $ResumeShortcut -ErrorAction SilentlyContinue
+}
+
+# When Windows last started (in ticks, 0 if unknown): to tell whether it has
+# restarted since a restart was asked for.
+function Get-BootTime {
+    try { return [int64](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime.ToUniversalTime().Ticks }
+    catch { return [int64]0 }
+}
+
+# The rest runs inside try/finally, so the one-at-a-time lock is freed however
+# it ends, also when the window stays open afterwards (-NoExit).
+try {
+# Whatever started this run, nothing should open the installer again unless
+# this run asks for another restart (Request-Restart sets it up again).
+Unregister-Resume
+# What an earlier administrator part left for this account to remove.
+Get-ChildItem -LiteralPath $Env:ProgramData -Directory -Filter "$AdminFolderPrefix*" -ErrorAction SilentlyContinue |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
 $saved = $null
 if (Test-Path $ResumeFile) { $saved = Get-Content $ResumeFile -Raw | ConvertFrom-Json }
 if ($Resume) {
     if (-not $saved) { Write-Host "There's no DataLab install waiting to continue."; exit 2 }
     $Package = $saved.Package; $Settings = $saved.Settings; $Constraints = $saved.Constraints
-    Unregister-Resume  # opened once; if it stops again, it asks for another restart itself
     Write-Host ""
     Write-Host "Welcome back! Let's finish setting up DataLab." -ForegroundColor Cyan
     Write-Host "You won't be asked for administrator permission again."
@@ -311,13 +499,37 @@ if ($Settings) {
     $Settings = (Resolve-Path -LiteralPath $Settings).ProviderPath
 }
 
+# How many restarts so far didn't make Docker usable, and when Windows had
+# started at the time the last restart was asked for: 0 if no restart is
+# waiting, -1 if one is but the start time couldn't be read.
+$Restarts = 0
+$RestartBoot = [int64]0
+if ($saved) {
+    if ($saved.Restarts) { $Restarts = [int]$saved.Restarts }
+    if ($saved.RestartBoot) { $RestartBoot = [int64]$saved.RestartBoot }
+}
+if ($RestartBoot -ne 0) {
+    $bootNow = Get-BootTime
+    # Windows' start time can shift by a few seconds when its clock is set, so
+    # only a clear change counts. With no start time to compare, a run from
+    # the logon task counts as after a restart.
+    $restarted = if ($RestartBoot -gt 0 -and $bootNow -gt 0) {
+        [math]::Abs($bootNow - $RestartBoot) -gt [TimeSpan]::FromMinutes(2).Ticks
+    } else { [bool]$Resume }
+    if ($restarted) { $Restarts += 1; $RestartBoot = [int64]0 }
+}
+
 function Save-Progress($prepared) {
     New-Item -ItemType Directory -Force $StateDir | Out-Null
-    @{ Package = $Package; Settings = $Settings; Constraints = $Constraints; Prepared = $prepared } |
+    @{ Package = $Package; Settings = $Settings; Constraints = $Constraints; Prepared = $prepared
+        Restarts = $Restarts; RestartBoot = $RestartBoot } |
         ConvertTo-Json | Set-Content -Encoding UTF8 $ResumeFile
 }
 
 function Request-Restart {
+    $script:RestartBoot = Get-BootTime
+    if ($script:RestartBoot -eq 0) { $script:RestartBoot = [int64]-1 }
+    Save-Progress $true
     Register-Resume
     Write-Host ""
     Note "Windows needs to restart to finish turning these on."
@@ -334,14 +546,96 @@ function Request-Restart {
     exit 0
 }
 
+# Runs the administrator part and returns its result (ok, restart, error).
+#
+# It runs elevated, so it must not run anything that a program running as the
+# person could have changed, and this script's own file (in Downloads or
+# OneDrive, say) is one of those. So the elevated window gets a short, fixed
+# command that reads a copy of this script's text once, checks its SHA-256
+# against the text this window is running, and runs that checked text from
+# memory; no file is run elevated. What it downloads and writes goes into a
+# new folder only administrators can change (New-ProtectedFolder), which it
+# lets the person read and remove once it's done.
+function Invoke-AdminPart {
+    if (-not $ScriptText) { Stop-Install "Run the installer from its file: powershell -ExecutionPolicy Bypass -File install.ps1 ..." }
+    $work = Join-Path $Env:ProgramData ($AdminFolderPrefix + [guid]::NewGuid().ToString("N"))
+    $copy = Join-Path $Env:TEMP ($AdminFolderPrefix + [guid]::NewGuid().ToString("N") + ".ps1")
+    $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($ScriptText)
+    [System.IO.File]::WriteAllBytes($copy, $bytes)
+    $quote = { param($text) "'" + ($text -replace "'", "''") + "'" }
+    # Only single quotes inside: the whole command is one double-quoted argument.
+    $command = "`$b = [IO.File]::ReadAllBytes($(& $quote $copy)); " +
+        "`$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b)); " +
+        "if (`$h -ne '$(Get-BytesHash $bytes)') { " +
+        "Write-Host 'The installer changed on disk after it started, so nothing was run.'; Start-Sleep -Seconds 20; exit 1 }; " +
+        "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b))) -Prepare " +
+        "-ForUserSid $(& $quote $MySid) -WorkDir $(& $quote $work)$(if ($Yes) { ' -Yes' })"
+    Say "Asking Windows for permission now (look for the box; it may be behind this window)..."
+    try {
+        $null = Start-Process powershell.exe -Verb RunAs -Wait -PassThru `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$command`""
+    } catch {
+        Stop-Install ("Windows didn't give administrator permission (the box was closed or 'No' was " +
+            "clicked, or your temporary administrator access has run out), so nothing was changed. " +
+            "Get administrator access again (or ask IT for it), then run the installer again." +
+            "`n   (Windows said: $($_.Exception.Message))")
+    } finally {
+        Remove-Item -LiteralPath $copy -ErrorAction SilentlyContinue
+    }
+    $resultFile = Join-Path $work "result.json"
+    if (-not (Test-Path -LiteralPath $resultFile)) { Stop-Install "The administrator part closed before it finished." }
+    $outcome = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+    if (-not $outcome.ok) {
+        Stop-Install ("The administrator part didn't finish: $($outcome.error)`n   " +
+            "Details are saved in $(Join-Path $work 'setup.log')")
+    }
+    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    return $outcome
+}
+
+# Windows has restarted, but this sign-in still can't use Docker. Asking for
+# another restart could repeat for ever (and with -Yes, restart at every
+# sign-in), so this stops and says why.
+function Stop-StillNoDocker {
+    Save-Progress $true  # keeps the count of restarts
+    Write-Host ""
+    Note "Windows has restarted, but your account still can't use Docker."
+    $member = Test-InDockerUsers $MySid
+    if ($member -eq $true) {
+        Say "Your account is in the '$DockerUsers' group, but Windows hasn't applied that to"
+        Say "this sign-in. Sign out and in again, then run the installer again."
+        exit 1
+    }
+    if ($member -eq $false) {
+        Say "Your account was added to the '$DockerUsers' group, but it isn't in it any more."
+    } else {
+        Say "Your account should be in the '$DockerUsers' group, but Windows doesn't show it there."
+    }
+    Say "On a managed computer, the likely cause is a group policy that resets who is in"
+    Say "this computer's groups at each sign-in. Ask IT (the service desk) to let your"
+    Say "account stay in the '$DockerUsers' group on this computer, and mention that a"
+    Say "group policy seems to remove it."
+    if (-not $Yes) {
+        Write-Host ""
+        Say "You can also run the administrator part again now, to add your account back."
+        Say "If a policy removes it again, that won't last past the next sign-in."
+        if (Ask "Run the administrator part again?") {
+            $null = Invoke-AdminPart
+            Good "Windows is set up."
+            Request-Restart
+        }
+    }
+    Stop-Install "Your account can't use Docker yet (see above)."
+}
+
 Step "Step 1 of 7: Getting Windows ready (WSL and Docker Desktop)"
 Say "DataLab runs its analysis in Docker, a sealed-off space on your computer."
 Say "Docker needs a Windows feature called WSL."
 $missing = @()
 if (-not (Test-Path $WslExe)) { $missing += "Turn on WSL and install it (WSL $WslVersion, from Microsoft)" }
 if (-not (Test-Path $DockerDesktop)) { $missing += "Install Docker Desktop $DockerVersion (from Docker)" }
-$mySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$prepared = ($saved -and $saved.Prepared) -or (Test-InDockerUsers $mySid)
+if (Test-DockerServiceManual) { $missing += "Let Docker Desktop start without an administrator" }
+$prepared = ($saved -and $saved.Prepared) -or (Test-InDockerUsers $MySid)
 if (-not (Test-CanUseDocker) -and -not $prepared) { $missing += "Give your account permission to use Docker" }
 
 if ($missing) {
@@ -371,31 +665,14 @@ if ($missing) {
     Write-Host ""
     if (-not (Ask "Ready to continue?")) { Say "No problem. Nothing was changed; run the installer again when you're ready."; exit 1 }
 
-    $ResultFile = Join-Path $Env:TEMP "datalab-prepare.json"
-    Remove-Item $ResultFile -ErrorAction SilentlyContinue
-    $arguments = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"",
-        "-Prepare", "-ForUserSid", $mySid, "-ResultFile", "`"$ResultFile`"")
-    Say "Asking Windows for permission now (look for the box; it may be behind this window)..."
-    try {
-        $null = Start-Process powershell.exe -Verb RunAs -ArgumentList $arguments -Wait -PassThru
-    } catch {
-        Stop-Install ("Windows didn't give administrator permission (the box was closed or 'No' was " +
-            "clicked, or your temporary administrator access has run out), so nothing was changed. " +
-            "Get administrator access again (or ask IT for it), then run the installer again." +
-            "`n   (Windows said: $($_.Exception.Message))")
-    }
-    if (-not (Test-Path $ResultFile)) { Stop-Install "The administrator part closed before it finished." }
-    $outcome = Get-Content $ResultFile -Raw | ConvertFrom-Json
-    if (-not $outcome.ok) {
-        Stop-Install ("The administrator part didn't finish: $($outcome.error)`n   " +
-            "Details are saved in $([System.IO.Path]::ChangeExtension($ResultFile, '.log'))")
-    }
+    $outcome = Invoke-AdminPart
     Good "Windows is set up."
     Save-Progress $true
     if ($outcome.restart -or -not (Test-CanUseDocker)) { Request-Restart }
 } elseif (-not (Test-CanUseDocker)) {
     # The administrator part is done, but Windows only applies it at sign-in.
-    Save-Progress $true
+    # After one restart that didn't help, another won't either.
+    if ($Restarts -ge 1) { Stop-StillNoDocker }
     Request-Restart
 }
 Good "WSL and Docker Desktop are ready."
@@ -479,3 +756,6 @@ Write-Host "All done! DataLab is installed." -ForegroundColor Green
 Say "To open it: Start menu > type DataLab > press Enter. It opens in your browser."
 Say "A small window stays open while DataLab runs; close it to quit DataLab."
 Say "(Or run: `"$DataLab`" serve)"
+} finally {
+    $SetupLock.Dispose()
+}

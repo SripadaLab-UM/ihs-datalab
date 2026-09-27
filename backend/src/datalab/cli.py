@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -202,19 +203,33 @@ def _pull_images(settings) -> int:
 def _pull_failure_hint(error: str) -> str:
     """What to do about a failed `docker pull`, in words for someone non-technical."""
     lowered = error.lower()
-    if "unauthorized" in lowered or "denied" in lowered:
+    # Docker's own engine first: its pipe (Windows) or socket (Mac, Linux) is
+    # named in the message. Otherwise "access is denied" on the Windows pipe
+    # (not in docker-users) or "permission denied ... daemon socket" would look
+    # like the registry refusing the image.
+    local_engine = re.search(
+        r"//\./pipe/|%2fpipe%2f|docker\.sock|daemon socket|docker daemon", lowered
+    )
+    if local_engine and ("access is denied" in lowered or "permission denied" in lowered):
         return (
-            "The registry wouldn't let this computer download it. That's not something you "
-            "did: the DataLab maintainer needs to make the image available. Send them this message."
+            "This account isn't allowed to use Docker yet. On Windows, it has to be in the "
+            "'docker-users' group, which only takes effect after a restart (or signing out and "
+            "in again). Restart, then try again; if it still happens, ask IT to add your "
+            "account to 'docker-users' on this computer."
         )
     if (
-        "cannot connect" in lowered
-        or "pipe" in lowered
+        local_engine
+        or "cannot connect" in lowered
         or ("daemon" in lowered and "running" in lowered)
     ):
         return (
             "Docker Desktop doesn't seem to be running. Start it, wait until it says "
             "'Engine running', then try again."
+        )
+    if "unauthorized" in lowered or "denied" in lowered:
+        return (
+            "The registry wouldn't let this computer download it. That's not something you "
+            "did: the DataLab maintainer needs to make the image available. Send them this message."
         )
     return "Check the internet connection (and the VPN, if you're on one), then try again."
 
