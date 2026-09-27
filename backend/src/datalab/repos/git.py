@@ -383,7 +383,7 @@ class Clone:
         return self.read_blobs([entry.blob]).get(entry.blob)
 
     def changed_paths(self, a: str, b: str) -> list[str]:
-        out = self.git("diff", "--name-only", "-z", "--no-renames", a, b).stdout
+        out = self.git("diff", "--no-ext-diff", "--name-only", "-z", "--no-renames", a, b).stdout
         return [p.decode("utf-8", "surrogateescape") for p in out.split(b"\0") if p]
 
     def copy_tree(self, commit: str, folder: Path, *, skip: Callable[[str], bool]) -> int:
@@ -506,7 +506,9 @@ class Clone:
             if done.returncode != 0:
                 left = self._conflicts(tree)
                 # Nothing staged means the resolution made the change a no-op.
-                staged = self.git("diff", "--cached", "--quiet", cwd=tree, check=False)
+                staged = self.git(
+                    "diff", "--no-ext-diff", "--cached", "--quiet", cwd=tree, check=False
+                )
                 self.git("rebase", "--abort", cwd=tree, check=False)
                 if left:
                     return RebaseResult("conflict", conflicts=left)
@@ -518,7 +520,9 @@ class Clone:
         return RebaseResult("empty" if head == onto_commit else "done", commit=head)
 
     def _conflicts(self, tree: Path) -> list[str]:
-        out = self.git("diff", "--name-only", "-z", "--diff-filter=U", cwd=tree, check=False)
+        out = self.git(
+            "diff", "--no-ext-diff", "--name-only", "-z", "--diff-filter=U", cwd=tree, check=False
+        )
         return sorted(p.decode("utf-8", "surrogateescape") for p in out.stdout.split(b"\0") if p)
 
     def push(self, commit: str) -> PushResult:
