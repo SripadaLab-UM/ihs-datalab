@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from datalab.app import create_app
 from datalab.sessions import manager as manager_module
+from datalab.sessions import seeds
 from datalab.sessions.containers import Mount
 from datalab.sessions.hooks import TurnInfo
 from tests.conftest import FakeDatabase
@@ -156,68 +157,140 @@ async def test_cancelling_a_turn_cancels_its_hooks_without_waiting(app):
     await asyncio.wait_for(cancelled.wait(), 1)
 
 
+def wait_idle(client, cid: str, turns: int) -> list[dict]:
+    deadline = time.monotonic() + 5
+    while True:
+        events = client.get(f"/api/conversations/{cid}/events").json()
+        busy = client.get(f"/api/conversations/{cid}").json()["busy"]
+        if not busy and sum(e["type"] == "turn_done" for e in events) >= turns:
+            return events
+        assert time.monotonic() < deadline
+        time.sleep(0.02)
+
+
+def kb_seed(calls: list[str]):
+    def seed(conversation, staging):
+        calls.append(conversation.id)
+        # A fresh, empty folder of DataLab's, outside /work.
+        assert staging.is_dir() and not staging.is_symlink() and not any(staging.iterdir())
+        assert "work" not in staging.parts
+        (staging / "index.md").write_text("# Index\n")
+        return "abc123"
+
+    return seed
+
+
 def test_a_workspace_seed_runs_once_per_conversation_and_records_its_base(app):
     use_fake_runtime(app)
     manager = app.state.services.sessions
     seeded: list[str] = []
-
-    def seed(conversation, work):
-        seeded.append(conversation.id)
-        (work / "kb").mkdir()
-        (work / "kb" / "index.md").write_text("# Index\n")
-        return "abc123"
-
-    manager.register_workspace_seed("kb", seed)
+    manager.register_workspace_seed("kb", kb_seed(seeded), into="kb")
     with pytest.raises(ValueError):
-        manager.register_workspace_seed("kb", seed)
+        manager.register_workspace_seed("kb2", kb_seed(seeded), into="kb")
+    with pytest.raises(ValueError):
+        manager.register_workspace_seed("x", kb_seed(seeded), into="../x")
     with TestClient(app) as client:
         cid = client.post("/api/conversations", json={}).json()["id"]
         client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"})
-        wait_for(client, cid, "turn_done")
+        wait_idle(client, cid, 1)
+        kb = manager.paths(cid).work / "kb"
+        assert (kb / "index.md").read_text() == "# Index\n"
         assert manager.workspace_base(cid, "kb") == "abc123"
         # The agent edits its copy; then the conversation is idle and reaped.
-        (manager.paths(cid).work / "kb" / "index.md").write_text("# Edited\n")
+        (kb / "index.md").write_text("# Edited\n")
         asyncio.run(manager._shutdown(cid))
         client.post(f"/api/conversations/{cid}/messages", json={"text": "again"})
-        deadline = time.monotonic() + 5
-        while client.get(f"/api/conversations/{cid}").json()["busy"] or (
-            sum(
-                e["type"] == "turn_done"
-                for e in client.get(f"/api/conversations/{cid}/events").json()
-            )
-            < 2
-        ):
-            assert time.monotonic() < deadline
-            time.sleep(0.02)
+        wait_idle(client, cid, 2)
     assert seeded == [cid]
-    assert (manager.paths(cid).work / "kb" / "index.md").read_text() == "# Edited\n"
-    assert manager.workspace_base(cid, "kb") == "abc123"
+    assert (kb / "index.md").read_text() == "# Edited\n"
+    assert not (manager.paths(cid).root / "seed-staging").exists()
     assert manager.workspace_base(cid, "other") is None
 
 
-def test_a_seed_that_fails_is_tried_again_before_the_next_turn(app, caplog):
+def test_a_seed_that_fails_isnt_tried_again_and_the_chat_says_so(app, caplog):
     use_fake_runtime(app)
     manager = app.state.services.sessions
     calls: list[int] = []
 
-    def seed(conversation, work):
+    def seed(conversation, staging):
         calls.append(1)
-        if len(calls) == 1:
-            raise OSError("no clone yet")
-        return None
+        raise OSError("no clone yet")
 
-    manager.register_workspace_seed("kb", seed)
+    manager.register_workspace_seed("kb", seed, into="kb")
     with caplog.at_level(logging.ERROR), TestClient(app) as client:
         cid = client.post("/api/conversations", json={}).json()["id"]
-        for text in ("one", "two", "three"):
+        for number, text in enumerate(("one", "two"), start=1):
             client.post(f"/api/conversations/{cid}/messages", json={"text": text})
-            deadline = time.monotonic() + 5
-            while client.get(f"/api/conversations/{cid}").json()["busy"]:
-                assert time.monotonic() < deadline
-                time.sleep(0.02)
-            wait_for(client, cid, "turn_done")
-    assert len(calls) == 2
-    assert any("workspace seed kb failed" in r.message for r in caplog.records)
+            events = wait_idle(client, cid, number)
+    assert calls == [1]
+    [notice] = [e for e in events if e["type"] == "notice"]
+    assert "/work/kb" in notice["data"]["text"] and "no clone yet" in notice["data"]["text"]
+    assert manager.workspace_base(cid, "kb") is None
+    assert not (manager.paths(cid).work / "kb").exists()
+
+
+def seed_now(app, conversation):
+    app.state.services.sessions._seed_workspace(conversation)
+
+
+def test_a_seed_never_writes_through_a_link_left_in_work(app, tmp_path):
+    manager = app.state.services.sessions
+    store = app.state.services.conversations
+    seeded: list[str] = []
+    manager.register_workspace_seed("kb", kb_seed(seeded), into="kb")
+    conversation = store.create(kind="data", mode="analysis", title="t", model="m")
+    secrets_folder = tmp_path / "dot-ssh"
+    secrets_folder.mkdir()
+    work = manager.paths(conversation.id).work
+    work.mkdir(parents=True)
+    (work / "kb").symlink_to(secrets_folder)  # a dangling one counts too
+    seed_now(app, conversation)
+    assert list(secrets_folder.iterdir()) == []
+    assert (work / "kb").is_symlink()
+    assert manager.workspace_base(conversation.id, "kb") is None
+    [notice] = store.events_of_types_after(conversation.id, 0, ("notice",))
+    assert "already exists" in notice.data["text"]
+
+
+def test_a_seed_cut_off_by_a_crash_isnt_run_again_on_top(app, monkeypatch):
+    manager = app.state.services.sessions
+    store = app.state.services.conversations
+    seeded: list[str] = []
+    manager.register_workspace_seed("kb", kb_seed(seeded), into="kb")
+    conversation = store.create(kind="data", mode="analysis", title="t", model="m")
+
+    # It wrote and moved its files, then DataLab died before recording that.
+    def crash(done, paths, name, **entry):
+        if entry["status"] == "done":
+            raise SystemExit("killed")
+        real_save(done, paths, name, **entry)
+
+    real_save = seeds._save
+    monkeypatch.setattr(seeds, "_save", crash)
+    with pytest.raises(SystemExit):
+        seed_now(app, conversation)
+    monkeypatch.setattr(seeds, "_save", real_save)
+    kb = manager.paths(conversation.id).work / "kb"
+    (kb / "index.md").write_text("# Kept\n")
+
+    seed_now(app, conversation)  # the next start
+    assert seeded == [conversation.id]
+    assert (kb / "index.md").read_text() == "# Kept\n"
+    assert seeds.records(manager.paths(conversation.id))["kb"]["status"] == "failed"
+    [notice] = store.events_of_types_after(conversation.id, 0, ("notice",))
+    assert "stopped while it was being set up" in notice.data["text"]
+
+
+def test_a_conversation_that_already_had_turns_isnt_seeded(app):
+    manager = app.state.services.sessions
+    store = app.state.services.conversations
+    conversation = store.create(kind="data", mode="analysis", title="t", model="m")
+    store.append(conversation.id, "user_message", {"text": "before the seed existed"})
+    seeded: list[str] = []
+    manager.register_workspace_seed("kb", kb_seed(seeded), into="kb")
+    seed_now(app, conversation)
+    assert seeded == []
+    assert seeds.records(manager.paths(conversation.id))["kb"]["status"] == "skipped"
 
 
 # Mount providers ------------------------------------------------------------
@@ -306,16 +379,36 @@ def test_a_source_in_a_conversations_folder_is_refused(app, settings, repos):
     other = settings.data_dir / "sessions" / "c_other" / "work"
     other.mkdir(parents=True)
     (repos / "sneaky").symlink_to(other)
+    assert mounted(app, repos, Mount(other, "/mnt/a"), Mount(repos / "sneaky", "/mnt/b")) == []
+
+
+@pytest.mark.parametrize("name", ["datalab.sqlite", "logs/audit.jsonl", "settings.toml"])
+def test_datalabs_own_files_are_refused_even_linked_from_a_root(app, settings, repos, name):
+    source = settings.data_dir / name
+    if not source.exists():  # the database is there already; the others once written
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("{}\n")
+    (repos / "link").symlink_to(source)
+    assert mounted(app, repos, Mount(source, "/mnt/a"), Mount(repos / "link", "/mnt/b")) == []
+
+
+def test_only_repos_in_the_data_folder_can_be_a_root(app, settings, tmp_path):
     manager = app.state.services.sessions
-    # Even when its provider claims the whole data folder.
-    manager.register_mounts(
-        lambda _: [Mount(other, "/mnt/a"), Mount(repos / "sneaky", "/mnt/b")],
-        roots=[settings.data_dir],
-    )
-    conversation = app.state.services.conversations.create(
-        kind="data", mode="analysis", title="t", model="m"
-    )
-    assert manager._extra_mounts(conversation.id) == []
+    data = settings.data_dir
+    (data / "logs").mkdir(exist_ok=True)
+    for root in (data, data.parent, tmp_path, data / "logs", data / "sessions"):
+        with pytest.raises(ValueError, match="data folder"):
+            manager.register_mounts(lambda _: [], roots=[root])
+    (data / "repos" / "x").mkdir(parents=True)
+    manager.register_mounts(lambda _: [], roots=[data / "repos"])
+    manager.register_mounts(lambda _: [], roots=[data / "repos" / "x"])
+
+
+def test_a_repo_in_the_data_folder_can_be_mounted(app, settings):
+    root = settings.data_dir / "repos" / "x"
+    (root / "skills").mkdir(parents=True)
+    args = mounted(app, root, Mount(root / "skills", "/mnt/skills"))
+    assert args[1] == f"type=bind,source={(root / 'skills').resolve()},target=/mnt/skills,readonly"
 
 
 def test_credentials_are_refused_even_inside_a_root(app, repos):

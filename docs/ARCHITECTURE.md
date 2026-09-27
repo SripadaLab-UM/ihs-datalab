@@ -118,16 +118,22 @@ own slot, and the shared modules offer extension points:
     going is cancelled and left to end on its own, so `turn_done` is always
     written. Hooks must not block the event loop or catch cancellation.
     Knowledge uses one to diff `/work/kb`.
-  - `register_workspace_seed(name, fn(conversation, work) -> base)` writes
-    into a conversation's `/work` once, before its first turn, and records
-    the base it returns (`workspace_base`), in the session folder. It never
-    runs again for that conversation, so container restarts keep the
-    agent's edits. Knowledge uses one for the `/work/kb` copy.
+  - `register_workspace_seed(name, fn(conversation, staging) -> base,
+    into=...)` runs once per conversation, before its first turn only. The
+    seed writes into a fresh folder DataLab made in the session folder,
+    outside `/work`; DataLab then renames it to `/work/<into>` in one step,
+    refusing if anything is already there (a link included), and records
+    the base it returns (`workspace_base`). It is never run again: not
+    after a failure or a crash (the chat gets a notice), and not when the
+    container restarts, so the agent's edits are kept. Knowledge uses one
+    for the `/work/kb` copy.
   - `register_mounts(fn(conversation) -> list[Mount], roots=[...])` adds
     read-only mounts when a conversation's container starts, alongside its
     attachments. Targets are normalised and must be under `/mnt`; duplicates
     are dropped. Sources are resolved, following links, and must be inside
-    the provider's declared roots, never in any conversation's folder, a
+    the provider's declared roots. Nothing in DataLab's data folder can be
+    mounted except under `repos/` (not the database, the logs, or any
+    conversation's folder), and no root may hold the data folder. Nor can a
     home folder, a dot-folder in it, or a credentials file. The resolved
     path is what's mounted.
 - **Migrations** are numbered per area, so branches don't collide: 0007

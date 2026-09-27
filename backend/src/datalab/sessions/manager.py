@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from datalab.config import Settings, default_data_dir
-from datalab.sessions import modes, rigor
+from datalab.sessions import modes, rigor, seeds
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths, instance_of
@@ -31,6 +31,7 @@ from datalab.sessions.hooks import (
     TurnInfo,
     WorkspaceSeed,
     checked_mount,
+    data_dir_problem,
 )
 from datalab.sessions.inputs import (
     AttachmentStore,
@@ -43,6 +44,7 @@ from datalab.sessions.inputs import (
 from datalab.sessions.plan_schema import TYPES_BY_ID
 from datalab.sessions.plans import PlanStore
 from datalab.sessions.runtime import SessionRuntime
+from datalab.sessions.seeds import Seed
 from datalab.sessions.store import Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens
 from datalab.sessions.tracing import trace
@@ -126,7 +128,7 @@ class SessionManager:
         self._starting: set[str] = set()
         # Extension points for later milestones (see hooks.py).
         self._after_turn: list[AfterTurnHook] = []
-        self._seeds: dict[str, WorkspaceSeed] = {}
+        self._seeds: list[Seed] = []
         self._mount_providers: list[tuple[MountProvider, tuple[Path, ...]]] = []
         # Hooks still running after their turn ended (kept so they aren't
         # garbage-collected mid-run).
@@ -137,17 +139,16 @@ class SessionManager:
         once its checkpoint, number check and review are done."""
         self._after_turn.append(hook)
 
-    def register_workspace_seed(self, name: str, seed: WorkspaceSeed) -> None:
-        """Run `seed(conversation, work)` once per conversation, before its
-        first turn, and record what it returns (`workspace_base`)."""
-        if name in self._seeds:
-            raise ValueError(f"A workspace seed named {name!r} is already registered.")
-        self._seeds[name] = seed
+    def register_workspace_seed(self, name: str, seed: WorkspaceSeed, *, into: str) -> None:
+        """Before each new conversation's first turn, run `seed(conversation,
+        staging)` and move what it wrote to `/work/<into>`, once (seeds.py)."""
+        if any(s.name == name or s.into == into for s in self._seeds):
+            raise ValueError(f"A workspace seed for {name!r} or /work/{into} already exists.")
+        self._seeds.append(Seed(name, seed, into))
 
     def workspace_base(self, conversation_id: str, name: str) -> str | None:
-        """What the seed `name` returned for this conversation, if it ran."""
-        entry = self._seeded(conversation_id).get(name)
-        return entry.get("base") if entry else None
+        """What the seed `name` returned for this conversation, if it's in place."""
+        return seeds.base(self.paths(conversation_id), name)
 
     def register_mounts(self, provider: MountProvider, *, roots: Sequence[Path]) -> None:
         """Add `provider(conversation)`'s read-only mounts to each container
@@ -155,7 +156,12 @@ class SessionManager:
         `roots`, folders the provider owns (such as a repo clone)."""
         for root in roots:
             real = Path(os.path.realpath(root))
-            problem = "it isn't a full path" if not root.is_absolute() else private_place(real)
+            problem = (
+                "it isn't a full path"
+                if not root.is_absolute()
+                else data_dir_problem(real, self._settings.data_dir, self._other_data_dirs())
+                or private_place(real)
+            )
             if problem:
                 raise ValueError(f"{root} can't be a mount root: {problem}")
         self._mount_providers.append((provider, tuple(roots)))
@@ -496,7 +502,7 @@ class SessionManager:
         conversation = self._store.get(conversation_id) if self._mount_providers else None
         if conversation is None:
             return mounts
-        sessions_dir = self._settings.data_dir / "sessions"
+        others = self._other_data_dirs()
         targets: set[str] = set()
         for provider, roots in self._mount_providers:
             try:
@@ -507,7 +513,9 @@ class SessionManager:
                 continue
             for mount in provided:
                 try:
-                    checked = checked_mount(mount, roots=roots, sessions_dir=sessions_dir)
+                    checked = checked_mount(
+                        mount, roots=roots, data_dir=self._settings.data_dir, other_data_dirs=others
+                    )
                     if checked.target in targets:
                         # Docker refuses to start a container with two.
                         raise MountRefused(f"{checked.target} is already mounted")
@@ -518,33 +526,22 @@ class SessionManager:
                 mounts += checked.args()
         return mounts
 
-    def _seeded(self, conversation_id: str) -> dict[str, dict[str, Any]]:
-        """The workspace seeds that have run for a conversation, by name."""
-        try:
-            return json.loads(self.paths(conversation_id).seeds.read_text())
-        except (OSError, ValueError):
-            return {}
+    def _other_data_dirs(self) -> list[Path]:
+        """The other profiles' usual data folders: never mountable at all."""
+        return [
+            d for p in ("real", "practice") if (d := default_data_dir(p)) != self._settings.data_dir
+        ]
 
     def _seed_workspace(self, conversation: Conversation) -> None:
-        """Run the seeds that haven't run for this conversation yet (on a worker
-        thread). Recorded in its session folder, outside every mount, so each
-        runs once per conversation however often its container restarts."""
-        paths = self.paths(conversation.id)
-        done = self._seeded(conversation.id)
-        pending = [(n, seed) for n, seed in self._seeds.items() if n not in done]
-        if not pending:
-            return
-        paths.create()
-        for name, seed in pending:
-            try:
-                base = seed(conversation, paths.work)
-            except Exception:
-                log.exception("workspace seed %s failed in %s", name, conversation.id)
-                continue
-            done[name] = {"base": base, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
-            fresh = paths.seeds.with_suffix(".tmp")
-            fresh.write_text(json.dumps(done, indent=1))
-            fresh.replace(paths.seeds)
+        """Run the seeds that haven't run for this conversation (on a worker
+        thread). Only before its first turn: after that, /work is the agent's."""
+        seeds.run_seeds(
+            self._seeds,
+            conversation,
+            self.paths(conversation.id),
+            had_turn=self._store.count(conversation.id, "user_message") > 0,
+            notice=lambda text: self._store.append(conversation.id, "notice", {"text": text}),
+        )
 
     def _input_mounts(self, conversation_id: str) -> list[str]:
         """Mounts for the attachments that still pass every check, right now."""

@@ -58,14 +58,13 @@ class TurnInfo:
 # asyncio.CancelledError: either would hold up the whole app.
 AfterTurnHook = Callable[[str, TurnInfo], Awaitable[None]]
 
-# `seed(conversation, work)`: write files into `work`, the host folder that
-# is the conversation's /work, and return the base they came from (a commit
-# id, say), which the manager records (`SessionManager.workspace_base`).
-# Called on a worker thread before the conversation's first turn, and once
-# only, ever: never again when its container restarts after being idle, so
-# the agent's edits are never overwritten. The agent hasn't run yet, but a
-# seed still writes only new files, without following links. If it raises,
-# nothing is recorded and it's tried again before the next turn.
+# `seed(conversation, staging)`: write the files into `staging`, a fresh
+# empty folder DataLab made outside /work, and return the base they came
+# from (a commit id, say). DataLab then renames `staging` into /work as the
+# seed's folder, and records the base (`SessionManager.workspace_base`).
+# Called on a worker thread, once per conversation, before its first turn
+# only: never again, even after a failure or when its container restarts,
+# so the agent's edits are never overwritten (see seeds.py).
 WorkspaceSeed = Callable[[Conversation, Path], str | None]
 
 # `provider(conversation)`: the mounts to add when its container starts.
@@ -76,22 +75,38 @@ MountProvider = Callable[[Conversation], list[Mount]]
 # The only place in the container a provider may mount into: nothing of
 # DataLab's, Codex's or the system's lives there.
 MOUNT_ROOT = "/mnt"
+# The only folders inside DataLab's own data folder that may be mounted (the
+# lab repos' clones, for milestones 5 and 6). Everything else there is the
+# database (SQL text and bind values), the logs, and every conversation's
+# files: study data, and a research container has the internet.
+MOUNTABLE_IN_DATA_DIR = ("repos",)
 
 
 class MountRefused(ValueError):
     pass
 
 
-def checked_mount(mount: Mount, *, roots: Sequence[Path], sessions_dir: Path) -> Mount:
+def checked_mount(
+    mount: Mount, *, roots: Sequence[Path], data_dir: Path, other_data_dirs: Sequence[Path] = ()
+) -> Mount:
     """The mount to pass to docker, or MountRefused saying why not.
 
     - The target is normalised (docker would read `/./work` as `/work`) and
       must be inside MOUNT_ROOT.
     - The source must be a full path. It's resolved, following every link,
       and the real location is what's mounted. It must be inside one of the
-      provider's declared `roots`, never in any conversation's folders
-      (`sessions_dir`), and never a home folder, a dot-folder in it, or a
-      credentials file.
+      provider's declared `roots`; never in DataLab's data folder outside
+      MOUNTABLE_IN_DATA_DIR, nor another profile's data folder at all; and
+      never a home folder, a dot-folder in it, or a credentials file.
+
+    Known limits (fine for now; revisit if they stop holding):
+    - The path is resolved here and mounted a moment later, when docker
+      runs. A link swapped in between would be followed, so this is safe
+      only while the declared roots are written by DataLab alone (its own
+      repo clones), never by the agent or another program.
+    - Paths are compared as text, ignoring case on Mac and Windows. Unicode
+      normalisation (a Mac's NFD names) and case-insensitive volumes on
+      Linux aren't handled.
     """
     target = _checked_target(mount.target)
     if not mount.source.is_absolute():
@@ -100,15 +115,33 @@ def checked_mount(mount: Mount, *, roots: Sequence[Path], sessions_dir: Path) ->
         real = mount.source.resolve(strict=True)
     except (OSError, RuntimeError) as error:
         raise MountRefused(f"{mount.source} can't be found") from error
-    sessions = _real(sessions_dir)
-    if _within(real, sessions) or _within(sessions, real):
-        raise MountRefused(f"{real} is in DataLab's conversation folders")
+    problem = data_dir_problem(real, data_dir, other_data_dirs)
+    if problem:
+        raise MountRefused(f"{real} can't be mounted: {problem}")
     if not any(_within(real, _real(root)) for root in roots):
         raise MountRefused(f"{real} isn't inside a folder its provider declared")
     problem = private_place(real)
     if problem:
         raise MountRefused(f"{real} can't be mounted: {problem}")
     return Mount(real, target)
+
+
+def data_dir_problem(
+    real: Path, data_dir: Path, other_data_dirs: Sequence[Path] = ()
+) -> str | None:
+    """Why a resolved path (a mount's source, or a provider's root) touches
+    DataLab's data, or None: it holds a data folder, or is inside one
+    outside MOUNTABLE_IN_DATA_DIR."""
+    own = _real(data_dir)
+    for folder, allowed in (
+        (own, MOUNTABLE_IN_DATA_DIR),
+        *((_real(d), ()) for d in other_data_dirs),
+    ):
+        if _within(folder, real):
+            return "it holds a DataLab data folder"
+        if _within(real, folder) and not any(_within(real, folder / name) for name in allowed):
+            return "it's in a DataLab data folder"
+    return None
 
 
 def _checked_target(target: str) -> str:
