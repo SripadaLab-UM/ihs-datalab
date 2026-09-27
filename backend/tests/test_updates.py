@@ -164,12 +164,34 @@ class TestStartup:
         monkeypatch.setenv("DATALAB_PROFILE", "practice")
         monkeypatch.setenv("DATALAB_DATA_DIR", str(data_dir))
         monkeypatch.setattr("datalab.trial.refuse_if_running", lambda settings: None)
-        monkeypatch.setattr("uvicorn.run", lambda *args, **kwargs: None)
+        self.checks: list[str] = []
+        self.servers: list[object] = []
+        self.apps: list[object] = []
+        test = self
+
+        class Server:
+            def __init__(self, config) -> None:
+                self.should_exit = False
+                test.servers.append(self)
+
+            def run(self) -> None:
+                pass
+
+        monkeypatch.setattr("uvicorn.Server", Server)
+
+        class Checker:
+            def check_on_start(self) -> None:
+                test.checks.append("checked")
 
         def create_app(settings, **_):
+            from types import SimpleNamespace
+
             from datalab import db
 
             db.connect(settings.database_file).close()
+            app = SimpleNamespace(state=SimpleNamespace(update_checker=Checker()))
+            test.apps.append(app)
+            return app
 
         monkeypatch.setattr("datalab.app.create_app", create_app)
         return lambda: cli.main(["serve", "--no-browser"])
@@ -195,6 +217,20 @@ class TestStartup:
         assert f"Finishing the update from 0.0.9 to {__version__}" in capsys.readouterr().out
         assert updates.read_marker(data_dir) is None
         assert len(schema(database)) == len(use_migrations(monkeypatch, None))
+
+    def test_it_checks_for_updates_in_the_background_and_can_be_asked_to_quit(self, serve):
+        import time
+
+        assert serve() == 0
+        deadline = time.monotonic() + 5
+        while not self.checks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert self.checks == ["checked"]
+        # The updater quits DataLab through this, to restart it.
+        [server], [app] = self.servers, self.apps
+        assert server.should_exit is False  # type: ignore[attr-defined]
+        app.state.shutdown()  # type: ignore[attr-defined]
+        assert server.should_exit is True  # type: ignore[attr-defined]
 
     def test_an_older_version_wont_start_on_a_newer_database(
         self, data_dir, serve, monkeypatch, capsys

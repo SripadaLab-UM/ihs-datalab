@@ -7,9 +7,10 @@
   only shows its synthetic database; nothing can be changed there.
 - **Storage** lists what uses disk in the data folder, and removes one item
   the person chose (storage.py says what can go, and what never does).
-- **Updates** shows the installed version, an update in progress, what the
-  startup recovery did, recent updates and the backups. Checking GitHub for
-  a newer release isn't built yet.
+- **Updates** shows the installed version, what the last check for a newer
+  release found (releases.py), an update in progress, what the startup
+  recovery did, recent updates and the backups. **Install update** runs the
+  updater (updater.py), only once the person has confirmed.
 - **Diagnostics** builds the metadata-only report (diagnostics.py).
 
 The GitHub sign-in (knowledge base and pipelines) is its own section, with
@@ -34,7 +35,9 @@ from datalab.config import Settings
 from datalab.credentials import model_api_key
 from datalab.db import backups as backups_module
 from datalab.relay.policy import model_allowed
+from datalab.releases import UpdateChecker
 from datalab.storage import Storage, StorageRefused
+from datalab.updater import UpdateFailed, Updater
 
 
 def _no_turns(_: str) -> bool:
@@ -61,6 +64,10 @@ class SettingsServices:
     password_changed: Callable[[], None] = _nothing
     # What the startup recovery did about an interrupted update, if anything.
     recovery: updates.Recovery | None = None
+    # The check for a newer release, and the updater. None: ones of the
+    # router's own (tests); the updater then can't restart anything.
+    checker: UpdateChecker | None = None
+    updater: Updater | None = None
     # Stand-ins for tests: the database check, and Docker's version.
     check_database: Callable[..., setup.DatabaseCheck] = setup.check_database
     docker_version: Callable[[], str] = diagnostics.docker_version
@@ -207,11 +214,60 @@ class BackupInfoOut(BaseModel):
     kept: bool
 
 
+class ReleaseOut(BaseModel):
+    version: str
+    tag: str
+    title: str
+    # As written on GitHub (Markdown). Shown as plain text, never as HTML.
+    notes: str
+    published_at: str | None
+    page: str | None  # the release's page on github.com
+    prerelease: bool
+    size_bytes: int
+
+
+class UpdateInstallOut(BaseModel):
+    state: Literal[
+        "idle",
+        "downloading",
+        "stopping",
+        "backing-up",
+        "installing",
+        "pulling-images",
+        "switching",
+        "restarting",
+        "failed",
+    ]
+    version: str | None
+    message: str
+    started_at: str | None
+    updated_at: str | None
+
+
+class UpdateCheckOut(BaseModel):
+    state: Literal[
+        "not-checked", "up-to-date", "available", "offline", "rate-limited", "not-visible", "failed"
+    ]
+    message: str
+    current_version: str
+    channel: str
+    checked_at: str | None
+    available: ReleaseOut | None
+    can_install: bool
+    # Why Install update can't be used here or now, when it can't.
+    cannot_install_because: str | None
+    install: UpdateInstallOut
+
+
+class UpdateInstallIn(BaseModel):
+    version: str
+    # The person read what installing does and said yes.
+    confirmed: bool = False
+
+
 class UpdatesOut(BaseModel):
     version: str
-    # Checking GitHub for a newer release isn't built yet.
-    check_available: bool
-    check_message: str
+    check: UpdateCheckOut
     marker: UpdateMarkerOut | None
     marker_unreadable: bool
     recovery: RecoveryOut | None
@@ -234,6 +290,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
     practice = settings.profile == "practice"
     storage = Storage(settings, services.database, turn_running=services.turn_running)
     problems = diagnostics.recent_problems()
+    checker = services.checker or UpdateChecker(settings)
+    updater = services.updater or Updater(settings, checker)
     router = APIRouter(prefix="/api/settings", tags=["settings"])
 
     @router.get("/status")
@@ -418,8 +476,7 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
         )
         return UpdatesOut(
             version=__version__,
-            check_available=False,
-            check_message="Update checks aren't set up yet.",
+            check=check_state(),
             marker=marker,
             marker_unreadable=unreadable,
             recovery=RecoveryOut(outcome=recovery.outcome, message=recovery.message)
@@ -452,6 +509,61 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             migrations_applied=len(applied),
             latest_migration=applied[-1] if applied else None,
         )
+
+    def check_state() -> UpdateCheckOut:
+        last = checker.last
+        release = last.release
+        progress = updater.progress
+        why_not = None
+        if release is not None and last.state == "available":
+            why_not = updater.why_not()
+            if why_not is None and updater.running():
+                why_not = "The update is being installed."
+        return UpdateCheckOut(
+            state=last.state,
+            message=last.message,
+            current_version=last.current,
+            channel=last.channel,
+            checked_at=last.checked_at,
+            available=ReleaseOut(
+                version=release.version,
+                tag=release.tag,
+                title=release.title,
+                notes=release.notes,
+                published_at=release.published_at,
+                page=release.page,
+                prerelease=release.prerelease,
+                size_bytes=release.wheel.size,
+            )
+            if release is not None and last.state == "available"
+            else None,
+            can_install=release is not None and last.state == "available" and why_not is None,
+            cannot_install_because=why_not,
+            install=UpdateInstallOut(**asdict(progress)),
+        )
+
+    @router.get("/updates/check")
+    def update_check() -> UpdateCheckOut:
+        """What the last check found (no network): for the Update available pill."""
+        return check_state()
+
+    @router.post("/updates/check")
+    async def check_now() -> UpdateCheckOut:
+        """Ask GitHub now (at most once a minute; never while GitHub asked to wait)."""
+        await asyncio.to_thread(checker.check)
+        return check_state()
+
+    @router.post("/updates/install")
+    async def install_update(body: UpdateInstallIn) -> UpdateCheckOut:
+        """Install the release on offer, once the person has confirmed. Returns at
+        once; GET /updates/check follows it. DataLab restarts at the end."""
+        if not body.confirmed:
+            raise HTTPException(400, "Installing an update needs your confirmation.")
+        try:
+            await updater.start(body.version)
+        except UpdateFailed as refused:
+            raise HTTPException(409, str(refused)) from None
+        return check_state()
 
     # Diagnostics --------------------------------------------------------
 

@@ -38,6 +38,7 @@ from datalab.data.service import Database, DataService
 from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
+from datalab.releases import UpdateChecker
 from datalab.repos.github import GitHubAuth
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
@@ -51,6 +52,7 @@ from datalab.sessions.plans import PlanDesk, PlanStore
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
+from datalab.updater import Updater, busy_reason
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
 VERSION = __version__
@@ -261,6 +263,26 @@ def create_app(
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )
+    # Checking GitHub for a newer release happens here in the host process
+    # only (`datalab serve` asks once at start, if `updates.check_on_start`).
+    update_checker = UpdateChecker(settings)
+    app.state.update_checker = update_checker
+
+    def request_shutdown() -> bool:
+        # `datalab serve` sets this; without it (tests), nothing restarts.
+        shutdown = getattr(app.state, "shutdown", None)
+        if shutdown is None:
+            return False
+        shutdown()
+        return True
+
+    updater = Updater(
+        settings,
+        update_checker,
+        busy=lambda: busy_reason(connection, sessions.any_busy),
+        stop_sessions=sessions.close_all,
+        shutdown=request_shutdown,
+    )
     app.include_router(
         build_settings_router(
             SettingsServices(
@@ -271,6 +293,8 @@ def create_app(
                 model_key=model_key,
                 password_changed=lazy.reset if lazy else lambda: None,
                 recovery=recovery,
+                checker=update_checker,
+                updater=updater,
             )
         )
     )

@@ -187,6 +187,12 @@ class SessionManager:
         paths = self.paths(conversation_id)
         return Checkpoints(paths.checkpoints, paths.work)
 
+    def any_busy(self) -> bool:
+        """Whether any conversation's agent is working, starting, or restoring."""
+        if self._restoring or self._starting:
+            return True
+        return any(not task.done() for task in self._turns.values())
+
     def is_busy(self, conversation_id: str) -> bool:
         if conversation_id in self._restoring or conversation_id in self._starting:
             return True

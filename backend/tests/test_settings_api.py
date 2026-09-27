@@ -637,8 +637,10 @@ def test_updates_show_the_version_marker_recovery_and_backups(settings, keychain
     updates.begin(h.root, settings.database_file, from_version=__version__, to_version="0.3.0")
     shown = h.client.get("/api/settings/updates").json()
     assert shown["version"] == __version__
-    assert shown["check_available"] is False
-    assert shown["check_message"] == "Update checks aren't set up yet."
+    assert shown["check"]["state"] == "not-checked"
+    assert shown["check"]["current_version"] == __version__
+    assert shown["check"]["available"] is None and shown["check"]["can_install"] is False
+    assert shown["check"]["install"]["state"] == "idle"
     assert shown["marker"]["state"] == "backed-up" and shown["marker"]["to_version"] == "0.3.0"
     assert shown["recovery"] == {"outcome": "needs-you", "message": recovery.message}
     assert [b["reason"] for b in shown["backups"]] == ["update", "restore"]
@@ -831,3 +833,61 @@ async def test_storage_waits_for_a_real_delivery(tmp_path):
     go_on.set()
     await h.finish(run_id)
     assert storage.remove("run-files", run_id).freed_bytes > 0
+
+
+# ------------------------------------------------------- update check and install
+
+
+def update_world(settings, tmp_path):
+    from datalab.releases import ReleaseSource, UpdateChecker
+    from datalab.updater import Layout, Updater
+    from tests.release_fakes import REPO, FakeGitHub
+
+    github = FakeGitHub()
+    github.release("v99.0.0", notes="**Faster** exports.\n<img src=x onerror=alert(1)>")
+    checker = UpdateChecker(settings, source=ReleaseSource(REPO, http=github.client()))
+    # A development copy: it can check, but not install itself.
+    update = Updater(settings, checker, layout=Layout(tmp_path / "app"), platform="darwin")
+    return github, checker, update
+
+
+def test_the_pill_reads_the_last_check_without_asking_github(settings, keychain, tmp_path):
+    github, checker, update = update_world(settings, tmp_path)
+    h = Harness(settings, checker=checker, updater=update)
+    shown = h.client.get("/api/settings/updates/check").json()
+    assert shown["state"] == "not-checked" and github.requests == []
+
+    checked = h.client.post("/api/settings/updates/check").json()
+    assert checked["state"] == "available"
+    assert checked["available"]["version"] == "99.0.0"
+    assert checked["available"]["notes"].startswith("**Faster** exports.")
+    assert checked["current_version"] == __version__
+    # This test's DataLab isn't one the installer set up: it says so.
+    assert checked["can_install"] is False
+    assert "wasn't installed by the DataLab installer" in checked["cannot_install_because"]
+    assert h.client.get("/api/settings/updates").json()["check"]["state"] == "available"
+
+
+def test_installing_needs_confirmation(settings, keychain, tmp_path):
+    _, checker, update = update_world(settings, tmp_path)
+    h = Harness(settings, checker=checker, updater=update)
+    h.client.post("/api/settings/updates/check")
+    refused = h.client.post("/api/settings/updates/install", json={"version": "99.0.0"})
+    assert refused.status_code == 400 and "confirmation" in refused.json()["detail"]
+    cant = h.client.post(
+        "/api/settings/updates/install", json={"version": "99.0.0", "confirmed": True}
+    )
+    assert cant.status_code == 409 and "installer" in cant.json()["detail"]
+    assert updates.read_marker(settings.data_dir) is None
+
+
+def test_offline_shows_as_a_state_not_an_error(settings, keychain, tmp_path):
+    github, checker, update = update_world(settings, tmp_path)
+
+    def offline(request):
+        raise httpx.ConnectError("offline", request=request)
+
+    github.answer = offline
+    h = Harness(settings, checker=checker, updater=update)
+    checked = h.client.post("/api/settings/updates/check")
+    assert checked.status_code == 200 and checked.json()["state"] == "offline"

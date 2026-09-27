@@ -151,6 +151,33 @@ def advance(data_dir: Path, state: str) -> Marker:
     return marker
 
 
+def abandon(
+    data_dir: Path, database_file: Path, *, app_version: str, known: set[str]
+) -> Marker | None:
+    """Give up an update this version started, before the new version ran.
+
+    For the updater, when a step fails part way: the launcher has been put
+    back (or never switched), so the marker is cleared as "abandoned". It
+    refuses, leaving the marker for the startup recovery, if the database
+    has changes this version doesn't know (the new version must have run).
+    Runs holding the data folder's lock, like `begin`.
+    """
+    with _holding_lock(data_dir):
+        try:
+            marker = read_marker(data_dir)
+        except UnreadableMarker:
+            return None
+        if marker is None or not same_version(marker.from_version, app_version):
+            return None
+        if _newer_migrations(database_file, known):
+            raise UpdateError(
+                f"DataLab {marker.to_version} already changed the database; the update "
+                "can't simply be given up."
+            )
+        _clear(data_dir, marker, "abandoned")
+        return marker
+
+
 def finish(data_dir: Path, app_version: str) -> Marker | None:
     """Clear the marker once the version the update installed has started."""
     try:
