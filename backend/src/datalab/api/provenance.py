@@ -1,15 +1,22 @@
-"""How was this made? A workspace file's provenance, for the Outputs viewer.
+"""Provenance (milestone 8, brought forward): where each number in an answer
+appears, and how each workspace file was made.
 
-Computed when asked, from what DataLab already keeps: the checkpoints, the
-event log, and the Data accessed log (sessions/provenance.py). Nothing here
-shows query results or command output: a query is named by its Data accessed
-entry, a command by its text, and a script by its path and checkpoint (the
-files API serves its content, as the person already sees it).
+- After every turn, a hook (`SessionManager.register_after_turn`) records a
+  `provenance` event for the turn's answer: each number with where it
+  appears, and the output files it names (sessions/provenance.py).
+- "How was this made?" for a file is computed when asked, from what DataLab
+  already keeps: the checkpoints, the event log, and the Data accessed log.
+
+Nothing here shows query results or command output: a query is named by its
+Data accessed entry, a command by its text, and a script by its path and
+checkpoint (the files API serves its content, as the person already sees it).
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
@@ -17,9 +24,19 @@ from pydantic import BaseModel
 
 from datalab.data.access_log import AccessLog
 from datalab.sessions.checkpoints import UnsafePath, check_relative
+from datalab.sessions.hooks import TurnInfo
 from datalab.sessions.manager import SessionManager
-from datalab.sessions.provenance import Version, file_chain, turns_from_events
+from datalab.sessions.provenance import Version, file_chain, record_turn, turns_from_events
 from datalab.sessions.store import ConversationStore
+
+
+@dataclass(frozen=True)
+class ProvenanceServices:
+    """What provenance uses, given by the app (app.py)."""
+
+    conversations: ConversationStore  # the event log: answers, commands, provenance events
+    sessions: SessionManager  # checkpoints, the turn's sources, and the after-turn hook
+    access_log: AccessLog  # the Data accessed log
 
 
 class ChainCommandOut(BaseModel):
@@ -65,9 +82,24 @@ class FileProvenanceOut(BaseModel):
     more_queries: int = 0
 
 
-def build_provenance_router(
-    store: ConversationStore, sessions: SessionManager, access_log: AccessLog
-) -> APIRouter:
+def build_provenance_router(services: ProvenanceServices) -> APIRouter:
+    store, sessions, access_log = services.conversations, services.sessions, services.access_log
+
+    async def after_turn(conversation_id: str, info: TurnInfo) -> None:
+        """Record where the turn's answer's numbers appear (a review run again has no answer)."""
+        if info.review_only:
+            return
+        await asyncio.to_thread(
+            record_turn,
+            store,
+            conversation_id,
+            info.since,
+            sessions.turn_sources(conversation_id),
+            sessions.checkpoints(conversation_id),
+            info.checkpoint,
+        )
+
+    sessions.register_after_turn(after_turn)
     router = APIRouter(prefix="/api/conversations/{conversation_id}", tags=["provenance"])
 
     @router.get("/provenance/{path:path}")

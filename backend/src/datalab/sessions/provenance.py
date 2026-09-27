@@ -116,16 +116,18 @@ def record_turn(
     since: int,
     sources: list[tuple[Source, str]],
     checkpoints: Any,
+    checkpoint: int | None,
 ) -> dict[str, Any] | None:
     """After a turn: append the `provenance` event for its answer, if the answer
     states any numbers or names any output files. `sources` is what the turn
-    produced (runtime.turn_sources); the latest checkpoint adds the output
-    data files. Returns the event's data, or None if there was nothing to say."""
+    produced (SessionManager.turn_sources); the turn's `checkpoint` adds the
+    output data files and names the outputs (never the live folder, which the
+    agent can change). Returns the event's data, or None if there was nothing
+    to say."""
     answer = turn_answer(store.all_events_after(conversation_id, since))
     if answer is None:
         return None
-    latest = checkpoints.latest()
-    entries = checkpoints.entries(latest.number) if latest is not None else {}
+    entries = checkpoints.entries(checkpoint) if checkpoint is not None else {}
 
     def read(entry: Any, limit: int) -> bytes:
         with os.fdopen(checkpoints.open_object(entry), "rb") as source:

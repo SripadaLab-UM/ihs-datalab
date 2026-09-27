@@ -553,6 +553,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/provenance/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * File Provenance
+         * @description How a workspace file (a path in /work, such as outputs/fig1.png) was made.
+         */
+        get: operations["file_provenance_api_conversations__conversation_id__provenance__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/status": {
         parameters: {
             query?: never;
@@ -636,6 +656,55 @@ export interface components {
             kind: "file" | "folder";
             /** Available */
             available: boolean;
+        };
+        /** ChainCommandOut */
+        ChainCommandOut: {
+            /** Id */
+            id: string;
+            /** Command */
+            command: string;
+            /** Exit Code */
+            exit_code: number | null;
+            /** Names File */
+            names_file: boolean;
+            /** Via Script */
+            via_script: string | null;
+        };
+        /** ChainQueryOut */
+        ChainQueryOut: {
+            /** Id */
+            id: string;
+            /** Started At */
+            started_at: string;
+            /** Tables */
+            tables: string[];
+            /** Row Count */
+            row_count: number | null;
+            /** Result File */
+            result_file: string | null;
+            /** Read By */
+            read_by: components["schemas"]["ChainReaderOut"][];
+            /** In Turn */
+            in_turn: boolean;
+        };
+        /** ChainReaderOut */
+        ChainReaderOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "script" | "command";
+            /** Ref */
+            ref: string;
+        };
+        /** ChainScriptOut */
+        ChainScriptOut: {
+            /** Path */
+            path: string;
+            /** Sha256 */
+            sha256: string;
+            /** Names File */
+            names_file: boolean;
         };
         /** CheckResultOut */
         CheckResultOut: {
@@ -749,6 +818,49 @@ export interface components {
             kind: "html" | "image" | "csv" | "text" | "pdf" | "other";
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** FileProvenanceOut */
+        FileProvenanceOut: {
+            /** Path */
+            path: string;
+            /** Found */
+            found: boolean;
+            /** Summary */
+            summary: string;
+            /** Checkpoint */
+            checkpoint?: number | null;
+            /** Turn */
+            turn?: number | null;
+            /**
+             * Commands
+             * @default []
+             */
+            commands: components["schemas"]["ChainCommandOut"][];
+            /**
+             * More Commands
+             * @default 0
+             */
+            more_commands: number;
+            /**
+             * Edited Directly
+             * @default false
+             */
+            edited_directly: boolean;
+            /**
+             * Scripts
+             * @default []
+             */
+            scripts: components["schemas"]["ChainScriptOut"][];
+            /**
+             * Queries
+             * @default []
+             */
+            queries: components["schemas"]["ChainQueryOut"][];
+            /**
+             * More Queries
+             * @default 0
+             */
+            more_queries: number;
         };
         /** FileRef */
         FileRef: {
@@ -2002,6 +2114,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    file_provenance_api_conversations__conversation_id__provenance__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileProvenanceOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

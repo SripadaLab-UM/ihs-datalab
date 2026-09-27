@@ -42,12 +42,7 @@ def test_how_was_this_made_over_http(app):
 
     from fastapi.testclient import TestClient
 
-    from datalab.api.provenance import build_provenance_router
-
-    services = app.state.services
-    app.include_router(
-        build_provenance_router(services.conversations, services.sessions, services.access_log)
-    )
+    services = app.state.services  # the app registers the router itself
     with TestClient(app) as client:
         cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
         store = services.conversations
@@ -320,7 +315,7 @@ def test_after_a_turn_its_answer_gets_a_provenance_event(settings, workspace):
     cid = store.create(kind="data", mode="analysis", title="t", model="m").id
     work, checkpoints = workspace
     (work / "outputs" / "by_month.csv").write_text("month,hours\n2025-07,7.21\n")
-    checkpoints.take("After turn 1", turn=1)
+    taken = checkpoints.take("After turn 1", turn=1).number
     since = store.append(cid, "user_message", {"text": "Sleep by month?"}).seq
     store.append(
         cid,
@@ -335,7 +330,7 @@ def test_after_a_turn_its_answer_gets_a_provenance_event(settings, workspace):
     store.append(cid, "review_started", {})
     store.append(cid, "answer", {"id": "r1", "phase": "final_answer", "text": "Review: 99 issues."})
     data = record_turn(
-        store, cid, since - 1, [(QUERY, '{"query_id": "q_0001", "n": 81}')], checkpoints
+        store, cid, since - 1, [(QUERY, '{"query_id": "q_0001", "n": 81}')], checkpoints, taken
     )
     assert data is not None and data["answer"] == "m1"
     by_text = {n["text"]: n["sources"] for n in data["numbers"]}
@@ -349,4 +344,33 @@ def test_after_a_turn_its_answer_gets_a_provenance_event(settings, workspace):
     # An answer with nothing to trace adds nothing.
     quiet = store.append(cid, "user_message", {"text": "Thanks"}).seq
     store.append(cid, "answer", {"id": "m2", "phase": "final_answer", "text": "You're welcome."})
-    assert record_turn(store, cid, quiet - 1, [], checkpoints) is None
+    assert record_turn(store, cid, quiet - 1, [], checkpoints, taken) is None
+
+
+async def test_the_app_records_provenance_after_each_turn(app, monkeypatch):
+    """The hook the app registers: the turn's sources and its own checkpoint."""
+    from datalab.sessions.hooks import TurnInfo
+
+    services = app.state.services
+    store, sessions = services.conversations, services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="m").id
+    since = store.append(cid, "user_message", {"text": "How many?"}).seq - 1
+    store.append(
+        cid, "answer", {"id": "m1", "phase": "final_answer", "text": "There were 812 days."}
+    )
+    monkeypatch.setattr(sessions, "turn_sources", lambda c: [(COMMAND, "812 rows")])
+    [hook] = [h for h in sessions._after_turn if h.__qualname__.endswith("after_turn")][-1:]
+    await hook(cid, TurnInfo(turn=1, status="completed", since=since, checkpoint=None))
+    [event] = [e for e in store.all_events_after(cid, 0) if e.type == "provenance"]
+    assert event.data["numbers"] == [
+        {"text": "812", "sources": [{"kind": "command", "ref": "cmd-1"}]}
+    ]
+    # A review run again has no new answer: nothing more is recorded.
+    await hook(
+        cid, TurnInfo(turn=1, status="completed", since=since, checkpoint=None, review_only=True)
+    )
+    assert len([e for e in store.all_events_after(cid, 0) if e.type == "provenance"]) == 1
+
+
+def test_a_conversation_without_a_runtime_has_no_sources(app):
+    assert app.state.services.sessions.turn_sources("no-such-conversation") == []

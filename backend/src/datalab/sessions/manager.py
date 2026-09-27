@@ -47,7 +47,7 @@ from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.seeds import Seed
 from datalab.sessions.store import Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens
-from datalab.sessions.tracing import trace
+from datalab.sessions.tracing import Source, trace
 
 log = logging.getLogger(__name__)
 
@@ -138,6 +138,12 @@ class SessionManager:
         """Run `await hook(conversation_id, turn_info)` after every turn,
         once its checkpoint, number check and review are done."""
         self._after_turn.append(hook)
+
+    def turn_sources(self, conversation_id: str) -> list[tuple[Source, str]]:
+        """What the conversation's last turn produced, with where each piece came
+        from (for provenance), or [] with no runtime. Read-only, in memory only."""
+        runtime = self._runtimes.get(conversation_id)
+        return runtime.turn_sources() if runtime is not None else []
 
     def register_workspace_seed(self, name: str, seed: WorkspaceSeed, *, into: str) -> None:
         """Before each new conversation's first turn, run `seed(conversation,
