@@ -165,6 +165,12 @@ query results, or data files in `outputs/`, and flags the ones that don't.
 That shows a number came from *some* output, not that it's the right
 statistic from the right analysis.
 
+Not counted as claims: numbers in code and links, dates, years, counts of
+ten or less, list numbering ("3." at the start of a line), and the volume
+and pages of a citation (`2021;281:1077-1078`, `pp.`, PMIDs, DOIs). The
+research helper's web answer isn't evidence, so numbers taken from the
+literature are flagged; that's deliberate.
+
 Planned (milestone 8): the full chain below.
 
 - Every number, table, and figure in an answer links to what produced it:

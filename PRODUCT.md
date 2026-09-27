@@ -218,7 +218,8 @@ language, "paper", after understand.cap-study.com: serif for reading, hairline
 rules instead of cards, small uppercase labels, and colour only where it means
 something (data session, research session, attention, errors). Data, SQL and
 paths stay in a monospace font. The Narrator structure stays; only the
-treatment changes.
+treatment changes. The paper treatment was in place for the Workspace by
+2026-09-27, and the later tabs are built on it.
 
 ## Planned: help and onboarding (after the paper reskin)
 

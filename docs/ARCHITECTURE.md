@@ -636,6 +636,21 @@ something we can use end to end ourselves.
        within- versus between-person analyses, checking denominators,
        exclusions, uncertainty, and interpretation. Re-run when prompts,
        skills, the model, or the Codex version change.
+   - **Since 3h (2026-09-26 to 27):**
+     - the "paper" look for the Workspace (docs/DESIGN.md), answer-first
+       finished turns, and drawers for narrow windows;
+     - analysis plans by type from one registry, with revisions and sending
+       a plan back as another type (PRs #2 and #3; WORKSPACE.md, "Analysis
+       plans");
+     - the number check leaves out citations and list numbering, and checks
+       numbers at the start of a line or bullet;
+     - fixes: an export during a turn no longer splits it; a turn cut off
+       by a shutdown or crash is ended at the next start; a conversation's
+       Docker network is removed when its containers stop (they used up
+       Docker's address pools after about 30 conversations);
+     - PRs #4 and #5: each plan records which queries had already returned
+       data when it was proposed, drafts survive a reload, and five
+       evaluation tasks check the plan type chosen.
 
    | Milestone | Implemented | Tested automatically | Demonstrated end to end | Accepted |
    |---|---|---|---|---|
