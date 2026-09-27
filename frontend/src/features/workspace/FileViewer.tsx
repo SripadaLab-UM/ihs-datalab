@@ -1,11 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 
 import { api } from "@/api/client";
 import { Button, Chip, FileGlyph, Icon, Modal } from "@/components/ui";
 import { formatBytes, parseCsv } from "@/lib/csv";
-import type { OpenFile } from "@/lib/files";
+import { provenanceApi } from "@/api/provenance";
+import { showQuery } from "@/components/chat/provenance";
+import { kindOf, OpenFileContext, type OpenFile } from "@/lib/files";
+
+import { HowWasThisMade } from "./HowWasThisMade";
 
 /**
  * Shows one workspace file. Agent-made HTML runs in a sandboxed frame with scripts off.
@@ -16,6 +20,7 @@ import type { OpenFile } from "@/lib/files";
  */
 export function FileViewer({ conversationId, file, onClose }: { conversationId: string; file: OpenFile; onClose: () => void }) {
   const [source, setSource] = useState(false);
+  const [howMade, setHowMade] = useState(false);
   const checkpoints = useQuery({ queryKey: ["checkpoints", conversationId], queryFn: () => api.checkpoints(conversationId) });
   const latest = checkpoints.data?.[0]?.number;
   const [chosen, setChosen] = useState<number | null | undefined>(file.checkpoint);
@@ -39,11 +44,18 @@ export function FileViewer({ conversationId, file, onClose }: { conversationId: 
       }
       onClose={onClose}
       actions={
-        file.kind === "html" && (
-          <Button variant="ghost" onClick={() => setSource(!source)}>
-            <Icon name={source ? "eye" : "code"} size={14} /> {source ? "Show page" : "Show source"}
-          </Button>
-        )
+        <>
+          {!live && (
+            <Button variant="ghost" onClick={() => setHowMade(!howMade)} aria-expanded={howMade}>
+              <Icon name="history" size={14} /> How was this made?
+            </Button>
+          )}
+          {file.kind === "html" && (
+            <Button variant="ghost" onClick={() => setSource(!source)}>
+              <Icon name={source ? "eye" : "code"} size={14} /> {source ? "Show page" : "Show source"}
+            </Button>
+          )}
+        </>
       }
     >
       {!live && version != null && (
@@ -58,6 +70,11 @@ export function FileViewer({ conversationId, file, onClose }: { conversationId: 
             </span>
           )}
         </p>
+      )}
+      {howMade && !live && (
+        <div className="mb-4 border border-line bg-surface px-4 py-3">
+          <FileProvenancePanel conversationId={conversationId} file={file} onClose={onClose} />
+        </div>
       )}
       {!live && version == null ? (
         <p className="text-sm text-muted">Loading…</p>
@@ -208,3 +225,27 @@ function CsvPreview({ conversationId, file }: { conversationId: string; file: Op
 }
 
 const NUMBER = /^[-+]?(\d[\d,]*(\.\d*)?|\.\d+)([eE][-+]?\d+)?$|^NA$|^NaN$/;
+
+/** "How was this made?" for a workspace file, from the latest checkpoint. */
+function FileProvenancePanel({ conversationId, file, onClose }: { conversationId: string; file: OpenFile; onClose: () => void }) {
+  const openFile = use(OpenFileContext);
+  const inWork = file.root === "outputs" ? `outputs/${file.path}` : file.path;
+  const made = useQuery({
+    queryKey: ["provenance", conversationId, inWork],
+    queryFn: () => provenanceApi.file(conversationId, inWork),
+  });
+  if (made.isError) return <p className="text-sm text-danger">DataLab couldn't work out how this file was made.</p>;
+  if (!made.data) return <p className="text-sm text-muted">Looking back through the checkpoints…</p>;
+  return (
+    <HowWasThisMade
+      provenance={made.data}
+      openQuery={(id) => {
+        onClose();
+        showQuery(id);
+      }}
+      openScript={
+        openFile ? (path, checkpoint) => openFile({ root: "work", path, kind: kindOf(path), checkpoint }) : undefined
+      }
+    />
+  );
+}

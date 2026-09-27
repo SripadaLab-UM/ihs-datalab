@@ -9,6 +9,7 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
+import { showQuery } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
@@ -443,7 +444,7 @@ function TurnView({
           stopping={stop.isPending}
         />
       )}
-      {answer && <AnswerCard answer={answer} trace={turn.trace} streaming={live} />}
+      {answer && <AnswerCard answer={answer} trace={turn.trace} streaming={live} turn={turn} />}
       {/* Only the latest review: one run again replaces one that didn't finish. */}
       {reviews.slice(-1).map((review) => (
         <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
@@ -601,13 +602,32 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 }
 
 /** The answer, set apart from the work behind it. */
-function AnswerCard({ answer, trace, streaming }: { answer: string; trace: Turn["trace"]; streaming: boolean }) {
+function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace: Turn["trace"]; streaming: boolean; turn: Turn }) {
+  const openFile = use(OpenFileContext);
+  // Where each number appears, once the turn's provenance has arrived.
+  const numbers = useMemo(() => {
+    if (!turn.provenance || streaming) return undefined;
+    const commands = new Map(turn.items.flatMap((i) => (i.kind === "command" ? [[i.id, i.command] as const] : [])));
+    return {
+      sources: new Map(turn.provenance.numbers.map((n) => [n.text, n.sources])),
+      links: {
+        commandText: (id: string) => commands.get(id),
+        openQuery: showQuery,
+        openFile: openFile
+          ? (path: string) => {
+              const file = workspaceFile(`/work/${path}`);
+              if (file) openFile(file);
+            }
+          : undefined,
+      },
+    };
+  }, [turn, streaming, openFile]);
   return (
     <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
-      <Markdown text={answer} />
+      <Markdown text={answer} numbers={numbers} />
       {trace && !streaming && (
         <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
           <TraceChip trace={trace} />

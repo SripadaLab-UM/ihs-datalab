@@ -67,7 +67,7 @@ it("shows where a number appears, and says it only appears there", () => {
   const dialog = screen.getByRole("dialog", { name: "Where 81 appears" });
   expect(dialog).toHaveTextContent("python analysis.py");
   expect(dialog).toHaveTextContent("which doesn't show it was computed there");
-  fireEvent.click(screen.getByRole("button", { name: "in Data accessed" }));
+  fireEvent.click(screen.getByRole("button", { name: "in Queries" }));
   expect(links.openQuery).toHaveBeenCalledWith("q_0001");
   fireEvent.click(screen.getByRole("button", { name: "outputs/table.csv" }));
   expect(links.openFile).toHaveBeenCalledWith("outputs/table.csv");
@@ -88,9 +88,10 @@ const made: FileProvenance = {
     "Written in turn 2 (its current content first appears in checkpoint 2). No command names it, but one ran a script that does (analysis.py). DataLab doesn't see which command writes a file inside the workspace.",
   checkpoint: 2,
   turn: 2,
+  in_review: false,
   commands: [
-    { id: "c2", command: "python /work/analysis.py", exit_code: 0, names_file: false, via_script: "analysis.py" },
-    { id: "c1", command: "ls /data/oracle", exit_code: 0, names_file: false, via_script: null },
+    { id: "c2", command: "python /work/analysis.py", exit_code: 0, names_file: false, via_script: "analysis.py", seen_in_output: false },
+    { id: "c1", command: "ls /data/oracle", exit_code: 0, names_file: false, via_script: null, seen_in_output: true },
   ],
   more_commands: 3,
   edited_directly: false,

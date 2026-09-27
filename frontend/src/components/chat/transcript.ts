@@ -1,6 +1,7 @@
 // Turns a conversation's event log into what the chat shows.
 import type { Approval } from "./ApprovalCard";
 import { asComparison, asPlan, isV2 } from "./plan";
+import { asAnswerProvenance, type AnswerProvenance } from "./provenance";
 //
 // The event log (see backend sessions/runtime.py) is a flat, append-only list:
 // user messages, streamed answer text, reasoning, commands, tool calls, and
@@ -50,6 +51,8 @@ export interface Turn {
   continues?: boolean;
   /** Numbers in the answer that nothing the turn produced contains. */
   trace?: { numbers: number; untraced: string[] };
+  /** Where each number in the answer appears, and the output files it names. */
+  provenance?: AnswerProvenance;
 }
 
 const MAX_COMMAND_OUTPUT = 20_000;
@@ -113,6 +116,11 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           untraced: Array.isArray(data.untraced) ? data.untraced.map(String) : [],
         };
         break;
+      case "provenance": {
+        const provenance = asAnswerProvenance(data);
+        if (provenance) current().provenance = provenance;
+        break;
+      }
       case "plan_approved": {
         const item = approvals.get(text(data.approval));
         if (item) {

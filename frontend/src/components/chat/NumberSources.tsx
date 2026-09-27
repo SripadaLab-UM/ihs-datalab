@@ -92,7 +92,7 @@ function Place({ source, links }: { source: NumberSource; links: SourceLinks }) 
         {links.openQuery && (
           <>
             {" "}
-            <LinkButton onClick={() => links.openQuery?.(source.ref)}>in Data accessed</LinkButton>
+            <LinkButton onClick={() => links.openQuery?.(source.ref)}>in Queries</LinkButton>
           </>
         )}
       </span>

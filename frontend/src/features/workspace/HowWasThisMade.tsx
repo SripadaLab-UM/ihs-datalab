@@ -27,7 +27,9 @@ export function HowWasThisMade({
         <>
           {provenance.commands.length > 0 && (
             <>
-              <h4 className="dl-label mt-3">Commands in turn {provenance.turn}</h4>
+              <h4 className="dl-label mt-3">
+                {provenance.in_review ? `Commands in turn ${provenance.turn}'s rigor review` : `Commands in turn ${provenance.turn}`}
+              </h4>
               <ul className="mt-1 flex flex-col gap-1.5">
                 {provenance.commands.map((command) => (
                   <li key={command.id} className="flex flex-wrap items-baseline gap-2">
@@ -36,6 +38,7 @@ export function HowWasThisMade({
                     </code>
                     {command.names_file && <Chip tone="good">names this file</Chip>}
                     {!command.names_file && command.via_script && <Chip tone="good">ran {command.via_script}, which names it</Chip>}
+                    {command.seen_in_output && <Chip>printed its name</Chip>}
                     {command.exit_code !== null && command.exit_code !== 0 && <Chip tone="bad">failed ({command.exit_code})</Chip>}
                   </li>
                 ))}

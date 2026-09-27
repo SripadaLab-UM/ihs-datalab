@@ -18,28 +18,7 @@ export interface AnswerProvenance {
   files: string[];
 }
 
-/** How a workspace file was made (GET /api/conversations/{id}/provenance/{path}). */
-export interface FileProvenance {
-  path: string;
-  found: boolean;
-  summary: string;
-  checkpoint?: number | null;
-  turn?: number | null;
-  commands: { id: string; command: string; exit_code: number | null; names_file: boolean; via_script: string | null }[];
-  more_commands: number;
-  edited_directly: boolean;
-  scripts: { path: string; sha256: string; names_file: boolean }[];
-  queries: {
-    id: string;
-    started_at: string;
-    tables: string[];
-    row_count: number | null;
-    result_file: string | null;
-    read_by: { kind: "script" | "command"; ref: string }[];
-    in_turn: boolean;
-  }[];
-  more_queries: number;
-}
+export type { FileProvenance } from "@/api/provenance";
 
 /** A provenance event's data, or undefined if it isn't one. */
 export function asAnswerProvenance(value: unknown): AnswerProvenance | undefined {
@@ -111,4 +90,13 @@ export function markNumbers(numbers: string[]) {
   return () => (tree: HastNode) => {
     walk(tree);
   };
+}
+
+// --- Showing a query in the Data accessed log --------------------------------
+
+/** Asks the workspace's side panel to show a query in its Data accessed log. */
+export const SHOW_QUERY = "datalab:show-query";
+
+export function showQuery(id: string): void {
+  window.dispatchEvent(new CustomEvent(SHOW_QUERY, { detail: { id } }));
 }

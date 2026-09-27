@@ -157,7 +157,7 @@ the rigor review checks that it did.
 - In Analysis mode this is the default workflow. In other modes the agent
   proposes a plan when a question calls for one.
 
-### Claim-to-evidence tracing (partial)
+### Claim-to-evidence tracing (built)
 
 Built: after each final answer, DataLab checks whether each number in it
 appears (allowing rounding and percentages) in that turn's command output,
@@ -171,14 +171,25 @@ and pages of a citation (`2021;281:1077-1078`, `pp.`, PMIDs, DOIs). The
 research helper's web answer isn't evidence, so numbers taken from the
 literature are flagged; that's deliberate.
 
-Planned (milestone 8): the full chain below.
+Built (brought forward from milestone 8): the chain behind it.
 
-- Every number, table, and figure in an answer links to what produced it:
-  the query in the Data accessed log, the script, and the command output.
-- Every file in Outputs has a **How was this made?** view showing the same
-  chain.
-- DataLab already records every piece of this: the event log, the data access
-  log, and the checkpoints. The feature ties them together.
+- **Each number in an answer** is marked. Click it to see where it appears:
+  a command's output (named by the command), a query's result (opens its
+  entry in the Queries tab), or an output data file. It says what was
+  checked: the number appears there, which doesn't show it was computed
+  there. A number that appears nowhere is highlighted, and says so.
+- **Every workspace file has How was this made?** in the viewer. From the
+  checkpoints: the one that first saved its current content, and the turn
+  (or the turn's rigor review) it came after. From that turn: its
+  commands, the likeliest writers first (those naming the file, then those
+  that ran a script that does), the scripts as they were then, and the
+  queries whose result files they read.
+- DataLab doesn't see which command writes a file inside the workspace, so
+  it says "one of the turn's commands" when none names the file, and that
+  the chain describes the latest checkpoint, not the file as it may be now.
+- Nothing here shows data: not query rows, and not command output (used
+  only to match). DataLab ties together what it already records: the event
+  log, the data access log, and the checkpoints.
 
 ### Rigor review (toggle) (built)
 
