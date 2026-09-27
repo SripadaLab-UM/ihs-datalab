@@ -28,7 +28,7 @@ from datalab.config import Settings
 from datalab.sessions import codex_config
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import UnsafePath, open_workspace_file
-from datalab.sessions.containers import SessionContainers, SessionPaths
+from datalab.sessions.containers import SessionContainers, SessionPaths, instance_of
 from datalab.sessions.tokens import SessionAccess, SessionTokens
 
 log = logging.getLogger(__name__)
@@ -128,6 +128,7 @@ class ResearchHelper:
             agent_image=settings.agent_image,
             host_port=settings.port,
             profile=settings.profile,
+            instance=instance_of(settings.data_dir),
         )
         token = self._tokens.issue(
             SessionAccess(session_id=helper_id, kind="research", results_dir=paths.oracle_results)

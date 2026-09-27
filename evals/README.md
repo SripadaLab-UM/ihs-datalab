@@ -36,12 +36,12 @@ uv run --project backend python evals/run.py --only mood_change
 ```
 
 Needs the synthetic database (`synthetic/db.sh start`), Docker, and a saved
-U-M GPT key. Stop any practice DataLab first: the runner starts its own, on
-port 8767 with a fresh data folder (removed afterwards) and a catalog
-rebuilt from the synthetic database, so eval conversations never mix with
-yours. `--repeat N` runs each task N times, for pass rates. Don't start a
-practice DataLab while it runs: its sessions would look like the run's own
-and be cleaned up with them. Plans the agent proposes are approved as written; research-helper
+U-M GPT key. The runner starts its own DataLab, on port 8767 with a fresh
+data folder (removed afterwards) and a catalog rebuilt from the synthetic
+database, so eval conversations never mix with yours. A practice DataLab can
+keep running alongside: each instance labels its containers with its data
+folder and cleans up only its own. `--model gpt-5.6-sol` evaluates another
+approved model. `--repeat N` runs each task N times, for pass rates. Plans the agent proposes are approved as written; research-helper
 questions are declined; the rigor review is off, so each answer is graded
 as given.
 

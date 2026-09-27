@@ -49,18 +49,9 @@ def main() -> int:
     parser.add_argument("--only", nargs="*", help="task ids to run (default: all)")
     parser.add_argument("--repeat", type=int, default=1, help="runs of each task (default 1)")
     parser.add_argument("--effort", default="medium", choices=["low", "medium", "high"])
+    parser.add_argument("--model", help="the model to evaluate (default: DataLab's default)")
     args = parser.parse_args()
     tasks = [t for t in TASKS if not args.only or t.id in args.only]
-
-    # A second practice DataLab would remove the first one's session
-    # containers at startup (they're labelled by profile, not by instance).
-    running = subprocess.run(
-        ["docker", "ps", "-q", "--filter", "label=datalab.profile=practice"],
-        capture_output=True, text=True,
-    ).stdout.split()  # fmt: skip
-    if running:
-        sys.exit("A practice DataLab has sessions running. Stop it, then run the evals.")
-    before = set(_practice_containers()) | set(_practice_networks())
 
     expected = answer_key.compute()
     commit = _git("rev-parse", "HEAD")
@@ -79,6 +70,9 @@ def main() -> int:
     )
     # A fresh data folder each run: nothing carries over between runs.
     data_dir = Path(tempfile.mkdtemp(prefix="practice-evals-", dir=home))
+    # The run's containers carry this instance's label, so a practice DataLab
+    # running alongside is never touched, and the run cleans up only its own.
+    instance = _instance(data_dir)
     env = {**os.environ, "DATALAB_PROFILE": "practice", "DATALAB_DATA_DIR": str(data_dir)}
     # The catalog, rebuilt from the synthetic database (metadata only), so the
     # column comments the agent reads always match the data.
@@ -93,6 +87,7 @@ def main() -> int:
         sys.exit(f"Couldn't build the catalog from the synthetic database:\n{built.stderr[-2000:]}")
     (data_dir / "settings.toml").write_text(
         f"port = {PORT}\ncatalog_dir = {json.dumps(str(catalog))}\n"
+        + (f"default_model = {json.dumps(args.model)}\n" if args.model else "")
     )
     log = (out / "server.log").open("w")
     server = subprocess.Popen(
@@ -104,6 +99,7 @@ def main() -> int:
         "commit": commit,
         "uncommitted_changes": dirty,
         "effort": args.effort,
+        "model": args.model or "default",
         "repeat": args.repeat,
         "catalog_sha256": _tree_hash(catalog),
         "catalog_tables": sum(1 for _ in catalog.rglob("*.yml")),
@@ -131,7 +127,7 @@ def main() -> int:
     finally:
         info["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         _write_summary(out, info, results)
-        _stop(server, keep=before)
+        _stop(server, instance)
         log.close()
         # The eval conversations' workspaces: the results keep what matters.
         shutil.rmtree(data_dir, ignore_errors=True)
@@ -366,21 +362,29 @@ def _summary(info: dict, results: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _practice_containers() -> list[str]:
+def _instance(data_dir: Path) -> str:
+    """The instance label DataLab gives this data folder's containers."""
+    sys.path.insert(0, str(ROOT / "backend" / "src"))
+    from datalab.sessions.containers import instance_of
+
+    return instance_of(data_dir)
+
+
+def _containers(instance: str) -> list[str]:
     return subprocess.run(
-        ["docker", "ps", "-aq", "--filter", "label=datalab.profile=practice"],
+        ["docker", "ps", "-aq", "--filter", f"label=datalab.instance={instance}"],
         capture_output=True, text=True,
     ).stdout.split()  # fmt: skip
 
 
-def _practice_networks() -> list[str]:
+def _networks(instance: str) -> list[str]:
     return subprocess.run(
-        ["docker", "network", "ls", "-q", "--filter", "label=datalab.profile=practice"],
+        ["docker", "network", "ls", "-q", "--filter", f"label=datalab.instance={instance}"],
         capture_output=True, text=True,
     ).stdout.split()  # fmt: skip
 
 
-def _stop(server: subprocess.Popen, keep: set[str]) -> None:
+def _stop(server: subprocess.Popen, instance: str) -> None:
     """Stop the server and everything it started (uv, then datalab).
 
     SIGTERM, not SIGINT: uv passes a signal on and the group gets it too, and
@@ -394,11 +398,9 @@ def _stop(server: subprocess.Popen, keep: set[str]) -> None:
         with contextlib.suppress(ProcessLookupError):
             os.killpg(server.pid, signal.SIGKILL)
     # Containers this run made that DataLab's shutdown didn't remove.
-    left = [c for c in _practice_containers() if c not in keep]
-    if left:
+    if left := _containers(instance):
         subprocess.run(["docker", "rm", "-f", *left], capture_output=True)
-    networks = [n for n in _practice_networks() if n not in keep]
-    if networks:
+    if networks := _networks(instance):
         subprocess.run(["docker", "network", "rm", *networks], capture_output=True)
 
 

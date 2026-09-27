@@ -21,7 +21,7 @@ from datalab.config import Settings, default_data_dir
 from datalab.sessions import modes, rigor
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
-from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
+from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths, instance_of
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import (
     AttachmentStore,
@@ -249,6 +249,7 @@ class SessionManager:
             agent_image=self._settings.agent_image,
             host_port=self._settings.port,
             profile=self._settings.profile,
+            instance=instance_of(self._settings.data_dir),
             extra_mounts=(lambda: self._input_mounts(conversation_id))
             if self._attachments
             else None,
