@@ -145,6 +145,10 @@ def _decimals(token: str) -> int:
         return places
 
 
+# What ends an ordered-list number: "12. " or "12) ", or either at a line's end.
+_LIST_NUMBER_END = re.compile(r"[.)](?:\s|\Z)")
+
+
 def _trivial(token: str, value: Decimal, prose: str, start: int) -> bool:
     """Numbers that aren't findings: list numbering, small counts, and years."""
     if "." not in token and "," not in token and not token.endswith("%"):
@@ -152,7 +156,11 @@ def _trivial(token: str, value: Decimal, prose: str, start: int) -> bool:
             return True  # "two tables", "step 3"
         if 1900 <= value <= 2100:
             return True  # a year or cohort
+        # Only an ordered list's own number, with nothing but indentation
+        # before it. A number after a bullet ("- 312 participants") or at the
+        # start of a line ("312 participants") is a finding.
         line_start = prose.rfind("\n", 0, start) + 1
-        if prose[line_start:start].strip() in ("", "-", "*"):
-            return True  # "1." at the start of a list item
+        indented = not prose[line_start:start].strip()
+        if token.isdigit() and indented and _LIST_NUMBER_END.match(prose, start + len(token)):
+            return True  # "12." at the start of a list item
     return False

@@ -100,6 +100,37 @@ def test_findings_shaped_like_citations_are_kept():
         assert numbers_in_answer(answer) == expected, answer
 
 
+def test_a_finding_at_the_start_of_a_line_or_bullet_is_checked():
+    cases = {
+        "- 312 participants were enrolled": ["312"],
+        "* 1,226 interns": ["1,226"],
+        "+ 45 withdrew": ["45"],
+        "  - 45 withdrew": ["45"],
+        "- 12. was the median": ["12"],
+        "312 participants were enrolled.": ["312"],
+        "Enrolled:\n312 participants": ["312"],
+        "-312 change in steps": ["-312"],
+        "1.5 hours more sleep\n12.5 hours in bed": ["1.5", "12.5"],
+        "| 312 | 7.2 |\n|---|---|": ["312", "7.2"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_ordered_list_numbers_are_left_out():
+    cases = {
+        "11. Sleep\n12. Steps\n13. Mood": [],
+        "  15) nested item": [],
+        "Steps:\n99.\n100.": [],
+        "42. Mean sleep was 7.2 hours": ["7.2"],
+        "## 3. Results": [],
+        "2025 cohort": [],
+        "7 sites": [],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
 def test_long_answers_stay_fast():
     started = time.monotonic()
     numbers_in_answer("10.1234/" * 32000 + " 2021;" * 20000 + " pp. " * 20000)
