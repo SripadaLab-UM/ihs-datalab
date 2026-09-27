@@ -329,8 +329,11 @@ only, so text an R check wrote can't carry a value into the record or the
 tab. Destination
 keys are listed read-only; folders are chosen in Settings. New files come
 from Save as workflow ([As built](#as-built-save-as-workflow)); editing an
-existing one isn't in the tab yet. The docked chat opens in Data engineering
-until there is a Workflow authoring mode.
+existing one isn't in the tab yet. The docked chat opens in Workflow
+authoring mode (sessions/modes.py): the agent drafts in its copy of the repo,
+checks each draft with the `check_workflow` tool (the same check as the tab
+and every run, with pipelines as on `main`), and its changes become a
+Pipelines proposal to review and save there.
 
 ## As built (Pipelines)
 
@@ -343,8 +346,8 @@ config, every filter and driver switched off, `--no-ext-diff`). There's one
 GitHub sign-in for both repos; signing in is in Settings → GitHub. The tab
 browses GitHub's `main` as last synced, read-only.
 
-**Changes.** Each new Data engineering conversation gets its own copy of
-the repo at `/work/pipelines` (without `.github/`, and with no repository
+**Changes.** Each new Data engineering or Workflow authoring conversation
+gets its own copy of the repo at `/work/pipelines` (without `.github/`, and with no repository
 metadata or credentials). After each turn, what the agent changed in
 `ihsDataR/` and `workflows/` becomes one proposal, replacing any earlier
 one still open; changes anywhere else in the copy, and anything in

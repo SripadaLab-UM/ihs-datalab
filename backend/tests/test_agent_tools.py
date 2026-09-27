@@ -37,8 +37,13 @@ async def mcp_session(base_url: str, token: str, elicitation_callback=None):
             yield session
 
 
-def data_token(services, tmp_path: Path, kind: str = "data") -> str:
-    access = SessionAccess(session_id="sess1", kind=kind, results_dir=tmp_path / "oracle")  # type: ignore[arg-type]
+def data_token(services, tmp_path: Path, kind: str = "data", queries: bool = True) -> str:
+    access = SessionAccess(
+        session_id="sess1",
+        kind=kind,  # type: ignore[arg-type]
+        results_dir=tmp_path / "oracle",
+        queries=queries,
+    )
     return services.tokens.issue(access)
 
 
@@ -59,6 +64,7 @@ async def test_tools_are_listed(server, tmp_path):
         "query",
         "ask_research_helper",
         "propose_plan",
+        "check_workflow",
     }
 
 
@@ -118,6 +124,54 @@ async def test_rejected_sql_is_a_tool_error(server, tmp_path):
         result = await session.call_tool("query", {"sql": "DELETE FROM IHS_2025.T"})
     assert result.is_error
     assert "Only SELECT" in result.content[0].text
+    assert database.calls == []
+
+
+async def test_a_metadata_only_session_cant_query(server, tmp_path):
+    """Knowledge writing: the catalog tools work, `query` is refused before
+    anything reaches the database or the access log."""
+    base_url, services, database = server
+    token = data_token(services, tmp_path, queries=False)
+    async with mcp_session(base_url, token) as session:
+        hits = payload(await session.call_tool("search_catalog", {"query": "mood"}))
+        refused = await session.call_tool(
+            "query", {"sql": "SELECT STUDY_PARTICIPANT_ID FROM IHS_2025.VFITBITDAILYDATA"}
+        )
+    assert hits[0]["table"] == "IHS_2025.VW_DAILY_MOOD"
+    assert refused.is_error and "catalog tools only" in refused.content[0].text
+    assert database.calls == []
+    assert services.access_log.for_session("sess1") == []
+
+
+async def test_check_workflow_runs_datalabs_own_check(server, tmp_path):
+    from tests.test_workflow_runner import WEEKLY
+
+    base_url, services, database = server
+    broken = WEEKLY.replace("inputs: { raw: extract }", "inputs: { raw: check_summary }")
+    aliased = "name: x\nsteps: &s []\nmore: *s\n"
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        good = payload(await session.call_tool("check_workflow", {"text": WEEKLY}))
+        bad = payload(await session.call_tool("check_workflow", {"text": broken}))
+        alias = payload(await session.call_tool("check_workflow", {"text": aliased}))
+        big = payload(await session.call_tool("check_workflow", {"text": "#" * 300_000}))
+        yaml_error = payload(await session.call_tool("check_workflow", {"text": "a: [\n"}))
+    assert good == {"valid": True, "problems": [], "note": good["note"]}
+    assert bad["valid"] is False
+    problem = next(p for p in bad["problems"] if p["where"] == "steps[2].inputs.raw")
+    assert problem["message"] == "'check_summary' isn't an earlier step."
+    assert (
+        problem["line"]
+        == WEEKLY.splitlines().index(
+            next(line for line in WEEKLY.splitlines() if "inputs: { raw: extract }" in line)
+        )
+        + 1
+    )
+    assert alias["valid"] is False and "anchors or aliases" in alias["problems"][0]["message"]
+    assert alias["problems"][0]["line"] == 2
+    assert big["valid"] is False and "larger than" in big["problems"][0]["message"]
+    assert yaml_error["valid"] is False
+    assert "isn't valid YAML" in yaml_error["problems"][0]["message"]
+    # A check reads nothing and runs nothing.
     assert database.calls == []
 
 

@@ -92,8 +92,8 @@ def lab(tmp_path, github_keychain):
     connection.close()
 
 
-def conversation(lab: Lab) -> str:
-    made = lab.store.create(kind="data", mode="analysis", title="t", model="m")
+def conversation(lab: Lab, mode: str = "analysis") -> str:
+    made = lab.store.create(kind="data", mode=mode, title="t", model="m")
     lab.manager._seed_workspace(made)
     return made.id
 
@@ -166,6 +166,21 @@ def test_each_conversation_gets_a_copy_of_the_synced_commit(lab):
     # Nothing that could hold a credential is in the copy.
     everything = b"".join(p.read_bytes() for p in folder.rglob("*") if p.is_file())
     assert TOKEN.encode() not in everything and REFRESH.encode() not in everything
+
+
+def test_knowledge_writing_edits_become_proposal_cards_without_review_fields(lab):
+    """Every mode gets the copy; Knowledge writing's edits are kb_proposal
+    cards like any conversation's, and a review field it writes is dropped."""
+    synced(lab)
+    for mode in ("workflows", "engineering"):
+        assert (kb_dir(lab, conversation(lab, mode)) / "sources" / "fitbit.md").is_file()
+    cid = conversation(lab, "knowledge")
+    faked = NEW_PAGE.replace("status: draft\n", "status: draft\nreviewed_by: codex\n")
+    proposal = turn(lab, cid, {"qc/wear-time.md": faked})
+    assert proposal is not None
+    [card] = events(lab, cid)
+    assert card["id"] == proposal.id
+    assert "codex" not in card["diff"] and "10 hours" in card["diff"]
 
 
 def test_without_a_clone_the_copy_says_so_and_nothing_is_proposed(lab):

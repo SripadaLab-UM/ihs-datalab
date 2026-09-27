@@ -113,7 +113,33 @@ def create_app(
     plan_desk.turn_running = sessions.turn_running
     plan_desk.current_turn = sessions.current_turn
     plan_desk.queries_so_far = access_log.for_session
-    agent_tools = build_agent_tools(data, catalog, tokens, research_helper, plan_desk)
+    # One GitHub sign-in for both lab repos: only one object may refresh its
+    # tokens, since each refresh replaces the refresh token.
+    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    # Built here, before the agent tools, whose check_workflow uses the
+    # workflows' check (they're included below, in their place).
+    pipelines = build_pipelines_router(
+        PipelineServices(settings, connection, conversations, sessions, auth=github)
+    )
+    workflows_router = build_workflows_router(
+        WorkflowServices(
+            settings,
+            connection,
+            data,
+            access_log,
+            catalog=catalog,
+            # New workflow files are shared with the pipelines repo's Save & share.
+            pipelines=pipelines.pipelines,  # type: ignore[attr-defined]
+        )
+    )
+    agent_tools = build_agent_tools(
+        data,
+        catalog,
+        tokens,
+        research_helper,
+        plan_desk,
+        check_workflow_text=workflows_router.runner.check_text,  # type: ignore[attr-defined]
+    )
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
         transport_security=TransportSecuritySettings(
@@ -224,31 +250,13 @@ def create_app(
     app.include_router(
         build_sql_router(SqlServices(settings, data, catalog, access_log, destinations))
     )
-    # One GitHub sign-in for both lab repos: only one object may refresh its
-    # tokens, since each refresh replaces the refresh token.
-    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
     app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
         build_knowledge_router(
             KnowledgeServices(settings, connection, conversations, sessions, auth=github)
         )
     )
-    pipelines = build_pipelines_router(
-        PipelineServices(settings, connection, conversations, sessions, auth=github)
-    )
-    app.include_router(
-        build_workflows_router(
-            WorkflowServices(
-                settings,
-                connection,
-                data,
-                access_log,
-                catalog=catalog,
-                # New workflow files are shared with the pipelines repo's Save & share.
-                pipelines=pipelines.pipelines,  # type: ignore[attr-defined]
-            )
-        )
-    )
+    app.include_router(workflows_router)
     app.include_router(pipelines)
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))

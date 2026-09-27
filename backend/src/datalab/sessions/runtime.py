@@ -59,6 +59,8 @@ class SessionRuntime:
         tool_timeout_seconds: int,
         emit: Emit,
         approvals: Approvals | None = None,
+        queries: bool = True,
+        tools_off: tuple[str, ...] = (),
     ) -> None:
         self.session_id = session_id
         self.kind: SessionKind = kind
@@ -68,6 +70,8 @@ class SessionRuntime:
         self._model = model
         self._instructions = developer_instructions
         self._tool_timeout = tool_timeout_seconds
+        self._queries = queries
+        self._tools_off = tools_off
         self._emit = emit
         self._client: AppServerClient | None = None
         self._thread_id: str | None = self._saved_thread_id()
@@ -278,13 +282,19 @@ class SessionRuntime:
         self._tokens.revoke_session(self.session_id)
         token = self._tokens.issue(
             SessionAccess(
-                session_id=self.session_id, kind=self.kind, results_dir=self.paths.oracle_results
+                session_id=self.session_id,
+                kind=self.kind,
+                results_dir=self.paths.oracle_results,
+                queries=self._queries,
             )
         )
         self.paths.create()
         self.paths.codex_config.write_text(
             codex_config.render(
-                self.kind, model=self._model, tool_timeout_seconds=self._tool_timeout
+                self.kind,
+                model=self._model,
+                tool_timeout_seconds=self._tool_timeout,
+                tools_off=self._tools_off,
             )
         )
         await self.containers.start(token)

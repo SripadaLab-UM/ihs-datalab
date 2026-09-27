@@ -22,7 +22,8 @@ export function PipelinesPage() {
   const status = useQuery({ queryKey: ["pipelines-status"], queryFn: pipelinesApi.status });
   const ready = Boolean(status.data?.head) && status.data?.repo !== "signed out";
   const tree = useQuery({ queryKey: ["pipelines-files", status.data?.head], queryFn: pipelinesApi.files, enabled: ready });
-  // Proposals appear after the agent's turns, from any Data engineering conversation.
+  // Proposals appear after the agent's turns, from any Data engineering or Workflow
+  // authoring conversation (the Workflows tab's chat).
   const proposals = useQuery({
     queryKey: ["pipeline-proposals"],
     queryFn: () => pipelinesApi.proposals(),
@@ -258,8 +259,8 @@ function ProposalList({
   if (proposals.length === 0) {
     return (
       <p className="px-4 py-4 font-sans text-[13px] leading-relaxed text-muted">
-        Nothing proposed yet. When the Data engineering agent changes ihsDataR or a workflow file, the change appears
-        here after its turn.
+        Nothing proposed yet. When the Data engineering or Workflow authoring agent changes ihsDataR or a workflow
+        file, the change appears here after its turn.
       </p>
     );
   }

@@ -24,6 +24,9 @@ class SessionAccess:
     # Where query results are written on the host, and where the agent sees them.
     results_dir: Path
     results_path_in_container: str = "/data/oracle"
+    # Whether its `query` tool runs SQL. False in modes with the catalog
+    # tools only (sessions/modes.py): metadata, never rows.
+    queries: bool = True
 
 
 class SessionTokens:

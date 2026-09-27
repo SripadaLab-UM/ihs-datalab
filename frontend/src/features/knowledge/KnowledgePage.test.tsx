@@ -118,7 +118,7 @@ it("shows a page's front matter as facts and its text as Markdown, and follows l
     "https://github.com/SripadaLab-UM/ihs-knowledge/blob/abc1234def/sources/fitbit.md",
   );
   // The docked chat can take the page along.
-  expect(chat.props?.mode).toBe("extraction");
+  expect(chat.props?.mode).toBe("knowledge");
   await waitFor(() => expect(chat.props?.context?.label).toBe("The page open in the Knowledge tab (sources/fitbit.md)"));
   // A link in the text opens the page it points to, in the tab.
   fireEvent.click(screen.getByRole("button", { name: "the sleep rule" }));

@@ -202,7 +202,7 @@ NEW_STEPS = "weekly_steps <- function(x) {\n  x * 7\n}\n"
 # The copy -----------------------------------------------------------------
 
 
-def test_only_data_engineering_conversations_get_a_copy_of_the_repo(lab):
+def test_only_engineering_and_workflow_authoring_conversations_get_a_copy_of_the_repo(lab):
     synced(lab)
     cid = conversation(lab)
     folder = copy_of(lab, cid)
@@ -214,8 +214,24 @@ def test_only_data_engineering_conversations_get_a_copy_of_the_repo(lab):
     everything = b"".join(p.read_bytes() for p in folder.rglob("*") if p.is_file())
     assert TOKEN.encode() not in everything and REFRESH.encode() not in everything
     assert lab.pipelines.base(cid) == lab.remote.head()
-    analysis = conversation(lab, mode="analysis")
-    assert not copy_of(lab, analysis).exists()
+    for mode in ("analysis", "extraction", "knowledge"):
+        assert not copy_of(lab, conversation(lab, mode=mode)).exists()
+    authoring = conversation(lab, mode="workflows")
+    assert (copy_of(lab, authoring) / "workflows" / "weekly.yaml").is_file()
+    assert lab.pipelines.base(authoring) == lab.remote.head()
+
+
+def test_a_workflow_authoring_draft_becomes_a_pipelines_proposal(lab):
+    """The agent drafts in workflows/; the person reviews and saves it in the
+    Pipelines tab, like any Data engineering change."""
+    synced(lab)
+    cid = conversation(lab, mode="workflows")
+    draft = "name: monthly\nsteps: []\n"
+    proposal = turn(lab, cid, {"workflows/monthly.yaml": draft})
+    assert proposal is not None
+    assert [(c.path, c.change) for c in proposal.files] == [("workflows/monthly.yaml", "added")]
+    listed = lab.client.get("/api/pipelines/proposals").json()
+    assert [p["id"] for p in listed if p["conversation_id"] == cid] == [proposal.id]
 
 
 def test_without_a_clone_the_copy_says_so_and_nothing_is_proposed(lab):

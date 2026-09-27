@@ -8,9 +8,12 @@ Research sessions have no route here at all (their gateway doesn't forward to
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
+import yaml
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -29,6 +32,12 @@ from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
 from datalab.sessions.plans import Outcome, PlanDesk
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
+from datalab.workflows.model import MAX_FILE_BYTES as MAX_WORKFLOW_BYTES
+from datalab.workflows.model import WorkflowInvalid, problem_position
+
+# DataLab's own check of a workflow file's text (WorkflowRunner.check_text):
+# raises WorkflowInvalid with every problem.
+WorkflowCheck = Callable[[str], object]
 
 # The kind of approval DataLab asks the person for, carried in the elicitation message.
 HELPER_APPROVAL = "research_helper"
@@ -60,6 +69,7 @@ def build_agent_tools(
     tokens: SessionTokens,
     helper: ResearchHelper | None = None,
     plans: PlanDesk | None = None,
+    check_workflow_text: WorkflowCheck | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
@@ -131,6 +141,12 @@ def build_agent_tools(
         preview_rows: how many rows to return inline (the file has them all).
         """
         access = _session(ctx, tokens)
+        if not access.queries:
+            raise ToolError(
+                "This mode has the catalog tools only (metadata, no rows): it can't run "
+                "queries. Write the SQL and say it needs checking in a Data extraction "
+                "conversation."
+            )
         try:
             outcome = await service.run_query(
                 session_id=access.session_id,
@@ -152,6 +168,43 @@ def build_agent_tools(
                 "tables": outcome.tables,
             }
         )
+
+    if check_workflow_text is not None:
+        workflow_check = check_workflow_text
+
+        @server.tool(annotations=_READ_ONLY)
+        async def check_workflow(text: str, ctx: Context) -> str:
+            """Check a workflow file's text with DataLab's own workflow check.
+
+            The same check the Workflows tab and every run use: the YAML
+            model, step references, parameters and binds, `reads:`, QC and
+            small-cell rules, and destinations. Pipelines are looked up as on
+            the repo's main branch. Nothing is saved or run.
+            text: the whole workflow file (YAML), as written in /work/pipelines/workflows.
+            """
+            _session(ctx, tokens)
+            problems = _draft_problems(text)
+            if problems is None:
+                try:
+                    await asyncio.to_thread(workflow_check, text)
+                    problems = []
+                except WorkflowInvalid as error:
+                    problems = [
+                        {
+                            "where": p.path,
+                            "line": (problem_position(text, p.path) or (None, None))[0],
+                            "message": p.message,
+                        }
+                        for p in error.problems
+                    ]
+            return _json(
+                {
+                    "valid": not problems,
+                    "problems": problems,
+                    "note": "Fix every problem before you finish. DataLab checks the file "
+                    "again when it lists it and before every run.",
+                }
+            )
 
     if plans is not None:
 
@@ -302,6 +355,28 @@ def _session(ctx: Context, tokens: SessionTokens) -> SessionAccess:
     if access is None or access.kind != "data":
         raise ToolError("This session isn't allowed to query data.")
     return access
+
+
+def _draft_problems(text: str) -> list[dict[str, Any]] | None:
+    """Problems found before the full check, or None to go on to it.
+
+    The text comes from the agent, so it's refused before the check reads
+    it when it's too large, or uses YAML anchors and aliases (`&a`, `*a`):
+    a few lines of aliases can stand for a structure far too large to walk.
+    Workflow files don't need them."""
+    if len(text.encode()) > MAX_WORKFLOW_BYTES:
+        message = f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB."
+        return [{"where": "", "line": None, "message": message}]
+    try:
+        for event in yaml.parse(text, Loader=yaml.SafeLoader):
+            anchored = getattr(event, "anchor", None) is not None
+            if anchored or isinstance(event, yaml.AliasEvent):
+                line = event.start_mark.line + 1 if event.start_mark else None
+                message = "Don't use YAML anchors or aliases (& and *): write each value out."
+                return [{"where": f"line {line}", "line": line, "message": message}]
+    except yaml.YAMLError:
+        return None  # the full check says where the YAML is broken
+    return None
 
 
 def _describe(info: TableInfo, catalog: Catalog) -> dict[str, Any]:

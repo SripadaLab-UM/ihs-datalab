@@ -663,6 +663,7 @@ class SessionManager:
             async def emit(kind: str, data: dict[str, Any]) -> None:
                 self._store.append(conversation.id, kind, data)
 
+            mode = modes.MODES[conversation.mode]
             runtime = SessionRuntime(
                 conversation.id,
                 conversation.kind,
@@ -674,6 +675,8 @@ class SessionManager:
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
+                queries=mode.queries,
+                tools_off=mode.tools_off,
             )
             self._runtimes[conversation.id] = runtime
         return runtime

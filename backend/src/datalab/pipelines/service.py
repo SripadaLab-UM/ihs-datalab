@@ -1,13 +1,14 @@
-"""The pipelines repo's part of DataLab: the clone, each Data engineering
-conversation's copy, its proposed changes, the package's tests, and Save & share.
+"""The pipelines repo's part of DataLab: the clone, each Data engineering or
+Workflow authoring conversation's copy, its proposed changes, the package's
+tests, and Save & share.
 
 - **The clone.** `repos.pipelines` (such as SripadaLab-UM/ihs-pipelines),
   cloned into `<data folder>/repos/ihs-pipelines` and synced with GitHub's
   `main` from the Pipelines tab (repos/sync.py). The Workflows tab reads its
   workflow files from the same clone (workflows/source.py).
 - **The copy.** A workspace seed copies `main` (as last synced) into each
-  new Data engineering conversation's `/work/pipelines`, once, and records
-  the commit. No `.git`, no credentials, no `.github/`: just the files.
+  new Data engineering or Workflow authoring conversation's `/work/pipelines`,
+  once, and records the commit. No `.git`, no credentials, no `.github/`: just the files.
 - **Proposals.** After each turn, the copy in the turn's checkpoint is
   compared with the conversation's base (proposals.py). A difference becomes
   a proposal, listed in the Pipelines tab (not in the chat, for now), with
@@ -63,7 +64,8 @@ log = logging.getLogger(__name__)
 
 SEED = "pipelines"
 INTO = "pipelines"  # /work/pipelines
-MODES = ("engineering",)
+# Data engineering, and Workflow authoring (whose files are in workflows/).
+MODES = ("engineering", "workflows")
 REPO = "pipelines"  # its row in repo_sync
 _REFS = "refs/datalab/pipelines"  # keeps each proposal's commit, per conversation
 _DATALAB = Identity("DataLab", "datalab@localhost")

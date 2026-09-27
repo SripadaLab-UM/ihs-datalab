@@ -2486,6 +2486,16 @@ export interface components {
             description: string;
             /** Starters */
             starters: string[];
+            /**
+             * Tab Only
+             * @default false
+             */
+            tab_only: boolean;
+            /**
+             * Queries
+             * @default true
+             */
+            queries: boolean;
         };
         /** ModelKeyIn */
         ModelKeyIn: {

@@ -1,7 +1,7 @@
 """Pipelines (milestone 6): browsing and changing the lab's `ihs-pipelines` repo.
 
-Each Data engineering conversation gets its own copy of the repo at
-`/work/pipelines`, made once by a workspace seed. After each turn an
+Each Data engineering or Workflow authoring conversation gets its own copy of
+the repo at `/work/pipelines`, made once by a workspace seed. After each turn an
 after-turn hook compares the copy in the turn's checkpoint with the
 conversation's base and records what changed as a proposal, which the
 Pipelines tab lists. See pipelines/service.py.

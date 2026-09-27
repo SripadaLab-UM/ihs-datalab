@@ -18,11 +18,10 @@ import { ago, repoState } from "./repoState";
 const WIDE = "(min-width: 1280px)";
 // Below these widths the list and the chat are shown over the page.
 const LIST_BESIDE = "(min-width: 1024px)";
-// The docs ask for a chat that "helps write or tidy a page or skill". DataLab has
-// no such mode yet, so it's Data extraction: a data session with the catalog
-// tools, which is what table and query pages cite. Its edits to /work/kb come
-// back as proposed-edit cards in this chat, like any conversation's.
-const CHAT_MODE = "extraction";
+// Knowledge writing (sessions/modes.py): helps write or tidy a page or skill,
+// with the catalog tools that table and query pages cite, and no queries. Its
+// edits to /work/kb come back as proposed-edit cards in this chat.
+export const CHAT_MODE = "knowledge";
 
 /** Knowledge pages, lab skills and their change history, with a chat that helps write or tidy a page or skill. */
 export function KnowledgePage() {

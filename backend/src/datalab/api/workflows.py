@@ -392,7 +392,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         await runner.close()
 
     router = APIRouter(prefix="/api/workflows", tags=["workflows"], lifespan=lifespan)
-    router.runner = runner  # type: ignore[attr-defined]  # for tests
+    # For tests, and for the agent tools' check_workflow (app.py).
+    router.runner = runner  # type: ignore[attr-defined]
 
     def run_or_404(run_id: str) -> dict[str, Any]:
         detail = runner.detail(run_id)

@@ -299,7 +299,10 @@ function NewConversation({ onClose }: { onClose: () => void }) {
         <div>
           <p className={label}>What would you like to do?</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {modes.data?.map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
+            {/* Modes a tab docks (Workflow authoring, Knowledge writing) open from that tab. */}
+            {modes.data
+              ?.filter((m) => !m.tab_only)
+              .map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
           </div>
         </div>
         {/* No title to type: DataLab names the conversation from its first question. */}

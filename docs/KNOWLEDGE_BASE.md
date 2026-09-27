@@ -237,9 +237,8 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   against GitHub's version it conflicted with. A save cut off by DataLab
   stopping ends as failed when it starts again, to be tried again. The Knowledge tab lists pages and skills by
   folder, renders them with their front matter as facts, shows recent
-  changes, and docks a chat. There's no mode for writing pages yet, so the
-  chat is Data extraction (a data session, with the catalog that table and
-  query pages cite).
+  changes, and docks a chat in Knowledge writing mode: a data session with
+  the catalog tools that table and query pages cite, but no queries.
 
 ## The check
 
