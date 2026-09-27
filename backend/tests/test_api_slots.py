@@ -49,6 +49,13 @@ def test_the_areas_are_in_the_api_schema(client):
         assert f"/api/{area}/status" in paths
 
 
+def test_no_two_api_models_share_a_name(client):
+    """Two routers each with a `RunOut` get renamed `datalab__api__…__RunOut` in
+    the schema, which breaks the frontend's generated types."""
+    schemas = client.app.openapi()["components"]["schemas"]  # type: ignore[attr-defined]
+    assert [name for name in schemas if name.startswith("datalab__")] == []
+
+
 def test_app_needs_the_data_folder_lock(settings, catalog, monkeypatch):
     from datalab import app as app_module
     from datalab import datalock

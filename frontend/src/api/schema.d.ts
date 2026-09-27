@@ -2159,6 +2159,39 @@ export interface components {
                 [key: string]: string | number | null;
             };
         };
+        /** RunOut */
+        RunOut: {
+            /** Id */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "succeeded" | "failed" | "rejected" | "stopped";
+            /** Sql */
+            sql: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Message */
+            message: string | null;
+            diagnostic: components["schemas"]["DiagnosticOut"] | null;
+            /** Query Id */
+            query_id: string | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Bytes Written */
+            bytes_written: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds: number | null;
+            /** Columns */
+            columns: components["schemas"]["ColumnOut"][];
+            /** Tables */
+            tables: string[];
+            /** Warnings */
+            warnings: string[];
+        };
         /** SafetyReportOut */
         SafetyReportOut: {
             /** Started At */
@@ -2394,48 +2427,8 @@ export interface components {
             /** Commit */
             commit: string | null;
         };
-        /** WorkflowsStatus */
-        WorkflowsStatus: {
-            /** Available */
-            available: boolean;
-            /** Folder */
-            folder: string;
-        };
-        /** RunOut */
-        datalab__api__sql__RunOut: {
-            /** Id */
-            id: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "running" | "succeeded" | "failed" | "rejected" | "stopped";
-            /** Sql */
-            sql: string;
-            /** Started At */
-            started_at: string;
-            /** Finished At */
-            finished_at: string | null;
-            /** Message */
-            message: string | null;
-            diagnostic: components["schemas"]["DiagnosticOut"] | null;
-            /** Query Id */
-            query_id: string | null;
-            /** Row Count */
-            row_count: number | null;
-            /** Bytes Written */
-            bytes_written: number | null;
-            /** Elapsed Seconds */
-            elapsed_seconds: number | null;
-            /** Columns */
-            columns: components["schemas"]["ColumnOut"][];
-            /** Tables */
-            tables: string[];
-            /** Warnings */
-            warnings: string[];
-        };
-        /** RunOut */
-        datalab__api__workflows__RunOut: {
+        /** WorkflowRunOut */
+        WorkflowRunOut: {
             /** Id */
             id: string;
             /** Workflow Name */
@@ -2475,6 +2468,13 @@ export interface components {
             replay_notes: string[];
             /** Reproduced */
             reproduced: boolean | null;
+        };
+        /** WorkflowsStatus */
+        WorkflowsStatus: {
+            /** Available */
+            available: boolean;
+            /** Folder */
+            folder: string;
         };
     };
     responses: never;
@@ -3453,7 +3453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
+                    "application/json": components["schemas"]["RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -3486,7 +3486,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
+                    "application/json": components["schemas"]["RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -3517,7 +3517,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
+                    "application/json": components["schemas"]["RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -4078,7 +4078,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"][];
+                    "application/json": components["schemas"]["WorkflowRunOut"][];
                 };
             };
             /** @description Validation Error */
@@ -4111,7 +4111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                    "application/json": components["schemas"]["WorkflowRunOut"];
                 };
             };
             /** @description Validation Error */
@@ -4204,7 +4204,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                    "application/json": components["schemas"]["WorkflowRunOut"];
                 };
             };
             /** @description Validation Error */
@@ -4266,7 +4266,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                    "application/json": components["schemas"]["WorkflowRunOut"];
                 };
             };
             /** @description Validation Error */
@@ -4332,7 +4332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                    "application/json": components["schemas"]["WorkflowRunOut"];
                 };
             };
             /** @description Validation Error */

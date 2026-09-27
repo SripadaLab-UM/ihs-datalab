@@ -150,7 +150,7 @@ class ReplayCheckOut(BaseModel):
     blocking: list[str]  # why it can't run at all
 
 
-class RunOut(BaseModel):
+class WorkflowRunOut(BaseModel):
     id: str
     workflow_name: str
     workflow_path: str
@@ -198,7 +198,7 @@ class DeliveryOut(BaseModel):
     delivered_at: str
 
 
-class RunDetailOut(RunOut):
+class RunDetailOut(WorkflowRunOut):
     workflow_source: Literal["git", "file"]
     repo_commit: str | None
     workflow_blob: str
@@ -322,12 +322,12 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         )
 
     @router.get("/runs")
-    def list_runs(path: str | None = None, limit: int = 100) -> list[RunOut]:
+    def list_runs(path: str | None = None, limit: int = 100) -> list[WorkflowRunOut]:
         rows = runner.store.list_runs(path, limit=max(1, min(limit, 500)))
-        return [RunOut.model_validate(_run_fields(r)) for r in rows]
+        return [WorkflowRunOut.model_validate(_run_fields(r)) for r in rows]
 
     @router.post("/runs", status_code=201)
-    async def start(body: StartIn) -> RunOut:
+    async def start(body: StartIn) -> WorkflowRunOut:
         try:
             run_id = await runner.start(body.path, body.params, seed=body.seed)
         except SourceError as error:
@@ -336,7 +336,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             raise _unprocessable(error) from error
         except RunRefused as error:
             raise HTTPException(409, str(error)) from error
-        return RunOut.model_validate(_run_fields(run_or_404(run_id)))
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(run_id)))
 
     @router.get("/runs/{run_id}")
     def get_run(run_id: str) -> RunDetailOut:
@@ -347,13 +347,13 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         return RunDetailOut.model_validate(_run_fields(run_or_404(run_id))).steps
 
     @router.post("/runs/{run_id}/stop", status_code=202)
-    async def stop(run_id: str) -> RunOut:
+    async def stop(run_id: str) -> WorkflowRunOut:
         run_or_404(run_id)
         try:
             await runner.stop(run_id)
         except RunRefused as error:
             raise HTTPException(409, str(error)) from error
-        return RunOut.model_validate(_run_fields(run_or_404(run_id)))
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(run_id)))
 
     @router.get("/runs/{run_id}/stream")
     async def stream(run_id: str, request: Request) -> StreamingResponse:
@@ -378,7 +378,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         )
 
     @router.post("/runs/{run_id}/again", status_code=201)
-    async def run_again(run_id: str) -> RunOut:
+    async def run_again(run_id: str) -> WorkflowRunOut:
         """The current workflow file afresh: today's data, the same parameters and seed."""
         run_or_404(run_id)
         try:
@@ -389,7 +389,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             raise _unprocessable(error) from error
         except RunRefused as error:
             raise HTTPException(409, str(error)) from error
-        return RunOut.model_validate(_run_fields(run_or_404(new_id)))
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(new_id)))
 
     @router.get("/runs/{run_id}/replay")
     async def replay_check(run_id: str) -> ReplayCheckOut:
@@ -399,7 +399,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         return ReplayCheckOut(exact=check.exact, reasons=check.reasons, blocking=check.blocking)
 
     @router.post("/runs/{run_id}/replay", status_code=201)
-    async def replay(run_id: str, body: ReplayIn) -> RunOut:
+    async def replay(run_id: str, body: ReplayIn) -> WorkflowRunOut:
         """The original definition, extracts, image and seed, run again."""
         run_or_404(run_id)
         try:
@@ -414,7 +414,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             raise _unprocessable(error) from error
         except RunRefused as error:
             raise HTTPException(409, str(error)) from error
-        return RunOut.model_validate(_run_fields(run_or_404(new_id)))
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(new_id)))
 
     @router.get("/runs/{run_id}/delivery")
     def delivery(run_id: str) -> DeliveryStatusOut:
