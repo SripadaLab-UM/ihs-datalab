@@ -45,6 +45,8 @@ export interface PlanDiff {
   comparable: boolean;
   type?: { before: string; after: string };
   rationale?: { before: string; after: string };
+  /** DataLab's record of what had run when each was proposed (why a stale plan is proposed again). */
+  record?: { before: string; after: string };
   changes: PlanChange[];
   unchanged: number;
 }
@@ -132,6 +134,9 @@ export function planChanges(before: AnyPlan, after: PlanV2): PlanDiff {
   }
   if (before.rationale.trim() !== after.rationale.trim()) {
     diff.rationale = { before: before.rationale, after: after.rationale };
+  }
+  if (JSON.stringify(before.proposed_after ?? null) !== JSON.stringify(after.proposed_after ?? null)) {
+    diff.record = { before: proposedAfterText(before), after: proposedAfterText(after) };
   }
   return diff;
 }

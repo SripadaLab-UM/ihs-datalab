@@ -135,3 +135,13 @@ it("says what the record of what ran doesn't count, and clears every draft on si
   expect(sessionStorage.getItem("datalab:plan-draft:ap1")).toBeNull();
   expect(sessionStorage.getItem("datalab:other")).toBe("kept");
 });
+
+it("shows when the record of what had run changed, and says a single query was running", () => {
+  const stale: PlanV2 = { ...plan, proposed_after: { queries: 0, tables: [], more_tables: 0 } };
+  const again: PlanV2 = { ...plan, proposed_after: { queries: 1, tables: ["IHS_2025.VW_DAILY_MOOD"], more_tables: 0 } };
+  const diff = planChanges(stale, again);
+  expect(diff.record?.before).toMatch(/^No queries had returned data/);
+  expect(diff.record?.after).toMatch(/^1 query in this conversation had returned data or was still running, reading IHS_2025.VW_DAILY_MOOD/);
+  expect(diff.changes).toEqual([]);
+  expect(planChanges(again, again).record).toBeUndefined();
+});
