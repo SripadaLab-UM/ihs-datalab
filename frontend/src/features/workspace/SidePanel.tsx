@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { api, type Checkpoint, type Conversation, type WorkspaceFile } from "@/api/client";
 import { shortTable } from "@/components/chat/activity";
 import { SHOW_QUERY } from "@/components/chat/provenance";
-import { Button, Chip, EmptyNote, FileGlyph, Icon, Modal, Tabs } from "@/components/ui";
+import { Button, Chip, EmptyNote, FileGlyph, Icon, InfoTip, Modal, Tabs } from "@/components/ui";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 import { formatBytes } from "@/lib/csv";
 import type { OpenFile } from "@/lib/files";
@@ -37,7 +37,7 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
     { id: "history", label: "History" },
   ];
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div data-tour="outputs" className="flex h-full min-h-0 flex-col">
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {tab === "inputs" && <Inputs conversation={conversation} practice={health.data?.profile === "practice"} />}
@@ -83,9 +83,12 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
         <span className="dl-label">
           {all.length} file{all.length === 1 ? "" : "s"} in outputs
         </span>
-        <Button variant="ghost" className="px-0 py-0 text-xs" onClick={() => setExporting(true)}>
-          <Icon name="export" size={14} /> Export…
-        </Button>
+        <span className="flex items-center gap-1">
+          <Button variant="ghost" className="px-0 py-0 text-xs" onClick={() => setExporting(true)}>
+            <Icon name="export" size={14} /> Export…
+          </Button>
+          <InfoTip term="export" align="end" />
+        </span>
       </div>
       {prefix && (
         <p className="-mt-3 font-sans text-[12px] text-muted">
@@ -186,15 +189,19 @@ function History({ conversation }: { conversation: Conversation }) {
   const [confirming, setConfirming] = useState<Checkpoint | null>(null);
   if (checkpoints.data?.length === 0) {
     return (
-      <EmptyNote icon="history" title="No checkpoints yet">
-        After each turn DataLab saves a copy of the workspace files, so you can always go back.
-      </EmptyNote>
+      <>
+        <EmptyNote icon="history" title="No checkpoints yet">
+          After each turn DataLab saves a copy of the workspace files, so you can always go back.
+        </EmptyNote>
+        <InfoTip term="checkpoint" className="mt-2" />
+      </>
     );
   }
   return (
     <>
-      <p className="mb-4 font-sans text-[13px] leading-relaxed text-muted">
-        A copy of the files after each turn. Restoring never loses the current ones.
+      <p className="mb-4 flex items-start gap-1 font-sans text-[13px] leading-relaxed text-muted">
+        <span className="flex-1">A copy of the files after each turn. Restoring never loses the current ones.</span>
+        <InfoTip term="checkpoint" align="end" />
       </p>
       <ol className="relative flex flex-col gap-3 before:absolute before:bottom-2 before:left-[7px] before:top-2 before:w-px before:bg-line">
         {checkpoints.data?.map((checkpoint, index) => (
@@ -326,6 +333,7 @@ function DataAccessed({
         <p className="dl-label flex flex-1 items-center gap-1.5 !text-data">
           <Icon name="lock" size={11} /> Read-only · every query, newest last
         </p>
+        <InfoTip term="data-accessed" align="end" />
         {queries.data?.some((q) => q.status === "succeeded") && (
           <Button variant="ghost" className="px-1.5 py-0.5 text-[12px]" onClick={() => setDrafting(true)}>
             <Icon name="history" size={12} /> Turn this into a workflow

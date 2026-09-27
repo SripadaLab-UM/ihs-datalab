@@ -1,5 +1,6 @@
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { searchForWorkspaceRoot } from "vite";
 import { defineConfig } from "vitest/config";
 
 // In development the UI runs on Vite and the API on DataLab. Cookies are
@@ -12,6 +13,8 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    // The user guide (docs/guide) is bundled from outside the frontend folder.
+    fs: { allow: [searchForWorkspaceRoot(process.cwd()), "../docs/guide"] },
     proxy: { "/api": backend, "/sign-in": backend },
   },
   test: {

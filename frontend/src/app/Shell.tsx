@@ -5,6 +5,8 @@ import { NavLink, Outlet } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
 import { clearAllDrafts } from "@/components/chat/plan";
+import { HelpLink } from "@/features/help/HelpLink";
+import { TourProvider } from "@/features/help/Tour";
 
 const TABS = [
   { to: "/workspace", label: "Workspace" },
@@ -52,6 +54,7 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
+        <span className="flex-1" />
         {health.data?.profile === "practice" && (
           <span
             className="ml-auto shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
@@ -60,9 +63,12 @@ export function Shell() {
             practice · synthetic data
           </span>
         )}
+        <HelpLink />
       </header>
       <div className="min-h-0 flex-1">
-        <Outlet />
+        <TourProvider>
+          <Outlet />
+        </TourProvider>
       </div>
     </div>
   );

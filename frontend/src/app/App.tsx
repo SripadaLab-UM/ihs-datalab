@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
+import { HelpPage } from "@/features/help/HelpPage";
 import { KnowledgePage } from "@/features/knowledge/KnowledgePage";
 import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -29,6 +30,7 @@ export function App() {
             <Route path="pipelines/*" element={<PipelinesPage />} />
             <Route path="knowledge/*" element={<KnowledgePage />} />
             <Route path="settings" element={<SettingsPage />} />
+            <Route path="help/:slug?" element={<HelpPage />} />
             <Route path="signed-out" element={<SignedOut />} />
           </Route>
         </Routes>

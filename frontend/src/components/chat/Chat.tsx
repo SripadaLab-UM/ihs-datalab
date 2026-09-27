@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
-import { Button, Chip, FileGlyph, Icon, SessionBadge } from "@/components/ui";
+import { Button, Chip, FileGlyph, Icon, InfoTip, SessionBadge } from "@/components/ui";
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
@@ -287,10 +287,8 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   return (
-    <label
-      className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink"
-      title="After each answer that did some work, the agent's work is reviewed against a checklist: traced claims, the plan, causal language, sample sizes, uncertainty, privacy. It roughly doubles the time and cost of each answer."
-    >
+    <span className="flex items-center gap-1">
+    <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
       <input
         type="checkbox"
         className="peer sr-only"
@@ -304,6 +302,8 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
       />
       Rigor review
     </label>
+    <InfoTip term="rigor-review" align="end" />
+    </span>
   );
 }
 
@@ -534,7 +534,7 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
   const planChip = planStatus(rows.flatMap((row) => (row.type === "approval" ? [row.approval] : [])));
   return (
     <section className="border-y border-line">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
+      <button type="button" data-tour="how-made" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
         <Marker tone="done" open={open} />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
@@ -634,7 +634,7 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
     };
   }, [turn, streaming, openFile, openQuery]);
   return (
-    <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
+    <section data-tour="answer" className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
@@ -656,18 +656,18 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
 
 /** Which numbers in the answer came from something the turn produced. */
 function TraceChip({ trace }: { trace: NonNullable<Turn["trace"]> }) {
-  const how =
-    "DataLab looks for each number in this turn's query results, command output, and data files. A match only means the number appears there, not that it's right.";
   if (trace.untraced.length === 0) {
     return (
-      <Chip title={how}>
-        {trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs
-      </Chip>
+      <>
+        <Chip>{trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs</Chip>
+        <InfoTip term="trace-and-provenance" />
+      </>
     );
   }
   return (
     <>
-      <Chip tone="attn" title={how}>
+      <InfoTip term="trace-and-provenance" />
+      <Chip tone="attn">
         {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not matched to this turn's outputs
       </Chip>
       {trace.untraced.slice(0, 8).map((n) => (
@@ -850,7 +850,7 @@ export function ComposerBox({
   };
 
   return (
-    <footer className="px-4 pt-2 pb-6 sm:px-8">
+    <footer data-tour="composer" className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
         {typeof note === "function" ? note(sending) : note}
