@@ -194,7 +194,7 @@ function InnerStep({ step }: { step: Step }) {
 /** The agent's own words while it works: narration, set as reading text. */
 export function SayRow({ text }: { text: string }) {
   return (
-    <div className="max-w-[62ch] py-1 text-muted [&_.prose-datalab]:text-[1.06rem]">
+    <div className="max-w-[72ch] py-1 text-muted [&_.prose-datalab]:text-[1.06rem]">
       <Markdown text={text} />
     </div>
   );

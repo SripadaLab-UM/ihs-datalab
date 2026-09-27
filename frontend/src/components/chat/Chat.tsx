@@ -35,8 +35,13 @@ export function Chat({
   // Follow new steps only while the person is at the bottom: scrolling up to
   // read something shouldn't be undone by the next step arriving.
   const [following, setFollowing] = useState(true);
-  const [suggestion, setSuggestion] = useState<{ text: string } | null>(null);
+  const [effort, setEffort] = useEffortChoice();
   const queryClient = useQueryClient();
+  // A starter question is sent as it is, so the agent starts at once.
+  const start = useMutation({
+    mutationFn: (text: string) => api.send(conversation.id, text, effort),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
 
   // Working: DataLab says so, or the transcript does and DataLab hasn't
   // answered since. A restart mid-turn leaves the transcript without an end,
@@ -96,7 +101,11 @@ export function Chat({
         {headerStart}
         <Title conversation={conversation} />
         <SessionBadge kind={conversation.kind} />
-        <span className="font-mono text-[11.5px] text-faint">{conversation.model}</span>
+        <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-faint">
+          {conversation.model}
+          <span aria-hidden>·</span>
+          <EffortSelect effort={effort} onChange={setEffort} />
+        </span>
         <div className="ml-auto flex items-center gap-2">
           {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
           {headerActions}
@@ -109,8 +118,15 @@ export function Chat({
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
         }}
       >
-        <div className="mx-auto flex max-w-[42rem] flex-col gap-14">
-          {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
+        <div className="mx-auto flex max-w-[48rem] flex-col gap-14 2xl:max-w-[54rem]">
+          {turns.length === 0 && (
+            <EmptyState
+              conversation={conversation}
+              onPick={(text) => start.mutate(text)}
+              starting={start.isPending || start.isSuccess || running}
+              error={start.error?.message}
+            />
+          )}
           {turns.map((turn, index) => (
             <TurnView
               key={index}
@@ -134,7 +150,7 @@ export function Chat({
           </div>
         )}
       </div>
-      <Composer conversation={conversation} running={running} suggestion={suggestion} />
+      <Composer conversation={conversation} running={running || start.isPending} effort={effort} />
     </div>
   );
 }
@@ -236,7 +252,17 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   );
 }
 
-function EmptyState({ conversation, onPick }: { conversation: Conversation; onPick: (s: { text: string }) => void }) {
+function EmptyState({
+  conversation,
+  onPick,
+  starting,
+  error,
+}: {
+  conversation: Conversation;
+  onPick: (text: string) => void;
+  starting: boolean;
+  error?: string;
+}) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
   const mode = modes.data?.find((m) => m.id === conversation.mode);
   const data = conversation.kind === "data";
@@ -269,11 +295,13 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
       {mode && mode.starters.length > 0 && (
         <div>
           <p className="dl-label mb-2">Try one of these, or ask your own</p>
+          {error && <p className="mb-2 font-sans text-[13px] text-danger">{error}</p>}
           <ul className="border-t border-line">
             {mode.starters.map((starter) => (
               <li key={starter} className="border-b border-line">
                 <button
-                  onClick={() => onPick({ text: starter })}
+                  onClick={() => onPick(starter)}
+                  disabled={starting}
                   className="group flex w-full items-baseline gap-4 py-3.5 text-left font-serif text-[18.5px] leading-snug text-ink"
                 >
                   <span className="flex-1 group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">{starter}</span>
@@ -661,15 +689,7 @@ function ReviewBox({
   );
 }
 
-function Composer({
-  conversation,
-  running,
-  suggestion,
-}: {
-  conversation: Conversation;
-  running: boolean;
-  suggestion: { text: string } | null;
-}) {
+function Composer({ conversation, running, effort }: { conversation: Conversation; running: boolean; effort: Effort }) {
   const [text, setText] = useState("");
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -679,12 +699,6 @@ function Composer({
     element.style.height = "auto";
     element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
   }, [text]);
-  // A starter prompt the person picked goes into the box, for them to edit and send.
-  useEffect(() => {
-    // Never over what the person has already typed.
-    if (suggestion) setText((current) => (current.trim() ? current : suggestion.text));
-  }, [suggestion]);
-  const [effort, setEffort] = useState<Effort>("medium");
   const queryClient = useQueryClient();
   const send = useMutation({
     mutationFn: () => api.send(conversation.id, text.trim(), effort),
@@ -704,7 +718,7 @@ function Composer({
 
   return (
     <footer className="px-4 pt-2 pb-6 sm:px-8">
-      <div className="mx-auto max-w-[42rem]">
+      <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
         <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
@@ -723,17 +737,6 @@ function Composer({
             placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : "Ask a question, or say what to do next"}
             className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
           />
-          <select
-            value={effort}
-            onChange={(e) => setEffort(e.target.value as Effort)}
-            aria-label="How hard the agent thinks"
-            className="self-center bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
-            title="How hard the agent thinks"
-          >
-            <option value="low">Quick</option>
-            <option value="medium">Balanced</option>
-            <option value="high">Thorough</option>
-          </select>
           {running ? (
             <Button variant="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
               <Icon name="stop" size={14} /> Stop
@@ -749,5 +752,44 @@ function Composer({
         </p>
       </div>
     </footer>
+  );
+}
+
+const EFFORT_KEY = "datalab.effort";
+
+/** How hard the agent thinks, remembered in this browser as the default for new messages. */
+function useEffortChoice(): [Effort, (effort: Effort) => void] {
+  const [effort, setEffort] = useState<Effort>(() => {
+    try {
+      const saved = localStorage.getItem(EFFORT_KEY);
+      return saved === "low" || saved === "medium" || saved === "high" ? saved : "medium";
+    } catch {
+      return "medium";
+    }
+  });
+  const choose = (next: Effort) => {
+    setEffort(next);
+    try {
+      localStorage.setItem(EFFORT_KEY, next);
+    } catch {
+      // Private windows may refuse storage: the choice still holds for this page.
+    }
+  };
+  return [effort, choose];
+}
+
+function EffortSelect({ effort, onChange }: { effort: Effort; onChange: (effort: Effort) => void }) {
+  return (
+    <select
+      value={effort}
+      onChange={(e) => onChange(e.target.value as Effort)}
+      aria-label="How hard the agent thinks"
+      title="How hard the agent thinks, for the next message you send"
+      className="bg-transparent font-sans text-[12px] text-muted hover:text-ink"
+    >
+      <option value="low">Quick</option>
+      <option value="medium">Balanced</option>
+      <option value="high">Thorough</option>
+    </select>
   );
 }
