@@ -1,8 +1,8 @@
 # Workflows and pipelines
 
 Status: **draft** for v1. The runner, run records, Run again, Replay and
-delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core));
-the Workflows and Pipelines tabs are not yet.
+delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core)),
+and so is the Workflows tab, read-only for now; the Pipelines tab is not yet.
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -300,6 +300,17 @@ seed and pipeline library; `GET /api/workflows/runs/<id>/replay` says first
 whether it can be exact, and why not (the image gone, another platform,
 DataLab's step wrapper or version changed). It records afterwards whether
 every output matched byte for byte, and doesn't deliver unless asked.
+
+**The Workflows tab** lists the folder's files with their checks (each
+problem with its path and line) and last run. A workflow's page shows the
+file read-only, with its problems marked in the editor, a form built from
+its parameters, and Run, followed live (`/runs/<id>/stream`) with Stop. A
+run's page shows its steps, what it pinned, its delivery, Run again, and
+Replay: the replay check's reasons come first, an inexact Replay needs a
+tick, and a Replay that delivers is asked about a second time. Destination
+keys are listed read-only; folders are chosen in Settings. Editing waits for
+the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
+until there is a Workflow authoring mode.
 
 ## Open questions
 

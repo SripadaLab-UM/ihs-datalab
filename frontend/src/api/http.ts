@@ -6,6 +6,8 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /** The response's whole `detail`, when it's more than a sentence (`{message, problems}`). */
+    readonly detail?: unknown,
   ) {
     super(message);
   }
@@ -22,8 +24,8 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     if (response.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
     const body = await response.json().catch(() => ({}));
-    const detail = typeof body.detail === "string" ? body.detail : response.statusText;
-    throw new ApiError(response.status, detail);
+    const detail = typeof body.detail === "string" ? body.detail : (body.detail?.message ?? response.statusText);
+    throw new ApiError(response.status, typeof detail === "string" ? detail : response.statusText, body.detail);
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }

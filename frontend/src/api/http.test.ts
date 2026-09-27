@@ -31,6 +31,13 @@ it("turns an error's detail into an ApiError", async () => {
   expect(error).toMatchObject({ status: 422, message: "The plan's Devices says only 'N/A'." });
 });
 
+it("keeps a detail that says more than one sentence", async () => {
+  const detail = { message: "This Replay can't be exact.", reasons: ["The image is gone."] };
+  vi.stubGlobal("fetch", answer(409, { detail }));
+  const error = await request("/api/x").catch((e: unknown) => e);
+  expect(error).toMatchObject({ status: 409, message: "This Replay can't be exact.", detail });
+});
+
 it("says when DataLab no longer knows this browser", async () => {
   vi.stubGlobal("fetch", answer(401, {}));
   const signedOut = vi.fn();
