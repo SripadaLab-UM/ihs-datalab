@@ -2,13 +2,14 @@
 
 Each backup is a folder in `<data_dir>/backups/`:
 
-    backups/0.2.0/
+    backups/0.2.0-20260927-070102-3fa1c2/
         datalab.sqlite     the database as it was, one self-contained file
         manifest.json      which version took it, its schema, when, and a checksum
 
-The folder is named for the DataLab version about to change the database, so
-`backups/0.2.0/` is "the database just before 0.2.0 first touched it". A
-second backup for the same version gets `-2`, `-3`, and so on.
+The folder is named for the DataLab version about to change the database and
+when (plus a random part), so `backups/0.2.0-…/` is "the database just
+before 0.2.0 touched it". Names are never reused, even after older backups
+are removed.
 
 The copy is made with SQLite's online backup API, never by copying the file:
 while DataLab runs, recent changes sit in the write-ahead log (`-wal`) next to
@@ -25,11 +26,13 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
 import shutil
 import sqlite3
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -37,12 +40,19 @@ from pathlib import Path
 FOLDER = "backups"
 FILE = "datalab.sqlite"
 MANIFEST = "manifest.json"
-_INCOMING = ".incoming-"
+INCOMING = ".incoming-"
 # How many backups to keep. The oldest beyond this are removed after each new
-# one. (A `[backups]` section in settings.toml can set this later.)
+# one. (A `[backups]` section in settings.toml can set this later.) Backups
+# taken before a rollback replaced the database are never removed
+# automatically: they may hold the only copy of what the rollback dropped.
 KEEP = 3
+KEPT_REASONS = frozenset({"restore"})
 # Room to leave on the disk after a backup, beyond the backup itself.
 _SPARE_BYTES = 200 * 1024**2
+# Antivirus and search indexers on Windows briefly hold new files open.
+_RENAME_ATTEMPTS = 5
+
+log = logging.getLogger(__name__)
 
 
 class BackupFailed(RuntimeError):
@@ -120,7 +130,7 @@ def take_backup(
     folder.mkdir(parents=True, exist_ok=True)
     _remove_incomplete(folder)
     _check_space(source, folder)
-    incoming = folder / f"{_INCOMING}{secrets.token_hex(4)}"
+    incoming = folder / f"{INCOMING}{secrets.token_hex(4)}"
     incoming.mkdir()
     try:
         target_path = incoming / FILE
@@ -137,18 +147,19 @@ def take_backup(
         if status != "ok":
             raise BackupFailed(f"the backup copy failed SQLite's check: {status}")
         _fsync(target_path)
+        created = datetime.now().astimezone()
         backup = Backup(
-            folder=folder / _free_name(folder, app_version),
+            folder=folder / _free_name(folder, app_version, created),
             app_version=app_version,
             from_version=from_version,
             migrations=tuple(migrations),
-            created_at=datetime.now().astimezone().isoformat(timespec="microseconds"),
+            created_at=created.isoformat(timespec="microseconds"),
             sha256=_sha256(target_path),
             size_bytes=target_path.stat().st_size,
             reason=reason,
         )
         _write_json(incoming / MANIFEST, _manifest(backup))
-        incoming.rename(backup.folder)
+        _rename(incoming, backup.folder)
     except BaseException as error:
         shutil.rmtree(incoming, ignore_errors=True)
         if isinstance(error, (sqlite3.Error, OSError)):
@@ -193,15 +204,21 @@ def read_backup(entry: Path) -> Backup | None:
 def prune(folder: Path, keep: int, *, protect: tuple[str, ...] = ()) -> list[Path]:
     """Remove the oldest backups beyond `keep`; return the folders removed.
 
-    Only folders with a DataLab backup manifest are ever removed, and never
-    one named in `protect`.
+    Only folders with a DataLab backup manifest are ever removed, never one
+    named in `protect`, and never one taken before a rollback (those don't
+    count towards `keep`). A folder that can't be removed right now (a file
+    held open on Windows, say) is left for next time: the new backup is fine.
     """
-    backups = list_backups(folder)
+    backups = [b for b in list_backups(folder) if b.reason not in KEPT_REASONS]
     removed = []
     for backup in backups[: max(len(backups) - max(keep, 1), 0)]:
         if backup.name in protect:
             continue
-        shutil.rmtree(backup.folder)
+        try:
+            shutil.rmtree(backup.folder)
+        except OSError as error:
+            log.warning("Couldn't remove the old backup %s yet: %s", backup.name, error)
+            continue
         removed.append(backup.folder)
     return removed
 
@@ -215,18 +232,34 @@ def _manifest(backup: Backup) -> dict:
     return raw
 
 
-def _free_name(folder: Path, version: str) -> str:
-    base = re.sub(r"[^A-Za-z0-9._+-]", "-", version).strip(".") or "unknown"
-    name, n = base, 1
-    while (folder / name).exists():
-        n += 1
-        name = f"{base}-{n}"
-    return name
+def _free_name(folder: Path, version: str, created: datetime) -> str:
+    """A name no backup has had: the version, the time, and a random part.
+
+    The random part matters: a counter would give a new backup the name of
+    one just removed, and a marker still naming that one would then point
+    at a different backup.
+    """
+    safe = re.sub(r"[^A-Za-z0-9._+-]", "-", version).strip(".") or "unknown"
+    while True:
+        name = f"{safe}-{created:%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
+        if not (folder / name).exists():
+            return name
+
+
+def _rename(source: Path, target: Path) -> None:
+    for attempt in range(_RENAME_ATTEMPTS):
+        try:
+            source.rename(target)
+            return
+        except PermissionError:
+            if attempt == _RENAME_ATTEMPTS - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
 
 
 def _remove_incomplete(folder: Path) -> None:
     """Remove half-made backups left by a crash. They are only ever copies."""
-    for entry in folder.glob(f"{_INCOMING}*"):
+    for entry in folder.glob(f"{INCOMING}*"):
         shutil.rmtree(entry, ignore_errors=True)
 
 

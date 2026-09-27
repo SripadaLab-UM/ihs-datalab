@@ -48,9 +48,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Check the tag matches the package version
+        # Pre-releases included: v0.1.0-alpha.2 is version 0.1.0a2 (PEP 440),
+        # so each pre-release has its own version and updates can tell them apart.
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/datalab/__init__.py)
-          test "v$version" = "${GITHUB_REF_NAME%%-*}" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
+          tag=$(printf '%s' "${GITHUB_REF_NAME#v}" | sed -E \
+            -e 's/-(alpha|a)\.?([0-9]+)$/a\2/' -e 's/-(beta|b)\.?([0-9]+)$/b\2/' -e 's/-rc\.?([0-9]+)$/rc\1/')
+          test "$tag" = "$version" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
 
   image:
     needs: [checks, version]

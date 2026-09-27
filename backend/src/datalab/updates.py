@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import os
+import re
 import secrets
 import sqlite3
 from dataclasses import asdict, dataclass, replace
@@ -41,6 +43,8 @@ MARKER = "update-in-progress.json"
 STATES = ("started", "backed-up", "installed", "switched")
 _HISTORY = Path("logs") / "updates.jsonl"
 _MTIME_MARGIN = 2.0  # seconds
+
+log = logging.getLogger(__name__)
 
 
 class UpdateError(RuntimeError):
@@ -58,8 +62,11 @@ class Marker:
     state: str
     started_at: str
     updated_at: str
-    # The backup folder `begin()` made, once it's complete.
+    # The backup folder `begin()` made, once it's complete, and its checksum
+    # (so a different backup that later got the same name is never mistaken
+    # for it).
     backup: str | None = None
+    backup_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,7 +123,7 @@ def begin(data_dir: Path, database_file: Path, *, from_version: str, to_version:
             )
         finally:
             source.close()
-        marker = replace(marker, backup=backup.name)
+        marker = replace(marker, backup=backup.name, backup_sha256=backup.sha256)
     marker = replace(marker, state="backed-up", updated_at=_now())
     _write(data_dir, marker)
     return marker
@@ -140,7 +147,7 @@ def finish(data_dir: Path, app_version: str) -> Marker | None:
         marker = read_marker(data_dir)
     except UnreadableMarker:
         return None
-    if marker is None or marker.to_version != app_version:
+    if marker is None or not same_version(marker.to_version, app_version):
         return None
     _clear(data_dir, marker, "finished")
     return marker
@@ -158,10 +165,10 @@ def backup_covering(data_dir: Path, database_file: Path, app_version: str) -> Ba
         marker = read_marker(data_dir)
     except UnreadableMarker:
         return None
-    if marker is None or marker.to_version != app_version or marker.backup is None:
+    if marker is None or not same_version(marker.to_version, app_version):
         return None
-    backup = backups.read_backup(backups.backups_dir(database_file) / marker.backup)
-    if backup is None or not backup.verify():
+    backup = _update_backup(marker, database_file)
+    if backup is None:
         return None
     for path in (database_file, database_file.with_name(database_file.name + "-wal")):
         # An empty -wal is only a database being opened, not a change.
@@ -176,7 +183,7 @@ def from_version_for(data_dir: Path, app_version: str) -> str | None:
     """The version being updated from, if an update to `app_version` is under way."""
     with contextlib.suppress(UnreadableMarker):
         marker = read_marker(data_dir)
-        if marker is not None and marker.to_version == app_version:
+        if marker is not None and same_version(marker.to_version, app_version):
             return marker.from_version
     return None
 
@@ -191,7 +198,7 @@ def recover(
         return _unreadable(data_dir, database_file, app_version, known)
     if marker is None:
         return None
-    if marker.to_version == app_version:
+    if same_version(marker.to_version, app_version):
         # The new version is starting: its migrations run (with a backup) as
         # usual, and the marker is cleared once it's up.
         return Recovery(
@@ -210,21 +217,24 @@ def recover(
 
     # The new version had already changed the database when the update was
     # abandoned. Put back the update's backup, but only if that drops nothing.
-    if marker.backup is not None:
+    # If anything goes wrong on the way, leave it to the person.
+    backup = _update_backup(marker, database_file)
+    if backup is not None:
         try:
-            plan = rollback.plan(database_file, known, choose=marker.backup)
-        except rollback.RollbackRefused:
-            plan = None
-        if plan is not None and not plan.loses_data:
-            kept = rollback.restore(database_file, plan.backup, app_version=app_version)
-            _clear(data_dir, marker, "undone")
-            return Recovery(
-                "undone",
-                f"The update to {marker.to_version} was interrupted after it had changed "
-                f"the database. DataLab put back the backup taken just before "
-                f"({plan.backup.name}); nothing had been recorded since. The changed "
-                f"database is kept in backups/{kept.name}.",
-            )
+            plan = rollback.plan(database_file, known, choose=backup.name)
+            if not plan.loses_data:
+                kept = rollback.restore(database_file, plan.backup, app_version=app_version)
+                _clear(data_dir, marker, "undone")
+                carried = " (the Data accessed log was carried over)" if plan.carried else ""
+                return Recovery(
+                    "undone",
+                    f"The update to {marker.to_version} was interrupted after it had changed "
+                    f"the database. DataLab put back the backup taken just before "
+                    f"({plan.backup.name}); nothing else had been recorded since{carried}. "
+                    f"The changed database is kept in backups/{kept.name}.",
+                )
+        except (rollback.RollbackRefused, backups.BackupFailed, sqlite3.Error, OSError) as error:
+            log.warning("Couldn't undo the interrupted update automatically: %s", error)
     return Recovery(
         "needs-you",
         f"The update to {marker.to_version} was interrupted after it had changed the "
@@ -251,6 +261,35 @@ def _unreadable(data_dir: Path, database_file: Path, app_version: str, known: se
         "An update was interrupted before it changed anything, and left a note DataLab "
         f"couldn't read (kept as {aside.name}). Your data wasn't changed.",
     )
+
+
+def same_version(a: str, b: str) -> bool:
+    """Whether two version strings name the same release.
+
+    Accepts the package's form ("0.1.0a2") and the tag's ("v0.1.0-alpha.2"),
+    so a pre-release is never mistaken for the release it leads up to.
+    """
+    return _normal(a) == _normal(b)
+
+
+def _normal(version: str) -> str:
+    text = version.strip().lower().removeprefix("v")
+    text = re.sub(r"[-_.]?(alpha|a)[-_.]?(\d+)", r"a\2", text)
+    text = re.sub(r"[-_.]?(beta|b)[-_.]?(\d+)", r"b\2", text)
+    text = re.sub(r"[-_.]?(rc|c|pre|preview)[-_.]?(\d+)", r"rc\2", text)
+    return re.sub(r"[-_.]?dev[-_.]?(\d+)", r".dev\1", text)
+
+
+def _update_backup(marker: Marker, database_file: Path) -> Backup | None:
+    """The update's backup, if it's still there, whole, and the one it made."""
+    if marker.backup is None:
+        return None
+    backup = backups.read_backup(backups.backups_dir(database_file) / marker.backup)
+    if backup is None or not backup.verify():
+        return None
+    if marker.backup_sha256 is not None and backup.sha256 != marker.backup_sha256:
+        return None
+    return backup
 
 
 def _newer_migrations(database_file: Path, known: set[str]) -> list[str]:

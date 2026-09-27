@@ -89,22 +89,26 @@ available** pill, and the Storage view come later.
 before an update switches versions, DataLab backs up `datalab.sqlite`:
 
 ```
-backups/0.2.0/
-  datalab.sqlite    the database just before 0.2.0 first changed it
+backups/0.2.0-20260927-070102-3fa1c2/
+  datalab.sqlite    the database just before 0.2.0 changed it
   manifest.json     app_version, from_version, migrations and schema_version,
                     created_at, sha256, size_bytes, reason
 ```
 
-- The folder is named for the version about to change the database. A second
-  backup for the same version gets `-2`, `-3`, and so on.
+- The folder is named for the version about to change the database, the
+  time, and a random part. Names are never reused, even after older backups are removed.
 - The copy uses SQLite's online backup API, so changes still in the
   write-ahead log are included, and it's saved as one self-contained file.
   It's built in a hidden `.incoming-…` folder and renamed into place when
   complete, so a folder with a manifest is always a whole backup.
 - If the backup fails (for example, the disk is full), no migration runs and
   DataLab says so instead of starting.
-- The newest 3 backups are kept. Only folders with a DataLab manifest are ever
-  removed; anything else in `backups/` is left alone.
+- The newest 3 backups are kept. Backups taken before a rollback are never
+  removed automatically and don't count towards the 3, since they may hold
+  the only copy of what the rollback dropped. Only folders with a DataLab
+  manifest are ever removed; anything else in `backups/` is left alone. A
+  folder that can't be removed yet (a file held open by antivirus on Windows,
+  say) is left for next time.
 - `datalab backup` takes one by hand.
 
 **Rolling back.** A DataLab that finds migrations it doesn't have won't open
@@ -116,10 +120,19 @@ newest backup this version can read.
   checksum still matches. `--list` shows the backups; `--backup NAME` picks
   one.
 - It first lists what the restore drops: rows recorded or changed since the
-  backup, per table, naming new conversations. If there are any, it refuses
-  unless given `--yes`.
+  backup, per table, naming new conversations. A value in a column the older
+  layout doesn't have counts as a change unless it's that column's default.
+  If anything would be dropped, it refuses unless given `--yes`.
+- **The Data accessed log is never rolled back.** Its rows (`queries`, in
+  every layout since the first) are carried over, matched by id, into the
+  restored database before it replaces the current one, so the record of what
+  was queried always survives a rollback. If they can't be carried over, the
+  rollback doesn't happen. Only values in columns the older layout lacks stay
+  behind, in the "restore" backup, and they are listed as dropped.
 - It backs up the database it replaces (reason "restore"), so a rollback can
   itself be undone.
+- Rolling back to a release from before milestone 7 isn't supported: those
+  releases don't have `datalab rollback`, and don't refuse a newer database.
 
 **Only the database is rolled back.** Conversation workspaces, runs, query
 results, and repos stay as they are. They are the person's work, and putting
@@ -131,12 +144,16 @@ conversation made since the update keeps its folder, but the older DataLab no
 longer lists it. A rule for releases follows from this: a new version must
 not change the layout of files the previous version reads.
 
+**Versions.** Each pre-release has its own version: the package uses PEP 440
+(`0.1.0a2`) and the tag the same release (`v0.1.0-alpha.2`), and the release
+workflow checks they match. The marker compares versions in either form.
+
 **The update marker.** Whatever runs an update records its progress in
 `update-in-progress.json` (`datalab/updates.py`):
 
 1. `begin` once conversations have stopped: writes the marker ("started"),
-   backs up the database for the new version, and records the backup
-   ("backed-up").
+   backs up the database for the new version, and records the backup and its
+   checksum ("backed-up").
 2. `advance` to "installed" once the new version is installed beside the old
    one, and to "switched" once the launcher opens it.
 3. The new version starts. Its migrations reuse the update's backup if the
@@ -150,17 +167,20 @@ If the marker is still there at a start, the update was interrupted:
 - **The old version is starting and the database is unchanged:** the update
   is abandoned, the marker cleared, and the person told they can try again.
 - **The old version is starting, but the new one had already migrated the
-  database:** if nothing has been recorded since the backup, the backup is put
-  back automatically, keeping the changed database as a backup. Otherwise
-  nothing is changed, and DataLab tells the person to reopen the newer
-  version or run `datalab rollback`.
+  database:** if nothing but queries has been recorded since the backup, the
+  backup is put back automatically (with the Data accessed log carried over),
+  keeping the changed database as a backup. Otherwise, or if the backup isn't
+  the update's own or the restore fails, nothing is changed, and DataLab tells
+  the person to reopen the newer version or run `datalab rollback`.
 - **The marker can't be read:** if the database is one this version can use,
   the marker is set aside (kept for diagnostics) and DataLab starts.
 
 CI checks all of this on every change (`scripts/upgrade-rollback-test.py`): a
 data folder made by the previous release's own code is upgraded by the
-current code, checked row by row, rolled back, and checked again. It also
-fails if a released migration was changed or removed.
+current code, checked row by row, rolled back (refused first while DataLab
+is running, and without `--yes`), and checked again, including that a query
+recorded after the upgrade survives. It also fails if a migration in any
+released tag was changed or removed.
 
 ## Where DataLab keeps things
 

@@ -227,6 +227,10 @@ def _rollback(settings, args) -> int:
         f"{backup.created_at[:16].replace('T', ' ')} before DataLab {backup.app_version} "
         "changed the database."
     )
+    if plan.carried:
+        print("\nThe Data accessed log is kept: these are carried over into the restored database:")
+        for line in rollback.describe(plan.carried):
+            print(f"  {line}")
     if plan.loses_data:
         print("\nThat drops what was recorded in DataLab since then:")
         for line in rollback.describe(plan.losses):

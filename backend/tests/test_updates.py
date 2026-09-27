@@ -40,7 +40,7 @@ def test_an_update_records_its_progress_and_backs_up_first(data_dir):
     database = data_dir / "datalab.sqlite"
     marker = updates.begin(data_dir, database, from_version="0.1.0", to_version="0.2.0")
 
-    assert marker.state == "backed-up" and marker.backup == "0.2.0"
+    assert marker.state == "backed-up" and marker.backup.startswith("0.2.0-")
     [backup] = list_backups(data_dir / "backups")
     assert backup.reason == "update" and backup.from_version == "0.1.0"
     assert updates.read_marker(data_dir) == marker
@@ -64,7 +64,7 @@ def test_the_new_version_finishes_the_update_and_reuses_its_backup(data_dir, mon
     open_database(database, version="0.2.0").close()
 
     # The update's backup already held the database as it was: no second one.
-    assert [b.name for b in list_backups(data_dir / "backups")] == ["0.2.0"]
+    assert [b.reason for b in list_backups(data_dir / "backups")] == ["update"]
     assert updates.finish(data_dir, "0.1.0") is None  # not the version being installed
     assert updates.finish(data_dir, "0.2.0") is not None
     assert updates.read_marker(data_dir) is None
@@ -84,7 +84,7 @@ def test_a_database_changed_after_the_update_backup_is_backed_up_again(data_dir,
     open_database(database, version="0.2.0").close()
 
     found = list_backups(data_dir / "backups")
-    assert [b.name for b in found] == ["0.2.0", "0.2.0-2"]
+    assert [b.reason for b in found] == ["update", "migrate"]
     assert found[-1].reason == "migrate" and found[-1].from_version == "0.1.0"
     assert len(rows(found[-1].file, "conversations")) == 2
 
@@ -205,3 +205,61 @@ class TestStartup:
 
         assert serve() == 1
         assert "datalab rollback" in capsys.readouterr().out
+
+
+def test_versions_keep_their_pre_release_part():
+    assert updates.same_version("0.1.0a2", "v0.1.0-alpha.2")
+    assert updates.same_version("0.2.0rc1", "0.2.0-rc.1")
+    assert not updates.same_version("0.1.0", "0.1.0a1")
+    assert not updates.same_version("0.1.0a1", "0.1.0a2")
+
+
+def test_it_leaves_it_to_the_person_if_the_undo_fails(data_dir, monkeypatch):
+    database = data_dir / "datalab.sqlite"
+    updates.begin(data_dir, database, from_version="0.1.0", to_version="0.2.0")
+    use_migrations(monkeypatch, None)
+    open_database(database, version="0.2.0").close()
+    use_migrations(monkeypatch, FIRST)
+
+    def fails(*args, **kwargs):
+        raise updates.rollback.RollbackRefused("The restored database failed SQLite's check")
+
+    monkeypatch.setattr(updates.rollback, "restore", fails)
+    recovery = updates.recover(data_dir, database, app_version="0.1.0", known=older(data_dir))
+
+    assert recovery is not None and recovery.outcome == "needs-you"
+    assert updates.read_marker(data_dir) is not None
+
+
+def test_a_backup_that_isnt_the_updates_own_is_never_used(data_dir, monkeypatch):
+    database = data_dir / "datalab.sqlite"
+    marker = updates.begin(data_dir, database, from_version="0.1.0", to_version="0.2.0")
+    # Another backup under the same name, as if the first had been replaced.
+    path = updates.marker_path(data_dir)
+    path.write_text(path.read_text().replace(marker.backup_sha256 or "", "0" * 64))
+    use_migrations(monkeypatch, None)
+    open_database(database, version="0.2.0").close()
+    use_migrations(monkeypatch, FIRST)
+
+    recovery = updates.recover(data_dir, database, app_version="0.1.0", known=older(data_dir))
+
+    assert recovery is not None and recovery.outcome == "needs-you"
+
+
+def test_an_update_that_added_a_used_column_isnt_undone_silently(data_dir, monkeypatch, tmp_path):
+    from tests.test_backups import with_extra_migration
+
+    database = data_dir / "datalab.sqlite"
+    updates.begin(data_dir, database, from_version="0.1.0", to_version="0.3.0")
+    with_extra_migration(monkeypatch, tmp_path, "ALTER TABLE queries ADD COLUMN reviewer TEXT;")
+    connection = open_database(database, version="0.3.0")
+    connection.execute("UPDATE queries SET reviewer = 'second analyst'")
+    connection.close()
+    use_migrations(monkeypatch, FIRST)
+
+    recovery = updates.recover(data_dir, database, app_version="0.1.0", known=older(data_dir))
+
+    assert recovery is not None and recovery.outcome == "needs-you"
+    assert "reviewer" in [
+        c[1] for c in sqlite3.connect(database).execute("PRAGMA table_info(queries)")
+    ]
