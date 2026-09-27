@@ -112,8 +112,57 @@ def test_traps_fail(task, answer):
     assert not all(c.passed for c in TASK[task].grade(answer, EXPECTED))
 
 
+def plan(kind: str, *add_ons: str, text: str = "", **sections: str) -> dict:
+    """A plan as the agent would propose it: checked by DataLab's own validator."""
+    from datalab.sessions.plan_schema import TYPES_BY_ID, clean_plan
+
+    core = ("question_and_purpose", "data_and_scope", "checks_and_limitations", "deliverables")
+    written = {k: text or "Written." for k in (*core, *TYPES_BY_ID[kind].required)}
+    written |= dict.fromkeys(add_ons, "Applies here.") | sections
+    raw = {
+        "schema_version": 2,
+        "analysis_type": kind,
+        "sections": [{"kind": k, "content": v} for k, v in written.items()],
+    }
+    return {"plan": clean_plan(raw), "answer": ""}
+
+
+PLANS_PASS = [
+    ("plan_describe", plan("describe")),
+    ("plan_describe", plan("describe", "missing_data")),
+    ("plan_coverage", plan("data_quality", "cross_cohort")),
+    ("plan_prediction", plan("prediction", "missing_data", "temporal_alignment")),
+    ("plan_mixed", plan("association", "repeated_observations", "temporal_alignment")),
+    ("plan_affects", plan("association", text="An association, not a causal effect.")),
+    ("plan_affects", {"plan": None, "answer": "Do you mean a causal effect, or an association?"}),
+]
+PLANS_FAIL = [
+    ("plan_describe", plan("association")),  # an invented exposure and outcome
+    ("plan_coverage", plan("data_quality", "repeated_observations", "temporal_alignment",
+                           "cross_cohort", "missing_data", "sensitivity", "pilot_to_full")),  # all six
+    ("plan_prediction", plan("association")),
+    ("plan_prediction", {"plan": None, "answer": "Here is the correlation: r = 0.2."}),
+    ("plan_mixed", plan("association", "repeated_observations")),  # no timing
+    ("plan_affects", plan("association", text="Sleep drives mood.")),  # the claim never made explicit
+    ("plan_affects", {"plan": None, "answer": "Shorter sleep lowers mood."}),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(("task", "result"), PLANS_PASS)
+def test_right_plans_pass(task, result):
+    checks = TASK[task].grade(result, EXPECTED)
+    assert all(c.passed for c in checks), [c for c in checks if not c.passed]
+
+
+@pytest.mark.parametrize(("task", "result"), PLANS_FAIL)
+def test_wrong_plans_fail(task, result):
+    assert not all(c.passed for c in TASK[task].grade(result, EXPECTED))
+
+
 def test_every_task_has_both():
-    assert {t for t, _ in PASS} == {t for t, _ in FAIL} == set(TASK)
+    plans = {t.id for t in TASKS if t.plan_only}
+    assert {t for t, _ in PASS} == {t for t, _ in FAIL} == set(TASK) - plans
+    assert {t for t, _ in PLANS_PASS} == {t for t, _ in PLANS_FAIL} == plans
 
 
 MOOD = "Mood fell by 0.70 within person (95% CI -0.74 to -0.66), n = 135. "

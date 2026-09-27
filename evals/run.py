@@ -178,6 +178,7 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
     approvals: list[dict] = []
     answered: set[str] = set()
     stopped_at: float | None = None
+    proposed: dict | None = None  # a plan task's plan
     follow_up = ""
     follow_up_after = 0  # the seq after which the follow-up turn's events start
     turn_began = begun
@@ -193,11 +194,17 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
                 continue
             answered.add(data["id"])
             # Plans are approved as the agent wrote them; the helper is never used.
-            if data["kind"] == "analysis_plan":
+            # A plan task is over once its plan is proposed: it's sent back and
+            # the turn stopped, since the plan is what's graded.
+            if data["kind"] == "analysis_plan" and not task.plan_only:
                 body = {"approve": True, "plan": data["plan"]}
             else:
                 body = {"approve": False}
             reply = client.post(f"/api/conversations/{cid}/approvals/{data['id']}", json=body)
+            if data["kind"] == "analysis_plan" and task.plan_only and proposed is None:
+                proposed = data["plan"]
+                client.post(f"/api/conversations/{cid}/stop")
+                stopped_at = time.time()
             approvals.append(
                 {
                     "kind": data["kind"],
@@ -207,6 +214,8 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
                 }
             )
         done = [e for e in events if e["type"] == "turn_done"]
+        if task.plan_only and done:
+            break  # its plan was proposed (and the turn stopped), or it never proposed one
         if done and not follow_up and _asks_to_continue(events):
             # Analysis mode pilots first and asks before the full run; a
             # researcher would say go ahead. Once, and recorded.
@@ -238,12 +247,18 @@ def _run_task(client: httpx.Client, task, effort: str, expected: dict) -> dict:
     if not final and any(e["type"] == "turn_done" for e in events):
         final = [a for a in answers if a.get("phase") is None][-1:]
     answer = final[-1]["text"] if final else ""
-    checks = task.grade(answer, expected) if answer else []
+    if task.plan_only:
+        # The plan is what's graded; the turn was stopped once it was proposed.
+        checks = task.grade({"plan": proposed, "answer": answer}, expected)
+        finished = proposed is not None or any(e["type"] == "turn_done" for e in events)
+        answer = json.dumps(proposed, indent=2) if proposed else answer
+    else:
+        checks = task.grade(answer, expected) if answer else []
     # Graded on the first turn, and the answer says it's only a pilot.
     # Still a pilot: on the first turn by any pilot label; after the
     # follow-up only by an explicit one (full answers mention the pilot).
     still_pilot = _PILOT_AGAIN if follow_up else _PILOT_ONLY
-    if answer and re.search(still_pilot, answer[:600], re.IGNORECASE):
+    if not task.plan_only and answer and re.search(still_pilot, answer[:600], re.IGNORECASE):
         checks.append(Check("ran in full", False, "the answer is a pilot or preliminary result"))
     queries = _get(client, f"/api/conversations/{cid}/data-accessed")
     usage = [e for e in events if e["type"] == "usage"]
@@ -391,12 +406,15 @@ def _stop(server: subprocess.Popen, instance: str) -> None:
     a second SIGINT makes uvicorn skip its shutdown, which is what removes
     the session containers. Repeated SIGTERMs don't.
     """
-    try:
-        os.killpg(server.pid, signal.SIGTERM)
-        server.wait(timeout=90)
-    except (subprocess.TimeoutExpired, ProcessLookupError):
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(server.pid, signal.SIGKILL)
+    if server.poll() is not None:
+        pass  # it had already exited (it didn't start, say): nothing to signal
+    else:
+        try:
+            os.killpg(server.pid, signal.SIGTERM)
+            server.wait(timeout=90)
+        except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(server.pid, signal.SIGKILL)
     # Containers this run made that DataLab's shutdown didn't remove.
     if left := _containers(instance):
         subprocess.run(["docker", "rm", "-f", *left], capture_output=True)

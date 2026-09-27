@@ -18,6 +18,16 @@ Each task is built around a trap the synthetic data carries on purpose
 | `mood_change` | Within- vs between-person: low-mood interns answer less, so a pooled average understates the drop; n, uncertainty, no causal claim |
 | `phq9_sep` | Who counts as a participant in a survey; uncertainty |
 | `small_cells` | A count under 11 that must be suppressed (directly, as a percentage, or by subtraction) |
+| `plan_describe` | A descriptive question gets a describe plan, not an invented exposure and outcome |
+| `plan_coverage` | A coverage audit gets a data-quality plan, with no more than two add-on sections |
+| `plan_prediction` | A prediction question gets a prediction plan (validation, what's known when) |
+| `plan_mixed` | A within-person association, with timing and repeated observations as add-ons |
+| `plan_affects` | An "X affects Y" question: the intended claim made explicit in the plan, or asked about |
+
+The `plan_` tasks grade the plan the agent proposes, not an answer (DataLab's
+own checks already make it well formed; these check it's the right kind).
+The runner sends the plan back unapproved and stops the turn once it's
+proposed, so each takes a minute or two.
 
 What the agent can know is only what DataLab shows it. The synthetic
 database documents its conventions the way a documented database would,
@@ -43,7 +53,8 @@ keep running alongside: each instance labels its containers with its data
 folder and cleans up only its own. `--model gpt-5.6-sol` evaluates another
 approved model. `--repeat N` runs each task N times, for pass rates. Plans the agent proposes are approved as written; research-helper
 questions are declined; the rigor review is off, so each answer is graded
-as given.
+as given. For a `plan_` task the first plan is sent back instead, and the
+turn stopped.
 
 Results go to `results/<date>-<commit>/`: `SUMMARY.md` (every answer, with
 its checks), one JSON file per task, the expected answers, and the run's

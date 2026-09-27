@@ -21,6 +21,9 @@ import contextlib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
+
+from datalab.sessions.plan_schema import MODULES, TYPES_BY_ID
 
 
 @dataclass
@@ -36,7 +39,11 @@ class Task:
     mode: str
     prompt: str
     tests: str  # what the task is for
-    grade: Callable[[str, dict], list[Check]] = field(repr=False)
+    grade: Callable[[Any, dict], list[Check]] = field(repr=False)
+    # Graded on the plan the agent proposes, not an answer: `grade` gets
+    # {"plan": the first plan proposed, or None, "answer": the final answer}.
+    # The runner sends the plan back and stops the turn once it's proposed.
+    plan_only: bool = False
 
 
 # Numbers as written in answers: 7,443 · −0.69 · .69 · 4.93% · 7.4k.
@@ -466,6 +473,68 @@ def _small_cells(answer: str, e: dict) -> list[Check]:
     ]
 
 
+# Plans: does the agent pick the kind of analysis the question is, and add
+# only the sections it raises? Graded on the plan as proposed, before anyone
+# edits it.
+_ADD_ONS = {m.kind for m in MODULES}
+_CAUSAL = (r"\bcaus", r"\bnot (?:a )?(?:causal|cause)", r"\bassociation\b", r"\bconfound")
+
+
+def _plan_text(plan: dict) -> str:
+    parts = [plan.get("rationale", "")] + [s.get("content", "") for s in plan.get("sections", [])]
+    return "\n".join(parts)
+
+
+def _plan_grader(
+    types: set[str],
+    *,
+    max_add_ons: int = 2,
+    needs: tuple[str, ...] = (),
+    or_asks: bool = False,
+    claim: bool = False,
+) -> Callable[[dict, dict], list[Check]]:
+    """A grader for a plan: its type is one of `types`, it has the add-on
+    sections in `needs` and no more than `max_add_ons` in all, and (with
+    `claim`) it says whether the claim is causal. With `or_asks`, asking the
+    person what they mean instead of proposing is also right."""
+
+    def grade(result: dict, expected: dict) -> list[Check]:
+        plan, answer = result.get("plan"), result.get("answer", "")
+        if plan is None:
+            asked = or_asks and "?" in answer[-600:]
+            return [
+                Check(
+                    "proposed a plan",
+                    asked,
+                    "asked the person what they meant instead" if asked else "no plan was proposed",
+                )
+            ]
+        kind = plan.get("analysis_type")
+        add_ons = sorted(s["kind"] for s in plan.get("sections", []) if s.get("kind") in _ADD_ONS)
+        labels = " or ".join(TYPES_BY_ID[t].label for t in sorted(types))
+        checks = [
+            Check("type", kind in types, f"{labels} (proposed {kind})"),
+            Check(
+                "add-ons only where they apply",
+                len(add_ons) <= max_add_ons and all(k in add_ons for k in needs),
+                f"at most {max_add_ons}"
+                + (f", including {', '.join(needs)}" if needs else "")
+                + f" (proposed: {', '.join(add_ons) or 'none'})",
+            ),
+        ]
+        if claim:
+            checks.append(
+                Check(
+                    "says what claim is intended",
+                    mentions(_plan_text(plan), *_CAUSAL),
+                    "the plan says whether it's a causal claim or an association",
+                )
+            )
+        return checks
+
+    return grade
+
+
 TASKS = [
     Task("enrolled_count", "extraction",
          "How many participants are enrolled in the 2025 cohort?",
@@ -498,4 +567,28 @@ TASKS = [
          "Give me the distribution of answers to the PHQ-9 suicidal-thoughts item in the 2025 "
          "cohort's September survey.",
          "a small cell that must be suppressed", _small_cells),
+    Task("plan_describe", "analysis",
+         "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, "
+         "month by month.",
+         "plan type: a descriptive question gets a describe plan, not an invented exposure",
+         _plan_grader({"describe"}), plan_only=True),
+    Task("plan_coverage", "analysis",
+         "How complete is the 2025 cohort's Garmin daily data, month by month?",
+         "plan type: a coverage audit, with only the add-ons it needs",
+         _plan_grader({"data_quality"}), plan_only=True),
+    Task("plan_prediction", "analysis",
+         "Can Fitbit sleep in the first four weeks of the internship predict the September PHQ-9 "
+         "total in the 2025 cohort?",
+         "plan type: prediction, with validation and what's known at prediction time",
+         _plan_grader({"prediction"}), plan_only=True),
+    Task("plan_mixed", "analysis",
+         "Is a shorter night's sleep followed by lower mood the next day, within the same intern, "
+         "in the 2025 cohort?",
+         "plan type: association, with timing and repeated observations as add-ons",
+         _plan_grader({"association"}, max_add_ons=3,
+                      needs=("repeated_observations", "temporal_alignment")), plan_only=True),
+    Task("plan_affects", "analysis",
+         "Does sleeping less make interns' mood worse in the 2025 cohort?",
+         "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",
+         _plan_grader({"association"}, or_asks=True, claim=True), plan_only=True),
 ]  # fmt: skip
