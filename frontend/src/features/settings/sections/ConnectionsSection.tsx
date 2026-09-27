@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, type ReactNode, useState } from "react";
 
 import { type Connections, type ConnectionTest, settingsApi } from "@/api/settings";
-import { Button, Chip, Icon } from "@/components/ui";
+import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
 import { Section } from "./Section";
 
@@ -74,7 +74,9 @@ function Database({ connections, result }: { connections: Connections; result?: 
           </dd>
           <dt className="text-muted">Account</dt>
           <dd className="font-mono text-xs">{oracle.user}</dd>
-          <dt className="text-muted">Read-only roles</dt>
+          <dt className="flex items-center gap-1 text-muted">
+            Read-only roles <InfoTip term="read-only" />
+          </dt>
           <dd className="flex flex-wrap gap-1">
             {oracle.read_only_roles.length ? (
               oracle.read_only_roles.map((role) => <Chip key={role}>{role}</Chip>)

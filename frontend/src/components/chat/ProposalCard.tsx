@@ -7,7 +7,7 @@ import { ApiError } from "@/api/http";
 import { commitUrl, type Finding, knowledgeApi, type ProposalDetail, type ProposalFile } from "@/api/knowledge";
 import { CodeEditor, type EditorLanguage } from "@/components/editor/CodeEditor";
 import { DiffView } from "@/components/editor/DiffView";
-import { Button, Chip, Icon } from "@/components/ui";
+import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
 import { checkChips, proposalState, proposalTitle, saveBlocker } from "./activity";
 import type { KbProposalItem } from "./transcript";
@@ -290,7 +290,8 @@ function Review({
               {(accept.error ?? reject.error)?.message}
             </p>
           )}
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <InfoTip term="save--share" align="end" />
             <Button onClick={() => reject.mutate()} disabled={busy}>
               Discard
             </Button>

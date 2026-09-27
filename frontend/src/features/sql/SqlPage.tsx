@@ -8,7 +8,7 @@ import { api } from "@/api/client";
 import { type HistoryItem, type SqlCheck, type SqlRun, sqlApi } from "@/api/sql";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
-import { Button, Icon, Tabs } from "@/components/ui";
+import { Button, Icon, InfoTip, Tabs } from "@/components/ui";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
@@ -185,6 +185,7 @@ export function SqlPage() {
             >
               <Icon name="history" size={13} /> Save as workflow
             </Button>
+            <InfoTip term="workflow" align="end" />
           </div>
           {bindNames.length > 0 && (
             <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-3">

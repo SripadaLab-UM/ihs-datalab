@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { type PipelineFinding, type PipelineProposalDetail, pipelinesApi } from "@/api/pipelines";
 import { DiffView } from "@/components/editor/DiffView";
-import { Button, Chip, Icon } from "@/components/ui";
+import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
 import { ACTIONABLE, busy, languageOf, proposalChip, when } from "./pipelines";
 import { TestResults } from "./TestResults";
@@ -96,6 +96,7 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
           <Button variant="primary" onClick={() => accept.mutate()} disabled={!canSave}>
             <Icon name="send" size={13} /> Save &amp; share
           </Button>
+          <InfoTip term="save--share" />
           {discarding ? (
             <span role="group" aria-label="Discard this change?" className="flex flex-wrap items-center gap-2">
               <span className="font-sans text-[13px] text-ink">Discard it? Nothing is shared, and it can't be undone.</span>

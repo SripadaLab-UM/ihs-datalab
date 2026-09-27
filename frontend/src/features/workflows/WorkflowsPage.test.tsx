@@ -396,7 +396,7 @@ it("shows the replay check's reasons and asks before an inexact replay, and agai
   });
   vi.mocked(workflowsApi.replay).mockResolvedValue(summary({ id: "run_3", mode: "replay", status: "running" }));
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText("This Replay can't be exact:")).toBeInTheDocument();
   expect(within(dialog).getByText("DataLab's step wrapper has changed since this run.")).toBeInTheDocument();
@@ -446,7 +446,7 @@ it("replays an exact run without delivering unless asked", async () => {
   vi.mocked(workflowsApi.replayCheck).mockResolvedValue({ exact: true, reasons: [], blocking: [] });
   vi.mocked(workflowsApi.replay).mockResolvedValue(summary({ id: "run_3", mode: "replay", status: "running" }));
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText(/This Replay can be exact/)).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "Replay" }));
@@ -460,7 +460,7 @@ it("says why a run can't be replayed at all", async () => {
     blocking: ["This run's extracted inputs have been removed."],
   });
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText("This run's extracted inputs have been removed.")).toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Replay" })).toBeDisabled();
