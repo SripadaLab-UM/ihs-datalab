@@ -485,6 +485,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sql/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_sql_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_knowledge_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_workflows_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_pipelines_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_settings_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -680,6 +765,16 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** KnowledgeStatus */
+        KnowledgeStatus: {
+            /** Available */
+            available: boolean;
+            /**
+             * Repo
+             * @constant
+             */
+            repo: "not configured";
+        };
         /** ModeOut */
         ModeOut: {
             /** Id */
@@ -761,6 +856,11 @@ export interface components {
             path: string;
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** PipelinesStatus */
+        PipelinesStatus: {
+            /** Available */
+            available: boolean;
         };
         /** PlanLimitsOut */
         PlanLimitsOut: {
@@ -884,6 +984,11 @@ export interface components {
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
         };
+        /** SettingsStatus */
+        SettingsStatus: {
+            /** Available */
+            available: boolean;
+        };
         /** SkippedOut */
         SkippedOut: {
             /** Path */
@@ -892,6 +997,11 @@ export interface components {
             reason: string;
             /** Size */
             size: number | null;
+        };
+        /** SqlStatus */
+        SqlStatus: {
+            /** Available */
+            available: boolean;
         };
         /** ValidationError */
         ValidationError: {
@@ -905,6 +1015,11 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WorkflowsStatus */
+        WorkflowsStatus: {
+            /** Available */
+            available: boolean;
         };
     };
     responses: never;
@@ -1807,6 +1922,106 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SafetyReportOut"] | null;
+                };
+            };
+        };
+    };
+    status_api_sql_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SqlStatus"];
+                };
+            };
+        };
+    };
+    status_api_knowledge_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeStatus"];
+                };
+            };
+        };
+    };
+    status_api_workflows_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowsStatus"];
+                };
+            };
+        };
+    };
+    status_api_pipelines_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    status_api_settings_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsStatus"];
                 };
             };
         };

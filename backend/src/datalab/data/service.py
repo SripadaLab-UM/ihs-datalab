@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from datalab.config import QueryLimits
-from datalab.data.access_log import AccessLog
+from datalab.data.access_log import AccessLog, Origin, check_owner
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
 from datalab.data.sqlcheck import SqlRejected, check_sql
@@ -77,8 +77,15 @@ class DataService:
         binds: Mapping[str, Any] | None,
         results_dir: Path,
         preview_rows: int | None = None,
+        origin: Origin = "conversation",
     ) -> QueryOutcome:
-        """Check, run, and log one query. Raises SqlRejected or QueryFailed."""
+        """Check, run, and log one query. Raises SqlRejected or QueryFailed.
+
+        `session_id` is the query's owner: a conversation id, or a playground
+        (`pg_…`) or workflow run (`run_…`) id, matching `origin`.
+        """
+        # Before anything is logged or run: a wrong owner is a bug in DataLab.
+        check_owner(origin, session_id)
         query_id = _new_query_id()
         binds = dict(binds or {})
         try:
@@ -88,7 +95,11 @@ class DataService:
             _check_binds(checked.binds, binds)
         except SqlRejected as rejection:
             self._log.rejected(
-                query_id=query_id, session_id=session_id, sql=sql, reason=str(rejection)
+                query_id=query_id,
+                session_id=session_id,
+                sql=sql,
+                reason=str(rejection),
+                origin=origin,
             )
             raise
 
@@ -96,7 +107,12 @@ class DataService:
         results_dir.mkdir(parents=True, exist_ok=True)
         out_path = results_dir / f"{query_id}.csv"
         self._log.started(
-            query_id=query_id, session_id=session_id, sql=checked.sql, binds=binds, tables=tables
+            query_id=query_id,
+            session_id=session_id,
+            sql=checked.sql,
+            binds=binds,
+            tables=tables,
+            origin=origin,
         )
         cancel = threading.Event()
         try:

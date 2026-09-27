@@ -309,10 +309,17 @@ access. It never gains it.
 
 ### Shared knowledge base
 
-- The knowledge base is a git repository synced with GitHub. It is mounted
-  **read-only** into every container, in both session types.
-- Agents propose edits as diffs. Only a person saves and pushes, and they see
-  the exact diff first.
+- The knowledge base is a git repository synced with GitHub. The synced
+  clone stays on the host, and **no container sees it**.
+- Each session gets its own **editable copy** at `/work/kb`, made fresh from
+  the synced clone when the session starts, in both session types. The agent
+  edits pages there like any other file in `/work`.
+- After each turn, DataLab compares the copy in that turn's checkpoint (never
+  the live folder) with the version it was copied from. Any difference
+  becomes a proposed-edit card with the exact diff. Only a person saves and
+  pushes.
+- An edit in one session's copy changes nothing outside that session: other
+  sessions, and the shared repo, only see it once it is saved.
 - Git operations run in DataLab's host process with the user's GitHub token,
   which is stored in the OS keychain. The token never enters a container.
 - Before sharing, DataLab scans the diff for things that look like row-level

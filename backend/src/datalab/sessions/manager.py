@@ -15,7 +15,7 @@ import os
 import shutil
 import time
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, Literal
 
 from datalab.config import Settings, default_data_dir
 from datalab.sessions import modes, rigor
@@ -23,6 +23,7 @@ from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths, instance_of
 from datalab.sessions.helper import ResearchHelper
+from datalab.sessions.hooks import AfterTurnHook, MountProvider, TurnInfo, mount_problem
 from datalab.sessions.inputs import (
     AttachmentStore,
     is_sample,
@@ -74,6 +75,8 @@ _OWN_TURN_EVENTS = frozenset({"files_restored", "input_attached", "input_removed
 _TURN_STARTS = frozenset({"user_message", "review_started"})
 # Model trouble that picking up again won't fix.
 _NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
+# How long each after-turn hook may take before it's given up on.
+AFTER_TURN_SECONDS = 120
 
 
 class Busy(RuntimeError):
@@ -111,6 +114,19 @@ class SessionManager:
         # Conversations whose next turn is being set up (between the busy
         # check and the turn's task starting), so a restore can't slip in.
         self._starting: set[str] = set()
+        # Extension points for later milestones (see hooks.py).
+        self._after_turn: list[AfterTurnHook] = []
+        self._mount_providers: list[MountProvider] = []
+
+    def register_after_turn(self, hook: AfterTurnHook) -> None:
+        """Run `await hook(conversation_id, turn_info)` after every turn,
+        once its checkpoint, number check and review are done."""
+        self._after_turn.append(hook)
+
+    def register_mounts(self, provider: MountProvider) -> None:
+        """Add `provider(conversation)`'s read-only mounts to each container
+        the conversation starts from now on."""
+        self._mount_providers.append(provider)
 
     def paths(self, conversation_id: str) -> SessionPaths:
         return SessionPaths(self._settings.data_dir / "sessions" / conversation_id)
@@ -198,9 +214,12 @@ class SessionManager:
             began = self._work_began(conversation_id, asked)
             await self._review(conversation_id, runtime, began.seq, str(began.data.get("text", "")))
             runtime.take_evidence()
+            checkpoint = None
             if runtime.ran_commands():
                 label = f"After turn {turn}'s review"
-                await self._checkpoint(conversation_id, runtime, turn, label)
+                checkpoint = await self._checkpoint(conversation_id, runtime, turn, label)
+            info = TurnInfo(turn, "completed", began.seq, checkpoint, review_only=True)
+            await self._run_after_turn(conversation_id, info)
         finally:
             if self._turns.get(conversation_id) is asyncio.current_task():
                 del self._turns[conversation_id]
@@ -434,10 +453,29 @@ class SessionManager:
             host_port=self._settings.port,
             profile=self._settings.profile,
             instance=instance_of(self._settings.data_dir),
-            extra_mounts=(lambda: self._input_mounts(conversation_id))
-            if self._attachments
-            else None,
+            extra_mounts=lambda: self._extra_mounts(conversation_id),
         )
+
+    def _extra_mounts(self, conversation_id: str) -> list[str]:
+        """Mounts beyond DataLab's own: attachments, then what providers add."""
+        mounts = self._input_mounts(conversation_id) if self._attachments else []
+        conversation = self._store.get(conversation_id) if self._mount_providers else None
+        if conversation is None:
+            return mounts
+        for provider in self._mount_providers:
+            try:
+                provided = provider(conversation)
+            except Exception:
+                # The container starts without them rather than not at all.
+                log.exception("a mount provider failed in %s", conversation_id)
+                continue
+            for mount in provided:
+                problem = mount_problem(mount)
+                if problem is None:
+                    mounts += mount.args()
+                else:
+                    log.warning("not mounting %s in %s: %s", mount.target, conversation_id, problem)
+        return mounts
 
     def _input_mounts(self, conversation_id: str) -> list[str]:
         """Mounts for the attachments that still pass every check, right now."""
@@ -474,8 +512,9 @@ class SessionManager:
 
     async def _checkpoint(
         self, conversation_id: str, runtime: SessionRuntime, turn: int, label: str = ""
-    ) -> None:
-        """Checkpoint /work after a turn, with the container frozen meanwhile."""
+    ) -> int | None:
+        """Checkpoint /work after a turn, with the container frozen meanwhile.
+        Its number, or None if it couldn't be saved."""
         containers = runtime.containers
         checkpoints = self.checkpoints(conversation_id)
         failed = {"text": "DataLab couldn't save a checkpoint of the files after this turn."}
@@ -488,7 +527,7 @@ class SessionManager:
                     "checkpoint of the files after this turn."
                 },
             )
-            return
+            return None
         try:
             await containers.pause()
             take = asyncio.ensure_future(
@@ -504,11 +543,11 @@ class SessionManager:
         except DockerError:
             log.exception("couldn't pause %s for a checkpoint", conversation_id)
             self._store.append(conversation_id, "notice", failed)
-            return
+            return None
         except Exception:
             log.exception("checkpoint failed in %s", conversation_id)
             self._store.append(conversation_id, "notice", failed)
-            return
+            return None
         finally:
             # Always, even if cancelled: a paused agent can't work.
             with contextlib.suppress(DockerError):
@@ -524,6 +563,7 @@ class SessionManager:
                 "skipped": len(checkpoint.skipped),
             },
         )
+        return checkpoint.number
 
     def _runtime(self, conversation: Conversation) -> SessionRuntime:
         runtime = self._runtimes.get(conversation.id)
@@ -557,9 +597,12 @@ class SessionManager:
         turn: int,
     ) -> None:
         started = self._store.last(conversation_id, "user_message")
+        since = started.seq if started else 0
         completed = False
+        status = "failed"
         try:
             result = await runtime.send(text, effort=effort)
+            status = result.status
             completed = result.status == "completed"
             if not completed and result.error:
                 self._store.append(conversation_id, "error", {"message": result.error})
@@ -578,32 +621,57 @@ class SessionManager:
             self._last_used[conversation_id] = time.monotonic()
         try:
             # Still part of the turn, so nothing else can start until it's saved.
-            await self._checkpoint(conversation_id, runtime, turn)
-            if not completed:
-                return
-            since = started.seq if started else 0
-            evidence = runtime.take_evidence()
-            ran_commands = runtime.ran_commands()
-            claims = await self._trace(conversation_id, since, evidence)
-            conversation = self._store.get(conversation_id)
-            # Reviewed only if there's something to review (work was done, or
-            # the answer states numbers), and not if the person pressed Stop.
-            wanted = conversation is not None and conversation.rigor_review
-            if wanted and (ran_commands or evidence or claims) and not runtime.stop_requested:
-                began = self._work_began(conversation_id, started) if started else None
-                question = str(began.data.get("text", "")) if began else ""
-                await self._review(conversation_id, runtime, began.seq if began else 0, question)
-                runtime.take_evidence()
-                if runtime.ran_commands():
-                    # The review ran commands, which could have changed files.
-                    label = f"After turn {turn}'s review"
-                    await self._checkpoint(conversation_id, runtime, turn, label)
+            checkpoint = await self._checkpoint(conversation_id, runtime, turn)
+            if completed:
+                checkpoint = await self._trace_and_review(
+                    conversation_id, runtime, started, turn, checkpoint
+                )
+            info = TurnInfo(turn, _turn_status(status), since, checkpoint)
+            await self._run_after_turn(conversation_id, info)
         finally:
             # The turn, with its checkpoint, trace, and review, is over: no
             # longer busy by the time the chat hears so.
             if self._turns.get(conversation_id) is asyncio.current_task():
                 del self._turns[conversation_id]
             self._store.append(conversation_id, "turn_done", {})
+
+    async def _trace_and_review(
+        self,
+        conversation_id: str,
+        runtime: SessionRuntime,
+        started: Event | None,
+        turn: int,
+        checkpoint: int | None,
+    ) -> int | None:
+        """A completed turn's number check, then its rigor review if wanted.
+        The checkpoint of /work afterwards."""
+        since = started.seq if started else 0
+        evidence = runtime.take_evidence()
+        ran_commands = runtime.ran_commands()
+        claims = await self._trace(conversation_id, since, evidence)
+        conversation = self._store.get(conversation_id)
+        # Reviewed only if there's something to review (work was done, or
+        # the answer states numbers), and not if the person pressed Stop.
+        wanted = conversation is not None and conversation.rigor_review
+        if wanted and (ran_commands or evidence or claims) and not runtime.stop_requested:
+            began = self._work_began(conversation_id, started) if started else None
+            question = str(began.data.get("text", "")) if began else ""
+            await self._review(conversation_id, runtime, began.seq if began else 0, question)
+            runtime.take_evidence()
+            if runtime.ran_commands():
+                # The review ran commands, which could have changed files.
+                label = f"After turn {turn}'s review"
+                checkpoint = await self._checkpoint(conversation_id, runtime, turn, label)
+        return checkpoint
+
+    async def _run_after_turn(self, conversation_id: str, info: TurnInfo) -> None:
+        """Each after-turn hook in turn, each on its own: one that fails or
+        takes too long is logged, and the others and the turn carry on."""
+        for hook in list(self._after_turn):
+            try:
+                await asyncio.wait_for(hook(conversation_id, info), AFTER_TURN_SECONDS)
+            except Exception:
+                log.exception("an after-turn hook failed in %s", conversation_id)
 
     def _end_cut_off_turn(self, conversation_id: str) -> bool:
         """End a turn the log shows still going: what was running (the agent's
@@ -772,6 +840,12 @@ class SessionManager:
         runtime = self._runtimes.pop(conversation_id, None)
         if runtime:
             await runtime.close()
+
+
+def _turn_status(status: str) -> Literal["completed", "interrupted", "failed"]:
+    if status in ("completed", "interrupted"):
+        return status  # type: ignore[return-value]
+    return "failed"
 
 
 def _enough_disk(folder, settings: Settings) -> bool:

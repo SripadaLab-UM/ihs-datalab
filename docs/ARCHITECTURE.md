@@ -67,7 +67,7 @@ Modules:
 
 ```
 src/datalab/
-  main.py           app factory, startup and shutdown, serves the built frontend
+  app.py            app factory, startup and shutdown, serves the built frontend
   config.py         the ~15 settings; defaults plus the user's settings file
   db/               SQLite connection, migrations/*.sql, small query helpers
   api/              one router per area: conversations, sql, workflows,
@@ -86,7 +86,50 @@ src/datalab/
   safety/           the Safety check tests
   connect/          outside-tool connector: tokens, scopes, MCP server
   credentials.py    keychain get/set
+  datalock.py       one DataLab per data folder (see below)
 ```
+
+**Seams for the parallel milestones.** So that milestones 4 to 7 can be
+built side by side without editing the same core files, each area has its
+own slot, and the shared modules offer extension points:
+
+- **Routers.** `api/sql.py`, `api/knowledge.py`, `api/workflows.py`,
+  `api/pipelines.py`, and `api/settings.py` each have a
+  `build_<name>_router(services)` under `/api/<name>`, registered once in
+  `create_app`. `services` is a small frozen dataclass in the same module
+  (`SqlServices`, `KnowledgeServices`, …) holding what that area uses. Each
+  starts with only `GET /api/<name>/status`.
+- **Query origin.** `DataService.run_query(..., origin=)` and the access log
+  record what a query was for: `conversation` (the default), `playground`,
+  or `run`. `session_id` stays the owner: a conversation id, a `pg_…`
+  Playground id, or a `run_…` workflow run id; a mismatch is refused.
+  `AccessLog.for_origin(origin, owner)` lists one owner's queries, and
+  `for_session` stays the conversation's Data accessed panel.
+- **Settings.** `settings.toml` has `[playground]`, `[repos]`, `[workflows]`,
+  and `[updates]` tables, read into frozen dataclasses on `Settings`
+  (`PlaygroundSettings`, …). Unknown keys and wrong types are refused.
+- **Session hooks** (`sessions/hooks.py`), registered on the
+  `SessionManager`:
+  - `register_after_turn(async fn(conversation_id, turn_info))` runs after
+    every turn's checkpoint, number check, and review, before `turn_done`.
+    `TurnInfo` gives the turn number, how it ended, where its events start,
+    and the checkpoint to read files from. Each hook has a time limit, and
+    one that fails is logged without affecting the turn. Knowledge uses it
+    to diff `/work/kb`.
+  - `register_mounts(fn(conversation) -> list[Mount])` adds read-only mounts
+    when a conversation's container starts, alongside its attachments.
+    Mounts at or inside `/work`, `/codex-home`, `/data`, or `/inputs` are
+    refused.
+- **Migrations** are numbered per area, so branches don't collide: 0007
+  knowledge, 0008 workflow runs, 0009 update metadata (see
+  `db/migrations/README.md`).
+- **Data-folder lock.** `serve` (and `try` and `safety-check`) take an
+  exclusive lock on `<data folder>/.lock` before anything else (`fcntl.flock`
+  on Mac and Linux, `msvcrt.locking` on Windows, and a process-id check where
+  a file system has no locks). A second DataLab on the same folder is
+  refused with a message: two launches at once could both pass the port
+  check, and the second would then remove the first's containers and end
+  its turns.
 
 ### 2. Sessions and the Codex adapter
 

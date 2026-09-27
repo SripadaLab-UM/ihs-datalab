@@ -20,7 +20,12 @@ from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
 from datalab.api.inputs import build_inputs_router
+from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
+from datalab.api.pipelines import PipelineServices, build_pipelines_router
 from datalab.api.safety import build_safety_router
+from datalab.api.settings import SettingsServices, build_settings_router
+from datalab.api.sql import SqlServices, build_sql_router
+from datalab.api.workflows import WorkflowServices, build_workflows_router
 from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
 from datalab.data.access_log import AccessLog
@@ -203,6 +208,18 @@ def create_app(
     app.state.canaries = canaries
     app.state.safety = safety
     app.include_router(build_safety_router(safety, settings.data_dir / "logs" / "safety-last.json"))
+    # The areas still being built. Each gets what it needs here, once, and
+    # otherwise changes only its own module (and registers any session hooks
+    # or mounts from there).
+    app.include_router(build_sql_router(SqlServices(settings, data, catalog, access_log)))
+    app.include_router(
+        build_knowledge_router(KnowledgeServices(settings, connection, conversations, sessions))
+    )
+    app.include_router(
+        build_workflows_router(WorkflowServices(settings, connection, data, access_log))
+    )
+    app.include_router(build_pipelines_router(PipelineServices(settings, conversations, sessions)))
+    app.include_router(build_settings_router(SettingsServices(settings, connection)))
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser

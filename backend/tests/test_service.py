@@ -120,3 +120,44 @@ async def test_concurrency_is_limited(tmp_path, log):
     for task in (first, second):
         task.cancel()
     await asyncio.gather(first, second, return_exceptions=True)
+
+
+async def test_queries_are_listed_by_origin_and_owner(tmp_path, log):
+    svc = service(FakeDatabase(), log)
+    await svc.run_query(session_id="c_1", sql=SQL, binds={"d": 1}, results_dir=tmp_path)
+    await svc.run_query(
+        session_id="pg_1", sql=SQL, binds={"d": 1}, results_dir=tmp_path, origin="playground"
+    )
+    with pytest.raises(SqlRejected):
+        await svc.run_query(
+            session_id="run_1", sql="DELETE FROM X", binds=None, results_dir=tmp_path, origin="run"
+        )
+    # The conversation's panel shows only its own queries, as before.
+    [mine] = log.for_session("c_1")
+    assert mine.origin == "conversation"
+    assert log.for_origin("conversation", "c_1") == [mine]
+    [playground] = log.for_origin("playground", "pg_1")
+    assert (playground.origin, playground.status) == ("playground", "succeeded")
+    [run] = log.for_origin("run", "run_1")
+    assert (run.origin, run.status) == ("run", "rejected")
+    assert log.for_origin("run", "run_2") == []
+    # The audit log says what each query was for.
+    assert [e["origin"] for e in audit_entries(tmp_path)] == ["conversation", "playground", "run"]
+
+
+@pytest.mark.parametrize(
+    ("origin", "owner"),
+    [("playground", "c_1"), ("run", "pg_1"), ("conversation", "run_1"), ("conversation", "pg_x")],
+)
+async def test_an_owner_that_doesnt_match_its_origin_is_refused_before_anything_runs(
+    tmp_path, log, origin, owner
+):
+    database = FakeDatabase()
+    with pytest.raises(ValueError, match=r"owner id|can't have"):
+        await service(database, log).run_query(
+            session_id=owner, sql=SQL, binds={"d": 1}, results_dir=tmp_path, origin=origin
+        )
+    assert database.calls == []
+    assert not (tmp_path / "logs" / "audit.jsonl").exists() or audit_entries(tmp_path) == []
+    with pytest.raises(ValueError):
+        log.for_origin(origin, owner)

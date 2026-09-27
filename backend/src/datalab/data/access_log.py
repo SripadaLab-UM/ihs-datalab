@@ -5,6 +5,10 @@ Two stores, on purpose:
   user's own Data accessed panel. It is local conversation data;
 - `logs/audit.jsonl` is append-only and metadata only: a fingerprint of the
   SQL, the tables touched, sizes and timings, and never SQL text or values.
+
+Each query has an origin, what it was run for, and an owner (`session_id`):
+a conversation (its id), the SQL Playground (a `pg_…` id), or a workflow run
+(a `run_…` id). A panel lists one owner's queries with `for_origin`.
 """
 
 from __future__ import annotations
@@ -16,7 +20,24 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, get_args
+
+Origin = Literal["conversation", "playground", "run"]
+ORIGINS: frozenset[str] = frozenset(get_args(Origin))
+# The owner ids of queries that aren't a conversation's start with these.
+_OWNER_PREFIXES = {"playground": "pg_", "run": "run_"}
+
+
+def check_owner(origin: str, owner_id: str) -> None:
+    """Refuse an owner id that doesn't match its origin, so one kind of
+    owner's queries can never be listed as another's."""
+    if origin not in ORIGINS:
+        raise ValueError(f"Unknown query origin: {origin!r}")
+    prefix = _OWNER_PREFIXES.get(origin)
+    if prefix is not None and not owner_id.startswith(prefix):
+        raise ValueError(f"A {origin} query's owner id must start with {prefix!r}")
+    if prefix is None and owner_id.startswith(tuple(_OWNER_PREFIXES.values())):
+        raise ValueError("A conversation's query can't have a playground or run id")
 
 
 @dataclass(frozen=True)
@@ -34,6 +55,7 @@ class QueryRecord:
     elapsed_ms: int | None
     result_path: str | None
     message: str | None
+    origin: Origin = "conversation"
 
 
 class AccessLog:
@@ -44,13 +66,21 @@ class AccessLog:
         audit_file.parent.mkdir(parents=True, exist_ok=True)
 
     def started(
-        self, *, query_id: str, session_id: str, sql: str, binds: dict[str, Any], tables: list[str]
+        self,
+        *,
+        query_id: str,
+        session_id: str,
+        sql: str,
+        binds: dict[str, Any],
+        tables: list[str],
+        origin: Origin = "conversation",
     ) -> None:
+        check_owner(origin, session_id)
         with self._lock:
             self._db.execute(
-                "INSERT INTO queries (id, session_id, started_at, status, sql_text, binds_json, "
-                "tables_json) VALUES (?, ?, ?, 'running', ?, ?, ?)",
-                (query_id, session_id, _now(), sql, _json(binds), _json(tables)),
+                "INSERT INTO queries (id, session_id, origin, started_at, status, sql_text, "
+                "binds_json, tables_json) VALUES (?, ?, ?, ?, 'running', ?, ?, ?)",
+                (query_id, session_id, origin, _now(), sql, _json(binds), _json(tables)),
             )
 
     def finished(
@@ -83,9 +113,19 @@ class AccessLog:
             if record:
                 self._append_audit(record)
 
-    def rejected(self, *, query_id: str, session_id: str, sql: str, reason: str) -> None:
+    def rejected(
+        self,
+        *,
+        query_id: str,
+        session_id: str,
+        sql: str,
+        reason: str,
+        origin: Origin = "conversation",
+    ) -> None:
         """A query the SQL check refused. It never reached the database."""
-        self.started(query_id=query_id, session_id=session_id, sql=sql, binds={}, tables=[])
+        self.started(
+            query_id=query_id, session_id=session_id, sql=sql, binds={}, tables=[], origin=origin
+        )
         self.finished(query_id, status="rejected", message=reason)
 
     def record_export(
@@ -104,9 +144,16 @@ class AccessLog:
             handle.write(json.dumps(entry) + "\n")
 
     def for_session(self, session_id: str) -> list[QueryRecord]:
+        """A conversation's queries (its Data accessed panel)."""
+        return self.for_origin("conversation", session_id)
+
+    def for_origin(self, origin: Origin, owner_id: str) -> list[QueryRecord]:
+        """One owner's queries, oldest first: a conversation's, a playground's, or a run's."""
+        check_owner(origin, owner_id)
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM queries WHERE session_id = ? ORDER BY started_at", (session_id,)
+                "SELECT * FROM queries WHERE origin = ? AND session_id = ? ORDER BY started_at",
+                (origin, owner_id),
             ).fetchall()
         return [_record(row) for row in rows]
 
@@ -118,6 +165,7 @@ class AccessLog:
         entry = {
             "ts": record.finished_at,
             "query_id": record.id,
+            "origin": record.origin,
             "session_id": record.session_id,
             "status": record.status,
             "sql_sha256": hashlib.sha256(record.sql_text.encode()).hexdigest(),
@@ -146,6 +194,7 @@ def _record(row: sqlite3.Row) -> QueryRecord:
         elapsed_ms=row["elapsed_ms"],
         result_path=row["result_path"],
         message=row["message"],
+        origin=row["origin"],
     )
 
 

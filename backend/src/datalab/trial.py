@@ -16,6 +16,7 @@ import uvicorn
 
 from datalab.app import create_app
 from datalab.config import Settings
+from datalab.datalock import refuse_second_instance
 from datalab.safety import SafetyReport
 from datalab.sessions.containers import SessionContainers, SessionPaths, instance_of
 from datalab.sessions.runtime import SessionRuntime
@@ -32,7 +33,10 @@ def refuse_if_running(settings: Settings) -> None:
 
     Starting a second copy would clean up the running one's session
     containers at startup, and then fail anyway because its port is taken.
+    The data folder's lock comes first (two launches at once could both find
+    the port free), and is held until this process exits.
     """
+    refuse_second_instance(settings.data_dir, settings.profile)
     with socket.socket() as probe:
         probe.settimeout(0.5)
         if probe.connect_ex(("127.0.0.1", settings.port)) == 0:

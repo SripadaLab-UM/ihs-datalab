@@ -129,6 +129,33 @@ class SessionPaths:
 
 
 @dataclass(frozen=True)
+class Mount:
+    """A host file or folder mounted read-only into the agent's container.
+
+    Always read-only: DataLab never trusts a folder the agent can write to
+    (see docs/ARCHITECTURE.md §2), and /work is the agent's one such folder.
+    """
+
+    source: Path
+    # Where it appears in the container: an absolute path.
+    target: str
+
+    def args(self) -> list[str]:
+        """The `docker run` arguments for this mount."""
+        # --mount (not -v) so a missing source is an error, never an empty
+        # folder, and colons in Windows paths aren't misread. Values are
+        # CSV-quoted, so commas and quotes in names are safe.
+        fields = ["type=bind", f"source={self.source}", f"target={self.target}", "readonly"]
+        return ["--mount", ",".join(_csv_field(f) for f in fields)]
+
+
+def _csv_field(value: str) -> str:
+    if any(c in value for c in ',"\n\r'):
+        return '"' + value.replace('"', '""') + '"'
+    return value
+
+
+@dataclass(frozen=True)
 class ContainerLimits:
     memory: str = "4g"
     cpus: str = "2"

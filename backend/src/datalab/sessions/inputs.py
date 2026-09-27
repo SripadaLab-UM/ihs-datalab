@@ -21,6 +21,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal
 
+from datalab.sessions.containers import Mount
+
 InputKind = Literal["file", "folder"]
 
 # Inside the home folder: credentials and app data. Also refused: every file
@@ -229,12 +231,7 @@ def mount_args(attachments: list[Attachment]) -> list[str]:
     """
     args: list[str] = []
     for item in attachments:
-        # --mount (not -v) so a missing source is an error, never an empty
-        # folder, and colons in Windows paths aren't misread. Values are
-        # CSV-quoted, so commas and quotes in names are safe.
-        source, target = f"source={item.host_path}", f"target={item.container_path}"
-        fields = ["type=bind", source, target, "readonly"]
-        args += ["--mount", ",".join(_csv_field(f) for f in fields)]
+        args += Mount(Path(item.host_path), item.container_path).args()
     return args
 
 
@@ -258,12 +255,6 @@ def _key(path: Path) -> str:
     """Paths compared the way the disk does: Mac and Windows ignore case."""
     text = str(path).replace("\\", "/")
     return text.casefold() if sys.platform in ("darwin", "win32") else text
-
-
-def _csv_field(value: str) -> str:
-    if any(c in value for c in ',"\n\r'):
-        return '"' + value.replace('"', '""') + '"'
-    return value
 
 
 class AttachmentStore:

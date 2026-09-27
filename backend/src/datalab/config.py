@@ -11,9 +11,9 @@ from __future__ import annotations
 import os
 import sys
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 Profile = Literal["real", "practice"]
 
@@ -50,6 +50,73 @@ class QueryLimits:
     max_concurrent_queries: int = 2
 
 
+# One section of settings.toml per later area of DataLab. Each starts with
+# the few fields known now, with safe defaults; the milestone that builds the
+# area adds what it needs here, and nowhere else in this file.
+
+
+@dataclass(frozen=True)
+class PlaygroundSettings:
+    """`[playground]`: the SQL Playground (milestone 4).
+
+    To come: how long results are kept, saved queries, a history limit.
+    Queries themselves keep the data service's limits (`[limits]`).
+    """
+
+    # Rows shown in the results grid. The whole result is always in its CSV.
+    preview_rows: int = 200
+
+    def __post_init__(self) -> None:
+        # The data service returns at most 500 preview rows.
+        if not 1 <= self.preview_rows <= 500:
+            raise ValueError("playground.preview_rows must be between 1 and 500")
+
+
+@dataclass(frozen=True)
+class RepoSettings:
+    """`[repos]`: the lab's git repositories (milestones 5 and 6).
+
+    None means not configured: nothing is cloned or synced. To come: the
+    GitHub App's client id, how often to sync, and the branch to follow.
+    """
+
+    # e.g. "SripadaLab-UM/ihs-knowledge"
+    knowledge: str | None = None
+    # e.g. "SripadaLab-UM/ihs-pipelines"
+    pipelines: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkflowSettings:
+    """`[workflows]`: the workflow runner (milestone 6).
+
+    To come: time limits and container limits for R steps, how long run
+    folders are kept.
+    """
+
+    # Workflow runs going at once. Their SQL steps also share the data
+    # service's query slots (`limits.max_concurrent_queries`).
+    max_concurrent_runs: int = 1
+
+    def __post_init__(self) -> None:
+        if self.max_concurrent_runs < 1:
+            raise ValueError("workflows.max_concurrent_runs must be at least 1")
+
+
+@dataclass(frozen=True)
+class UpdateSettings:
+    """`[updates]`: checking for and installing new releases (milestone 7).
+
+    To come: where backups go and how many are kept (see DISTRIBUTION.md).
+    """
+
+    # Whether DataLab asks GitHub for a newer release when it starts. Nothing
+    # checks yet; the updater will read this.
+    check_on_start: bool = True
+    # Where releases come from.
+    repository: str = "SripadaLab-UM/ihs_datalab"
+
+
 @dataclass(frozen=True)
 class Settings:
     profile: Profile
@@ -67,6 +134,10 @@ class Settings:
     allowed_models: tuple[str, ...] | None = None
     host: str = "127.0.0.1"
     port: int = 8765
+    playground: PlaygroundSettings = field(default_factory=PlaygroundSettings)
+    repos: RepoSettings = field(default_factory=RepoSettings)
+    workflows: WorkflowSettings = field(default_factory=WorkflowSettings)
+    updates: UpdateSettings = field(default_factory=UpdateSettings)
 
     @property
     def settings_file(self) -> Path:
@@ -150,8 +221,44 @@ def load_settings(profile: Profile | None = None) -> Settings:
         # CI only: on Linux, containers reach the host through the Docker
         # bridge, so DataLab must listen beyond 127.0.0.1 there.
         host=os.environ.get("DATALAB_HOST", Settings.host),
+        playground=_section(PlaygroundSettings, raw, "playground"),
+        repos=_section(RepoSettings, raw, "repos"),
+        workflows=_section(WorkflowSettings, raw, "workflows"),
+        updates=_section(UpdateSettings, raw, "updates"),
     )
     return _check_models(settings)
+
+
+def _section[T](cls: type[T], raw: dict, name: str) -> T:
+    """One `[name]` table of settings.toml, checked against its fields.
+
+    Unknown keys and values of the wrong type are refused with a message
+    naming them, rather than being ignored or failing later.
+    """
+    table = raw.get(name, {})
+    if not isinstance(table, dict):
+        raise ValueError(f"[{name}] in settings.toml must be a table")
+    known = {f.name: f for f in fields(cls)}  # type: ignore[arg-type]
+    unknown = sorted(set(table) - set(known))
+    if unknown:
+        raise ValueError(f"Unknown settings in [{name}] in settings.toml: {', '.join(unknown)}")
+    for key, value in table.items():
+        if not _fits(known[key].default, value):
+            raise ValueError(f"{name}.{key} in settings.toml has the wrong type: {value!r}")
+    return cls(**table)
+
+
+def _fits(default: Any, value: Any) -> bool:
+    """Whether a settings value has the type its field's default has."""
+    if default is None:  # the optional text fields
+        return isinstance(value, str)
+    if isinstance(default, bool):
+        return isinstance(value, bool)
+    if isinstance(default, int):
+        return isinstance(value, int) and not isinstance(value, bool)
+    if isinstance(default, float):
+        return isinstance(value, int | float) and not isinstance(value, bool)
+    return isinstance(value, type(default))
 
 
 def _allowed_models(raw: dict) -> tuple[str, ...] | None:

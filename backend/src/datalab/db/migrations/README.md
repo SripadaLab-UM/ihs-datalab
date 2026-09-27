@@ -1,0 +1,17 @@
+# Migrations
+
+Plain numbered `.sql` files, applied in order at startup, each exactly once
+(see `db/__init__.py`). A migration is never edited after it ships: change
+the schema with a new file.
+
+Numbers already taken by work in progress, so parallel branches don't
+collide. Use the reserved number for your area; take the next free one
+after these for anything else.
+
+| Number | For | Status |
+|---|---|---|
+| 0001–0005 | queries, conversations, attachments, exports, rigor | in use |
+| 0006 | `queries.origin`: conversation, playground, or run | in use |
+| 0007 | knowledge: proposed edits and Save & share records (milestone 5) | reserved |
+| 0008 | workflow runs and their steps (milestone 6) | reserved |
+| 0009 | update metadata: installed versions and backups (milestone 7) | reserved |
