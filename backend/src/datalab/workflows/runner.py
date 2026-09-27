@@ -60,6 +60,7 @@ from datalab.sessions.inputs import NotAttachable, check_attachable
 from datalab.sessions.titles import scrub_title
 from datalab.workflows.model import (
     ORACLE_INPUT,
+    WORKFLOW_NAME,
     BuiltinQc,
     CustomQc,
     Pipeline,
@@ -168,7 +169,8 @@ class _Plan:
     libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
-_YEAR = re.compile(r"(19|20)\d\d")
+# A cohort year: 2000 to 2029.
+_YEAR = re.compile(r"20[012]\d")
 
 
 def delivery_title(name: str) -> str:
@@ -177,25 +179,34 @@ def delivery_title(name: str) -> str:
     The export scrubs the title of anything shaped like a study identifier,
     and read as one word, `fitbit_daily_2025` mixes letters and digits the
     way IDs do, so the whole name went and the folder was called "export".
-    So the name is split at `_` and `-`, and each piece kept only if it
-    can't be part of an identifier:
+    So the name is split into pieces, and each is kept only if it can't be
+    part of an identifier:
 
-    - a piece of digits only if it is a year, so `steps_0001` and
-      `steps_syn_25_0001` can't come out as "steps 0001" or rebuild
-      "syn 25 0001";
-    - a piece mixing letters and digits (`p0001`) only if the scrub keeps it;
+    - a word of letters, if the scrub keeps it;
+    - never a piece mixing letters and digits (`p0001`, `syn25`);
+    - a piece of digits only if it is a cohort year (2000 to 2029) and the
+      piece before it was kept, so `steps_0001` can't come out as
+      "steps 0001", nor `syn_25_2001` or `syn25_2001` keep part of a code;
     - and if the scrub would still change the joined words (`participant
-      2025`), none of it: the folder is called "export".
+      2025`), none of it: the folder is called "export". So is a name the
+      file check wouldn't accept.
     """
-    kept = []
-    for piece in re.split(r"[_-]+", name):
+    if not WORKFLOW_NAME.fullmatch(name):
+        return "export"
+    kept: list[str] = []
+    previous_kept = True
+    for piece in re.split(r"[\W_]+", name):
         if not piece:
             continue
-        if piece.isdigit():
-            if _YEAR.fullmatch(piece):
-                kept.append(piece)
-        elif scrub_title(piece) == piece:
+        if piece.isalpha():
+            keep = scrub_title(piece) == piece
+        elif piece.isdigit():
+            keep = previous_kept and bool(_YEAR.fullmatch(piece))
+        else:
+            keep = False
+        if keep:
             kept.append(piece)
+        previous_kept = keep
     title = " ".join(kept)
     return title if title and scrub_title(title) == title else "export"
 

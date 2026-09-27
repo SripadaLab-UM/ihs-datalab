@@ -51,6 +51,8 @@ _ID = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _FILE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,99}")
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+# A workflow's name, as the file check requires it.
+WORKFLOW_NAME = _NAME
 _OBJECT = re.compile(r"[A-Z][A-Z0-9_$#]{0,127}\.[A-Z][A-Z0-9_$#]{0,127}")
 _COLUMN = re.compile(r"[A-Za-z][A-Za-z0-9_$#]{0,127}")
 # The one output of a step that has `output:`, as R sees it: outputs$final.

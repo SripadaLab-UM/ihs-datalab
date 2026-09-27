@@ -348,6 +348,16 @@ async def test_the_dated_delivery_folder_is_named_after_the_workflow(tmp_path):
         # If the scrub would still change the words, nothing of the name is used.
         ("participant_2025", "export"),
         ("0001", "export"),
+        # A year after a code, or after digits that went, goes with it.
+        ("syn25_2001", "export"),
+        ("steps_syn25_2001", "steps"),
+        ("syn_25_2001", "syn"),
+        ("steps_p12", "steps"),
+        ("2025_steps", "2025 steps"),
+        ("steps_1999", "steps"),
+        # Names the file check refuses aren't read at all.
+        ("p 0001 steps", "export"),
+        ("steps.syn25.0001", "export"),
     ],
 )
 def test_the_delivery_title_still_loses_an_identifier(tmp_path, name, title):

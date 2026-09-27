@@ -118,7 +118,10 @@ objects first, then runs the pipeline.
   R's `as.POSIXct` reads, and a DATE column whose every value is at midnight
   as plain dates (`YYYY-MM-DD`), as R itself writes one. A TIMESTAMP keeps its
   time; one WITH TIME ZONE is written as its local time, without the offset
-  (python-oracledb doesn't return it).
+  (python-oracledb doesn't return it). So values in different offsets can't
+  be compared or subtracted in the file. Select `SYS_EXTRACT_UTC(col)` for
+  the instant in UTC, or `TO_CHAR(col, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')` to
+  keep the offset as text.
   RAW is written as upper-case hex, as `RAWTOHEX` gives it. A hex key made of
   digits and one `E` (`12E4`) looks like a number to Excel, which changes it
   when the file is opened there: read keys as text.

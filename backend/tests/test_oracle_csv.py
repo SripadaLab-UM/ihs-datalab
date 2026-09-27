@@ -162,7 +162,10 @@ def test_stop_during_the_date_rewrite_ends_the_query_and_keeps_nothing(tmp_path,
             "SELECT 1 FROM DUAL", {}, out, max_rows=10**6, max_bytes=10**9,
             preview_rows=5, cancel=cancel,
         )  # fmt: skip
-    assert checks == [1]  # the first check, 5,000 rows in, stopped it
+    # The first check, 5,000 rows into the rewrite, stopped it. This relies on
+    # the fake returning all 12,000 rows in one batch, so Stop comes only once
+    # every row is written and the rewrite has begun.
+    assert checks == [1]
     assert list(tmp_path.iterdir()) == []
 
 
