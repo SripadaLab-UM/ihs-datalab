@@ -233,6 +233,9 @@ package are copied into its run folder (`source/`), and the run reads only
 that copy. From the clone, the copy is GitHub's `main` as last synced,
 taken under the clone's lock, so a Sync or Save & share during the run
 can't give it a package from another commit; the run records that commit.
+From another folder, the copy is the run's own workflow file and the
+package, within the package's limits (5000 files, 50 MB): a larger package
+isn't copied, and only pipeline steps are refused, saying why.
 
 **What the file check adds to the example above:**
 

@@ -276,7 +276,7 @@ class WorkflowRunner:
         seed: int | None = None,
         set_id: str | None = None,
     ) -> str:
-        run_id, folder = await self._pin()
+        run_id, folder = await self._pin(path)
         try:
             file, workflow = self.load(path, folder)
             values = resolve_params(workflow, params or {})
@@ -291,15 +291,16 @@ class WorkflowRunner:
                 run_id=run_id,
                 folder=folder,
             )
+            return self._launch(plan)
         except BaseException:
+            # Not started: its copy of the files goes too.
             await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
             raise
-        return self._launch(plan)
 
     async def run_again(self, run_id: str) -> str:
         """The current workflow file afresh: new extracts, the original parameters and seed."""
         original = self._original(run_id)
-        new_id, folder = await self._pin()
+        new_id, folder = await self._pin(original["workflow_path"])
         try:
             file, workflow = self.load(original["workflow_path"], folder)
             kept = {k: v for k, v in original["params"].items() if k in workflow.parameters}
@@ -315,17 +316,24 @@ class WorkflowRunner:
                 run_id=new_id,
                 folder=folder,
             )
+            return self._launch(plan)
         except BaseException:
             await asyncio.to_thread(shutil.rmtree, self.runs_dir / new_id, True)
             raise
-        return self._launch(plan)
 
-    async def _pin(self) -> tuple[str, WorkflowFolder]:
-        """A new run's id, and its own copy of the workflow files and the
-        package in its folder, which is all it reads from then on: a Sync
+    async def _pin(self, path: str) -> tuple[str, WorkflowFolder]:
+        """A new run's id, and its own copy of its workflow file (`path`) and
+        the package in its folder, which is all it reads from then on: a Sync
         or Save & share meanwhile can't change what it runs (source.py)."""
         run_id = new_run_id()
-        folder = await asyncio.to_thread(self.folder.snapshot, self.runs_dir / run_id / "source")
+        try:
+            folder = await asyncio.to_thread(
+                self.folder.snapshot, self.runs_dir / run_id / "source", workflow=path
+            )
+        except BaseException:
+            # A file that's missing, too large or not text: no run, and no folder.
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
+            raise
         return run_id, folder
 
     async def replay_check(self, run_id: str) -> ReplayCheck:
