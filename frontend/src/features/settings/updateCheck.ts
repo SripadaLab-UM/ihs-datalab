@@ -25,9 +25,14 @@ export function useUpdateCheck() {
   return useQuery({
     queryKey: UPDATE_CHECK,
     queryFn: settingsApi.updateCheck,
-    // Often while installing, to show each step; otherwise now and then, since the
-    // check at start finishes in the background.
-    refetchInterval: (query) => (installing(query.state.data) ? 2000 : 5 * 60_000),
+    // Often while installing, to show each step; soon after start, since the check
+    // at start finishes in the background; otherwise now and then. (A local read:
+    // only DataLab's host ever asks GitHub.)
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (installing(data)) return 2000;
+      return data?.state === "not-checked" ? 15_000 : 5 * 60_000;
+    },
     retry: false,
   });
 }
