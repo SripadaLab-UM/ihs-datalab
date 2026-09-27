@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -444,13 +445,16 @@ _MAX_RESULT_TEXT = 200_000
 _MAX_EVIDENCE = 5 * 1024**2
 
 
+# The query tool's result starts with its Data accessed id ({"query_id": ...}).
+# Read with a pattern, not by parsing: a wide preview is cut to
+# _MAX_RESULT_TEXT, which leaves the JSON unparseable.
+_QUERY_ID = re.compile(r'\A\s*\{\s*"query_id"\s*:\s*"([\w.-]{1,64})"')
+
+
 def _query_id(result_text: str) -> str:
     """The Data accessed log's id for a query, from the query tool's result."""
-    try:
-        found = json.loads(result_text).get("query_id")
-    except (ValueError, AttributeError):
-        return ""
-    return found if isinstance(found, str) else ""
+    found = _QUERY_ID.match(result_text)
+    return found.group(1) if found else ""
 
 
 def _result_text(result: Any) -> str:

@@ -669,6 +669,8 @@ export interface components {
             names_file: boolean;
             /** Via Script */
             via_script: string | null;
+            /** Seen In Output */
+            seen_in_output: boolean;
         };
         /** ChainQueryOut */
         ChainQueryOut: {
@@ -831,6 +833,11 @@ export interface components {
             checkpoint?: number | null;
             /** Turn */
             turn?: number | null;
+            /**
+             * In Review
+             * @default false
+             */
+            in_review: boolean;
             /**
              * Commands
              * @default []

@@ -110,22 +110,44 @@ class SourcedClaim:
         return bool(self.sources)
 
 
+# The most entries one number's window is searched through: a number that
+# matches nearly everything (0, 1) can't make a lookup slow.
+_MAX_HITS = 10_000
+
+
 def trace_sources(
-    answer: str, evidence: list[tuple[Source, str]], *, limit: int = 5
+    answer: str,
+    evidence: list[tuple[Source, str]],
+    *,
+    limit: int = 5,
+    max_numbers: int | None = None,
 ) -> list[SourcedClaim]:
-    """Each number in `answer`, with the pieces of `evidence` it appears in (at
-    most `limit`). The same match as `trace`: it says where a number appears,
-    not that it was computed there."""
-    known = [(source, _evidence_values([text])) for source, text in evidence]
+    """Each number in `answer` (the first `max_numbers`), with the pieces of
+    `evidence` it appears in (at most `limit`, in the evidence's order). The
+    same match as `trace`: it says where a number appears, not that it was
+    computed there.
+
+    Bounded: each piece of evidence is read once into one sorted list of
+    (value, source), and each number is looked up in it, so the cost grows
+    with the evidence and the numbers, not with their product.
+    """
+    tokens = numbers_in_answer(answer)[:max_numbers]
+    index: dict[Source, int] = {}
+    pairs: set[tuple[Decimal, int]] = set()
+    for source, text in evidence:
+        at = index.setdefault(source, len(index))
+        pairs.update((value, at) for value in _evidence_values([text]))
+    ordered = sorted(pairs)
+    values = [value for value, _ in ordered]
+    by_index = list(index)
     claims = []
-    for token in numbers_in_answer(answer):
-        found: list[Source] = []
-        for source, values in known:
-            if source not in found and _matches(token, values):
-                found.append(source)
-                if len(found) == limit:
-                    break
-        claims.append(SourcedClaim(token, tuple(found)))
+    for token in tokens:
+        found: set[int] = set()
+        for low, high in _windows(token):
+            start = bisect.bisect_left(values, low)
+            end = min(bisect.bisect_right(values, high), start + _MAX_HITS)
+            found.update(at for _, at in ordered[start:end])
+        claims.append(SourcedClaim(token, tuple(by_index[at] for at in sorted(found)[:limit])))
     return claims
 
 
@@ -147,20 +169,31 @@ def _evidence_values(evidence: list[str]) -> list[Decimal]:
 
 
 def _matches(token: str, known: list[Decimal]) -> bool:
+    if _value(token) is None:
+        return True
+    for low, high in _windows(token):
+        # Anything within the tolerance, found by binary search in the sorted values.
+        start = bisect.bisect_left(known, low)
+        if start < len(known) and known[start] <= high:
+            return True
+    return False
+
+
+def _windows(token: str) -> list[tuple[Decimal, Decimal]]:
+    """The ranges a value in the evidence can fall in to match `token`: the
+    claim is the evidence, rounded to the places it's written to."""
     value = _value(token)
     if value is None:
-        return True
+        return []
     candidates = {value}
     if token.endswith("%"):
         candidates.add(value / 100)  # 12.5% written from a proportion 0.125
+    windows = []
     for candidate in candidates:
         decimals = _decimals(token) + (2 if token.endswith("%") and candidate != value else 0)
-        tolerance = Decimal(1).scaleb(-decimals) / 2  # the claim is the evidence, rounded
-        # Anything within the tolerance, found by binary search in the sorted values.
-        start = bisect.bisect_left(known, candidate - tolerance)
-        if start < len(known) and known[start] <= candidate + tolerance:
-            return True
-    return False
+        tolerance = Decimal(1).scaleb(-decimals) / 2
+        windows.append((candidate - tolerance, candidate + tolerance))
+    return windows
 
 
 def _value(token: str) -> Decimal | None:

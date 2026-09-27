@@ -26,7 +26,7 @@ from datalab.data.access_log import AccessLog
 from datalab.sessions.checkpoints import UnsafePath, check_relative
 from datalab.sessions.hooks import TurnInfo
 from datalab.sessions.manager import SessionManager
-from datalab.sessions.provenance import Version, file_chain, record_turn, turns_from_events
+from datalab.sessions.provenance import Turn, Version, file_chain, one_turn, record_turn
 from datalab.sessions.store import ConversationStore
 
 
@@ -43,8 +43,9 @@ class ChainCommandOut(BaseModel):
     id: str
     command: str
     exit_code: int | None
-    names_file: bool
-    via_script: str | None
+    names_file: bool  # the command's own text names the file
+    via_script: str | None  # a script it ran that names the file
+    seen_in_output: bool  # its output mentions the file (the output isn't shown)
 
 
 class ChainScriptOut(BaseModel):
@@ -74,6 +75,7 @@ class FileProvenanceOut(BaseModel):
     summary: str
     checkpoint: int | None = None
     turn: int | None = None
+    in_review: bool = False  # first saved after the turn's rigor review, not the turn
     commands: list[ChainCommandOut] = []
     more_commands: int = 0
     edited_directly: bool = False
@@ -112,10 +114,14 @@ def build_provenance_router(services: ProvenanceServices) -> APIRouter:
         except UnsafePath as error:
             raise HTTPException(404, "No such file.") from error
         checkpoints = sessions.checkpoints(conversation_id)
-        versions = [
-            Version(c.number, c.turn, c.label, checkpoints.entries(c.number))
-            for c in checkpoints.list()
-        ]
+        # The summaries are small; a checkpoint's files are read only when needed.
+        versions = [Version(c.number, c.turn, c.label) for c in checkpoints.list()]
+        loaded: dict[int, dict[str, Any]] = {}
+
+        def entries(number: int) -> dict[str, Any]:
+            if number not in loaded:
+                loaded[number] = checkpoints.entries(number)
+            return loaded[number]
 
         def read(entry: Any, limit: int) -> bytes:
             with os.fdopen(checkpoints.open_object(entry), "rb") as source:
@@ -124,10 +130,28 @@ def build_provenance_router(services: ProvenanceServices) -> APIRouter:
         chain = file_chain(
             path,
             versions,
-            turns_from_events(store.all_events_after(conversation_id, 0)),
+            entries,
+            lambda number: _turn(store, conversation_id, number),
             access_log.for_session(conversation_id),
             read,
         )
         return FileProvenanceOut(**chain)
 
     return router
+
+
+def _turn(store: ConversationStore, conversation_id: str, number: int) -> Turn | None:
+    """Turn `number`, parsed from its own events only (not the whole conversation's)."""
+    starts = store.events_of_types_after(conversation_id, 0, ("user_message",))
+    if not 0 < number <= len(starts):
+        return None
+    start, following = starts[number - 1], starts[number] if number < len(starts) else None
+    events = []
+    seq = start.seq - 1
+    while batch := store.events_after(conversation_id, seq):
+        for event in batch:
+            if following is not None and event.seq >= following.seq:
+                return one_turn(events, number, following.created_at)
+            events.append(event)
+        seq = batch[-1].seq
+    return one_turn(events, number)
