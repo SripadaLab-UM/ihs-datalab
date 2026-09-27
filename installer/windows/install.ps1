@@ -1,6 +1,6 @@
 # DataLab installer for Windows.
 #
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -Package <datalab .whl file or URL> [-Settings <lab settings file>]
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Package <datalab .whl file or URL> [-Settings <lab settings file>]
 #       [-Constraints <constraints.txt>] [-Yes]
 #
 # constraints.txt holds the exact tested dependency versions; it's found
@@ -38,6 +38,15 @@ param(
     [string]$WorkDir = ""
 )
 $ErrorActionPreference = "Stop"
+# Constrained Language Mode (AppLocker, WDAC) blocks the .NET calls this relies
+# on, partway through; better to say so now.
+if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
+    Write-Host ""
+    Write-Host "   This computer runs PowerShell in a restricted mode ($($ExecutionContext.SessionState.LanguageMode))," -ForegroundColor Red
+    Write-Host "   usually set by IT (AppLocker or Windows Defender Application Control), so the" -ForegroundColor Red
+    Write-Host "   DataLab installer can't run. Ask IT to install DataLab, or to allow this script." -ForegroundColor Red
+    exit 1
+}
 # The text of this script as it's running, for the administrator part (see
 # Invoke-AdminPart). Empty when the script wasn't started from its file.
 $ScriptText = $MyInvocation.MyCommand.ScriptContents
@@ -46,16 +55,16 @@ $UvVersion = "0.12.19"
 $WslVersion = "2.7.14"
 $WslMsiUrl = "https://github.com/microsoft/WSL/releases/download/2.7.14/wsl.2.7.14.0.x64.msi"
 $WslMsiSha256 = "db084e536279a59e90a26ec598d8aa8a4dff8309f41d078fd06242953ac1ebcd"
-$WslPublisher = "O=Microsoft Corporation"
+# The exact organisation (O=) of the certificate each one must be signed with.
+$WslPublisher = "Microsoft Corporation"
 $DockerVersion = "4.77.0"
 $DockerUrl = "https://desktop.docker.com/win/main/amd64/228796/Docker%20Desktop%20Installer.exe"
 $DockerSha256 = "5b866599f0de9208f4594d64aa33658fa55cbdd64e0db13648cffe12c91795d2"
-$DockerPublisher = "O=Docker Inc"
+$DockerPublisher = "Docker Inc"
 $DockerAgreement = "https://www.docker.com/legal/docker-subscription-service-agreement/"
 
 $StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
 $ResumeFile = Join-Path $StateDir "installer-resume.json"
-$ResumeTask = "DataLab setup (continue after restart)"
 $ResumeShortcut = Join-Path ([Environment]::GetFolderPath("Startup")) "DataLab setup.lnk"
 $DockerDesktop = Join-Path $Env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
 # Docker Desktop's Windows service. Docker Desktop starts without an
@@ -65,8 +74,20 @@ $WslExe = Join-Path $Env:ProgramFiles "WSL\wsl.exe"
 # The group Docker Desktop creates for the people allowed to use it; its SID
 # differs per computer, so it's matched by name.
 $DockerUsers = "docker-users"
-# The administrator part's folder: "<ProgramData>\DataLab-setup-<random>".
+# The administrator part's folder: "<ProgramData>\DataLab-setup-<32 hex digits>".
+# ProgramData comes from Windows itself, not from $Env:ProgramData, which a
+# person can change for their own account.
+$AdminBase = [Environment]::GetFolderPath("CommonApplicationData")
 $AdminFolderPrefix = "DataLab-setup-"
+$AdminFolderPattern = "^" + [regex]::Escape((Join-Path $AdminBase $AdminFolderPrefix)) + "[0-9a-f]{32}$"
+# Programs run by full path from Windows' own folder, never looked up by name
+# (a person can add folders and App Paths entries for their own account).
+$SystemDir = [Environment]::SystemDirectory
+$WindowsPowerShell = Join-Path $SystemDir "WindowsPowerShell\v1.0\powershell.exe"
+# Well-known SIDs.
+$SystemSid = "S-1-5-18"
+$AdminsSid = "S-1-5-32-544"
+$TrustedInstallerSid = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
 
 function Step($text) { Write-Host "`n== $text ==" -ForegroundColor Cyan }
 function Say($text) { Write-Host "   $text" }
@@ -155,6 +176,31 @@ function Remove-Tree($path) {
     try { [System.IO.Directory]::Delete($path, $false) } catch { Write-Verbose "Couldn't remove ${path}: $_" }
 }
 
+# Whether a folder in ProgramData is one an administrator part made and left
+# for this account ($sid) to remove. Anyone can create folders in ProgramData,
+# so a name alone proves nothing: another account could make one that's a link
+# into this person's files. So it must be a real folder (not a link), named
+# exactly as the installer names them, owned by SYSTEM or Administrators, and
+# give this account a permission of its own. (uninstall.ps1 has a copy.)
+function Test-AdminFolder($item, $sid) {
+    if (-not $item.PSIsContainer) { return $false }
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+    if ($item.FullName -notmatch $AdminFolderPattern) { return $false }
+    try { $acl = Get-Acl -LiteralPath $item.FullName } catch { return $false }
+    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    if ($owner -notin @($SystemSid, $AdminsSid)) { return $false }
+    $mine = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
+        Where-Object { $_.IdentityReference.Value -eq $sid })
+    return $mine.Count -gt 0
+}
+
+# Removes what earlier administrator parts left for this account, and nothing else.
+function Remove-AdminFolder($sid) {
+    foreach ($item in @(Get-ChildItem -LiteralPath $AdminBase -Force -Filter "$AdminFolderPrefix*" -ErrorAction SilentlyContinue)) {
+        if (Test-AdminFolder $item $sid) { Remove-Tree $item.FullName }
+    }
+}
+
 # A Docker Desktop that was uninstalled (or crashed) can leave its socket files
 # behind. Windows can't open or delete them ("The file cannot be accessed by the
 # system"), and the next Docker Desktop then fails to start on them. They can
@@ -190,6 +236,8 @@ function Clear-StaleDockerSockets {
 function Save-Download($url, $sha256, $publisher, $file) {
     Say "Downloading $([System.Uri]::UnescapeDataString(($url -split '/')[-1]))..."
     $ProgressPreference = "SilentlyContinue"  # the progress bar makes big downloads much slower
+    # Windows PowerShell 5.1 may not offer TLS 1.2 by itself.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file
     $actual = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $sha256) {
@@ -197,10 +245,20 @@ function Save-Download($url, $sha256, $publisher, $file) {
         throw "The download of $url didn't match its expected checksum, so it wasn't run."
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $file
-    if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch [regex]::Escape($publisher)) {
+    if ($signature.Status -ne "Valid" -or (Get-Organisation $signature.SignerCertificate) -cne $publisher) {
         Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
         throw "The download of $url isn't signed by its publisher ($publisher), so it wasn't run."
     }
+}
+
+# The organisation (O=) a certificate was issued to, exactly as written in it.
+function Get-Organisation($certificate) {
+    if (-not $certificate) { return "" }
+    $name = $certificate.SubjectName.Format($true)  # one "KEY=value" per line, unescaped
+    foreach ($line in $name -split "\r?\n") {
+        if ($line -match '^\s*O=(.*)$') { return $Matches[1].Trim() }
+    }
+    return ""
 }
 
 # The SHA-256 of some bytes, written the same way as in the command that starts
@@ -220,8 +278,8 @@ function Get-BytesHash([byte[]]$bytes) {
 # looser, even briefly), then checked; anything unexpected stops the
 # administrator part before it does anything.
 function New-ProtectedFolder($path) {
-    $system = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-18")
-    $admins = New-Object System.Security.Principal.SecurityIdentifier("S-1-5-32-544")
+    $system = New-Object System.Security.Principal.SecurityIdentifier($SystemSid)
+    $admins = New-Object System.Security.Principal.SecurityIdentifier($AdminsSid)
     # A file's owner may always change its permissions, and Windows can make
     # the person the owner of what an elevated window creates. With this rule
     # an owner gets only what it gives: reading the permissions.
@@ -257,7 +315,8 @@ function New-ProtectedFolder($path) {
 }
 
 # Once the administrator part is completely done, lets the person read its
-# result and log, and remove the folder. Nothing elevated uses it after this.
+# result and log, and check and remove the folder (Remove-AdminFolder).
+# Nothing elevated uses the folder after this.
 function Grant-ResultToPerson($folder, [string[]]$files) {
     $person = New-Object System.Security.Principal.SecurityIdentifier($ForUserSid)
     $noInherit = [System.Security.AccessControl.InheritanceFlags]::None
@@ -276,7 +335,8 @@ function Grant-ResultToPerson($folder, [string[]]$files) {
     $item = Get-Item -LiteralPath $folder -Force
     $acl = $item.GetAccessControl($access)
     $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
-        $person, ($rights::ListDirectory -bor $rights::ReadAttributes -bor $rights::Delete -bor $rights::Synchronize),
+        $person, ($rights::ListDirectory -bor $rights::ReadAttributes -bor $rights::ReadPermissions -bor
+            $rights::Delete -bor $rights::Synchronize),
         $noInherit, $none, $allow)))
     $item.SetAccessControl($acl)
 }
@@ -288,9 +348,14 @@ if ($Prepare) {
     $resultFile = Join-Path $WorkDir "result.json"
     $logFile = Join-Path $WorkDir "setup.log"
     try {
-        $expected = Join-Path $Env:ProgramData $AdminFolderPrefix
-        if (-not $WorkDir.StartsWith($expected, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Unexpected working folder: $WorkDir"
+        if ($WorkDir -notmatch $AdminFolderPattern) { throw "Unexpected working folder: $WorkDir" }
+        # ProgramData itself must be Windows' own: not a link, and owned by
+        # SYSTEM, TrustedInstaller or Administrators (none of them the person).
+        $baseItem = Get-Item -LiteralPath $AdminBase -Force
+        $baseOwner = (Get-Acl -LiteralPath $AdminBase).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if (($baseItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
+            $baseOwner -notin @($SystemSid, $TrustedInstallerSid, $AdminsSid)) {
+            throw "$AdminBase isn't set up the way Windows sets it up (owner $baseOwner), so it wasn't used."
         }
         New-ProtectedFolder $WorkDir
         $ready = $true
@@ -323,7 +388,7 @@ if ($Prepare) {
             $msi = Join-Path $WorkDir "wsl.$WslVersion.x64.msi"
             Save-Download $WslMsiUrl $WslMsiSha256 $WslPublisher $msi
             Say "Installing WSL $WslVersion..."
-            $install = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/qn", "/norestart" `
+            $install = Start-Process (Join-Path $SystemDir "msiexec.exe") -ArgumentList "/i", "`"$msi`"", "/qn", "/norestart" `
                 -WorkingDirectory $WorkDir -Wait -PassThru
             if ($install.ExitCode -eq 3010) { $result.restart = $true }
             elseif ($install.ExitCode -ne 0) { throw "Installing WSL failed (msiexec exit code $($install.ExitCode))." }
@@ -390,9 +455,12 @@ if ($Prepare) {
             $result | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath $resultFile
             Stop-Transcript | Out-Null
             # The downloads and unpacked installers aren't needed any more.
-            Get-ChildItem -LiteralPath $WorkDir -Force |
-                Where-Object { $_.FullName -notin @($resultFile, $logFile) } |
-                Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            foreach ($child in @(Get-ChildItem -LiteralPath $WorkDir -Force)) {
+                if ($child.FullName -notin @($resultFile, $logFile)) {
+                    if ($child.PSIsContainer) { Remove-Tree $child.FullName }
+                    else { Remove-Item -LiteralPath $child.FullName -Force -ErrorAction SilentlyContinue }
+                }
+            }
             Grant-ResultToPerson $WorkDir @($resultFile, $logFile)
         }
     }
@@ -404,6 +472,8 @@ if ($Prepare) {
 # ---------------------------------------------------------------------------
 $Host.UI.RawUI.WindowTitle = "DataLab setup"
 $MySid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+# Per account, so two people installing on one computer don't share it.
+$ResumeTask = "DataLab setup for $MySid (continue after restart)"
 
 # One installer at a time: after a restart, the logon task, the Startup-folder
 # shortcut and a run started by hand could otherwise overlap.
@@ -424,7 +494,7 @@ if (-not $createdNew) {
 function Register-Resume {
     $arguments = "-NoProfile -ExecutionPolicy Bypass -NoExit -File `"$PSCommandPath`" -Resume"
     try {
-        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $arguments
+        $action = New-ScheduledTaskAction -Execute $WindowsPowerShell -Argument $arguments
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $MySid
         $trigger.Delay = "PT20S"  # let the desktop finish appearing first
         $principal = New-ScheduledTaskPrincipal -UserId $MySid -LogonType Interactive -RunLevel Limited
@@ -435,14 +505,17 @@ function Register-Resume {
             -Settings $options -Force -ErrorAction Stop | Out-Null
     } catch {
         $link = (New-Object -ComObject WScript.Shell).CreateShortcut($ResumeShortcut)
-        $link.TargetPath = "powershell.exe"
+        $link.TargetPath = $WindowsPowerShell
         $link.Arguments = $arguments
         $link.Save()
     }
 }
 
 function Unregister-Resume {
-    Unregister-ScheduledTask -TaskName $ResumeTask -Confirm:$false -ErrorAction SilentlyContinue
+    # (Also the name an earlier version of this installer used.)
+    foreach ($task in $ResumeTask, "DataLab setup (continue after restart)") {
+        Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+    }
     Remove-Item $ResumeShortcut -ErrorAction SilentlyContinue
 }
 
@@ -460,8 +533,7 @@ try {
 # this run asks for another restart (Request-Restart sets it up again).
 Unregister-Resume
 # What an earlier administrator part left for this account to remove.
-Get-ChildItem -LiteralPath $Env:ProgramData -Directory -Filter "$AdminFolderPrefix*" -ErrorAction SilentlyContinue |
-    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Remove-AdminFolder $MySid
 
 $saved = $null
 if (Test-Path $ResumeFile) { $saved = Get-Content $ResumeFile -Raw | ConvertFrom-Json }
@@ -470,7 +542,7 @@ if ($Resume) {
     $Package = $saved.Package; $Settings = $saved.Settings; $Constraints = $saved.Constraints
     Write-Host ""
     Write-Host "Welcome back! Let's finish setting up DataLab." -ForegroundColor Cyan
-    Write-Host "You won't be asked for administrator permission again."
+    Write-Host "This part shouldn't need administrator permission. If it does, it says why first."
 } else {
     Write-Host ""
     Write-Host "Welcome! This sets up DataLab on this computer." -ForegroundColor Cyan
@@ -534,7 +606,7 @@ function Request-Restart {
     Write-Host ""
     Note "Windows needs to restart to finish turning these on."
     Note "After the restart, sign in as usual. The DataLab installer opens by itself"
-    Note "a few moments later and carries on from here. It won't ask for"
+    Note "a few moments later and carries on from here. It shouldn't need"
     Note "administrator permission again."
     Note "Save anything you have open in other programs first."
     if (Ask "Restart now?") {
@@ -556,24 +628,38 @@ function Request-Restart {
 # memory; no file is run elevated. What it downloads and writes goes into a
 # new folder only administrators can change (New-ProtectedFolder), which it
 # lets the person read and remove once it's done.
+#
+# The command is passed with -EncodedCommand, and the values in it (the copy's
+# path, the SID, the folder) as Base64 text, so no quoting is involved: a
+# path with any kind of quote in it can't change the command. Before anything
+# else, the command limits where PowerShell looks for modules to Windows' own
+# folders and turns off loading them automatically, then loads the ones the
+# administrator part uses from $PSHOME: the person's own module folders
+# (Documents, or PSModulePath in their environment) are never used elevated.
 function Invoke-AdminPart {
-    if (-not $ScriptText) { Stop-Install "Run the installer from its file: powershell -ExecutionPolicy Bypass -File install.ps1 ..." }
-    $work = Join-Path $Env:ProgramData ($AdminFolderPrefix + [guid]::NewGuid().ToString("N"))
+    if (-not $ScriptText) { Stop-Install "Run the installer from its file: powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 ..." }
+    $work = Join-Path $AdminBase ($AdminFolderPrefix + [guid]::NewGuid().ToString("N"))
     $copy = Join-Path $Env:TEMP ($AdminFolderPrefix + [guid]::NewGuid().ToString("N") + ".ps1")
     $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($ScriptText)
     [System.IO.File]::WriteAllBytes($copy, $bytes)
-    $quote = { param($text) "'" + ($text -replace "'", "''") + "'" }
-    # Only single quotes inside: the whole command is one double-quoted argument.
-    $command = "`$b = [IO.File]::ReadAllBytes($(& $quote $copy)); " +
-        "`$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b)); " +
-        "if (`$h -ne '$(Get-BytesHash $bytes)') { " +
-        "Write-Host 'The installer changed on disk after it started, so nothing was run.'; Start-Sleep -Seconds 20; exit 1 }; " +
-        "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b))) -Prepare " +
-        "-ForUserSid $(& $quote $MySid) -WorkDir $(& $quote $work)$(if ($Yes) { ' -Yes' })"
+    $data = { param($text) "(D '" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)) + "')" }
+    $command = @(
+        "`$ErrorActionPreference = 'Stop'"
+        "`$env:PSModulePath = `$PSHOME + '\Modules;' + [Environment]::GetFolderPath('ProgramFiles') + '\WindowsPowerShell\Modules'"
+        "`$PSModuleAutoLoadingPreference = 'None'"
+        "foreach (`$m in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security', " +
+            "'Microsoft.PowerShell.Host', 'Dism', 'Microsoft.PowerShell.LocalAccounts') { Import-Module (`$PSHOME + '\Modules\' + `$m) }"
+        "function D(`$t) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(`$t)) }"
+        "`$b = [IO.File]::ReadAllBytes($(& $data $copy))"
+        "`$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b))"
+        "if (`$h -ne '$(Get-BytesHash $bytes)') { Write-Host 'The installer changed on disk after it started, so nothing was run.'; Start-Sleep -Seconds 20; exit 1 }"
+        "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b))) -Prepare -ForUserSid $(& $data $MySid) -WorkDir $(& $data $work)$(if ($Yes) { ' -Yes' })"
+    ) -join "`n"
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     Say "Asking Windows for permission now (look for the box; it may be behind this window)..."
     try {
-        $null = Start-Process powershell.exe -Verb RunAs -Wait -PassThru `
-            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$command`""
+        $null = Start-Process $WindowsPowerShell -Verb RunAs -Wait -PassThru `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded"
     } catch {
         Stop-Install ("Windows didn't give administrator permission (the box was closed or 'No' was " +
             "clicked, or your temporary administrator access has run out), so nothing was changed. " +
@@ -583,14 +669,48 @@ function Invoke-AdminPart {
         Remove-Item -LiteralPath $copy -ErrorAction SilentlyContinue
     }
     $resultFile = Join-Path $work "result.json"
-    if (-not (Test-Path -LiteralPath $resultFile)) { Stop-Install "The administrator part closed before it finished." }
+    $item = Get-Item -LiteralPath $work -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not (Test-AdminFolder $item $MySid) -or -not (Test-Path -LiteralPath $resultFile)) {
+        Stop-Install "The administrator part closed before it finished."
+    }
     $outcome = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
     if (-not $outcome.ok) {
         Stop-Install ("The administrator part didn't finish: $($outcome.error)`n   " +
             "Details are saved in $(Join-Path $work 'setup.log')")
     }
-    Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Tree $work
     return $outcome
+}
+
+# Offers to run the administrator part again after a restart didn't fix
+# something, then restarts. Never with -Yes: unattended, it would restart at
+# every sign-in.
+function Invoke-AdminPartAgain {
+    if ($Yes) { return }
+    Write-Host ""
+    Say "You can also run the administrator part again now. If something on this"
+    Say "computer undoes it, it won't last past the next restart either."
+    if (Ask "Run the administrator part again?") {
+        $null = Invoke-AdminPart
+        Good "Windows is set up."
+        Request-Restart
+    }
+}
+
+# The administrator part ran and Windows restarted, but something it did is
+# needed again. Running it (and restarting) again and again won't help, so
+# this stops and says what's missing.
+function Stop-StillMissing([string[]]$items) {
+    Save-Progress $true  # keeps the count of restarts
+    Write-Host ""
+    Note "Windows has restarted after the administrator part, but this is still needed:"
+    $items | ForEach-Object { Say "  - $_" }
+    Say "On a managed computer, the likely cause is a policy that undoes it (for example,"
+    Say "one that sets Docker Desktop's service back to starting by hand), or WSL or"
+    Say "Docker Desktop being installed somewhere other than the usual place. Ask IT"
+    Say "(the service desk), and show them this list."
+    Invoke-AdminPartAgain
+    Stop-Install "Windows isn't ready for Docker yet (see above)."
 }
 
 # Windows has restarted, but this sign-in still can't use Docker. Asking for
@@ -615,16 +735,7 @@ function Stop-StillNoDocker {
     Say "this computer's groups at each sign-in. Ask IT (the service desk) to let your"
     Say "account stay in the '$DockerUsers' group on this computer, and mention that a"
     Say "group policy seems to remove it."
-    if (-not $Yes) {
-        Write-Host ""
-        Say "You can also run the administrator part again now, to add your account back."
-        Say "If a policy removes it again, that won't last past the next sign-in."
-        if (Ask "Run the administrator part again?") {
-            $null = Invoke-AdminPart
-            Good "Windows is set up."
-            Request-Restart
-        }
-    }
+    Invoke-AdminPartAgain
     Stop-Install "Your account can't use Docker yet (see above)."
 }
 
@@ -638,6 +749,9 @@ if (Test-DockerServiceManual) { $missing += "Let Docker Desktop start without an
 $prepared = ($saved -and $saved.Prepared) -or (Test-InDockerUsers $MySid)
 if (-not (Test-CanUseDocker) -and -not $prepared) { $missing += "Give your account permission to use Docker" }
 
+# After the administrator part and a restart, the same things shouldn't be
+# missing again; if they are, running it again every time won't help.
+if ($missing -and $saved -and $saved.Prepared -and $Restarts -ge 1) { Stop-StillMissing $missing }
 if ($missing) {
     Write-Host ""
     Say "To do that, Windows needs to:"
@@ -744,7 +858,7 @@ Step "Step 7 of 7: Adding DataLab to the Start menu"
 # quit (close the window or press Ctrl-C).
 $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "DataLab.lnk"))
-$Shortcut.TargetPath = "powershell.exe"
+$Shortcut.TargetPath = $WindowsPowerShell
 $Shortcut.Arguments = "-NoExit -Command `"& '$DataLab' serve`""
 $Shortcut.Description = "IHS DataLab"
 $Shortcut.Save()

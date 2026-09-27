@@ -25,7 +25,7 @@ sh install-macos.sh --package datalab-0.1.0-py3-none-any.whl --settings lab-sett
 **Windows.** In PowerShell, in that folder:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Package datalab-0.1.0-py3-none-any.whl -Settings lab-settings.toml
+powershell -NoProfile -ExecutionPolicy Bypass -File install-windows.ps1 -Package datalab-0.1.0-py3-none-any.whl -Settings lab-settings.toml
 ```
 
 The installer asks for your U-M GPT key and the database password, and saves

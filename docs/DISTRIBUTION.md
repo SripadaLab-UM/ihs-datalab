@@ -242,22 +242,45 @@ Windows specifics).
   so the installer asks people to request it before they continue.
   - Built (`install.ps1`): the installer asks Windows for permission once, up
     front, and only if something is missing. That one step turns on the WSL
-    features, installs WSL and Docker Desktop (pinned versions, checked by
-    SHA-256, and Docker's installer by its signature), and adds the person to
+    features, installs WSL and Docker Desktop (pinned versions, each checked
+    by SHA-256 and by its publisher's signature), and adds the person to
     `docker-users` by SID (a name lookup needs the domain controller, which
     isn't reachable off the VPN). Then it offers the restart and opens again
     after sign-in, from a logon task for that person; nothing after this
     needs an administrator.
-  - The elevated part never runs anything the person's account could change.
-    The elevated window reads a copy of the installer's text once, checks its
-    SHA-256 against the text the person's window is running, and runs it from
-    memory. It downloads into a new folder, `%ProgramData%\DataLab-setup-<random>`,
-    that only SYSTEM and Administrators can use (inheritance off, checked
-    before use), checks each download's SHA-256 and Authenticode signature
-    (Microsoft for WSL, Docker for Docker Desktop), and runs it from there,
-    with `TEMP` pointed inside that folder too. When it's done, it deletes the
-    downloads and lets the person read the result and log, and remove the
-    folder; the installer removes it after reading it, or on the next run.
+  - The elevated part runs nothing the person's account could change, as far
+    as the installer can arrange it:
+    - It's started with `-EncodedCommand`, with its values (paths, SID)
+      inside as Base64 text, so no quoting is involved. The command reads a
+      copy of the installer's text once, checks its SHA-256 against the text
+      the person's window is running, and runs it from memory.
+    - Before that, it sets `PSModulePath` to Windows' own module folders
+      (`$PSHOME\Modules` and `Program Files\WindowsPowerShell\Modules`),
+      turns module autoloading off, and loads the modules it uses (including
+      `Dism` and `Microsoft.PowerShell.LocalAccounts`) by full path from
+      `$PSHOME`. The person's own module folders and `PSModulePath` aren't
+      used. `powershell.exe` and `msiexec.exe` are started by full path from
+      the Windows system folder, never looked up by name.
+    - ProgramData's location comes from Windows (`CommonApplicationData`),
+      not `%ProgramData%`, which a person can set for their own account. The
+      elevated part accepts only a folder named exactly
+      `DataLab-setup-<32 hex digits>` there, and checks that ProgramData
+      isn't a link and is owned by SYSTEM, TrustedInstaller or
+      Administrators.
+    - That folder is new, and only SYSTEM and Administrators can use it
+      (created with those permissions, inheritance off, checked before use).
+      Both downloads go there and are checked for their SHA-256 and their
+      Authenticode signature, whose certificate must name the exact
+      organisation (`Microsoft Corporation` for WSL, `Docker Inc` for Docker
+      Desktop). They run from there, with `TEMP` pointed inside the folder
+      too. At the end it deletes the downloads and lets the person read the
+      result and log and remove the folder. The installer does that after
+      reading them, or on its next run, but only for folders that aren't
+      links, are owned by SYSTEM or Administrators, and give that person a
+      permission of their own. Anyone can create folders in ProgramData, so
+      the name alone proves nothing.
+    - The installer stops at once if PowerShell runs in Constrained Language
+      Mode (AppLocker or WDAC).
   - A Docker Desktop that was already installed, probably without
     `--always-run-service`, gets its service (`com.docker.service`) set to
     start automatically, in the same elevated step. A service IT has
@@ -266,7 +289,11 @@ Windows specifics).
     a group policy removes them from `docker-users` at each sign-in), the
     installer doesn't ask for another restart: it stops, names the likely
     cause, says to ask IT, and offers to run the elevated part again (never
-    with `-Yes`, so it can't restart at every sign-in).
+    with `-Yes`, so it can't restart at every sign-in). The same goes for
+    anything else the elevated part fixed that is missing again after a
+    restart (for example, a policy that sets Docker's service back to
+    manual): the installer stops and names it, rather than running the
+    elevated part and restarting again.
   - Only one installer runs at a time (a named mutex), and each run removes
     the after-restart task and shortcut before anything else; only a run
     that asks for a restart sets them up again.
@@ -278,6 +305,10 @@ Windows specifics).
       `docker-users`. When IT elevates with their own administrator account
       (not temporary rights for the person's own account), that IT account
       is added to `docker-users` on the machine, besides the person.
+    - Membership of `docker-users` is what lets an account control Docker
+      Desktop's service, which runs as SYSTEM. So IT should treat
+      `docker-users` as a privileged group: add only the people who use
+      DataLab on that computer, and review who is in it.
   - Before starting Docker Desktop, it moves aside socket files an earlier
     Docker left behind, and stops a leftover Docker VM: either stops Docker
     Desktop from starting.
