@@ -36,20 +36,24 @@ _CITATION = re.compile(
     r"(?<![\w.])(?:1[89]|20)\d{2};\d+(?:\([\w-]+\))?:e?\d+" + _RANGE
     + r"|\bpp\. ?\d+" + _RANGE
     + r"|\bPMID:? ?\d+|\barXiv: ?\d{4}\.\d{4,5}"
-    + r"|(?:\bdoi: ?|https?://(?:dx\.)?doi\.org/)10\.\d{4,9}/[^\s,;)\]]+",
+    + r"|(?:\bdoi: ?|https?://(?:dx\.)?doi\.org/)10\.\d{4,9}/[^\s,;)\]\x00]+",
     re.IGNORECASE,
 )  # fmt: skip
 # A bare DOI, matched once, then dropped only if its suffix looks like one: a
 # letter first, and a digit (s41598-022-1, jama.2020.12, jsr.13520). A rate
 # such as 10.2345/100000, 10.2345/person-years or 10.1234/1000PY stays.
 # (Testing for these in the pattern itself would rescan every start: quadratic.)
-_BARE_DOI = re.compile(r"(?<![\w.])10\.\d{4,9}/([^\s,;)\]]+)")
+_BARE_DOI = re.compile(r"(?<![\w.])10\.\d{4,9}/([^\s,;)\]\x00]+)")
+# What removed code, dates and citations leave behind. Not a space, so a
+# number after them ("`n` 312. rows") doesn't look like it starts a line.
+# (The DOI patterns above stop at it, as they stop at a space.)
+_GAP = "\x00"
 
 
 def _drop_bare_doi(match: re.Match[str]) -> str:
     suffix = match.group(1)
     looks_like_doi = suffix[0].isalpha() and any(c.isdigit() for c in suffix)
-    return " " if looks_like_doi else match.group(0)
+    return _GAP if looks_like_doi else match.group(0)
 
 
 @dataclass(frozen=True)
@@ -60,20 +64,21 @@ class Claim:
 
 def numbers_in_answer(answer: str) -> list[str]:
     """The numbers an answer states, leaving out code, links, dates, citations,
-    and small integers."""
-    prose = _CODE_BLOCK.sub(" ", answer)
-    prose = _INLINE_CODE.sub(" ", prose)
+    list and heading numbers, and small integers."""
+    prose = _CODE_BLOCK.sub(_GAP, answer)
+    prose = _INLINE_CODE.sub(_GAP, prose)
     prose = _LINK_TARGET.sub("]", prose)
-    prose = _CITATION.sub(" ", prose)
+    prose = _CITATION.sub(_GAP, prose)
     prose = _BARE_DOI.sub(_drop_bare_doi, prose)
-    prose = _DATE.sub(" ", prose)
+    prose = _DATE.sub(_GAP, prose)
+    list_numbers = _list_numbers(prose)
     found: list[str] = []
     for match in _NUMBER.finditer(prose):
         token = match.group(0)
         value = _value(token)
-        if value is None or _trivial(token, value, prose, match.start()):
+        if value is None or _trivial(token, value, match.start(), list_numbers):
             continue
-        after = prose[match.end() : match.end() + 12].lower()
+        after = prose[match.end() : match.end() + 12].lower().replace(_GAP, " ")
         if token.endswith("%") and after.lstrip().startswith(("ci", "confidence", "credible")):
             continue  # "95% CI" is a choice, not a finding
         if token not in found:
@@ -145,14 +150,63 @@ def _decimals(token: str) -> int:
         return places
 
 
-def _trivial(token: str, value: Decimal, prose: str, start: int) -> bool:
+# What a line's content may sit behind: indentation, blockquote ">"s, and a
+# heading's "#"s.
+_LINE_MARKERS = re.compile(r"[ \t]*((?:>[ \t]*)*)(#{1,6}[ \t]+)?")
+# An ordered list's number ("12. ", "15) ", or either at a line's end), and a bullet.
+_ORDERED_ITEM = re.compile(r"(\d{1,9})[.)](?:\s|\Z)")
+_BULLET_ITEM = re.compile(r"[-*+](?:\s|\Z)")
+
+
+def _list_numbers(prose: str) -> set[int]:
+    """Where the numbers of ordered lists and numbered headings start.
+
+    Markdown's own rule: a list can start at any number after a blank line,
+    at the start of the text, or right after another ordered item, but it
+    can break into a paragraph (or a bullet's text) only at 1. So "The
+    cohort enrolled\n312. Of these" is a sentence, and so is "312. Of
+    these" after "- The cohort enrolled": its 312 is a finding. A number
+    after a bullet ("- 312 participants") is a finding too.
+    """
+    starts: set[int] = set()
+    previous = "start"  # the line before: start, blank, ordered, bullet, or text
+    previous_quoted = False
+    offset = 0
+    for line in prose.split("\n"):
+        markers = _LINE_MARKERS.match(line)
+        assert markers is not None  # every part is optional
+        content = line[markers.end() :]
+        quoted = bool(markers.group(1))
+        ordered = _ORDERED_ITEM.match(content)
+        if markers.group(2):  # a heading: "## 12. Results"
+            if ordered:
+                starts.add(offset + markers.end())
+            kind = "blank"  # a heading ends a paragraph, like a blank line
+        elif ordered:
+            # A new blockquote starts a new block, whatever came before.
+            fresh = previous in ("start", "blank", "ordered")
+            fresh = fresh or (quoted and not previous_quoted)
+            if fresh or int(ordered.group(1)) == 1:
+                starts.add(offset + markers.end())
+                kind = "ordered"
+            else:
+                kind = "text"
+        elif _BULLET_ITEM.match(content):
+            kind = "bullet"
+        else:
+            kind = "blank" if not content.strip() else "text"
+        previous, previous_quoted = kind, quoted
+        offset += len(line) + 1
+    return starts
+
+
+def _trivial(token: str, value: Decimal, start: int, list_numbers: set[int]) -> bool:
     """Numbers that aren't findings: list numbering, small counts, and years."""
     if "." not in token and "," not in token and not token.endswith("%"):
         if abs(value) <= 10:
             return True  # "two tables", "step 3"
         if 1900 <= value <= 2100:
             return True  # a year or cohort
-        line_start = prose.rfind("\n", 0, start) + 1
-        if prose[line_start:start].strip() in ("", "-", "*"):
-            return True  # "1." at the start of a list item
+        if start in list_numbers:
+            return True  # "12." at the start of a list item or heading
     return False

@@ -43,6 +43,21 @@ async def test_stop_is_confirmed_when_the_container_is_gone(tmp_path, monkeypatc
     await make(tmp_path).stop_and_confirm()
 
 
+async def test_stopping_removes_the_network_after_the_containers(tmp_path, monkeypatch):
+    """Networks left behind used up Docker's address pools after ~30 conversations."""
+    calls = []
+
+    async def docker(*args, check=True):
+        calls.append(args)
+        return ""
+
+    monkeypatch.setattr(module, "docker", docker)
+    containers = make(tmp_path)
+    await containers.stop()
+    assert calls[-1] == ("network", "rm", containers.network)
+    assert all(call[:2] == ("rm", "-f") for call in calls[:-1])
+
+
 async def test_pause_must_be_confirmed(tmp_path, monkeypatch):
     calls = fake_docker(monkeypatch, [(0, "true false", ""), (0, "true false", "")])
     with pytest.raises(DockerError):

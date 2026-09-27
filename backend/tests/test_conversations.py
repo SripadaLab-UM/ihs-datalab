@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import sqlite3
 import time
 
 import httpx
@@ -534,6 +536,127 @@ def test_continue_reads_the_turn_not_its_review_or_later_notices(app):
     # The chat shows an attachment as its own entry after the failed turn.
     store.append(cid, "input_attached", {"items": []})
     assert not manager._last_turn_failed(cid)
+
+
+def test_continue_isnt_blocked_by_an_export(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    # Exported while the agent worked, while DataLab saved its checkpoint,
+    # and after the turn: the chat shows each in the turn, which keeps its Continue.
+    store.append(cid, "exported", {"folder": "/x", "files": 1})
+    store.append(cid, "turn_finished", {"status": "failed"})
+    store.append(cid, "exported", {"folder": "/x", "files": 1})
+    store.append(cid, "turn_done", {})
+    store.append(cid, "exported", {"folder": "/x", "files": 1})
+    assert manager._last_turn_failed(cid)
+
+
+def events_of(store, cid: str) -> list[tuple[str, dict]]:
+    return [(e.type, e.data) for e in store.all_events_after(cid, 0)]
+
+
+def logged(settings, cid: str) -> list[tuple[str, dict]]:
+    """The events as logged, read after DataLab has closed its database."""
+    with contextlib.closing(sqlite3.connect(settings.database_file)) as db:
+        rows = db.execute(
+            "SELECT type, data_json FROM events WHERE conversation_id = ? ORDER BY seq", (cid,)
+        ).fetchall()
+    return [(kind, json.loads(data)) for kind, data in rows]
+
+
+CLOSED = ("notice", {"text": "DataLab closed while the agent was working."})
+
+
+def test_a_turn_cut_off_by_a_restart_is_ended_at_startup(app, settings):
+    store = app.state.services.conversations
+    cut_off = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cut_off, "user_message", {"text": "how many?"})
+    store.append(cut_off, "command_started", {"id": "c1", "command": "Rscript a.R"})
+    finished = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(finished, "user_message", {"text": "how many?"})
+    store.append(finished, "turn_finished", {"status": "completed"})
+    store.append(finished, "turn_done", {})
+    with TestClient(app):
+        pass
+    assert logged(settings, cut_off)[2:] == [
+        CLOSED,
+        ("turn_finished", {"status": "interrupted"}),
+        ("turn_done", {}),
+    ]
+    assert len(logged(settings, finished)) == 3  # nothing to end
+
+
+def test_a_turn_is_ended_only_once_and_like_a_stopped_one(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    manager.end_cut_off_turns()
+    manager.end_cut_off_turns()
+    assert [kind for kind, _ in events_of(store, cid)] == [
+        "user_message", "notice", "turn_finished", "turn_done"
+    ]  # fmt: skip
+    # As after Stop, Continue isn't offered for it.
+    assert not manager._last_turn_failed(cid)
+
+
+def test_a_turn_cut_off_after_it_finished_keeps_its_end(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    store.append(cid, "turn_finished", {"status": "failed"})
+    # Cut off while DataLab saved the checkpoint.
+    manager.end_cut_off_turns()
+    assert events_of(store, cid)[-2:] == [
+        ("turn_finished", {"status": "failed"}),
+        ("turn_done", {}),
+    ]
+    assert manager._last_turn_failed(cid)
+
+
+@pytest.mark.parametrize("review_turn_finished", [False, True])
+def test_a_review_cut_off_by_a_restart_is_ended_but_not_the_answer(app, review_turn_finished):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    store.append(cid, "turn_finished", {"status": "completed"})
+    store.append(cid, "review_started", {})
+    store.append(cid, "turn_started", {})
+    if review_turn_finished:
+        store.append(cid, "turn_finished", {"status": "completed"})
+    manager.end_cut_off_turns()
+    added = events_of(store, cid)[4 + review_turn_finished :]
+    # The review's own turn is ended, not the answer's: that one finished.
+    ended = [] if review_turn_finished else [("turn_finished", {"status": "interrupted"})]
+    assert added == [*ended, ("turn_done", {})]
+
+
+def test_a_turn_cut_off_by_shutdown_says_so_once(app, settings):
+    hold = asyncio.Event()  # never set: the turn is still going when DataLab closes
+    use_fake_runtime(app, hold=hold)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "answer_delta")
+    ends = [e for e in logged(settings, cid) if e[0] in ("notice", "turn_finished", "turn_done")]
+    assert ends == [CLOSED, ("turn_finished", {"status": "interrupted"}), ("turn_done", {})]
+
+
+def test_a_stopped_turn_isnt_ended_twice_at_shutdown(app, settings):
+    hold = asyncio.Event()
+    use_fake_runtime(app, hold=hold)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "answer_delta")
+        client.post(f"/api/conversations/{cid}/stop")
+        wait_for(client, cid, "turn_done")
+    ends = [e[0] for e in logged(settings, cid) if e[0] in ("turn_finished", "turn_done")]
+    assert ends == ["turn_finished", "turn_done"]
 
 
 def test_continue_while_busy_is_refused(app):

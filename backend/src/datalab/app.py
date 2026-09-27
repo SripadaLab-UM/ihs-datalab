@@ -122,6 +122,8 @@ def create_app(
             # Containers from a previous run that didn't shut down cleanly.
             await remove_all_session_containers(settings.profile, settings.data_dir)
             await helper.remove_leftovers(settings)
+        # Turns the last run stopped in the middle of, if it didn't close cleanly.
+        sessions.end_cut_off_turns()
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
             yield

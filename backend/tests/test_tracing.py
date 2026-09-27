@@ -100,6 +100,81 @@ def test_findings_shaped_like_citations_are_kept():
         assert numbers_in_answer(answer) == expected, answer
 
 
+def test_a_finding_at_the_start_of_a_line_or_bullet_is_checked():
+    cases = {
+        "- 312 participants were enrolled": ["312"],
+        "* 1,226 interns": ["1,226"],
+        "+ 45 withdrew": ["45"],
+        "  - 45 withdrew": ["45"],
+        "- 12. was the median": ["12"],
+        "312 participants were enrolled.": ["312"],
+        "Enrolled:\n312 participants": ["312"],
+        "-312 change in steps": ["-312"],
+        "1.5 hours more sleep\n12.5 hours in bed": ["1.5", "12.5"],
+        "| 312 | 7.2 |\n|---|---|": ["312", "7.2"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_ordered_list_numbers_are_left_out():
+    cases = {
+        "11. Sleep\n12. Steps\n13. Mood": [],
+        "  15) nested item": [],
+        "Steps:\n\n99.\n100.": [],
+        "Steps:\n1. Sleep\n12. Steps": [],  # a list that starts at 1 may follow text
+        "- Sleep\n  - Naps\n1. Steps\n12. Mood": [],
+        "Intro\n> 12. item\n> 13. item": [],
+        "> 12. item\n>\n> 13. item": [],
+        "42. Mean sleep was 7.2 hours": ["7.2"],
+        "## 3. Results": [],
+        "2025 cohort": [],
+        "7 sites": [],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_numbered_headings_are_left_out():
+    cases = {
+        "## 12. Results": [],
+        "### 12) Results": [],
+        "Some text\n## 14. Discussion": [],
+        "> ## 15. Quoted": [],
+        "## 312 participants": ["312"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_a_hard_wrapped_count_is_checked():
+    # A list can't break into a paragraph unless it starts at 1, so these
+    # are sentences, not list items.
+    cases = {
+        "The cohort enrolled\n312. Of these, 45 withdrew.": ["312", "45"],
+        "Total enrolled:\n  312.": ["312"],
+        "Steps:\n99.\n100.": ["99", "100"],  # 99. is text, so 100. is too
+        "> The cohort enrolled\n> 312. Of these": ["312"],
+        "- The cohort enrolled\n312. Of these, 45 withdrew.": ["312", "45"],
+        "- Sleep\n  - Naps\n12. Steps": ["12"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_removed_text_does_not_make_a_line_start():
+    cases = {
+        "`n` 312. rows": ["312"],
+        "2024-03-01 312. rows": ["312"],
+        "PMID: 34042743 312. rows": ["312"],
+        "doi:10.1038/abc`x`312 people": ["312"],
+        "10.1038/s41598-022`x`312 people": ["312"],
+        "```\nx\n```\n\n12. item": [],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
 def test_long_answers_stay_fast():
     started = time.monotonic()
     numbers_in_answer("10.1234/" * 32000 + " 2021;" * 20000 + " pp. " * 20000)

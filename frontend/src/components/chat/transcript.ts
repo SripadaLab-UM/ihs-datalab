@@ -267,21 +267,27 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "input_unavailable":
         add({ kind: "notice", tone: "error", text: `Not attached this time: ${text(data.reason)}.` });
         break;
-      case "exported":
-        turn = {
-          userText: "",
-          items: [{ kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` }],
-          status: "completed",
-        };
-        turns.push(turn);
+      case "exported": {
+        const notice: Item = { kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` };
+        // Exporting doesn't wait for the agent, and changes nothing it works
+        // on: the notice goes in the turn it was made during, or follows, so
+        // what that turn does next (or its Continue, or its review run again)
+        // stays with it.
+        if (turn) turn.items.push(notice);
+        else {
+          turn = { userText: "", items: [notice], status: "completed" };
+          turns.push(turn);
+        }
         break;
+      }
       case "files_changed": {
         const paths = Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === "string") : [];
         if (paths.length) add({ kind: "files", paths });
         break;
       }
       case "files_restored": {
-        // Between turns: shown on its own, after the turn it follows.
+        // Between turns (DataLab refuses a restore while busy, as it does
+        // attaching and removing inputs): shown on its own, after the turn it follows.
         const label = text(data.label).toLowerCase() || "an earlier checkpoint";
         const leftAlone = Array.isArray(data.left_alone) ? data.left_alone.length : 0;
         const notRestored = Array.isArray(data.not_restored) ? data.not_restored.length : 0;

@@ -180,13 +180,18 @@ class SessionContainers:
         await self._start_agent(token)
 
     async def stop(self) -> None:
-        """Stop the containers. The workspace and Codex home stay on disk."""
+        """Stop the containers and remove their network, which `start()` makes
+        again. The workspace and Codex home stay on disk.
+
+        The network goes too: Docker has room for only about 30, so leaving
+        one behind per conversation stopped new ones starting after a while.
+        """
         for name in (self.agent, self.gateway, self.proxy):
             await docker("rm", "-f", name, check=False)
+        await docker("network", "rm", self.network, check=False)
 
     async def remove(self) -> None:
         await self.stop()
-        await docker("network", "rm", self.network, check=False)
 
     async def is_running(self) -> bool:
         """Running and not paused: a paused agent can't run Codex."""
