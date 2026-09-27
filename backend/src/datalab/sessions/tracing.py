@@ -92,6 +92,43 @@ def trace(answer: str, evidence: list[str]) -> list[Claim]:
     return [Claim(token, _matches(token, known)) for token in numbers_in_answer(answer)]
 
 
+@dataclass(frozen=True)
+class Source:
+    """Where a number appears: a command's output, a query's result, or an output file."""
+
+    kind: str  # "command", "query", or "file"
+    ref: str  # the command's id, the query's id, or the file's path in /work
+
+
+@dataclass(frozen=True)
+class SourcedClaim:
+    text: str  # as written in the answer
+    sources: tuple[Source, ...]  # where it appears, in the order the evidence came
+
+    @property
+    def traced(self) -> bool:
+        return bool(self.sources)
+
+
+def trace_sources(
+    answer: str, evidence: list[tuple[Source, str]], *, limit: int = 5
+) -> list[SourcedClaim]:
+    """Each number in `answer`, with the pieces of `evidence` it appears in (at
+    most `limit`). The same match as `trace`: it says where a number appears,
+    not that it was computed there."""
+    known = [(source, _evidence_values([text])) for source, text in evidence]
+    claims = []
+    for token in numbers_in_answer(answer):
+        found: list[Source] = []
+        for source, values in known:
+            if source not in found and _matches(token, values):
+                found.append(source)
+                if len(found) == limit:
+                    break
+        claims.append(SourcedClaim(token, tuple(found)))
+    return claims
+
+
 # Clock times and dates in output (timestamps, `ls` listings) aren't findings.
 _TIME = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b")
 
