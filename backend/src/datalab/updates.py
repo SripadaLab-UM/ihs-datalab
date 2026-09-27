@@ -32,10 +32,13 @@ import os
 import re
 import secrets
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+from datalab import datalock
 from datalab.db import backups, rollback
 from datalab.db.backups import Backup
 
@@ -101,8 +104,15 @@ def begin(data_dir: Path, database_file: Path, *, from_version: str, to_version:
     """Start an update: write the marker, then back up the database.
 
     Call it only once the running DataLab has stopped its conversations, so
-    nothing is recorded after the backup.
+    nothing is recorded after the backup. It runs holding the data folder's
+    lock: the caller's, if this process has it, or its own (and then it
+    refuses, with DataFolderInUse, while a DataLab is running).
     """
+    with _holding_lock(data_dir):
+        return _begin(data_dir, database_file, from_version, to_version)
+
+
+def _begin(data_dir: Path, database_file: Path, from_version: str, to_version: str) -> Marker:
     if marker_path(data_dir).exists():
         raise UpdateError(
             "An earlier update hasn't finished. Start DataLab once so it can sort that "
@@ -191,7 +201,17 @@ def from_version_for(data_dir: Path, app_version: str) -> str | None:
 def recover(
     data_dir: Path, database_file: Path, *, app_version: str, known: set[str]
 ) -> Recovery | None:
-    """At startup: sort out an update that didn't finish. None if there wasn't one."""
+    """At startup: sort out an update that didn't finish. None if there wasn't one.
+
+    Runs holding the data folder's lock, like `begin`.
+    """
+    with _holding_lock(data_dir):
+        return _recover(data_dir, database_file, app_version, known)
+
+
+def _recover(
+    data_dir: Path, database_file: Path, app_version: str, known: set[str]
+) -> Recovery | None:
     try:
         marker = read_marker(data_dir)
     except UnreadableMarker:
@@ -261,6 +281,16 @@ def _unreadable(data_dir: Path, database_file: Path, app_version: str, known: se
         "An update was interrupted before it changed anything, and left a note DataLab "
         f"couldn't read (kept as {aside.name}). Your data wasn't changed.",
     )
+
+
+@contextmanager
+def _holding_lock(data_dir: Path) -> Iterator[None]:
+    """The data folder's lock for the duration, unless this process holds it already."""
+    if datalock.held(data_dir):
+        yield
+        return
+    with datalock.hold(data_dir):
+        yield
 
 
 def same_version(a: str, b: str) -> bool:

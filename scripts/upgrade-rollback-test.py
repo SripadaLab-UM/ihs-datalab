@@ -31,7 +31,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -44,7 +43,7 @@ SRC = ROOT / "backend" / "src"
 MIGRATIONS = "backend/src/datalab/db/migrations"
 # The first installable pre-release (v0.1.0-alpha.1): queries and conversations only.
 PINNED = "b32dec60d2084d97e7ea4815d05eba4fc639d6de"
-# Not a port anything else uses; the rollback command only checks it's free.
+# Not a port anything else uses; the rollback command checks it's free.
 PORT = 8785
 
 
@@ -115,13 +114,13 @@ def run(ref: str, scratch: Path) -> None:
     # What the rollback must keep: every query, in the previous release's columns.
     expected = {**before, "queries": snapshot(database, like=before)["queries"]}
     previous = previous_release_with_rollback(ref, old_names, scratch / "previous")
-    with socket.socket() as running:  # DataLab is "running" on its port
-        running.bind(("127.0.0.1", PORT))
-        running.listen()
+    from datalab.datalock import hold
+
+    with hold(data):  # a DataLab is running on this data folder
         busy = datalab(previous, data, "rollback", "--yes")
     expect(
-        busy.returncode != 0 and "already running" in busy.stdout + busy.stderr,
-        "while DataLab is running, rollback refuses",
+        busy.returncode != 0 and "already using the data folder" in busy.stdout + busy.stderr,
+        "while DataLab holds the data folder's lock, rollback refuses",
     )
     expect(schema(database) == new_names, "…and changes nothing")
     refused = datalab(previous, data, "rollback")

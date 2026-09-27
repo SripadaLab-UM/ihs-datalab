@@ -263,3 +263,27 @@ def test_an_update_that_added_a_used_column_isnt_undone_silently(data_dir, monke
     assert "reviewer" in [
         c[1] for c in sqlite3.connect(database).execute("PRAGMA table_info(queries)")
     ]
+
+
+def test_an_update_wont_begin_or_recover_while_a_datalab_is_running(data_dir):
+    from datalab.datalock import DataFolderInUse
+    from tests.test_rollback import hold_in_another_process
+
+    database = data_dir / "datalab.sqlite"
+    with hold_in_another_process(data_dir):
+        with pytest.raises(DataFolderInUse):
+            updates.begin(data_dir, database, from_version="0.1.0", to_version="0.2.0")
+        with pytest.raises(DataFolderInUse):
+            updates.recover(data_dir, database, app_version="0.1.0", known=older(data_dir))
+    assert updates.read_marker(data_dir) is None
+    assert list_backups(data_dir / "backups") == []
+
+
+def test_the_running_datalab_can_begin_an_update_under_its_own_lock(data_dir):
+    from datalab import datalock
+
+    datalock.refuse_second_instance(data_dir, "practice")  # as `datalab serve` does
+    marker = updates.begin(
+        data_dir, data_dir / "datalab.sqlite", from_version="0.1.0", to_version="0.2.0"
+    )
+    assert marker.state == "backed-up" and datalock.held(data_dir)

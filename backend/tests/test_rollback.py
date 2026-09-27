@@ -1,6 +1,9 @@
 """Rolling the database back for an older DataLab, and refusing when it's unsafe."""
 
 import sqlite3
+import subprocess
+import sys
+from contextlib import contextmanager
 
 import pytest
 
@@ -8,6 +11,7 @@ from datalab import cli, db
 from datalab.db import rollback
 from datalab.db.backups import list_backups, take_backup
 from datalab.db.rollback import RollbackRefused
+from datalab.trial import refuse_if_running as REAL_REFUSE_IF_RUNNING
 from tests.test_backups import (
     FIRST,
     add_conversation,
@@ -47,7 +51,7 @@ def test_rollback_puts_back_the_backup_taken_before_the_update(updated):
 
     plan = rollback.plan(path, older)
     assert plan.backup.name.startswith("0.2.0-") and plan.backup.reason == "migrate"
-    assert plan.undone == ("0003_attachments.sql", "0004_exports.sql", "0005_rigor.sql")
+    assert plan.undone == tuple(sorted(db.known_migrations() - older))
     assert not plan.loses_data
 
     kept = rollback.restore(path, plan.backup, app_version="0.1.0")
@@ -57,7 +61,7 @@ def test_rollback_puts_back_the_backup_taken_before_the_update(updated):
     assert db.backups.applied_migrations(connection) == sorted(older)
     connection.close()
     # What it replaced is kept, so the rollback can itself be undone.
-    assert kept.reason == "restore" and len(kept.migrations) == 5
+    assert kept.reason == "restore" and set(kept.migrations) == db.known_migrations()
     assert kept.verify()
 
 
@@ -157,6 +161,18 @@ class TestCommand:
         assert "Rolled back" in capsys.readouterr().out
         db.connect(path).close()  # the older DataLab opens it again
 
+    def test_it_refuses_while_a_datalab_holds_the_data_folder(self, data_dir, monkeypatch):
+        monkeypatch.setattr("datalab.trial.refuse_if_running", REAL_REFUSE_IF_RUNNING)
+        path = data_dir / "datalab.sqlite"
+        before = schema_of(path)
+        with hold_in_another_process(data_dir):
+            with pytest.raises(SystemExit, match="already using the data folder"):
+                cli.main(["rollback", "--yes"])
+            with pytest.raises(SystemExit, match="already using the data folder"):
+                cli.main(["backup"])
+        assert schema_of(path) == before
+        assert [b.reason for b in list_backups(data_dir / "backups")] == ["migrate"]
+
     def test_it_lists_the_backups(self, data_dir, capsys):
         assert cli.main(["rollback", "--list"]) == 0
         out = capsys.readouterr().out
@@ -174,8 +190,10 @@ def test_the_data_accessed_log_survives_a_rollback(updated):
     plan = rollback.plan(path, older)
     kept = rollback.restore(path, plan.backup, app_version="0.1.0")
 
-    # Every query, new or changed since the update, is still recorded...
-    assert rows(path, "queries") == queries_before
+    # Every query, new or changed since the update, is still recorded (in the
+    # columns the older layout has; 0006 added `origin`, left at its default)...
+    width = len(rows(path, "queries")[0])
+    assert rows(path, "queries") == [r[:width] for r in queries_before]
     # ...while the rest of the database is as the backup had it.
     assert [r[0] for r in rows(path, "conversations")] == ["c1"]
     assert kept.reason == "restore"
@@ -223,3 +241,39 @@ def test_a_new_column_left_at_its_default_isnt_a_change(updated):
     connection.close()
     [loss] = rollback.plan(path, older).losses
     assert (loss.table, loss.added, loss.changed) == ("conversations", 0, 1)
+
+
+def test_a_query_origin_other_than_the_default_is_listed_as_dropped(updated):
+    path, older = updated  # the older layout has no queries.origin (0006)
+    connection = sqlite3.connect(path, isolation_level=None)
+    connection.execute("UPDATE queries SET origin = 'playground'")
+    connection.close()
+    plan = rollback.plan(path, older)
+    assert [(loss.table, loss.changed) for loss in plan.losses] == [("queries", 1)]
+
+
+@contextmanager
+def hold_in_another_process(data_dir):
+    """Another DataLab holding the data folder's lock while the block runs."""
+    code = (
+        "import sys; from pathlib import Path; from datalab.datalock import hold;"
+        f"lock = hold(Path({str(data_dir)!r})); print('held', flush=True); sys.stdin.read()"
+    )
+    holder = subprocess.Popen(
+        [sys.executable, "-c", code], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+    )
+    try:
+        assert holder.stdout is not None and holder.stdout.readline().strip() == "held"
+        yield
+    finally:
+        assert holder.stdin is not None
+        holder.stdin.close()
+        holder.wait(timeout=10)
+
+
+def schema_of(path):
+    connection = sqlite3.connect(path)
+    try:
+        return db.backups.applied_migrations(connection)
+    finally:
+        connection.close()

@@ -102,6 +102,8 @@ def main(argv: list[str] | None = None) -> int:
 def _serve(settings, *, open_browser: bool) -> int:
     from datalab.trial import refuse_if_running
 
+    # The data folder's lock, held until DataLab exits: nothing else may
+    # change the database while an interrupted update is sorted out, or after.
     refuse_if_running(settings)
     import threading
     import webbrowser
@@ -175,8 +177,11 @@ def _backup(settings) -> int:
     import sqlite3
 
     from datalab import __version__
+    from datalab.datalock import refuse_second_instance
     from datalab.db.backups import backups_dir, take_backup
 
+    # A running DataLab may be backing up or removing old backups itself.
+    refuse_second_instance(settings.data_dir, settings.profile)
     if not settings.database_file.exists():
         print("There's no DataLab database yet, so there's nothing to back up.")
         return 1
@@ -204,13 +209,15 @@ def _rollback(settings, args) -> int:
         for backup in reversed(found):
             usable = "" if set(backup.migrations) <= known else "  (for a newer DataLab)"
             print(
-                f"{backup.name:<16} {backup.created_at[:16].replace('T', ' ')}  "
+                f"{backup.name:<30} {backup.created_at[:16].replace('T', ' ')}  "
                 f"{backup.reason:<8} schema {backup.schema_version}{usable}"
             )
         return 0
 
     from datalab.trial import refuse_if_running
 
+    # Held from before the plan until the restore is done (and this process
+    # exits), so nothing is recorded in between that the restore would lose.
     refuse_if_running(settings)
     try:
         plan = rollback.plan(settings.database_file, known, choose=args.backup)

@@ -185,6 +185,11 @@ def refuse_second_instance(data_dir: Path, profile: str) -> DataFolderLock:
     return _held[key]
 
 
+def held(data_dir: Path) -> bool:
+    """Whether this process holds the data folder's lock (see `refuse_second_instance`)."""
+    return data_dir.resolve() in _held
+
+
 def release_all() -> None:
     """Let go of every lock `refuse_second_instance` took (for tests)."""
     while _held:

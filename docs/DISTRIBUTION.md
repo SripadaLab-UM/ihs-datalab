@@ -131,6 +131,10 @@ newest backup this version can read.
   behind, in the "restore" backup, and they are listed as dropped.
 - It backs up the database it replaces (reason "restore"), so a rollback can
   itself be undone.
+- It holds the data folder's lock (`.lock`, see `datalock.py`) from before it
+  works out what to restore until it's done, so it refuses while DataLab is
+  running and nothing can be recorded in between. `datalab backup` takes the
+  lock too.
 - Rolling back to a release from before milestone 7 isn't supported: those
   releases don't have `datalab rollback`, and don't refuse a newer database.
 
@@ -161,6 +165,9 @@ workflow checks they match. The marker compares versions in either form.
    started, the marker is removed, and a line goes in `logs/updates.jsonl`
    (versions and times only).
 
+`begin` and the startup recovery run holding the data folder's lock: the
+running DataLab's own, or their own (refusing while a DataLab is running).
+
 If the marker is still there at a start, the update was interrupted:
 
 - **The new version is starting:** it carries on and finishes the update.
@@ -177,10 +184,10 @@ If the marker is still there at a start, the update was interrupted:
 
 CI checks all of this on every change (`scripts/upgrade-rollback-test.py`): a
 data folder made by the previous release's own code is upgraded by the
-current code, checked row by row, rolled back (refused first while DataLab
-is running, and without `--yes`), and checked again, including that a query
-recorded after the upgrade survives. It also fails if a migration in any
-released tag was changed or removed.
+current code, checked row by row, rolled back (refused first while another
+process holds the data folder's lock, and without `--yes`), and checked
+again, including that a query recorded after the upgrade survives. It also
+fails if a migration in any released tag was changed or removed.
 
 ## Where DataLab keeps things
 
