@@ -27,7 +27,9 @@ You can't edit the code in DataLab yourself: ask the agent.
 
 After each turn, whatever the agent changed in `ihsDataR/` and `workflows/`
 becomes one [proposal](glossary.md#proposal), shown in the Pipelines tab.
-Changes anywhere else in its copy are listed as not proposed.
+Changes anywhere else in its copy are listed as not proposed. The Workflows
+tab's Workflow authoring chat works the same way, and its proposals are
+reviewed and saved here too.
 
 ## Review it
 
@@ -39,7 +41,9 @@ Changes anywhere else in its copy are listed as not proposed.
   like participant data (data files, identifier-like column names, numbers
   next to dates) and any code that would run outside the test container once
   shared (such as `.Rprofile` or a package's load hooks). Changes outside
-  `ihsDataR/` and `workflows/` can't be shared at all.
+  `ihsDataR/` and `workflows/` can't be shared at all, and a changed
+  workflow file must pass the workflow check, with the real DataLab's
+  small-cells rule.
 
 What keeps a change safe is the sandbox and your reading of the diff.
 

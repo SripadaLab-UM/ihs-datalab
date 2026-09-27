@@ -35,13 +35,15 @@ research session.
 
 ## Mode
 
-What a conversation is for: Analysis, Data extraction, Data engineering, or
-Research. It sets the agent's instructions and the suggested questions, and
-decides whether it's a data or a research session.
+What a conversation is for, such as Analysis, Data extraction, Data
+engineering or Research. It sets the agent's instructions and the suggested
+questions, and decides whether it's a data or a research session.
 
 A mode is a starting point, not a restriction. Analysis, Data extraction and
 Data engineering are [data sessions](#data-session); Research is a
-[research session](#research-session).
+[research session](#research-session). Two more open only from the tab that
+docks them: Workflow authoring (Workflows tab) and Knowledge writing
+(Knowledge tab), both data sessions.
 
 ## Plan
 

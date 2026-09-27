@@ -81,3 +81,10 @@ participant-data finding, such as an ID typed into the SQL, must be confirmed
 first. Where the workflows come from the lab's `ihs-pipelines` repository,
 saving is [Save & share](glossary.md#save--share), and the package's tests
 must pass. Editing an existing workflow file isn't in the tab yet.
+
+The chat beside the Workflows tab is in Workflow authoring mode, a
+[data session](glossary.md#data-session). Ask it to draft a new workflow or
+change one: it works in its own copy of the repository and checks each draft
+with DataLab's workflow check. Its changes become a proposal in the
+[Pipelines](pipelines.md) tab, which you review, test and save there; the
+agent never saves.

@@ -24,9 +24,10 @@ file you see the exact change as a diff, and you can:
 - read what was refused, and why (files outside the knowledge base's
   folders, for example, or edits to who reviewed a page).
 
-A change to a page's status (draft or reviewed) is highlighted, so it can't
-slip through unnoticed. Only people review: DataLab fills in who reviewed a
-page, and when, from the person saving it.
+Only people review. The agent can't change a page's status (draft or
+reviewed): its version keeps the status the page had, `draft` for a new page,
+and the card says if it tried. Only your own edit on the card changes it.
+DataLab fills in who reviewed a page, and when, from the person saving it.
 
 ## The check
 
@@ -64,8 +65,11 @@ research sessions until a person has reviewed it.
 
 The **Knowledge** tab shows the pages and lab skills as they are on GitHub,
 by folder, with their facts (status, evidence, cohorts), and the recent
-changes. Its chat can help write or tidy a page; its edits become proposals
-like any other.
+changes. Its chat, in Knowledge writing mode, can help write or tidy a page
+or skill; its edits become proposals like any other. It's a data session
+that can read the catalog (tables and columns) but can't run queries, and
+nothing can be attached to it. The page open in the tab can go with your
+message.
 
 The practice DataLab doesn't get a copy of the knowledge base and never
 signs in to GitHub, so nothing from practice can reach it.
