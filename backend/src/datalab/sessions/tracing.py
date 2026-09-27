@@ -36,16 +36,17 @@ _CITATION = re.compile(
     r"(?<![\w.])(?:1[89]|20)\d{2};\d+(?:\([\w-]+\))?:e?\d+" + _RANGE
     + r"|\bpp\. ?\d+" + _RANGE
     + r"|\bPMID:? ?\d+|\barXiv: ?\d{4}\.\d{4,5}"
-    + r"|(?:\bdoi: ?|https?://(?:dx\.)?doi\.org/)10\.\d{4,9}/[^\s,;)\]]+",
+    + r"|(?:\bdoi: ?|https?://(?:dx\.)?doi\.org/)10\.\d{4,9}/[^\s,;)\]\x00]+",
     re.IGNORECASE,
 )  # fmt: skip
 # A bare DOI, matched once, then dropped only if its suffix looks like one: a
 # letter first, and a digit (s41598-022-1, jama.2020.12, jsr.13520). A rate
 # such as 10.2345/100000, 10.2345/person-years or 10.1234/1000PY stays.
 # (Testing for these in the pattern itself would rescan every start: quadratic.)
-_BARE_DOI = re.compile(r"(?<![\w.])10\.\d{4,9}/([^\s,;)\]]+)")
+_BARE_DOI = re.compile(r"(?<![\w.])10\.\d{4,9}/([^\s,;)\]\x00]+)")
 # What removed code, dates and citations leave behind. Not a space, so a
 # number after them ("`n` 312. rows") doesn't look like it starts a line.
+# (The DOI patterns above stop at it, as they stop at a space.)
 _GAP = "\x00"
 
 
@@ -161,13 +162,14 @@ def _list_numbers(prose: str) -> set[int]:
     """Where the numbers of ordered lists and numbered headings start.
 
     Markdown's own rule: a list can start at any number after a blank line,
-    at the start of the text, or right after another list item, but it can
-    break into a paragraph only at 1. So "The cohort enrolled\n312. Of
-    these" is a sentence, and its 312 is a finding. A number after a bullet
-    ("- 312 participants") is a finding too.
+    at the start of the text, or right after another ordered item, but it
+    can break into a paragraph (or a bullet's text) only at 1. So "The
+    cohort enrolled\n312. Of these" is a sentence, and so is "312. Of
+    these" after "- The cohort enrolled": its 312 is a finding. A number
+    after a bullet ("- 312 participants") is a finding too.
     """
     starts: set[int] = set()
-    previous = "start"  # the line before: start, blank, list, or text
+    previous = "start"  # the line before: start, blank, ordered, bullet, or text
     previous_quoted = False
     offset = 0
     for line in prose.split("\n"):
@@ -182,14 +184,15 @@ def _list_numbers(prose: str) -> set[int]:
             kind = "blank"  # a heading ends a paragraph, like a blank line
         elif ordered:
             # A new blockquote starts a new block, whatever came before.
-            fresh = previous != "text" or (quoted and not previous_quoted)
+            fresh = previous in ("start", "blank", "ordered")
+            fresh = fresh or (quoted and not previous_quoted)
             if fresh or int(ordered.group(1)) == 1:
                 starts.add(offset + markers.end())
-                kind = "list"
+                kind = "ordered"
             else:
                 kind = "text"
         elif _BULLET_ITEM.match(content):
-            kind = "list"
+            kind = "bullet"
         else:
             kind = "blank" if not content.strip() else "text"
         previous, previous_quoted = kind, quoted
