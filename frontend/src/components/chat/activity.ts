@@ -431,9 +431,14 @@ export function saveBlocker(options: {
   sharing: number;
   /** Files someone else changed on GitHub that the person hasn't resolved yet. */
   unresolved?: number;
+  /** Files with an open editor whose text isn't kept yet: saving would leave it out. */
+  unkept?: string[];
 }): string | null {
   const errors = options.findings.filter((f) => f.severity === "error").length;
   const unconfirmed = options.findings.filter((f) => f.severity === "data" && !options.confirmed.has(f.id)).length;
+  if (options.unkept?.length) {
+    return `Keep or cancel your edit of ${options.unkept.join(" and ")} first: Save & share saves only what's kept.`;
+  }
   if (!options.signedIn) return "Sign in to GitHub (in Settings) to save and share.";
   if (options.sharing === 0) return "Every file is left out: there's nothing to share.";
   if (options.unresolved) {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { commitUrl, type KbCommit, type KbEntry, type KbPage, knowledgeApi, type KnowledgeStatus } from "@/api/knowledge";
@@ -9,12 +9,15 @@ import { InternalLinks, Markdown } from "@/components/chat/Markdown";
 import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
+import { useMediaQuery, useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
 import { findPage, groupPages, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
 
 const WIDE = "(min-width: 1280px)";
+// Below these widths the list and the chat are shown over the page.
+const LIST_BESIDE = "(min-width: 1024px)";
 // The docs ask for a chat that "helps write or tidy a page or skill". DataLab has
 // no such mode yet, so it's Data extraction: a data session with the catalog
 // tools, which is what table and query pages cite. Its edits to /work/kb come
@@ -65,6 +68,15 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   );
   const [chatId, setChatId] = useTabState("datalab:kb:chat", "");
   const [chatKey, setChatKey] = useState(0);
+  // Over the page, each is a dialog: focus in it and kept there, Escape closes it.
+  const listBeside = useMediaQuery(LIST_BESIDE);
+  const chatBeside = useMediaQuery(WIDE);
+  const drawerBox = useRef<HTMLElement>(null);
+  const chatBox = useRef<HTMLElement>(null);
+  const drawerOver = drawer && !listBeside;
+  const chatOver = chatOpen === "open" && !chatBeside;
+  useOverlay(drawerBox, drawerOver, () => setDrawer(false));
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-kb-ask]"));
 
   const sync = useMutation({
     mutationFn: knowledgeApi.sync,
@@ -79,10 +91,12 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     setDrawer(false);
   };
 
+  // The file itself: a link or address may leave out ".md".
+  const found = findPage(entries, path);
   const page = useQuery({
-    queryKey: ["kb-page", path, head],
-    queryFn: () => knowledgeApi.page(path),
-    enabled: Boolean(path && head && findPage(entries, path)),
+    queryKey: ["kb-page", found?.path, head],
+    queryFn: () => knowledgeApi.page(found!.path),
+    enabled: Boolean(found && head),
   });
   const context = useMemo<ChatContext | undefined>(
     () => (page.data ? { label: `The page open in the Knowledge tab (${page.data.path})`, text: page.data.text, language: languageOf(page.data.path) } : undefined),
@@ -116,13 +130,17 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     >
       {drawer && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
       <aside
+        ref={drawerBox}
         aria-label="Pages and skills"
+        role={drawerOver ? "dialog" : undefined}
+        aria-modal={drawerOver || undefined}
+        tabIndex={-1}
         className={clsx(
           "min-h-0 overflow-hidden border-r border-line bg-rail",
           drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
         )}
       >
-        <PageList entries={entries} selected={path} onOpen={open} loading={pages.isPending} />
+        <PageList entries={entries} selected={found?.path ?? path} onOpen={open} loading={pages.isPending} />
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col">
@@ -135,7 +153,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
             <RepoLine status={status} onSync={() => sync.mutate()} syncing={sync.isPending} error={sync.error?.message} />
           </div>
           {chatOpen === "closed" && (
-            <Button variant="secondary" className="shrink-0 px-2.5 py-1 text-[12.5px]" onClick={() => setChatOpen("open")}>
+            <Button data-kb-ask variant="secondary" className="shrink-0 px-2.5 py-1 text-[12.5px]" onClick={() => setChatOpen("open")}>
               <Icon name="spark" size={13} /> Ask for help
             </Button>
           )}
@@ -173,7 +191,11 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         <>
           <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
+            ref={chatBox}
             aria-label="Knowledge chat"
+            role={chatOver ? "dialog" : undefined}
+            aria-modal={chatOver || undefined}
+            tabIndex={-1}
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
             <DockedChat

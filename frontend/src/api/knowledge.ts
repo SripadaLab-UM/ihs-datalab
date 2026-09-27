@@ -46,9 +46,13 @@ export const knowledgeApi = {
       method: "PUT",
       body: JSON.stringify({ files, reset }),
     }),
-  /** Save & share, with the ids of the data findings the person confirmed aren't participant data. */
-  accept: (proposalId: string, confirmed: string[]) =>
-    request<ProposalDetail>(`/api/knowledge/proposals/${id(proposalId)}/accept`, post({ confirmed })),
+  /**
+   * Save & share, with the ids of the data findings the person confirmed aren't
+   * participant data, and what they saw: each file's `after_sha256` and the ids
+   * of the check's findings. DataLab refuses (409) if either changed since.
+   */
+  accept: (proposalId: string, confirmed: string[], seen: Record<string, string | null>, findings: string[]) =>
+    request<ProposalDetail>(`/api/knowledge/proposals/${id(proposalId)}/accept`, post({ confirmed, seen, findings })),
   /** Discard: nothing is shared. */
   reject: (proposalId: string) => request<ProposalDetail>(`/api/knowledge/proposals/${id(proposalId)}/reject`, post()),
 

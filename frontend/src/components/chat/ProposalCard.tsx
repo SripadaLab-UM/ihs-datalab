@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
+import { ApiError } from "@/api/http";
 import { commitUrl, type Finding, knowledgeApi, type ProposalDetail, type ProposalFile } from "@/api/knowledge";
 import { CodeEditor, type EditorLanguage } from "@/components/editor/CodeEditor";
 import { DiffView } from "@/components/editor/DiffView";
@@ -33,7 +34,14 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
   const queryClient = useQueryClient();
   const key = ["kb-proposal", proposal.id];
   const [open, setOpen] = useState(() => proposalState(proposal.status).actionable);
-  const detail = useQuery({ queryKey: key, queryFn: () => knowledgeApi.proposal(proposal.id), enabled: open });
+  const saving = proposal.status === "saving";
+  const detail = useQuery({
+    queryKey: key,
+    queryFn: () => knowledgeApi.proposal(proposal.id),
+    // While it's saving, until it isn't (a save cut off by a restart ends as failed).
+    enabled: open || saving,
+    refetchInterval: (query) => (query.state.data?.proposal.status === "saving" ? 2000 : false),
+  });
   // The chat's events say when it changed elsewhere (another window, the agent's next turn).
   useEffect(() => {
     queryClient.invalidateQueries({ queryKey: ["kb-proposal", proposal.id] });
@@ -43,22 +51,38 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
   const commit = detail.data?.proposal.commit ?? proposal.commit;
   const knowledge = useQuery({ queryKey: ["knowledge-status"], queryFn: knowledgeApi.status, enabled: state.actionable || Boolean(commit) });
   // Once it's decided (saved, discarded, replaced), the review folds away; it can be opened again.
+  // Focus stays on the card, not lost with the button that was pressed.
+  const card = useRef<HTMLElement>(null);
   const decided = !state.actionable;
+  const wasActionable = useRef(state.actionable);
   useEffect(() => {
-    if (decided) setOpen(false);
+    if (!decided) {
+      wasActionable.current = true;
+      return;
+    }
+    setOpen(false);
+    if (!wasActionable.current) return;
+    wasActionable.current = false;
+    const active = document.activeElement;
+    if (!active || active === document.body || card.current?.contains(active)) card.current?.focus();
   }, [decided]);
+  const actionable = state.actionable && status !== "saving";
 
   return (
     <section
+      ref={card}
+      tabIndex={-1}
       aria-label={proposalTitle(proposal)}
-      className={clsx("border-l py-1 pl-5 text-[14px]", state.actionable ? "border-you" : "border-line")}
+      className={clsx("border-l py-1 pl-5 text-[14px] outline-none", state.actionable ? "border-you" : "border-line")}
     >
       <div className="flex flex-wrap items-baseline gap-2.5">
         <Icon name="book" size={15} className="translate-y-[2px] text-muted" />
         <h3 className="font-serif text-[21px] font-normal">{proposalTitle(proposal)}</h3>
         <Chip tone={state.tone}>{state.label}</Chip>
       </div>
-      <p className="mt-1 max-w-[62ch] font-serif text-[16px] leading-relaxed text-muted italic">{state.text}</p>
+      <p className="mt-1 max-w-[62ch] font-serif text-[16px] leading-relaxed text-muted italic" role="status">
+        {state.text}
+      </p>
       {status === "saved" && commit && (
         <p className="mt-1 font-sans text-[13px]">
           <CommitLink repo={knowledge.data?.name} commit={commit} />
@@ -68,22 +92,22 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
 
       {/* Open, each file has its own review below. */}
       {!open && (
-      <ul className="mt-3 flex flex-col gap-1 font-sans text-[13px]">
-        {proposal.files.map((file) => (
-          <li key={file.path} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-            <span className="font-mono text-[12.5px] text-ink">{file.path}</span>
-            <span className="text-muted">{file.change}</span>
-            <span className="font-mono text-[11.5px] text-muted tabular">
-              +{file.added} −{file.removed}
-            </span>
-            {file.flags.map((flag) => (
-              <Chip key={flag} tone="attn">
-                {flag}
-              </Chip>
-            ))}
-          </li>
-        ))}
-      </ul>
+        <ul className="mt-3 flex flex-col gap-1 font-sans text-[13px]">
+          {proposal.files.map((file) => (
+            <li key={file.path} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+              <span className="font-mono text-[12.5px] text-ink">{file.path}</span>
+              <span className="text-muted">{file.change}</span>
+              <span className="font-mono text-[11.5px] text-muted tabular">
+                +{file.added} −{file.removed}
+              </span>
+              {file.flags.map((flag) => (
+                <Chip key={flag} tone="attn">
+                  {flag}
+                </Chip>
+              ))}
+            </li>
+          ))}
+        </ul>
       )}
       {/* The check as it was when proposed; the review below runs it on the text as it is now. */}
       {proposal.files.length > 0 && !open && state.actionable && (
@@ -105,9 +129,10 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
             {detail.data && (
               <Review
                 detail={detail.data}
-                actionable={state.actionable && status !== "saving"}
+                actionable={actionable}
                 signedIn={knowledge.data?.signed_in ?? false}
                 onDetail={(next) => queryClient.setQueryData(key, next)}
+                onStale={() => queryClient.invalidateQueries({ queryKey: key })}
               />
             )}
             {!state.actionable && (
@@ -152,23 +177,42 @@ function Refused({ refused }: { refused: { path: string; reason: string }[] }) {
   );
 }
 
-/** Each file's changes, the check, the result of the last save, and the buttons. */
+/** Each file's changes, the check, the result of the last save, and the buttons.
+ *  The person's unkept edits live here, so Save & share knows about them. */
 function Review({
   detail,
   actionable,
   signedIn,
   onDetail,
+  onStale,
 }: {
   detail: ProposalDetail;
   actionable: boolean;
   signedIn: boolean;
   onDetail: (detail: ProposalDetail) => void;
+  onStale: () => void;
 }) {
   const proposal = detail.proposal;
   const queryClient = useQueryClient();
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
+  // Path -> the text in its open editor.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const setDraft = (path: string, text: string | undefined) =>
+    setDrafts((current) => {
+      const next = { ...current };
+      if (text === undefined) delete next[path];
+      else next[path] = text;
+      return next;
+    });
   const accept = useMutation({
-    mutationFn: () => knowledgeApi.accept(proposal.id, [...confirmed]),
+    // Exactly what's on screen: the server refuses if it would commit anything else.
+    mutationFn: () =>
+      knowledgeApi.accept(
+        proposal.id,
+        [...confirmed],
+        Object.fromEntries(detail.files.map((f) => [f.path, f.after_sha256 ?? null])),
+        detail.findings.map((f) => f.id),
+      ),
     onSuccess: (next) => {
       onDetail(next);
       // Shared: the Knowledge tab's pages, history and status move on.
@@ -176,18 +220,29 @@ function Review({
         for (const key of ["knowledge-status", "kb-pages", "kb-page", "kb-history"]) queryClient.invalidateQueries({ queryKey: [key] });
       }
     },
+    // Changed meanwhile (another window): show it as it is now.
+    onError: (error) => error instanceof ApiError && error.status === 409 && onStale(),
   });
   const reject = useMutation({ mutationFn: () => knowledgeApi.reject(proposal.id), onSuccess: onDetail });
   const busy = accept.isPending || reject.isPending;
   const sharing = detail.files.filter((f) => !f.left_out && f.after !== f.before).length;
-  const unresolved = detail.files.filter((f) => f.conflict && !f.edited && !f.left_out).length;
-  const blocker = saveBlocker({ findings: detail.findings, confirmed, signedIn, sharing, unresolved });
+  const unresolved = detail.files.filter((f) => f.conflict && !f.resolved && !f.left_out).length;
+  const unkept = detail.files.filter((f) => f.path in drafts && drafts[f.path] !== (f.after ?? "")).map((f) => f.path);
+  const blocker = saveBlocker({ findings: detail.findings, confirmed, signedIn, sharing, unresolved, unkept });
   const result = proposal.result;
 
   return (
     <div className="flex flex-col gap-5">
       {detail.files.map((file) => (
-        <FileReview key={file.path} proposalId={proposal.id} file={file} actionable={actionable && !busy} onDetail={onDetail} />
+        <FileReview
+          key={file.path}
+          proposalId={proposal.id}
+          file={file}
+          actionable={actionable && !busy}
+          draft={drafts[file.path]}
+          onDraft={(text) => setDraft(file.path, text)}
+          onDetail={onDetail}
+        />
       ))}
 
       <CheckFindings
@@ -231,14 +286,16 @@ function Review({
             </p>
           )}
           {(accept.error || reject.error) && (
-            <p className="font-sans text-[13px] text-danger">{(accept.error ?? reject.error)?.message}</p>
+            <p className="font-sans text-[13px] text-danger" role="alert">
+              {(accept.error ?? reject.error)?.message}
+            </p>
           )}
           <div className="flex flex-wrap justify-end gap-2">
             <Button onClick={() => reject.mutate()} disabled={busy}>
               Discard
             </Button>
             <Button variant="primary" onClick={() => accept.mutate()} disabled={busy || blocker !== null}>
-              {accept.isPending ? "Saving and sharing…" : "Save & share"}
+              {accept.isPending ? "Saving and sharing…" : proposal.status === "failed" ? "Try again" : "Save & share"}
             </Button>
           </div>
           <p className="text-right font-sans text-[12px] text-faint">
@@ -255,27 +312,39 @@ function FileReview({
   proposalId,
   file,
   actionable,
+  draft,
+  onDraft,
   onDetail,
 }: {
   proposalId: string;
   file: ProposalFile;
   actionable: boolean;
+  /** The text in its editor, if it's open (kept by Review, so Save & share knows). */
+  draft: string | undefined;
+  onDraft: (text: string | undefined) => void;
   onDetail: (detail: ProposalDetail) => void;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(file.after ?? "");
+  const editing = draft !== undefined;
+  const [replacing, setReplacing] = useState(false);
   const edit = useMutation({
     mutationFn: (change: { text?: string | null; reset?: boolean }) =>
       change.reset ? knowledgeApi.edit(proposalId, {}, [file.path]) : knowledgeApi.edit(proposalId, { [file.path]: change.text ?? null }),
     onSuccess: (detail) => {
       onDetail(detail);
-      setEditing(false);
+      onDraft(undefined);
     },
   });
   const language = languageOf(file.path);
-  const startEditing = () => {
-    setDraft(file.after ?? "");
-    setEditing(true);
+  const theirs = file.theirs_state === "text" ? (file.theirs ?? "") : null;
+  // A conflict can be resolved with text, unless GitHub's version isn't text.
+  const canResolve = file.conflict && file.theirs_state !== "not text";
+  const startEditing = () => onDraft(file.after ?? theirs ?? "");
+  const useTheirs = () => {
+    // Typed something of their own: ask before it's replaced.
+    if (theirs === null) return;
+    if (draft !== undefined && draft !== theirs && draft !== (file.after ?? "") && !replacing) return setReplacing(true);
+    setReplacing(false);
+    onDraft(theirs);
   };
 
   return (
@@ -285,7 +354,8 @@ function FileReview({
         <span className="font-sans text-[12.5px] text-muted">{file.change}</span>
         {file.edited && <Chip tone="you">your edit</Chip>}
         {file.left_out && <Chip>left out</Chip>}
-        {file.conflict && <Chip tone="attn">changed on GitHub since</Chip>}
+        {file.conflict && <Chip tone="attn">{file.theirs_state === "deleted" ? "deleted on GitHub since" : "changed on GitHub since"}</Chip>}
+        {file.conflict && file.resolved && !file.left_out && <Chip tone="good">resolved</Chip>}
       </header>
       {file.flags.map((flag) => (
         <p key={flag} className="flex items-baseline gap-1.5 font-sans text-[12.5px] text-attn">
@@ -298,17 +368,22 @@ function FileReview({
       ) : file.conflict ? (
         <>
           <p className="font-sans text-[13px] text-muted">
-            Someone else changed this file on GitHub since. Below, GitHub's version now (−) is compared with yours (+).
-            Resolve it: write what it should say, then Save & share again.
+            {file.theirs_state === "deleted"
+              ? "Someone else deleted this file on GitHub since. Leave it out to keep it deleted, or resolve it: write what it should say, then Save & share again."
+              : file.theirs_state === "not text"
+                ? "Someone else changed this file on GitHub since, and GitHub's version isn't text, so it can't be compared here. Leave this file out, or ask the DataLab maintainer."
+                : "Someone else changed this file on GitHub since. Below, GitHub's version now (−) is compared with yours (+). Resolve it: write what it should say, then Save & share again."}
           </p>
-          <DiffView
-            label={`${file.path}: GitHub's version now, and yours`}
-            original={file.theirs ?? ""}
-            modified={file.after ?? ""}
-            language={language}
-            layout="unified"
-            className="max-h-[28rem]"
-          />
+          {file.theirs_state !== "not text" && (
+            <DiffView
+              label={`${file.path}: GitHub's version now, and yours`}
+              original={theirs ?? ""}
+              modified={file.after ?? ""}
+              language={language}
+              layout="unified"
+              className="max-h-[28rem]"
+            />
+          )}
         </>
       ) : (
         <DiffView
@@ -323,28 +398,42 @@ function FileReview({
 
       {editing && (
         <div className="flex flex-col gap-2">
-          <CodeEditor label={`Your version of ${file.path}`} language={language} value={draft} onChange={setDraft} className="h-[22rem]" />
+          <CodeEditor label={`Your version of ${file.path}`} language={language} value={draft} onChange={onDraft} className="h-[22rem]" />
           <div className="flex flex-wrap gap-2">
             <Button variant="primary" onClick={() => edit.mutate({ text: draft })} disabled={edit.isPending}>
               {file.conflict ? "Keep this version" : "Keep my edit"}
             </Button>
-            {file.conflict && file.theirs !== null && (
-              <Button onClick={() => setDraft(file.theirs ?? "")} disabled={edit.isPending}>
-                Start from GitHub's version
+            {file.conflict && theirs !== null && (
+              <Button onClick={useTheirs} disabled={edit.isPending}>
+                {replacing ? "Replace your text with GitHub's version" : "Start from GitHub's version"}
               </Button>
             )}
-            <Button variant="ghost" onClick={() => setEditing(false)} disabled={edit.isPending}>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setReplacing(false);
+                onDraft(undefined);
+              }}
+              disabled={edit.isPending}
+            >
               Cancel
             </Button>
           </div>
-          <p className="font-sans text-[12px] text-faint">Kept here until you save and share. Nothing goes to GitHub yet.</p>
+          {replacing && (
+            <p className="font-sans text-[12.5px] text-attn" role="status">
+              That replaces what you've written here. Press it again to replace it, or keep writing.
+            </p>
+          )}
+          <p className="font-sans text-[12px] text-faint">
+            Keep it to include it in Save & share. Nothing goes to GitHub until you save.
+          </p>
         </div>
       )}
       {edit.error && <p className="font-sans text-[13px] text-danger">{edit.error.message}</p>}
 
       {actionable && !editing && (
         <div className="flex flex-wrap gap-1">
-          {!file.left_out && file.change !== "deleted" && (
+          {!file.left_out && (file.change !== "deleted" || canResolve) && (!file.conflict || canResolve) && (
             <Button variant="ghost" className="px-2 text-[12.5px]" onClick={startEditing}>
               <Icon name="pen" size={12} /> {file.conflict ? "Resolve" : "Edit"}
             </Button>

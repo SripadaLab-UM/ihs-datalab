@@ -141,3 +141,33 @@ it("says whom to ask when GitHub won't let this account in", async () => {
   expect(await screen.findByText("no access")).toBeTruthy();
   expect(screen.getByText(/Ask Ali to add you to the datalab-users team/)).toBeTruthy();
 });
+
+it("stops asking GitHub once the page is closed mid-sign-in", async () => {
+  vi.mocked(knowledgeApi.signIn).mockResolvedValue(waiting);
+  vi.mocked(knowledgeApi.pollSignIn).mockResolvedValue(waiting);
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const view = show();
+  await screen.findByLabelText("Your code");
+  await act(() => vi.advanceTimersByTimeAsync(5_000));
+  expect(knowledgeApi.pollSignIn).toHaveBeenCalledTimes(1);
+  view.unmount();
+  await act(() => vi.advanceTimersByTimeAsync(60_000));
+  expect(knowledgeApi.pollSignIn).toHaveBeenCalledTimes(1);
+  expect(knowledgeApi.cancelSignIn).not.toHaveBeenCalled(); // the code still works if they come back
+  expect(errors).not.toHaveBeenCalled();
+  errors.mockRestore();
+});
+
+it("a poll still out when the page closes changes nothing", async () => {
+  vi.mocked(knowledgeApi.signIn).mockResolvedValue(waiting);
+  let answer: (value: SignIn) => void = () => {};
+  vi.mocked(knowledgeApi.pollSignIn).mockImplementation(() => new Promise((resolve) => (answer = resolve)));
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const view = show();
+  await screen.findByLabelText("Your code");
+  await act(() => vi.advanceTimersByTimeAsync(5_000));
+  view.unmount();
+  await act(async () => answer({ ...out, state: "signed in", account: { login: "yfang", name: "Yu Fang" } }));
+  expect(knowledgeApi.sync).not.toHaveBeenCalled();
+});

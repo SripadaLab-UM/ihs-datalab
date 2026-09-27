@@ -229,7 +229,13 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   own edit or leaving a file out. Every end of Save & share says plainly
   what happened: saved (with the commit), someone else changed it (GitHub's
   version against theirs, to resolve), the check stopped it, or it failed;
-  nothing is shared otherwise. The Knowledge tab lists pages and skills by
+  nothing is shared otherwise. Save & share sends what the person saw
+  (each file's text as a digest, and the check's findings), and DataLab
+  refuses if it would commit anything else, such as an edit made in
+  another window; an edit still open in its editor holds the button until
+  it's kept or cancelled. A conflict counts as resolved only by text written
+  against GitHub's version it conflicted with. A save cut off by DataLab
+  stopping ends as failed when it starts again, to be tried again. The Knowledge tab lists pages and skills by
   folder, renders them with their front matter as facts, shows recent
   changes, and docks a chat. There's no mode for writing pages yet, so the
   chat is Data extraction (a data session, with the catalog that table and

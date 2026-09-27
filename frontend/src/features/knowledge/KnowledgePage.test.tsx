@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -14,9 +15,9 @@ vi.mock("@/api/knowledge", async (original) => ({
 }));
 const chat = vi.hoisted(() => ({ props: null as null | { mode: string; context?: ChatContext } }));
 vi.mock("@/components/chat/DockedChat", () => ({
-  DockedChat: (props: { mode: string; context?: ChatContext }) => {
+  DockedChat: (props: { mode: string; context?: ChatContext; headerActions?: ReactNode }) => {
     chat.props = props;
-    return <div>docked chat</div>;
+    return <div>docked chat{props.headerActions}</div>;
   },
 }));
 vi.mock("@/components/editor/CodeEditor", () => ({
@@ -170,4 +171,62 @@ it("shows recent changes, with links to GitHub and to the pages", async () => {
   expect(screen.getByText("and 1 more")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "qc/midnight-sleep.md" }));
   expect(await screen.findByRole("heading", { name: "Midnight-spanning sleep" })).toBeTruthy();
+});
+
+it("opens a page from an address without .md", async () => {
+  show("/knowledge/qc/midnight-sleep");
+  expect(await screen.findByRole("heading", { name: "Midnight-spanning sleep" })).toBeTruthy();
+  expect(knowledgeApi.page).toHaveBeenCalledWith("qc/midnight-sleep.md");
+  expect(screen.getByRole("button", { name: /midnight-sleep/ }).getAttribute("aria-current")).toBe("page");
+});
+
+it("never runs what a page's text or front matter holds", async () => {
+  const original = PAGES["qc/midnight-sleep.md"];
+  const evil = "<img src=x onerror=\"window.__pwned=1\"><script>window.__pwned=2</script>";
+  PAGES["qc/midnight-sleep.md"] = {
+    path: "qc/midnight-sleep.md", place: "page", head: "abc1234def", text: "…",
+    front_matter: { id: evil, status: "draft", summary: evil, limitations: [evil], related: ["javascript:alert(1)"] },
+    body: `# Tricks\n\n${evil}\n\n[click me](javascript:window.__pwned=3) and [data](data:text/html,<script>alert(1)</script>)\n\n<a href="javascript:alert(1)">raw</a>\n`,
+  }; // prettier-ignore
+  const { container } = show("/knowledge/qc/midnight-sleep.md");
+  expect(await screen.findByRole("heading", { name: "Tricks" })).toBeTruthy();
+  expect(container.querySelector("script")).toBeNull();
+  expect(container.querySelector("img[onerror]")).toBeNull();
+  expect([...container.querySelectorAll("a")].filter((a) => /^(javascript|data):/i.test(a.getAttribute("href") ?? ""))).toEqual([]);
+  expect([...container.querySelectorAll("*")].filter((el) => [...el.attributes].some((a) => a.name.startsWith("on")))).toEqual([]);
+  // Front matter is text.
+  expect(screen.getAllByText(evil, { exact: false }).length).toBeGreaterThan(0);
+  // A javascript: link is never followed as a page, nor opened without asking.
+  fireEvent.click(screen.getByText("click me"));
+  expect((window as { __pwned?: number }).__pwned).toBeUndefined();
+  PAGES["qc/midnight-sleep.md"] = original;
+});
+
+it("over a narrow page, the chat and the list are dialogs: focus in, kept there, Escape closes", async () => {
+  window.matchMedia = vi.fn(() => ({ matches: false })) as never;
+  show("/knowledge/sources/fitbit.md");
+  const ask = await screen.findByRole("button", { name: /Ask for help/ });
+  ask.focus();
+  fireEvent.click(ask);
+  const chatBox = screen.getByRole("dialog", { name: "Knowledge chat" });
+  expect(chatBox.getAttribute("aria-modal")).toBe("true");
+  await waitFor(() => expect(chatBox.contains(document.activeElement)).toBe(true));
+  // Tab from the last control comes back to the first.
+  const controls = [...chatBox.querySelectorAll<HTMLElement>("button")];
+  controls.at(-1)!.focus();
+  fireEvent.keyDown(controls.at(-1)!, { key: "Tab" });
+  expect(document.activeElement).toBe(controls[0]);
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(screen.queryByRole("dialog", { name: "Knowledge chat" })).toBeNull();
+  // Focus goes back to what opened it.
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: /Ask for help/ }));
+
+  const menu = screen.getByRole("button", { name: "Show pages and skills" });
+  menu.focus();
+  fireEvent.click(menu);
+  const drawer = await screen.findByRole("dialog", { name: "Pages and skills" });
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Filter pages and skills")));
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(drawer.getAttribute("role")).toBeNull();
+  expect(document.activeElement).toBe(menu);
 });
