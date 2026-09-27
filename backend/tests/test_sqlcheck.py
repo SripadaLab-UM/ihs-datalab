@@ -277,6 +277,14 @@ class TestColumns:
             "SELECT 'x' AS evil FROM DUAL WHERE 1 = 0 "
             "UNION ALL SELECT 'y' FROM DUAL GROUP BY dummy HAVING evil = 'x'",
             "SELECT 1 AS evil FROM DUAL WHERE evil IS NULL",
+            # A string literal isn't an output name ORDER BY can use.
+            "SELECT 'BOOM' FROM IHS_2025.T ORDER BY boom",
+            'SELECT 1 "evile" FROM DUAL ORDER BY evile',  # "evile" isn't EVILE
+            'SELECT COUNT(*) FROM IHS_2025.T ORDER BY "_COL_0"',
+            # Functions read as tables (Oracle 12.2+ needs no TABLE keyword).
+            "SELECT * FROM IHS_2025.MD5('x')",
+            "SELECT * FROM IHS_2025.NVL('x')",
+            'SELECT * FROM "IHS_2025"."NVL"(\'x\')',
         ],
     )
     def test_names_that_arent_columns(self, sql):
@@ -299,6 +307,10 @@ class TestColumns:
             "SELECT a, ROW_NUMBER() OVER (PARTITION BY b ORDER BY d) AS rn FROM IHS_2025.T",
             "WITH q (n) AS (SELECT a FROM IHS_2025.T) SELECT n FROM q ORDER BY n",
             "SELECT a AS z FROM IHS_2025.T ORDER BY z + 1",
+            # Unaliased expressions in ORDER BY, repeated or by position.
+            "SELECT a, COUNT(*) FROM IHS_2025.T GROUP BY a ORDER BY COUNT(*) DESC",
+            "SELECT TRUNC(d, 'MM'), COUNT(*) FROM IHS_2025.T GROUP BY TRUNC(d, 'MM') ORDER BY 1",
+            'SELECT a AS "Steps" FROM IHS_2025.T ORDER BY "Steps"',
             "SELECT a FROM IHS_2025.T t "
             "WHERE a = (SELECT MAX(u.a) FROM IHS_2025.U u WHERE u.c = t.d)",
         ],

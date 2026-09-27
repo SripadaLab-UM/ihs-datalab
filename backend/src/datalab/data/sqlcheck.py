@@ -12,6 +12,7 @@ database links, because those would let the database server send data out.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -208,7 +209,9 @@ def check_sql(
     _check_calls_as_written(sql)
     tables = _referenced_tables(statement, allowed_schemas)
     if columns is not None:
-        _check_columns(statement, columns)
+        # An unquoted _col_1 isn't a legal Oracle name, so if the SQL never
+        # says _col_, every such name is one qualify made up (see below).
+        _check_columns(statement, columns, generated_names="_col_" not in sql.lower())
     binds = tuple(sorted({p.name for p in statement.find_all(exp.Placeholder) if p.name}))
     return CheckedSql(sql=sql, tables=tables, binds=binds, warnings=_warnings(statement))
 
@@ -240,6 +243,10 @@ def _reject_forbidden_constructs(statement: exp.Expr) -> None:
             )
         if isinstance(node, exp.Having):
             _reject_aliases_in_having(node, aliases)
+        if isinstance(node, exp.Table) and isinstance(node.this, exp.Func):
+            raise SqlRejected(
+                "Reading from a function (a table function) isn't allowed; read tables and views."
+            )
         if isinstance(node, exp.Dot) and _contains_function_call(node):
             raise SqlRejected(
                 "Calling package or object functions isn't allowed: "
@@ -287,7 +294,12 @@ def _check_calls_as_written(sql: str) -> None:
             continue
         previous = tokens[i - 1] if i else None
         if previous is not None and previous.token_type == TokenType.DOT:
-            continue  # a package or object call: refused on the parsed tree
+            # schema.function(...), package.function(...) or a method: none is
+            # a built-in, and Oracle runs a schema's function even in FROM.
+            raise SqlRejected(
+                "Calling package, schema or object functions isn't allowed: "
+                f"...{previous.text}{token.text}(...)"
+            )
         quoted = token.token_type == TokenType.IDENTIFIER
         name = token.text if quoted else token.text.upper()
         if name in ORACLE_FUNCTIONS:
@@ -357,13 +369,16 @@ def _is_cte_column_list(tokens: list[Token], i: int) -> bool:
     return False
 
 
-def _check_columns(statement: exp.Expr, columns: ColumnIndex) -> None:
+def _check_columns(
+    statement: exp.Expr, columns: ColumnIndex, *, generated_names: bool = False
+) -> None:
     """Every column must be a real column of a table in its scope.
 
     Oracle treats a name that isn't a column (ORA_DATABASE_NAME, a dotted
     DBMS_UTILITY.PORT_STRING, or a function defined in the database) as a call
     with no arguments, so an unknown column is refused rather than run.
     """
+    _record_output_names(statement)
     tree = statement.copy()
     for column in list(tree.find_all(exp.Column)):
         bare = not column.table and not column.this.args.get("quoted")
@@ -387,10 +402,10 @@ def _check_columns(statement: exp.Expr, columns: ColumnIndex) -> None:
             "describe_table; quote lowercase column names exactly; in a recursive "
             "WITH query, qualify its columns with the query's name (r.n)."
         ) from error
-    _require_resolved_columns(tree)
+    _require_resolved_columns(tree, generated_names=generated_names)
 
 
-def _require_resolved_columns(tree: exp.Expr) -> None:
+def _require_resolved_columns(tree: exp.Expr, *, generated_names: bool) -> None:
     """After qualify, every column must name a source of its own query block,
     or of an enclosing one (a correlated reference).
 
@@ -399,7 +414,9 @@ def _require_resolved_columns(tree: exp.Expr) -> None:
     column list) and leaves it unqualified. Oracle doesn't read those names
     as aliases; it runs them as functions. The one unqualified name allowed
     is an ORDER BY reference to an alias of the same query, which Oracle does
-    resolve.
+    resolve. qualify also rewrites `ORDER BY COUNT(*)` (or `ORDER BY 1`) for an
+    unaliased expression to its own name for it, _COL_<n>: allowed when
+    `generated_names` says the SQL itself never used such a name.
     """
     for scope in traverse_scope(tree):
         for column in find_all_in_scope(scope.expression, exp.Column):
@@ -411,7 +428,10 @@ def _require_resolved_columns(tree: exp.Expr) -> None:
                     )
             elif not (
                 column.find_ancestor(exp.Order) is not None
-                and column.name.upper() in _output_names(scope.expression)
+                and (
+                    column.name in _output_names(scope.expression)
+                    or (generated_names and _is_generated_output(scope.expression, column.name))
+                )
             ):
                 raise SqlRejected(
                     f"{column.name.upper()} isn't a column of a table this part of the "
@@ -434,7 +454,36 @@ def _output_names(query: exp.Expr) -> set[str]:
         query = query.left
     if not isinstance(query, exp.Select):
         return set()
-    return {e.alias_or_name.upper() for e in query.expressions}
+    return query.meta.get(_OUTPUTS, set())
+
+
+_OUTPUTS = "datalab_outputs"
+
+
+def _record_output_names(statement: exp.Expr) -> None:
+    """Note each query block's own output names before qualify, which gives
+    every expression an alias: `SELECT 'BOOM' ... ORDER BY boom` has no
+    output named BOOM, and Oracle would run BOOM as a function. Only an
+    explicit alias or a bare column counts."""
+    for select in statement.find_all(exp.Select):
+        names = set()
+        for e in select.expressions:
+            if isinstance(e, (exp.Alias, exp.Column)):
+                identifier = e.args["alias"] if isinstance(e, exp.Alias) else e.this
+                if isinstance(identifier, exp.Identifier):
+                    # As Oracle stores it: unquoted names upper-case, quoted exact.
+                    quoted = identifier.args.get("quoted")
+                    names.add(identifier.name if quoted else identifier.name.upper())
+        select.meta[_OUTPUTS] = names
+
+
+def _is_generated_output(query: exp.Expr, name: str) -> bool:
+    """_COL_<n>: qualify's name for an unaliased select expression."""
+    while isinstance(query, exp.SetOperation):
+        query = query.left
+    if not isinstance(query, exp.Select) or not re.fullmatch(r"_COL_\d+", name):
+        return False
+    return name in {e.alias for e in query.expressions if isinstance(e, exp.Alias)}
 
 
 def _contains_function_call(node: exp.Dot) -> bool:
