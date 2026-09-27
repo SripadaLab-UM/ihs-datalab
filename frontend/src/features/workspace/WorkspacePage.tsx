@@ -3,12 +3,13 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { api, type Mode } from "@/api/client";
+import { api, type Conversation, type Mode } from "@/api/client";
 import { Chat } from "@/components/chat/Chat";
 import { Button, Icon, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
+import { DeleteConversation } from "./DeleteConversation";
 import { ExportDialog } from "./ExportDialog";
 import { FileViewer } from "./FileViewer";
 import { SidePanel } from "./SidePanel";
@@ -18,6 +19,8 @@ export function WorkspacePage() {
   const [creating, setCreating] = useState(false);
   const [open, setOpen] = useState<OpenFile | null>(null);
   const [exportingReport, setExportingReport] = useState(false);
+  const [deleting, setDeleting] = useState<Conversation | null>(null);
+  const navigate = useNavigate();
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
   const current = conversations.data?.find((c) => c.id === conversationId);
   // In a narrower window the conversation list (below 1024px) and the side
@@ -99,12 +102,12 @@ export function WorkspacePage() {
             {conversations.data?.map((c) => {
               const here = c.id === conversationId;
               return (
-                <li key={c.id}>
+                <li key={c.id} className="group relative">
                   <Link
                     to={`/workspace/${c.id}`}
                     aria-current={here ? "page" : undefined}
                     className={clsx(
-                      "relative flex items-center gap-2 rounded-[3px] py-2 pr-2 pl-3 font-sans text-[13.5px] leading-snug",
+                      "relative flex items-center gap-2 rounded-[3px] py-2 pr-8 pl-3 font-sans text-[13.5px] leading-snug",
                       here
                         ? "bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--color-line)] before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-ink"
                         : "text-muted hover:bg-surface/70 hover:text-ink",
@@ -128,6 +131,17 @@ export function WorkspacePage() {
                       </span>
                     )}
                   </Link>
+                  {!c.busy && (
+                    <button
+                      type="button"
+                      onClick={() => setDeleting(c)}
+                      aria-label={`Delete “${c.title}”`}
+                      title="Delete this conversation"
+                      className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-[3px] p-1 text-faint opacity-0 group-hover:opacity-100 hover:text-danger focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                    >
+                      <Icon name="trash" size={13} />
+                    </button>
+                  )}
                 </li>
               );
             })}
@@ -207,6 +221,17 @@ export function WorkspacePage() {
       {current && open && <FileViewer conversationId={current.id} file={open} onClose={() => setOpen(null)} />}
 
       {creating && <NewConversation onClose={() => setCreating(false)} />}
+      {deleting && (
+        <DeleteConversation
+          conversation={conversations.data?.find((c) => c.id === deleting.id) ?? deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            // Leaving a deleted conversation's page for the workspace's start.
+            if (deleting.id === conversationId) navigate("/workspace");
+            setDeleting(null);
+          }}
+        />
+      )}
     </div>
   );
 }

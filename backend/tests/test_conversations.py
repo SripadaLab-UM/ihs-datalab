@@ -313,6 +313,21 @@ def test_deleting_removes_the_conversation(app, monkeypatch):
     assert removed == [cid]
 
 
+def test_deleting_a_busy_conversation_is_refused(app):
+    """Deleting would stop the agent mid-turn: the person stops it first."""
+    hold = asyncio.Event()
+    use_fake_runtime(app, hold=hold)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "answer_delta")
+        refused = client.delete(f"/api/conversations/{cid}")
+        assert refused.status_code == 409 and "Stop it first" in refused.json()["detail"]
+        assert client.get(f"/api/conversations/{cid}").status_code == 200
+        hold.set()
+        wait_for(client, cid, "turn_done")
+
+
 def test_conversations_use_only_approved_models(app):
     with TestClient(app) as client:
         assert client.post("/api/conversations", json={"model": "claude-opus-5"}).status_code == 422

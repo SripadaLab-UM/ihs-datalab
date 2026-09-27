@@ -203,6 +203,9 @@ def build_conversations_router(
     @router.delete("/conversations/{conversation_id}", status_code=204)
     async def delete_conversation(conversation_id: str) -> None:
         get_or_404(conversation_id)
+        # Deleting would stop the agent mid-turn: the person stops it first.
+        if sessions.is_busy(conversation_id):
+            raise HTTPException(409, "The agent is working in this conversation. Stop it first.")
         await sessions.delete(conversation_id)
 
     @router.post("/conversations/{conversation_id}/messages", status_code=202)
