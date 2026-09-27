@@ -124,6 +124,10 @@ def main() -> int:
                 print(f"  {verdict} in {result['seconds']:.0f}s", flush=True)
                 (out / f"{task.id}-{attempt}.json").write_text(json.dumps(result, indent=2))
                 _write_summary(out, info, results)
+                if server.poll() is not None:
+                    # Without its server every task after this would fail too,
+                    # and read as the model's failures.
+                    sys.exit("The eval server stopped; see server.log. Ending the run.")
     finally:
         info["finished_at"] = datetime.now(UTC).isoformat(timespec="seconds")
         _write_summary(out, info, results)
@@ -391,11 +395,12 @@ def _stop(server: subprocess.Popen, instance: str) -> None:
     a second SIGINT makes uvicorn skip its shutdown, which is what removes
     the session containers. Repeated SIGTERMs don't.
     """
+    # A group that's already gone can answer EPERM on macOS, not ESRCH.
     try:
         os.killpg(server.pid, signal.SIGTERM)
         server.wait(timeout=90)
-    except (subprocess.TimeoutExpired, ProcessLookupError):
-        with contextlib.suppress(ProcessLookupError):
+    except (subprocess.TimeoutExpired, ProcessLookupError, PermissionError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(server.pid, signal.SIGKILL)
     # Containers this run made that DataLab's shutdown didn't remove.
     if left := _containers(instance):
