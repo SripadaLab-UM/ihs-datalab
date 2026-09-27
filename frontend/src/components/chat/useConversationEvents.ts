@@ -3,7 +3,9 @@ import { useEffect, useState } from "react";
 import type { ConversationEvent } from "./transcript";
 
 // Every event type the backend emits (backend sessions/runtime.py and manager.py).
-const EVENT_TYPES = [
+// A type left out never reaches the page (useConversationEvents.test.ts checks
+// that every type the chat handles is here).
+export const EVENT_TYPES = [
   "user_message",
   "turn_started",
   "turn_finished",
@@ -37,6 +39,7 @@ const EVENT_TYPES = [
   "review_finished",
   "trace",
   "turn_done",
+  "title_changed",
 ];
 
 /**
