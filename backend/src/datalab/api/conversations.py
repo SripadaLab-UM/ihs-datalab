@@ -16,9 +16,19 @@ from datalab.sessions.manager import CONTINUE_TEXT, Busy, NothingToReview, Sessi
 from datalab.sessions.modes import MODES
 from datalab.sessions.plans import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
-from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter
+from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
 
 _HEARTBEAT_SECONDS = 15
+
+
+def _one_line_title(title: str | None) -> str | None:
+    """A typed title, as one line of visible text (see normalize_title)."""
+    if title is None:
+        return None
+    title = normalize_title(title)
+    if not title:
+        raise ValueError("a title can't be empty")
+    return title
 
 
 class NewConversation(BaseModel):
@@ -26,6 +36,8 @@ class NewConversation(BaseModel):
     # Normally left out: the title is written from the first question.
     title: str = Field(default=DEFAULT_TITLE, max_length=200)
     model: str | None = None
+
+    _one_line = field_validator("title")(_one_line_title)
 
 
 class ConversationOut(BaseModel):
@@ -44,15 +56,7 @@ class ConversationChange(BaseModel):
     rigor_review: bool | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
 
-    @field_validator("title")
-    @classmethod
-    def _one_line(cls, title: str | None) -> str | None:
-        if title is None:
-            return None
-        title = " ".join(title.split())
-        if not title:
-            raise ValueError("a title can't be empty")
-        return title
+    _one_line = field_validator("title")(_one_line_title)
 
 
 class NewMessage(BaseModel):

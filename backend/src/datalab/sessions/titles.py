@@ -5,6 +5,11 @@ question, then gets a short title the way Codex names a thread. The request
 goes to the same approved U-M GPT model the conversation uses, which receives
 that question anyway, and passes the relay's own policy check. If there's no
 key or no answer, the title is the question's first words instead.
+
+A title shows in the sidebar and names export folders, so it's kept free of
+study identifiers: the model is told to leave them out, and whatever comes
+back (or the question's words, as a fallback) is scrubbed of anything shaped
+like a participant ID, an email address, or a date before it's stored.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import unicodedata
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -32,8 +38,39 @@ _INSTRUCTIONS = (
     "Write a title for a research conversation that starts with the question "
     "below. At most six words, specific to the question (name the measure, "
     "cohort, or method), in sentence case. No quotes, no ending punctuation, "
-    "no filler such as 'Question about' or 'Analysis of'. Reply with the "
-    "title only."
+    "no filler such as 'Question about' or 'Analysis of'. Never include "
+    "participant IDs or record numbers, people's names, email addresses, or "
+    "specific dates (a cohort year is fine). Reply with the title only."
+)
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+_MONTH = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?"
+    r"|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b\.?"
+)
+_DATES = re.compile(
+    "|".join(
+        [
+            # 2025-03-14, 2025/3/14, 2025.03.14, with a time or not
+            r"\b\d{4}[-/.]\d{1,2}[-/.]\d{1,2}(?:[T ]\d{1,2}:\d{2}(?::\d{2})?)?\b",
+            # 03/14/2025, 3-14-25
+            r"\b\d{1,2}[-/.]\d{1,2}[-/.](?:\d{4}|\d{2})\b",
+            # March 14, Mar 14th 2025, 14 March
+            rf"\b{_MONTH}\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:,?\s+\d{{4}}\b)?",
+            rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}(?:\s+\d{{4}}\b)?",
+        ]
+    ),
+    re.IGNORECASE,
+)
+# A word, with its possessive: "P-0001's" goes as a whole.
+_WORD = re.compile(r"\w+(?:[-_]\w+)*(?:['\u2019]s\b)?")
+# Punctuation a removed identifier can leave stranded.
+_EMPTY_BRACKETS = re.compile(r"\(\s*\)|\[\s*\]|\{\s*\}")
+_STRANDED = re.compile(r"\s+([,;:.!?)\]])|([(\[])\s+|([,;:])(?:\s*[,;:])+")
+_LOOSE_ENDS = " ,;:-_/\u2013\u2014"
+# Words left hanging at the end ("Sleep for P-0001 on 2025-03-14").
+_DANGLING = re.compile(
+    r"(?:[\s,;:]+(?:on|for|of|in|at|from|to|and|or|with|by|about|since|until))+$", re.IGNORECASE
 )
 
 
@@ -121,18 +158,70 @@ def _output_text(reply: Any) -> str:
     return "".join(parts)
 
 
+def normalize_title(text: str) -> str:
+    """One line of visible text: every title, typed or written, goes through this.
+
+    Control characters become spaces, and invisible formatting characters
+    (bidi overrides such as U+202E, zero-width spaces) are dropped, so a
+    title can't hide or reorder what's shown in the sidebar or a folder name.
+    """
+    kept = []
+    for char in text:
+        category = unicodedata.category(char)
+        if category == "Cf":
+            continue
+        kept.append(" " if category == "Cc" else char)
+    return " ".join("".join(kept).split())
+
+
+def scrub_title(text: str) -> str:
+    """The title without anything that looks like a study identifier.
+
+    Removes email addresses, dates (ISO, US, and "March 14"), runs of five or
+    more digits, and words mixing letters and digits the way IDs do ("P-0001",
+    "IHS2025_00123", "A1B2C3"). A year such as 2025, or a measure such as
+    PHQ-9 or COVID-19, stays. Names can't be told apart from other words:
+    the model is asked to leave them out.
+    """
+    original = normalize_title(text)
+    text = _EMAIL.sub(" ", original)
+    text = _DATES.sub(" ", text)
+    text = _WORD.sub(lambda m: "" if _looks_like_an_id(m.group()) else m.group(), text)
+    if text == original:
+        return original
+    text = _EMPTY_BRACKETS.sub(" ", text)
+    text = _STRANDED.sub(lambda m: m.group(1) or m.group(2) or m.group(3), " ".join(text.split()))
+    text = " ".join(text.split()).strip(_LOOSE_ENDS)
+    return _DANGLING.sub("", text).rstrip(_LOOSE_ENDS)
+
+
+def _looks_like_an_id(word: str) -> bool:
+    digit_runs = re.findall(r"\d+", word)
+    if not digit_runs:
+        return False
+    if max(len(run) for run in digit_runs) >= 5:
+        return True
+    if not re.search(r"[^\W\d_]", word):
+        return False  # only digits (a year, a count) and separators
+    if "_" in word or max(len(run) for run in digit_runs) >= 3:
+        return True
+    # Letters and digits taking turns, as in A1B2C3; HbA1c has one digit run.
+    return len(digit_runs) >= 2 and len(word) >= 5
+
+
 def clean_title(text: str) -> str | None:
     """One short line, without the quotes and full stops models like to add."""
     line = next((part.strip() for part in text.splitlines() if part.strip()), "")
-    line = re.sub(r"^(title\s*:\s*)", "", line, flags=re.IGNORECASE)
-    line = re.sub(r"\s+", " ", line.strip(_QUOTES)).rstrip(".!?;:,")
+    line = re.sub(r"^(title\s*:\s*)", "", normalize_title(line), flags=re.IGNORECASE)
+    line = scrub_title(line.strip(_QUOTES)).strip(_QUOTES).rstrip(".!?;:,")
     return _shorten(line) or None
 
 
 def fallback_title(question: str) -> str:
     """The question's first words, when the model can't be asked."""
     first = next((part.strip() for part in question.splitlines() if part.strip()), "")
-    first = re.split(r"(?<=[.?!])\s", first, maxsplit=1)[0].rstrip(".?!")
+    first = re.split(r"(?<=[.?!])\s", normalize_title(first), maxsplit=1)[0]
+    first = scrub_title(first.rstrip(".?!")).rstrip(".?!,;:")
     return _shorten(" ".join(first.split()[:8])) or DEFAULT_TITLE
 
 

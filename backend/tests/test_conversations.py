@@ -196,6 +196,24 @@ def test_the_first_question_names_the_conversation(app):
     ]
 
 
+def test_typed_titles_are_one_line_of_visible_text(app):
+    """Creating and renaming share one rule: no line breaks, control
+    characters, or bidi overrides, and not blank."""
+    with TestClient(app) as client:
+        made = client.post("/api/conversations", json={"title": " Sleep\n\u202epilot\u202c\x07 "})
+        assert made.status_code == 201 and made.json()["title"] == "Sleep pilot"
+        assert client.post("/api/conversations", json={"title": " \n\u2066 "}).status_code == 422
+        cid = made.json()["id"]
+        renamed = client.patch(
+            f"/api/conversations/{cid}", json={"title": "Mood\u2067\r\nscores\u2069"}
+        )
+        assert renamed.json()["title"] == "Mood scores"
+        blank = client.patch(f"/api/conversations/{cid}", json={"title": "\u202e"})
+        assert blank.status_code == 422
+        # Left out, it's the default until the first question names it.
+        assert client.post("/api/conversations", json={}).json()["title"] == "New conversation"
+
+
 def test_a_name_chosen_before_the_title_arrives_wins(app):
     store = app.state.services.conversations
     conversation = store.create(kind="data", mode="analysis", title="New conversation", model="m")

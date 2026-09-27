@@ -29,6 +29,7 @@ from typing import Any
 
 from datalab import __version__
 from datalab.htmlclean import clean_fragment
+from datalab.sessions.titles import scrub_title
 from datalab.svgcheck import is_static_svg
 
 MANIFEST = "datalab-export.json"
@@ -130,11 +131,16 @@ def export(
     destination: Path,
     *,
     title: str,
+    tag: str = "",
     sources: list[ExportSource],
     extra_files: dict[str, bytes] | None = None,
     about: dict[str, Any],
 ) -> ExportResult:
     """Copy files into a new dated folder in `destination`, with a manifest.
+
+    The folder is named for the date, the title with anything shaped like a
+    study identifier taken out, and `tag` (the conversation's ID), so the
+    name says which conversation it's from without leaning on its title.
 
     The agent's files go under `files/`, so none can pose as DataLab's own
     report or manifest. Types that run when opened get `.txt` added, and
@@ -143,7 +149,7 @@ def export(
     """
     if not destination.is_dir():
         raise ExportError("The export folder isn't there any more. Choose it again in Settings.")
-    folder = _new_folder(destination, title)
+    folder = _new_folder(destination, title, tag)
     written: list[dict[str, Any]] = []
     try:
         for source in sources:
@@ -316,9 +322,10 @@ def report_document(title: str, body_html: str, css: str) -> bytes:
     ).encode()
 
 
-def _new_folder(destination: Path, title: str) -> Path:
+def _new_folder(destination: Path, title: str, tag: str = "") -> Path:
     stamp = datetime.now().strftime("%Y-%m-%d %H%M")
-    base = f"{stamp} {safe_name(title)}".strip()
+    name = safe_name(scrub_title(title))
+    base = f"{stamp} {name} {safe_name(tag, 40)}" if tag else f"{stamp} {name}"
     for number in range(1, 1000):
         candidate = destination / (base if number == 1 else f"{base} ({number})")
         try:

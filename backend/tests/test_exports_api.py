@@ -77,6 +77,31 @@ def test_practice_exports_only_to_its_own_folder(settings, catalog):
         assert events[-1]["type"] == "exported"
 
 
+def test_what_names_an_export_carries_no_study_identifiers(settings, catalog):
+    """A title typed by the person (or stored before titles were scrubbed)
+    may name a participant: the folder, manifest, and report title don't."""
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = prepare(app, client)
+        client.patch(f"/api/conversations/{cid}", json={"title": "P-0001 sleep, 2025-03-14"})
+        result = client.post(
+            f"/api/conversations/{cid}/exports",
+            json={
+                "destination_id": "practice",
+                "files": [{"root": "outputs", "path": "table.csv"}],
+                "checkpoint": shown(client, cid),
+                "report": {"html": "<p>Hi</p>"},
+            },
+        )
+        assert result.status_code == 201
+        [export] = list((settings.data_dir / "practice-exports").iterdir())
+        assert export.name.endswith(f" sleep {cid}")
+        manifest = json.loads((export / MANIFEST).read_text())
+        assert manifest["conversation"]["title"] == "sleep"
+        assert manifest["conversation"]["id"] == cid
+        assert "<title>sleep</title>" in (export / "conversation.html").read_text()
+
+
 def test_real_destinations_come_from_the_picker(real_settings, catalog, monkeypatch, tmp_path):
     dropbox = tmp_path / "Dropbox" / "IHS"
     dropbox.mkdir(parents=True)

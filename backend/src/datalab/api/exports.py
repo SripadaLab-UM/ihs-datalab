@@ -25,6 +25,7 @@ from datalab.sessions.checkpoints import UnsafePath, check_relative, open_worksp
 from datalab.sessions.inputs import AttachmentStore, NotAttachable, check_attachable
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
+from datalab.sessions.titles import scrub_title
 
 PRACTICE_DESTINATION = "practice"
 
@@ -156,12 +157,17 @@ def build_exports_router(
         study_data = not practice and (
             conversation.kind == "data" or bool(attachments.list(conversation_id))
         )
+        # Titles are scrubbed when written, but one typed by the person, or
+        # stored before titles were scrubbed, could still name a participant.
+        # What's outside the files (the folder name, the manifest, the
+        # report's page title) carries only the scrubbed title.
+        title = scrub_title(conversation.title) or "Conversation"
         about = {
             "profile": settings.profile,
             "contains_study_data": study_data,
             "conversation": {
                 "id": conversation.id,
-                "title": conversation.title,
+                "title": title,
                 "kind": conversation.kind,
                 "mode": conversation.mode,
                 "model": conversation.model,
@@ -175,11 +181,14 @@ def build_exports_router(
         def run() -> exports.ExportResult:
             extra = {}
             if report is not None:
-                extra["conversation.html"] = exports.report_document(
-                    conversation.title, report.html, report.css
-                )
+                extra["conversation.html"] = exports.report_document(title, report.html, report.css)
             return exports.export(
-                folder, title=conversation.title, sources=sources, extra_files=extra, about=about
+                folder,
+                title=title,
+                tag=conversation.id,
+                sources=sources,
+                extra_files=extra,
+                about=about,
             )
 
         try:
