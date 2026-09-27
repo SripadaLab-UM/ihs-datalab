@@ -32,7 +32,11 @@ def write_report(meta: dict[str, Any], results: dict[str, list[dict[str, Any]]])
         "",
         f"- Generated: {meta['generated_at']}",
         f"- DataLab commit: `{meta['datalab_commit'][:12]}`"
-        + (" (with uncommitted backend changes)" if meta.get("datalab_dirty") else ""),
+        + (
+            " (with uncommitted backend changes)"
+            if meta.get("datalab_dirty")
+            else " (no uncommitted backend changes)"
+        ),
         f"- ihs-pipelines commit: `{meta['pipelines_commit'][:12]}`",
         f"- Prototype commit: `{meta['prototype_commit'][:12]}`, "
         f"R image `{meta['prototype_image']}`",
