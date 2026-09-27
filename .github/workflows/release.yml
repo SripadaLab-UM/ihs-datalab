@@ -6,7 +6,21 @@ name: Release
 #    GitHub Container Registry;
 # 2. build the DataLab package with that image pinned by digest inside it;
 # 3. create a GitHub Release with the package, the exact dependency versions,
-#    and the installers.
+#    the installers, the exact images (images.json), and a SHA256SUMS file.
+#
+# Not done here yet, because each needs something CI doesn't have:
+# - TODO(signing): Authenticode-sign install.ps1 and uninstall.ps1. Needs the
+#   lab's code-signing certificate; managed Windows machines may refuse
+#   unsigned scripts under their execution policy.
+# - TODO(signing): sign or notarize anything macOS runs directly. Today the
+#   installer writes the launcher on the user's machine, so nothing shipped
+#   needs it yet; a pre-built DataLab.app would need an Apple Developer ID.
+# - TODO(windows): the fresh-install and update-and-rollback run on a real
+#   managed Windows machine (docs/DISTRIBUTION.md, "Windows specifics"). CI
+#   only checks that the installer parses (ci.yml, windows-installer).
+# - The gateway and proxy images aren't built here: they're upstream images
+#   pinned by digest in sessions/containers.py, and the release lists them.
+#   If DataLab builds its own gateway image later, add it to the image jobs.
 on:
   push:
     tags: ["v*"]
@@ -129,9 +143,30 @@ jobs:
           cp installer/windows/install.ps1 assets/install-windows.ps1
           cp installer/windows/uninstall.ps1 assets/uninstall-windows.ps1
           cp backend/dist/*.whl backend/dist/constraints.txt assets/
+          # Every image this release runs, pinned by digest. The gateway and
+          # research proxy are upstream images pinned in the code.
+          containers=backend/src/datalab/sessions/containers.py
+          gateway=$(sed -n 's/^GATEWAY_IMAGE = "\(.*\)"/\1/p' "$containers")
+          proxy=$(sed -n 's/^PROXY_IMAGE = "\(.*\)"/\1/p' "$containers")
+          for image in "$AGENT_IMAGE" "$gateway" "$proxy"; do
+            case "$image" in *@sha256:*) ;; *) echo "Not pinned by digest: '$image'"; exit 1 ;; esac
+          done
+          printf '{\n  "agent": "%s",\n  "gateway": "%s",\n  "proxy": "%s"\n}\n' \
+            "$AGENT_IMAGE" "$gateway" "$proxy" > assets/images.json
+          (cd assets && sha256sum -- * > SHA256SUMS)
+          {
+            echo "Images, pinned by digest:"
+            echo ""
+            echo "- Agent: \`$AGENT_IMAGE\`"
+            echo "- Gateway: \`$gateway\`"
+            echo "- Research proxy: \`$proxy\`"
+            echo ""
+            echo "To check a download against SHA256SUMS: \`shasum -a 256 -c SHA256SUMS --ignore-missing\`"
+            echo "on Mac, or compare \`Get-FileHash <file>\` with it on Windows."
+          } > notes.md
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" $prerelease \
             --title "DataLab $GITHUB_REF_NAME" \
-            --notes "Agent image: \`$AGENT_IMAGE\`" \
+            --notes-file notes.md \
             assets/*

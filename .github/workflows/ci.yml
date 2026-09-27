@@ -32,6 +32,28 @@ jobs:
       - name: Evaluation graders
         run: uv run ruff check ../evals && uv run ruff format --check ../evals && uv run pytest -q ../evals/test_graders.py
 
+  upgrade:
+    # A data folder from the previous release (the last v* tag) upgrades with
+    # this commit's code, backed up first and with every row kept, then rolls
+    # back to exactly what it was. SQLite only, so it takes seconds.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The previous release's tag and code come from git history.
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Upgrade from the previous release, then roll back
+        working-directory: backend
+        run: |
+          uv sync --locked
+          uv run ruff check ../scripts/upgrade-rollback-test.py
+          uv run ruff format --check ../scripts/upgrade-rollback-test.py
+          uv run python ../scripts/upgrade-rollback-test.py
+
   oracle:
     # The backend against a real Oracle: the synthetic database (fake data only).
     runs-on: ubuntu-latest
