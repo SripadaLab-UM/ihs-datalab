@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -107,6 +108,23 @@ def test_connections_show_the_database_and_whether_secrets_are_saved(real, keych
     assert (shown["oracle"]["password"], shown["oracle"]["can_set_password"]) == ("missing", True)
     assert (shown["model"]["key"], shown["model"]["can_set_key"]) == ("missing", True)
     assert shown["read_only_because"] is None
+
+
+def test_a_keychain_that_refuses_is_a_plain_503(real, keychain, monkeypatch):
+    from keyring.errors import KeyringLocked
+
+    def locked(*args):
+        raise KeyringLocked("locked")
+
+    monkeypatch.setattr(keychain, "set_password", locked)
+    for path, body in (
+        ("database-password", {"password": PASSWORD}),
+        ("model-key", {"key": MODEL_KEY}),
+    ):
+        refused = real.client.put(f"/api/settings/connections/{path}", json=body)
+        assert refused.status_code == 503 and "keychain" in refused.json()["detail"]
+        assert PASSWORD not in refused.text and MODEL_KEY not in refused.text
+    assert real.password_changes == 0
 
 
 def test_secrets_are_saved_to_the_keychain_and_never_returned(real, keychain):
@@ -272,22 +290,43 @@ def test_datalab_setup_saves_through_the_same_checks(tmp_path, keychain, monkeyp
     )
     assert keychain.saved[("datalab-oracle", "U")] == PASSWORD
 
+    # A key that can't be saved: nothing is, and setup says so with its exit code.
+    answers = iter([f"{MODEL_KEY} with spaces"])
+    assert setup.setup(None, None, update=True) == 1
+
 
 # ---------------------------------------------------------------- storage
 
 
 def add_run(
-    connection: sqlite3.Connection, root: Path, run_id: str, *, status="succeeded", of_run=None
+    connection: sqlite3.Connection,
+    root: Path,
+    run_id: str,
+    *,
+    status="succeeded",
+    of_run=None,
+    finished: bool | None = None,
+    delivery="none",
 ):
+    finished = status not in ("queued", "running") if finished is None else finished
     connection.execute(
         "INSERT INTO workflow_runs (id, workflow_name, mode, of_run, status, started_at, "
+        "finished_at, delivery_status, "
         "started_by, workflow_path, workflow_source, workflow_blob, workflow_text, image_ref, "
         "image_digest, image_platform, host_platform, r_packages_sha256, runner_version, "
         "runtime_json, params_json, seed, reads_json, run_dir) VALUES (?, 'Weekly steps', ?, ?, "
-        "?, '2026-09-27T10:00:00+00:00', 'Someone <s@example.org>', 'weekly.yaml', 'file', "
+        "?, '2026-09-27T10:00:00+00:00', ?, ?, 'Someone <s@example.org>', 'weekly.yaml', 'file', "
         "'sha256:0', 'name: x', 'img', 'sha256:1', 'linux/arm64', 'linux/arm64', '0', "
         "'datalab x', '{}', '{}', 1, '[]', ?)",
-        (run_id, "replay" if of_run else "run", of_run, status, f"runs/{run_id}"),
+        (
+            run_id,
+            "replay" if of_run else "run",
+            of_run,
+            status,
+            "2026-09-27T10:05:00+00:00" if finished else None,
+            delivery,
+            f"runs/{run_id}",
+        ),
     )
     folder = root / "runs" / run_id
     (folder / "steps" / "extract").mkdir(parents=True, exist_ok=True)
@@ -426,6 +465,71 @@ def test_a_run_in_use_keeps_its_files(practice):
     )
 
 
+def test_a_run_still_delivering_keeps_its_files(practice):
+    """A run is `succeeded` before its delivery, and gets `finished_at` only after."""
+    h = practice
+    delivering = add_run(
+        h.connection, h.root, "run_20260927T100000_444444", finished=False, delivery="pending"
+    )
+    refused = h.remove("run-files", "run_20260927T100000_444444")
+    assert refused.status_code == 409 and "still going" in refused.json()["detail"]
+    h.connection.execute("UPDATE workflow_runs SET finished_at = '2026-09-27T10:06:00+00:00'")
+    refused = h.remove("run-files", "run_20260927T100000_444444")
+    assert refused.status_code == 409 and "delivering" in refused.json()["detail"]
+    assert (delivering / "steps" / "extract" / "final.csv").exists()
+    assert h.connection.execute("SELECT inputs_kept FROM workflow_runs").fetchone()[0] == 1
+    listed = h.group("runs")["items"][0]
+    assert listed["removable"] is False and "delivering" in listed["not_removable_because"]
+
+
+def test_files_held_open_can_be_removed_on_a_retry(practice, monkeypatch):
+    """On Windows an open file can't be removed: say so, and let the person try again."""
+    from datalab import storage
+
+    h = practice
+    folder = add_run(h.connection, h.root, "run_20260927T100000_555555")
+    real = storage._remove_entry
+
+    def held(entry: Path) -> None:
+        if entry.name == "steps":
+            raise PermissionError("in use")
+        real(entry)
+
+    monkeypatch.setattr(storage, "_remove_entry", held)
+    refused = h.remove("run-files", "run_20260927T100000_555555")
+    assert refused.status_code == 409 and "Close it in other programs" in refused.json()["detail"]
+    assert sorted(p.name for p in folder.iterdir()) == ["record.json", "steps"]
+    assert json.loads((folder / "record.json").read_text())["files_removal_partial"] is True
+    listed = h.group("runs")["items"][0]
+    assert listed["removable"] and "couldn't be removed yet" in listed["detail"]
+
+    monkeypatch.setattr(storage, "_remove_entry", real)
+    assert h.remove("run-files", "run_20260927T100000_555555").status_code == 200
+    assert [p.name for p in folder.iterdir()] == ["record.json"]
+    assert json.loads((folder / "record.json").read_text())["files_removal_partial"] is False
+    assert h.remove("run-files", "run_20260927T100000_555555").status_code == 409
+
+
+def test_a_held_playground_result_or_backup_says_so(practice, monkeypatch):
+    h = practice
+    add_playground_result(h, "q_20260927T100000_aaaaaa")
+    backup = take_backup(h, "manual")
+
+    def refuse(*args, **kwargs):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(Path, "unlink", refuse)
+    monkeypatch.setattr(Path, "rename", refuse)
+    for kind, item_id in (
+        ("playground-result", "q_20260927T100000_aaaaaa"),
+        ("backup", backup.name),
+    ):
+        refused = h.remove(kind, item_id)
+        assert refused.status_code == 409 and "Close it" in refused.json()["detail"], kind
+    monkeypatch.undo()
+    assert backup.folder.exists()
+
+
 def test_backups_go_and_a_rollbacks_backup_only_when_confirmed(practice):
     h = practice
     plain = take_backup(h, "migrate")
@@ -556,6 +660,9 @@ def test_updates_show_recent_updates_and_an_unreadable_marker(practice):
 
 # ------------------------------------------------------------ diagnostics
 
+# Diagnostics never read the conversations or events tables at all, so the
+# title and conversation canaries pass trivially; they stay as a guard in case
+# that ever changes.
 CANARIES = {
     "password": PASSWORD,
     "model key": MODEL_KEY,
@@ -627,7 +734,9 @@ def test_diagnostics_hold_metadata_and_nothing_else(tmp_path, keychain, monkeypa
         raise RuntimeError(CANARIES["exception message"])
     except RuntimeError:
         logging.getLogger("datalab.api.files").exception("Couldn't open %s", CANARIES["log value"])
-    logging.getLogger("httpx").warning(f"formatted {CANARIES['other library']}")
+    # As another library might: values already in the message (DataLab's own
+    # log calls can't, since ruff's G rules refuse it).
+    logging.getLogger("httpx").warning(f"formatted {CANARIES['other library']}")  # noqa: G004
 
     text = h.client.get("/api/settings/diagnostics").json()["text"]
 
@@ -661,3 +770,64 @@ def test_the_home_folder_is_shortened_to_a_tilde(monkeypatch, tmp_path):
 def test_settings_status_says_it_is_built(practice):
     assert practice.client.get("/api/settings/status").json() == {"available": True}
     assert os.environ.get("DATALAB_ORACLE_PASSWORD") is None
+
+
+# ------------------------------------------------ Storage and the runner itself
+
+
+async def test_storage_and_a_replay_never_both_go_ahead(tmp_path):
+    """A Replay checks its original's kept inputs, then waits on Docker before it
+    records itself. Storage removing the files in that gap must stop the Replay,
+    and a Replay already recorded must stop Storage."""
+    from datalab.storage import Storage, StorageRefused
+    from datalab.workflows.runner import RunRefused
+    from tests.test_workflow_runner import harness
+
+    h = harness(tmp_path)
+    first = await h.run("weekly_steps.yaml", seed=7)
+    storage = Storage(h.settings, h.connection)
+    plan = h.runner._plan
+
+    async def removed_meanwhile(**kwargs):
+        made = await plan(**kwargs)
+        storage.remove("run-files", first["id"])  # the Replay's check has passed by now
+        return made
+
+    h.runner._plan = removed_meanwhile  # type: ignore[method-assign]
+    with pytest.raises(RunRefused, match="removed"):
+        await h.runner.replay(first["id"])
+    assert h.connection.execute("SELECT COUNT(*) FROM workflow_runs").fetchone()[0] == 1
+    assert [p.name for p in h.run_dir(first).iterdir()] == ["record.json"]
+
+    h.runner._plan = plan  # type: ignore[method-assign]
+    second = await h.run("weekly_steps.yaml", seed=8)
+    replay = await h.runner.replay(second["id"])
+    with pytest.raises(StorageRefused, match="Replay"):
+        storage.remove("run-files", second["id"])
+    await h.finish(replay)
+    assert storage.remove("run-files", second["id"]).freed_bytes > 0
+
+
+async def test_storage_waits_for_a_real_delivery(tmp_path):
+    from datalab.storage import Storage, StorageRefused
+    from tests.test_workflow_runner import harness
+
+    h = harness(tmp_path)
+    storage = Storage(h.settings, h.connection)
+    deliver = h.runner._deliver
+    started, go_on = asyncio.Event(), asyncio.Event()
+
+    async def slow(*args, **kwargs):
+        started.set()
+        await go_on.wait()
+        return await deliver(*args, **kwargs)
+
+    h.runner._deliver = slow  # type: ignore[method-assign]
+    run_id = await h.runner.start("weekly_steps.yaml", {}, seed=7)
+    await started.wait()
+    assert h.runner.detail(run_id)["status"] == "succeeded"  # already, before delivery
+    with pytest.raises(StorageRefused):
+        storage.remove("run-files", run_id)
+    go_on.set()
+    await h.finish(run_id)
+    assert storage.remove("run-files", run_id).freed_bytes > 0

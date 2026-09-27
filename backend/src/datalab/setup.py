@@ -68,6 +68,7 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
                 print("Saved the U-M GPT key to this computer's keychain.")
             except SecretRefused as refused:
                 print(f"{refused} Nothing was saved.")
+                return 1
 
     oracle = asks_for_oracle_password(settings)
     if oracle is not None:
@@ -79,6 +80,7 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
                     print("Saved the database password to this computer's keychain.")
                 except SecretRefused as refused:
                     print(f"{refused} Nothing was saved.")
+                    return 1
     elif profile == "real":
         print(
             "No database is configured yet. Ask the DataLab maintainer for the lab's "

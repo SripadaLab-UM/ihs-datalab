@@ -44,6 +44,7 @@ from datalab.config import Settings
 from datalab.db import backups as backups_module
 from datalab.exports import MANIFEST as EXPORT_MANIFEST
 from datalab.exports import DestinationStore
+from datalab.workflows.records import WRITE_LOCK
 
 RemovableKind = Literal["playground-result", "run-files", "backup"]
 
@@ -55,6 +56,10 @@ _BACKUP_NAME = re.compile(r"[A-Za-z0-9+_-][A-Za-z0-9._+-]{0,199}")
 _ACTIVE_RUN = ("queued", "running")
 # What stays in a run's folder when its files are removed.
 _RUN_RECORD = "record.json"
+_HELD_OPEN = (
+    "couldn't be removed: another program may have a file open (antivirus, or a file "
+    "open elsewhere). Close it in other programs and try again."
+)
 
 # Top-level entries each group accounts for; the rest are listed as "Other".
 _KNOWN = {
@@ -292,8 +297,8 @@ class Storage:
 
     def _runs(self) -> Group:
         rows = self._db.execute(
-            "SELECT id, workflow_name, status, started_at, run_dir, inputs_kept, of_run "
-            "FROM workflow_runs ORDER BY started_at DESC"
+            "SELECT id, workflow_name, status, started_at, finished_at, delivery_status, "
+            "run_dir, inputs_kept, of_run FROM workflow_runs ORDER BY started_at DESC"
         ).fetchall()
         replaying = {r["of_run"] for r in rows if r["of_run"] and r["status"] in _ACTIVE_RUN}
         items = []
@@ -302,16 +307,20 @@ class Storage:
             if not _plain_dir(folder):
                 continue
             size = size_of(folder)
-            why = _why_run_busy(row["status"], row["id"] in replaying)
-            if why is None and not row["inputs_kept"]:
-                why = "Its files were already removed; only its record is left."
+            why = _why_run_busy(row, row["id"] in replaying)
+            state = ""
+            if not row["inputs_kept"]:
+                if _run_leftovers(folder):
+                    state = " · some files couldn't be removed yet"
+                else:
+                    state = " · files removed, record kept"
+                    why = why or "Its files were already removed; only its record is left."
             items.append(
                 Item(
                     "run-files",
                     row["id"],
                     f"{row['workflow_name']}",
-                    f"{row['id']} · {row['status']}"
-                    + ("" if row["inputs_kept"] else " · files removed, record kept"),
+                    f"{row['id']} · {row['status']}{state}",
                     size,
                     modified_at=row["started_at"],
                     removable=why is None,
@@ -536,8 +545,13 @@ class Storage:
             raise StorageRefused("Its query is still running. Stop it or let it finish first.")
         file = found[0]
         freed = size_of(file) + size_of(_columns_file(file))
-        file.unlink()
-        with contextlib.suppress(FileNotFoundError):
+        try:
+            file.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            raise StorageRefused(f"The result {_HELD_OPEN}") from None
+        with contextlib.suppress(OSError):
             columns = _columns_file(file)
             if _plain_file(columns):
                 columns.unlink()
@@ -554,24 +568,41 @@ class Storage:
             raise StorageRefused("No such run.", status=404)
         if not _inside(folder, self._root / "runs"):
             raise StorageRefused("No such run.", status=404)
-        why = _why_run_busy(row["status"], self._replaying(run_id))
-        if why is not None:
-            raise StorageRefused(why)
-        if not row["inputs_kept"]:
+        if not row["inputs_kept"] and not _run_leftovers(folder):
             raise StorageRefused("This run's files were already removed.")
-        # Marked first, so a Replay asked for from now on refuses (it checks
-        # this), then checked again for one that started in between.
-        self._set_inputs_kept(run_id, False)
-        if self._replaying(run_id):
-            self._set_inputs_kept(run_id, True)
-            raise StorageRefused("A Replay of this run has just started and is using its files.")
+        # Claimed in one statement, holding the run tables' lock: only a run
+        # that has finished (delivery too) and that no Replay is using. A
+        # Replay's own record goes in only while `inputs_kept` is 1
+        # (RunStore.create_run), so the two can't both go ahead.
+        placeholders = ", ".join("?" for _ in _ACTIVE_RUN)
+        with WRITE_LOCK:
+            claimed = self._db.execute(
+                "UPDATE workflow_runs SET inputs_kept = 0 WHERE id = ? "
+                f"AND status NOT IN ({placeholders}) AND finished_at IS NOT NULL "
+                "AND delivery_status != 'pending' AND NOT EXISTS (SELECT 1 FROM workflow_runs "
+                f"AS other WHERE other.of_run = ? AND other.status IN ({placeholders}))",
+                (run_id, *_ACTIVE_RUN, run_id, *_ACTIVE_RUN),
+            ).rowcount
+        if claimed != 1:
+            current = self._db.execute(
+                "SELECT status, finished_at, delivery_status FROM workflow_runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+            why = _why_run_busy(current, self._replaying(run_id)) if current else None
+            raise StorageRefused(why or "The run is in use.")
         freed = 0
-        for entry in folder.iterdir():
-            if entry.name == _RUN_RECORD and _plain_file(entry):
-                continue
-            freed += size_of(entry)
-            _remove_entry(entry)
-        _note_files_removed(folder / _RUN_RECORD)
+        stuck = False
+        for entry in _run_leftovers(folder):
+            size = size_of(entry)
+            try:
+                _remove_entry(entry)
+            except OSError:
+                stuck = True
+                size -= size_of(entry)
+            freed += size
+        _note_files_removed(folder / _RUN_RECORD, partial=stuck)
+        if stuck:
+            raise StorageRefused(f"Some of the run's files {_HELD_OPEN}")
         return Removed("run-files", run_id, freed)
 
     def _replaying(self, run_id: str) -> bool:
@@ -582,11 +613,6 @@ class Storage:
                 (run_id, *_ACTIVE_RUN),
             ).fetchone()
             is not None
-        )
-
-    def _set_inputs_kept(self, run_id: str, kept: bool) -> None:
-        self._db.execute(
-            "UPDATE workflow_runs SET inputs_kept = ? WHERE id = ?", (1 if kept else 0, run_id)
         )
 
     def _remove_backup(self, name: str, *, confirmed: bool) -> Removed:
@@ -610,8 +636,14 @@ class Storage:
             )
         freed = size_of(entry)
         # Renamed aside first, so a half-removed folder is never taken for a backup.
+        for earlier in folder.glob(f"{backups_module.INCOMING}removing-*"):
+            shutil.rmtree(earlier, ignore_errors=True)  # a removal a held file stopped
         aside = folder / f"{backups_module.INCOMING}removing-{secrets.token_hex(4)}"
-        entry.rename(aside)
+        try:
+            entry.rename(aside)
+        except OSError:
+            raise StorageRefused(f"The backup {_HELD_OPEN}") from None
+        # Whatever a held file keeps here now is no backup, and goes next time.
         shutil.rmtree(aside, ignore_errors=True)
         return Removed("backup", name, freed)
 
@@ -699,9 +731,15 @@ def _mtime(path: Path) -> str | None:
     return datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds")
 
 
-def _why_run_busy(status: str, replaying: bool) -> str | None:
-    if status in _ACTIVE_RUN:
+def _why_run_busy(row: sqlite3.Row, replaying: bool) -> str | None:
+    """Why a run's files are in use: it's going, still delivering, or being replayed.
+
+    A run is `succeeded` before its delivery, and only gets `finished_at`
+    once delivery is done, so both are checked."""
+    if row["status"] in _ACTIVE_RUN or row["finished_at"] is None:
         return "The run is still going."
+    if row["delivery_status"] == "pending":
+        return "The run is still delivering its results."
     if replaying:
         return "A Replay of this run is using its files."
     return None
@@ -731,8 +769,16 @@ def _remove_entry(entry: Path) -> None:
         shutil.rmtree(entry)
 
 
-def _note_files_removed(record: Path) -> None:
-    """Say in the run folder's own record that its files were removed."""
+def _run_leftovers(folder: Path) -> list[Path]:
+    """What's in a run's folder besides its record."""
+    try:
+        return [e for e in folder.iterdir() if not (e.name == _RUN_RECORD and _plain_file(e))]
+    except OSError:
+        return []
+
+
+def _note_files_removed(record: Path, *, partial: bool) -> None:
+    """Say in the run folder's own record that its files were removed (or some were)."""
     if not _plain_file(record):
         return
     with contextlib.suppress(OSError, ValueError):
@@ -740,8 +786,9 @@ def _note_files_removed(record: Path) -> None:
         if isinstance(detail, dict):
             detail["inputs_kept"] = False
             detail["files_removed_at"] = datetime.now(UTC).isoformat(timespec="seconds")
-            partial = record.with_name(record.name + ".partial")
-            partial.write_text(
+            detail["files_removal_partial"] = partial
+            temporary = record.with_name(record.name + ".partial")
+            temporary.write_text(
                 json.dumps(detail, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
             )
-            partial.replace(record)
+            temporary.replace(record)

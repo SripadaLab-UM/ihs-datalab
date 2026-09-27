@@ -26,6 +26,7 @@ from typing import Literal
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from keyring.errors import KeyringError
 from pydantic import BaseModel, SecretStr
 
 from datalab import __version__, db, diagnostics, setup, updates
@@ -288,6 +289,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             setup.store_oracle_password(oracle, body.password.get_secret_value())
         except setup.SecretRefused as refused:
             raise HTTPException(422, str(refused)) from None
+        except KeyringError:
+            raise HTTPException(503, _KEYCHAIN_FAILED) from None
         services.password_changed()
 
     @router.put("/connections/model-key", status_code=204)
@@ -299,6 +302,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             setup.store_model_key(body.key.get_secret_value())
         except setup.SecretRefused as refused:
             raise HTTPException(422, str(refused)) from None
+        except KeyringError:
+            raise HTTPException(503, _KEYCHAIN_FAILED) from None
 
     @router.post("/connections/test")
     async def test_connections() -> ConnectionTestOut:
@@ -463,6 +468,12 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
         )
 
     return router
+
+
+_KEYCHAIN_FAILED = (
+    "This computer's keychain didn't save it (it may be locked, or have refused DataLab). "
+    "Nothing was saved. Unlock the keychain and try again."
+)
 
 
 def _text(value: object) -> str | None:

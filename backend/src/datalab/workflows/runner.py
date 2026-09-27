@@ -84,7 +84,7 @@ from datalab.workflows.model import (
     step_outputs,
 )
 from datalab.workflows.qc import builtin_qc
-from datalab.workflows.records import FINISHED, RunStore, now
+from datalab.workflows.records import FINISHED, InputsGone, RunStore, now
 from datalab.workflows.sandbox import (
     RNG_KIND,
     RUNTIME_ENV,
@@ -477,12 +477,25 @@ class WorkflowRunner:
     def _launch(self, plan: _Plan) -> str:
         plan.run_dir = self.runs_dir / plan.run_id
         plan.run_dir.mkdir(parents=True)  # always new: never an old run's folder
-        workflow = plan.workflow
-        image = plan.image
         pipelines = []
-        for step in workflow.steps:
+        for step in plan.workflow.steps:
             if isinstance(step, PipelineStep):
                 pipelines.append({"name": step.pipeline, "step": step.id})
+        try:
+            self._record_new_run(plan, pipelines)
+        except InputsGone:
+            with contextlib.suppress(OSError):
+                plan.run_dir.rmdir()
+            raise RunRefused("This run's extracted inputs have been removed.") from None
+        task = asyncio.create_task(self._run(plan), name=f"workflow {plan.run_id}")
+        self._tasks[plan.run_id] = task
+        task.add_done_callback(lambda _: self._notify())
+        self._notify()
+        return plan.run_id
+
+    def _record_new_run(self, plan: _Plan, pipelines: list[dict[str, Any]]) -> None:
+        workflow = plan.workflow
+        image = plan.image
         self.store.create_run(
             {
                 "id": plan.run_id,
@@ -520,12 +533,11 @@ class WorkflowRunner:
                 "delivery_status": "pending" if workflow.deliver else "none",
             },
             [(s.id, i, step_kind(s)) for i, s in enumerate(workflow.steps)],
+            # A Replay reads its original's kept inputs: they must still be there.
+            needs_inputs_of=plan.original["id"]
+            if plan.mode == "replay" and plan.original
+            else None,
         )
-        task = asyncio.create_task(self._run(plan), name=f"workflow {plan.run_id}")
-        self._tasks[plan.run_id] = task
-        task.add_done_callback(lambda _: self._notify())
-        self._notify()
-        return plan.run_id
 
     # ----------------------------------------------------------- running
 
