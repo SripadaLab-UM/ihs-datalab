@@ -763,6 +763,51 @@ def test_review_fields_only_ever_come_from_datalab(lab):
     assert f"reviewed_by: yfang\nreviewed_on: {time.strftime('%Y-%m-%d')}" in shared
 
 
+def test_only_a_person_changes_a_pages_status(lab):
+    """The agent's `status: reviewed` would be saved as reviewed, stamped with
+    the saver's name. So the agent's version keeps the base's status (draft
+    for a new page), and the card says so; the person's own edit can change it."""
+    synced(lab)
+    cid = conversation(lab, "knowledge")
+    promoted = MIDNIGHT.replace("status: draft\n", "status: reviewed\n")
+    assert promoted != MIDNIGHT
+    new_reviewed = NEW_PAGE.replace("status: draft\n", "status: reviewed\n")
+    proposal = turn(
+        lab, cid, {"qc/midnight-sleep.md": promoted + "\nMore.\n", "qc/wear-time.md": new_reviewed}
+    )
+    assert proposal is not None
+    views = {
+        v["path"]: v
+        for v in lab.client.get(f"/api/knowledge/proposals/{proposal.id}").json()["files"]
+    }
+    for path in ("qc/midnight-sleep.md", "qc/wear-time.md"):
+        assert "status: draft\n" in views[path]["after"], path
+        assert "status: reviewed" not in views[path]["after"], path
+        assert any("only a person changes a page's status" in f for f in views[path]["flags"])
+    # A status change alone isn't proposed at all.
+    only_status = conversation(lab, "knowledge")
+    assert turn(lab, only_status, {"qc/midnight-sleep.md": promoted}) is None
+    # Saved as a draft, with no reviewer stamped on it.
+    assert accept(lab, proposal)["proposal"]["status"] == "saved"
+    for path in ("qc/midnight-sleep.md", "qc/wear-time.md"):
+        shared = lab.remote.show(path)
+        assert "status: draft" in shared and "reviewed_by" not in shared, path
+    # The person's own edit does change it, and DataLab stamps them as the reviewer.
+    again = turn(lab, cid, {"qc/wear-time.md": new_reviewed + "\nAnd more.\n"})
+    assert again is not None
+    [view] = lab.client.get(f"/api/knowledge/proposals/{again.id}").json()["files"]
+    assert "status: draft" in view["after"]
+    lab.client.put(
+        f"/api/knowledge/proposals/{again.id}/edits",
+        json={
+            "files": {"qc/wear-time.md": view["after"].replace("status: draft", "status: reviewed")}
+        },
+    )
+    assert accept(lab, again)["proposal"]["status"] == "saved"
+    shared = lab.remote.show("qc/wear-time.md")
+    assert "status: reviewed" in shared and "reviewed_by: yfang" in shared
+
+
 def test_a_deleted_conversations_base_is_pruned(lab):
     synced(lab)
     cid = conversation(lab)

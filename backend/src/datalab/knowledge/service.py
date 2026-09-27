@@ -550,7 +550,7 @@ class Knowledge:
                 fd = checkpoints.open_object(Entry("", change.sha256, 0, 0, False))
                 with os.fdopen(fd, "rb") as handle:
                     raw = kb.as_text(handle.read())
-                agent = kb.keep_review_fields(raw, before) if raw is not None else None
+                agent = kb.agents_text(change.path, raw, before) if raw is not None else None
             left_out = change.path in edits and edits[change.path] is None
             edited = change.path in edits and edits[change.path] is not None
             after = before if left_out else edits[change.path] if edited else agent

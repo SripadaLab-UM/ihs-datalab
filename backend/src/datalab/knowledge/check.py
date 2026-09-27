@@ -276,9 +276,16 @@ def review_changes(old: str | None, new: str) -> list[str]:
     after = front_matter(new)[0] or {}
     changes = []
     if old is not None and before.get("status") != after.get("status"):
-        changes.append(f"status: {before.get('status', 'none')} → {after.get('status', 'none')}")
+        was = before.get("status", "none")
+        changes.append(
+            f"status: {was} → {after.get('status', 'none')} in the agent's text; kept as "
+            f"{was}: only a person changes a page's status"
+        )
     elif old is None and after.get("status") not in (None, "draft"):
-        changes.append(f"a new page with status {after.get('status')}")
+        changes.append(
+            f"a new page with status {after.get('status')} in the agent's text; kept as "
+            "draft: only a person changes a page's status"
+        )
     for key in REVIEW_FIELDS:
         if str(before.get(key, "")) != str(after.get(key, "")):
             changes.append(f"{key} changed (DataLab fills it in when a person saves)")
@@ -293,6 +300,23 @@ def keep_review_fields(new: str, old: str | None) -> str:
     for key in REVIEW_FIELDS:
         text = _set_field(text, key, old_lines.get(key))
     return text
+
+
+def keep_status(new: str, old: str | None) -> str:
+    """`new` with the status `old` had (`draft` for a new page), so an agent
+    can't mark a page reviewed: only a person's own edit changes it."""
+    if split_front_matter(new)[0] is None:
+        return new
+    if old is None:
+        return _set_field(new, "status", "status: draft") if "status" in _front_lines(new) else new
+    return _set_field(new, "status", _front_lines(old).get("status"))
+
+
+def agents_text(path: str, new: str, old: str | None) -> str:
+    """What DataLab proposes of the agent's text for `path`: never its
+    review fields, nor, on a page, its status."""
+    text = keep_review_fields(new, old)
+    return keep_status(text, old) if place(path) == "page" else text
 
 
 def stamp_review(text: str, reviewer: str, day: datetime.date) -> str:

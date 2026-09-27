@@ -98,9 +98,10 @@ The rules are deliberately few:
 - **Every page has typed evidence and states its limitations.** "The model
   said so" is never enough.
 - **Only people review.** `reviewed_by` and `reviewed_on` are filled in by
-  DataLab from the person saving. When an agent's proposal would change a
-  page's status, the diff card highlights it so it can't slip through
-  unnoticed.
+  DataLab from the person saving. An agent can't change a page's status
+  either: its version keeps the status the page had (`draft` for a new
+  page), the diff card says the agent tried, and only the person's own
+  edit changes it.
 - **Say which years.** Tables, columns, and rules drift between cohorts, so
   pages state which cohorts they apply to, and note differences.
 - **No participant-level data, ever.** That means no IDs, no per-person dates,
@@ -192,7 +193,9 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   app skill, a Codex system skill, or any `kb-*` name: Codex 0.157.1 lists
   same-named skills side by side, the lab's first, so one could stand in for
   DataLab's own. Such a skill is also left out of the copy. Changes to `reviewed_by`
-  and `reviewed_on` are dropped (and flagged); status changes are flagged.
+  and `reviewed_on` are dropped (and flagged), and so is an agent's change
+  to a page's `status`: its version keeps the base's (`draft` for a new
+  page), so only a person's own edit on the card changes it.
   The proposal is a `kb_proposal` event in the conversation's log, with the
   diff (capped at 64 KB a file and 256 KB in all; the full diff is in the
   API) and the check's counts.

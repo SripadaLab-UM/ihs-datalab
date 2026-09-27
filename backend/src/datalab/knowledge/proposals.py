@@ -14,6 +14,8 @@ Some differences can't be proposed, and are listed with the reason instead:
 
 `reviewed_by` and `reviewed_on` are never taken from the agent: DataLab
 fills them in from the person who saves (check.py, `keep_review_fields`).
+Nor is a page's `status`: the agent's version keeps the base's (`draft` for
+a new page), and only a person's own edit changes it (`keep_status`).
 """
 
 from __future__ import annotations
@@ -128,8 +130,8 @@ def compare(workspace: Workspace, base: Base) -> tuple[list[Change], list[Refusa
             refused.append(Refusal(path, "it isn't a text file"))
             continue
         old = _text(base.read(path)) if known is not None and known.regular else None
-        if old is not None and kb.keep_review_fields(text, old) == old:
-            continue  # only fields DataLab sets itself changed
+        if old is not None and kb.agents_text(path, text, old) == old:
+            continue  # only fields a person or DataLab sets changed
         flags = tuple(kb.review_changes(old, text))
         changes.append(
             Change(path, "modified" if old is not None else "added", digest, size, flags)
