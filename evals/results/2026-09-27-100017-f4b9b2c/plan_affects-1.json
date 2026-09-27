@@ -1,0 +1,129 @@
+{
+  "task": "plan_affects",
+  "mode": "analysis",
+  "prompt": "Does sleeping less make interns' mood worse in the 2025 cohort?",
+  "tests": "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",
+  "passed": false,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Association or estimation (proposed association)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": false,
+      "detail": "at most 2 (proposed: missing_data, repeated_observations, sensitivity, temporal_alignment)"
+    },
+    {
+      "name": "says what claim is intended",
+      "passed": true,
+      "detail": "the plan says whether it's a causal claim or an association"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"association\",\n  \"analysis_type_label\": \"Association or estimation\",\n  \"rationale\": \"The question asks how nightly sleep relates to mood, so the appropriate first analysis is an observational repeated-measures association rather than a causal effect estimate.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 IHS cohort, are interns' daily mood scores lower after nights when they slept less? Purpose: estimate the short-term within-person association between wearable-measured sleep duration and daily mood, while avoiding a causal interpretation unless a stronger design is specified.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025 only. Population: enrolled participants with at least one daily mood report and at least one wearable sleep observation that can be aligned by participant and date. Metadata checked so far: VW_DAILY_MOOD has PARTICIPANTIDENTIFIER, MOOD_STARTDATE, MOOD_ENDDATE, MOOD_SCORE; FITBITSLEEPLOGS has PARTICIPANTIDENTIFIER, STARTDATE, ENDDATE, MINUTESASLEEP, ISMAINSLEEP and related sleep fields; GARMINSLEEPSUMMARY has PARTICIPANTIDENTIFIER, CALENDARDATE, DURATIONINSECONDS and sleep-stage durations. Join paths show shared PARTICIPANTIDENTIFIER only, so dates must be aligned before joining. I have not yet checked row counts, coverage, value ranges, or which sleep source has sufficient coverage.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before interpreting results I will check participant counts, row counts, duplicate participant-date records, parseability and range of MOOD_SCORE, impossible sleep durations, sleep-source availability, overlap between sleep and mood dates, unmatched rows, missingness, and whether participants have enough within-person variation in sleep to estimate a within-person association. Main limitations: observational association, potential time-varying confounding, self-selection into mood reporting and wearable wear, device/source differences, and residual dependence among repeated observations.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A concise static HTML report in /work/outputs plus the complete analysis source in /work. The report will include sample flow, data-quality checks, model results with effect sizes and confidence intervals, sensitivity analyses, and the exact SQL provenance. It will not include participant identifiers or row-level records.\"\n    },\n    {\n      \"kind\": \"target_quantity\",\n      \"label\": \"Target quantity (estimand)\",\n      \"content\": \"Primary estimand: the within-person difference in daily mood score associated with one hour less sleep the preceding night among 2025 interns with aligned wearable sleep and mood data. This supports an association claim only: it will not show that sleeping less causes worse mood. I will also summarize the between-person association separately, because interns who generally sleep less may differ from interns who generally sleep more.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Mood: VW_DAILY_MOOD.MOOD_SCORE, using MOOD_STARTDATE/MOOD_ENDDATE for timing after checking that scores are numeric or can be defensibly coded. Sleep: wearable sleep duration in hours. Fitbit candidate is FITBITSLEEPLOGS.MINUTESASLEEP, restricted where appropriate to main sleep episodes using ISMAINSLEEP after checking values. Garmin candidate is GARMINSLEEPSUMMARY.DURATIONINSECONDS or summed stage durations, using CALENDARDATE, after checking validation and ranges. The pilot will determine whether a single primary source or a clearly documented device-source approach is supportable from coverage and comparability.\"\n    },\n    {\n      \"kind\": \"method\",\n      \"label\": \"Method and adjustment\",\n      \"content\": \"Primary model: a repeated-measures regression of mood score on prior-night sleep hours decomposed into within-person deviation from each participant's mean sleep and between-person mean sleep. Include participant fixed effects or equivalent within-person centering for the primary within-person estimate; include day-of-week and calendar-time terms if coverage supports them. Uncertainty will account for repeated observations by clustering at participant level or using a mixed/repeated-measures model with participant-level dependence. Report effect size as mood-score units per 1 hour less sleep with 95% confidence interval, plus descriptive summaries.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"The unit of analysis is participant-day after date alignment. I will report observations, distinct participants, and participants contributing estimable within-person variation: at least two aligned participant-days with nonidentical sleep duration and nonmissing mood. Multiple sleep or mood records for the same participant-date will be handled by a pre-specified aggregation after duplicate checks: main sleep episode for Fitbit when available, otherwise daily total/longest defensible sleep record; mood records on the same date summarized by mean if the scale supports it.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Primary alignment: prior-night sleep linked to the next daily mood report by participant and calendar date. For Fitbit, sleep ENDDATE date will be treated as the waking/date-of-mood candidate after timezone-aware date extraction where possible. For Garmin, CALENDARDATE will be treated as the sleep night/date provided by the device; the pilot will verify date behavior. Sensitivity: same-calendar-day alignment and, if feasible, excluding records with ambiguous timing or duplicated dates.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"I will quantify missing mood, missing sleep, and the overlap of available sleep and mood by participant and date. Complete-case aligned participant-days will be used for the primary model; no imputation will be done in the first analysis. I will describe how differential missingness or mood-reporting behavior could bias the association.\"\n    },\n    {\n      \"kind\": \"sensitivity\",\n      \"label\": \"Sensitivity analyses\",\n      \"content\": \"Sensitivity checks will include: shorter-sleep threshold summaries such as <6 hours versus >=6 hours as a descriptive complement, alternate date alignment where defensible, excluding implausible sleep durations using transparent thresholds, and fitting the model separately by sleep source if both Fitbit and Garmin contribute enough participants.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 42.96924901008606,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_96330ca64860d63d",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "association",
+        "analysis_type_label": "Association or estimation",
+        "rationale": "The question asks how nightly sleep relates to mood, so the appropriate first analysis is an observational repeated-measures association rather than a causal effect estimate.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 IHS cohort, are interns' daily mood scores lower after nights when they slept less? Purpose: estimate the short-term within-person association between wearable-measured sleep duration and daily mood, while avoiding a causal interpretation unless a stronger design is specified."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025 only. Population: enrolled participants with at least one daily mood report and at least one wearable sleep observation that can be aligned by participant and date. Metadata checked so far: VW_DAILY_MOOD has PARTICIPANTIDENTIFIER, MOOD_STARTDATE, MOOD_ENDDATE, MOOD_SCORE; FITBITSLEEPLOGS has PARTICIPANTIDENTIFIER, STARTDATE, ENDDATE, MINUTESASLEEP, ISMAINSLEEP and related sleep fields; GARMINSLEEPSUMMARY has PARTICIPANTIDENTIFIER, CALENDARDATE, DURATIONINSECONDS and sleep-stage durations. Join paths show shared PARTICIPANTIDENTIFIER only, so dates must be aligned before joining. I have not yet checked row counts, coverage, value ranges, or which sleep source has sufficient coverage."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting results I will check participant counts, row counts, duplicate participant-date records, parseability and range of MOOD_SCORE, impossible sleep durations, sleep-source availability, overlap between sleep and mood dates, unmatched rows, missingness, and whether participants have enough within-person variation in sleep to estimate a within-person association. Main limitations: observational association, potential time-varying confounding, self-selection into mood reporting and wearable wear, device/source differences, and residual dependence among repeated observations."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A concise static HTML report in /work/outputs plus the complete analysis source in /work. The report will include sample flow, data-quality checks, model results with effect sizes and confidence intervals, sensitivity analyses, and the exact SQL provenance. It will not include participant identifiers or row-level records."
+          },
+          {
+            "kind": "target_quantity",
+            "label": "Target quantity (estimand)",
+            "content": "Primary estimand: the within-person difference in daily mood score associated with one hour less sleep the preceding night among 2025 interns with aligned wearable sleep and mood data. This supports an association claim only: it will not show that sleeping less causes worse mood. I will also summarize the between-person association separately, because interns who generally sleep less may differ from interns who generally sleep more."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Mood: VW_DAILY_MOOD.MOOD_SCORE, using MOOD_STARTDATE/MOOD_ENDDATE for timing after checking that scores are numeric or can be defensibly coded. Sleep: wearable sleep duration in hours. Fitbit candidate is FITBITSLEEPLOGS.MINUTESASLEEP, restricted where appropriate to main sleep episodes using ISMAINSLEEP after checking values. Garmin candidate is GARMINSLEEPSUMMARY.DURATIONINSECONDS or summed stage durations, using CALENDARDATE, after checking validation and ranges. The pilot will determine whether a single primary source or a clearly documented device-source approach is supportable from coverage and comparability."
+          },
+          {
+            "kind": "method",
+            "label": "Method and adjustment",
+            "content": "Primary model: a repeated-measures regression of mood score on prior-night sleep hours decomposed into within-person deviation from each participant's mean sleep and between-person mean sleep. Include participant fixed effects or equivalent within-person centering for the primary within-person estimate; include day-of-week and calendar-time terms if coverage supports them. Uncertainty will account for repeated observations by clustering at participant level or using a mixed/repeated-measures model with participant-level dependence. Report effect size as mood-score units per 1 hour less sleep with 95% confidence interval, plus descriptive summaries."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "The unit of analysis is participant-day after date alignment. I will report observations, distinct participants, and participants contributing estimable within-person variation: at least two aligned participant-days with nonidentical sleep duration and nonmissing mood. Multiple sleep or mood records for the same participant-date will be handled by a pre-specified aggregation after duplicate checks: main sleep episode for Fitbit when available, otherwise daily total/longest defensible sleep record; mood records on the same date summarized by mean if the scale supports it."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Primary alignment: prior-night sleep linked to the next daily mood report by participant and calendar date. For Fitbit, sleep ENDDATE date will be treated as the waking/date-of-mood candidate after timezone-aware date extraction where possible. For Garmin, CALENDARDATE will be treated as the sleep night/date provided by the device; the pilot will verify date behavior. Sensitivity: same-calendar-day alignment and, if feasible, excluding records with ambiguous timing or duplicated dates."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "I will quantify missing mood, missing sleep, and the overlap of available sleep and mood by participant and date. Complete-case aligned participant-days will be used for the primary model; no imputation will be done in the first analysis. I will describe how differential missingness or mood-reporting behavior could bias the association."
+          },
+          {
+            "kind": "sensitivity",
+            "label": "Sensitivity analyses",
+            "content": "Sensitivity checks will include: shorter-sleep threshold summaries such as <6 hours versus >=6 hours as a descriptive complement, alternate date alignment where defensible, excluding implausible sleep durations using transparent thresholds, and fitting the model separately by sleep source if both Fitbit and Garmin contribute enough participants."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 100957,
+        "inputTokens": 98343,
+        "cachedInputTokens": 54784,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2614,
+        "reasoningOutputTokens": 405
+      },
+      "last": {
+        "totalTokens": 25064,
+        "inputTokens": 23627,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1437,
+        "reasoningOutputTokens": 258
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_60edfa8f2257f8c5",
+  "attempt": 1
+}

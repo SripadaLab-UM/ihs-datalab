@@ -485,18 +485,27 @@ def _plan_text(plan: dict) -> str:
     return "\n".join(parts)
 
 
+# Add-ons that can apply to a question about one cohort's nightly device data:
+# not cross-cohort comparability, and not "Pilot, then full run", which in
+# Analysis mode would only restate the usual pilot-then-ask step.
+_ONE_COHORT = frozenset(
+    {"repeated_observations", "temporal_alignment", "missing_data", "sensitivity"}
+)
+
+
 def _plan_grader(
     types: set[str],
     *,
-    max_add_ons: int = 2,
+    can_apply: frozenset[str] = _ONE_COHORT,
     needs: tuple[str, ...] = (),
     or_asks: bool = False,
     claim: bool = False,
 ) -> Callable[[dict, dict], list[Check]]:
-    """A grader for a plan: its type is one of `types`, it has the add-on
-    sections in `needs` and no more than `max_add_ons` in all, and (with
-    `claim`) it says whether the claim is causal. With `or_asks`, asking the
-    person what they mean instead of proposing is also right."""
+    """A grader for a plan: its type is one of `types`, its add-on sections
+    are ones that can apply to the question (`can_apply`) and include those
+    it `needs`, and (with `claim`) it says whether the claim is causal. With
+    `or_asks`, asking the person what they mean instead of proposing is also
+    right."""
 
     def grade(result: dict, expected: dict) -> list[Check]:
         plan, answer = result.get("plan"), result.get("answer", "")
@@ -512,14 +521,16 @@ def _plan_grader(
         kind = plan.get("analysis_type")
         add_ons = sorted(s["kind"] for s in plan.get("sections", []) if s.get("kind") in _ADD_ONS)
         labels = " or ".join(TYPES_BY_ID[t].label for t in sorted(types))
+        stray = [k for k in add_ons if k not in can_apply]
+        missing = [k for k in needs if k not in add_ons]
         checks = [
             Check("type", kind in types, f"{labels} (proposed {kind})"),
             Check(
                 "add-ons only where they apply",
-                len(add_ons) <= max_add_ons and all(k in add_ons for k in needs),
-                f"at most {max_add_ons}"
-                + (f", including {', '.join(needs)}" if needs else "")
-                + f" (proposed: {', '.join(add_ons) or 'none'})",
+                not stray and not missing,
+                f"proposed: {', '.join(add_ons) or 'none'}"
+                + (f"; can't apply here: {', '.join(stray)}" if stray else "")
+                + (f"; needed: {', '.join(missing)}" if missing else ""),
             ),
         ]
         if claim:
@@ -585,8 +596,8 @@ TASKS = [
          "Is a shorter night's sleep followed by lower mood the next day, within the same intern, "
          "in the 2025 cohort?",
          "plan type: association, with timing and repeated observations as add-ons",
-         _plan_grader({"association"}, max_add_ons=4,
-                      needs=("repeated_observations", "temporal_alignment")), plan_only=True),
+         _plan_grader({"association"}, needs=("repeated_observations", "temporal_alignment")),
+         plan_only=True),
     Task("plan_affects", "analysis",
          "Does sleeping less make interns' mood worse in the 2025 cohort?",
          "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",

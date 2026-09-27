@@ -19,13 +19,16 @@ Each task is built around a trap the synthetic data carries on purpose
 | `phq9_sep` | Who counts as a participant in a survey; uncertainty |
 | `small_cells` | A count under 11 that must be suppressed (directly, as a percentage, or by subtraction) |
 | `plan_describe` | A descriptive question gets a describe plan, not an invented exposure and outcome |
-| `plan_coverage` | A coverage audit gets a data-quality plan, with no more than two add-on sections |
+| `plan_coverage` | A coverage audit gets a data-quality plan |
 | `plan_prediction` | A prediction question gets a prediction plan (validation, what's known when) |
 | `plan_mixed` | A within-person association, with timing and repeated observations as add-ons |
 | `plan_affects` | An "X affects Y" question: the intended claim made explicit in the plan, or asked about |
 
 The `plan_` tasks grade the plan the agent proposes, not an answer (DataLab's
 own checks already make it well formed; these check it's the right kind).
+Each also checks its add-on sections are ones that can apply to the question:
+none about comparing cohorts for a one-cohort question, and no "Pilot, then
+full run" that only restates Analysis mode's usual pilot.
 The runner sends the plan back unapproved and stops the turn once it's
 proposed, so each takes a minute or two.
 

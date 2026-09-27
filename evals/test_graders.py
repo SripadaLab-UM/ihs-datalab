@@ -130,7 +130,7 @@ def plan(kind: str, *add_ons: str, text: str = "", **sections: str) -> dict:
 PLANS_PASS = [
     ("plan_describe", plan("describe")),
     ("plan_describe", plan("describe", "missing_data")),
-    ("plan_coverage", plan("data_quality", "cross_cohort")),
+    ("plan_coverage", plan("data_quality", "repeated_observations", "temporal_alignment")),
     ("plan_prediction", plan("prediction", "missing_data", "temporal_alignment")),
     ("plan_mixed", plan("association", "repeated_observations", "temporal_alignment")),
     ("plan_affects", plan("association", text="An association, not a causal effect.")),
@@ -138,6 +138,8 @@ PLANS_PASS = [
 ]
 PLANS_FAIL = [
     ("plan_describe", plan("association")),  # an invented exposure and outcome
+    ("plan_describe", plan("describe", "pilot_to_full")),  # restates the usual pilot
+    ("plan_prediction", plan("prediction", "cross_cohort")),  # one cohort
     ("plan_coverage", plan("data_quality", "repeated_observations", "temporal_alignment",
                            "cross_cohort", "missing_data", "sensitivity", "pilot_to_full")),  # all six
     ("plan_prediction", plan("association")),
