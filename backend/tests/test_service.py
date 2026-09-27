@@ -10,7 +10,7 @@ from datalab.data.access_log import AccessLog
 from datalab.data.oracle import QueryCancelled
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
-from tests.conftest import COHORTS, FakeDatabase
+from tests.conftest import COHORTS, FakeDatabase, sample_catalog
 
 SQL = (
     "SELECT STUDY_PARTICIPANT_ID, TRACKERSTEPS FROM IHS_2025.VFITBITDAILYDATA "
@@ -24,7 +24,7 @@ def log(tmp_path: Path) -> AccessLog:
 
 
 def service(database, log, **limits) -> DataService:
-    return DataService(database, log, QueryLimits(**limits), COHORTS)
+    return DataService(database, log, QueryLimits(**limits), COHORTS, sample_catalog())
 
 
 def audit_entries(tmp_path: Path) -> list[dict]:

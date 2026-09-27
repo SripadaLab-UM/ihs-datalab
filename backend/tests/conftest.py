@@ -60,6 +60,10 @@ class FakeDatabase:
 
 @pytest.fixture
 def catalog() -> Catalog:
+    return sample_catalog()
+
+
+def sample_catalog() -> Catalog:
     return Catalog(
         [
             TableInfo(

@@ -22,7 +22,13 @@ Query the IHS database carefully and show your work.
 7. The `query` tool returns a preview; the full result is a CSV in
    `/data/oracle`. Work from the file.
 8. Show every SQL statement you ran, with its purpose and row count, in your
-   answer. The person can also see them in the Data accessed panel.
-9. If a query is rejected (it isn't a single SELECT, or it's too large), read
-   the message, narrow the query, and try again. Don't try to get around a
-   limit; ask the person instead.
+   answer. The person can also see them under Queries.
+9. Oracle's built-in SQL functions all work: dates and time zones
+   (`TO_TIMESTAMP_TZ`, `FROM_TZ`, `NEW_TIME`), text and regular expressions,
+   `LISTAGG`, statistics (`MEDIAN`, `PERCENTILE_CONT`, `CORR`, `REGR_*`,
+   `STATS_*`), and window functions. Not allowed: package calls such as
+   `DBMS_LOB.SUBSTR` (use `SUBSTR`, which works on long text), XML functions,
+   `SYS_CONTEXT`, and functions defined in the database.
+10. If a query is rejected (it isn't a single SELECT, or it's too large), read
+    the message, narrow the query, and try again. Don't try to get around a
+    limit; ask the person instead.

@@ -1,12 +1,15 @@
 import pytest
 
-from datalab.data.sqlcheck import SqlRejected, TableRef, check_sql
+from datalab.data.sqlcheck import ORACLE_FUNCTIONS, SqlRejected, TableRef, check_sql
+
+from .sql_samples import SAMPLE_CALLS
 
 COHORTS = frozenset({"IHS_2024", "IHS_2025", "IHS_2026"})
 
 
 def ok(sql: str):
-    return check_sql(sql, allowed_schemas=COHORTS)
+    # Column resolution has its own tests below (TestColumns).
+    return check_sql(sql, allowed_schemas=COHORTS, columns=None)
 
 
 def rejected(sql: str) -> str:
@@ -103,7 +106,8 @@ class TestRejected:
         rejected(sql)
 
     def test_unknown_function(self):
-        assert "allowed list" in rejected("SELECT MY_CUSTOM_FN(a) FROM IHS_2025.T")
+        message = rejected("SELECT MY_CUSTOM_FN(a) FROM IHS_2025.T")
+        assert "isn't one of Oracle's built-in SQL functions" in message
 
     def test_xml_query_functions(self):
         rejected("SELECT * FROM XMLTABLE('/a' PASSING XMLTYPE('<a/>'))")
@@ -157,3 +161,216 @@ class TestCteScope:
             "SELECT * FROM (WITH s AS (SELECT 1 x FROM dual) SELECT x FROM s) p, "
             "(SELECT x FROM s) q"
         )
+
+
+class TestFunctions:
+    """Oracle's built-in SQL functions are allowed; anything else, and the few
+    built-ins that can reach outside the database, are not."""
+
+    def test_every_allowed_function_has_a_sample_call(self):
+        assert set(SAMPLE_CALLS) == ORACLE_FUNCTIONS
+
+    @pytest.mark.parametrize("name", sorted(SAMPLE_CALLS))
+    def test_allowed_function(self, name):
+        ok(f"SELECT {SAMPLE_CALLS[name]} FROM IHS_2025.T")
+
+    @pytest.mark.parametrize(
+        "call",
+        [
+            "SYS_CONTEXT('USERENV', 'IP_ADDRESS')",
+            "USERENV('TERMINAL')",
+            'XMLELEMENT("a", x)',  # sqlglot models this one
+            "XMLAGG(x)",
+            "XMLTYPE(s)",
+            "EXTRACTVALUE(s, '/a')",
+            "BFILENAME('DIR', 'f.txt')",
+            "DUMP(x)",
+            "SYS_XMLGEN(x)",
+        ],
+    )
+    def test_denied_function(self, call):
+        assert "isn't allowed" in rejected(f"SELECT {call} FROM IHS_2025.T")
+
+
+class TestCallsAsWritten:
+    """From the security review: the parser maps some names onto its own
+    functions, but Oracle runs the name as written."""
+
+    @pytest.mark.parametrize(
+        "call",
+        ["MD5('a')", "LEFT('a', 1)", "IFNULL(a, 1)", "SHA2('a', 256)", "DATE_ADD(d, 1)", "YEAR(d)"],
+    )
+    def test_names_that_arent_oracle_built_ins(self, call):
+        assert "isn't one of Oracle's built-in" in rejected(f"SELECT {call} FROM IHS_2025.T")
+
+    def test_quoted_names_must_match_exactly(self):
+        message = rejected('SELECT "nvl"(a, 1) FROM IHS_2025.T')
+        assert "without quotes" in message
+        ok('SELECT "NVL"(a, 1) FROM IHS_2025.T')
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "WITH q (a, b) AS (SELECT 1, 2 FROM DUAL) SELECT a FROM q",
+            "SELECT CAST(a AS NUMBER(10, 2)), CAST(b AS VARCHAR2(20)) FROM IHS_2025.T",
+            "SELECT INTERVAL '5' DAY(3) TO SECOND(2) FROM DUAL",
+            "SELECT COUNT(DISTINCT(a)) FROM IHS_2025.T WHERE a IN (1, 2)",
+            "SELECT a FROM IHS_2025.T WHERE EXISTS (SELECT 1 FROM DUAL)",
+            "SELECT a FROM IHS_2025.T GROUP BY ROLLUP (a)",
+            # Clauses the tokenizer reads as one token, followed by "(".
+            "SELECT a FROM IHS_2025.T ORDER BY (a + 1)",
+            "SELECT a FROM IHS_2025.T GROUP BY (a)",
+            "SELECT ROW_NUMBER() OVER (PARTITION BY (a) ORDER BY (b)) FROM IHS_2025.T",
+            "SELECT LEVEL FROM DUAL START WITH (1 = 1) CONNECT BY (LEVEL <= 3)",
+            "SELECT LEVEL FROM DUAL CONNECT BY LEVEL <= 3 ORDER SIBLINGS BY (LEVEL)",
+        ],
+    )
+    def test_sql_words_that_take_parentheses(self, sql):
+        ok(sql)
+
+    def test_a_type_name_only_counts_after_as(self):
+        assert "isn't one of Oracle's built-in" in rejected("SELECT NUMBER(5) FROM IHS_2025.T")
+
+
+# A small catalog: T has a quoted lowercase column, as the real survey views do.
+CATALOG = {
+    "IHS_2025": {
+        "T": {"A": "NUMBER", "B": "VARCHAR2", "D": "DATE", "interest0": "NUMBER"},
+        "U": {"A": "NUMBER", "C": "DATE"},
+    }
+}
+
+
+def ok_with_catalog(sql: str):
+    return check_sql(sql, allowed_schemas=COHORTS, columns=CATALOG)
+
+
+def rejected_with_catalog(sql: str) -> str:
+    with pytest.raises(SqlRejected) as info:
+        ok_with_catalog(sql)
+    return str(info.value)
+
+
+class TestColumns:
+    """Oracle runs a name that isn't a column as a call with no arguments, so
+    every column must be a real column of a table in its scope."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT ORA_DATABASE_NAME FROM DUAL",
+            "SELECT ORA_LOGIN_USER FROM DUAL",
+            "SELECT DBMS_UTILITY.PORT_STRING FROM DUAL",
+            "SELECT UTL_INADDR.GET_HOST_NAME FROM DUAL",
+            "SELECT UTL_HTTP.REQUEST FROM DUAL",
+            "SELECT 1 FROM DUAL WHERE DBMS_LOCK.SLEEP IS NULL",
+            "SELECT DATALAB_RO.DL_NOPAREN FROM DUAL",
+            "SELECT secret_fn FROM IHS_2025.T",
+            "SELECT a FROM IHS_2025.T UNION SELECT secret_fn FROM DUAL",
+            "SELECT (SELECT secret_fn FROM DUAL) FROM IHS_2025.T",
+            "SELECT a FROM IHS_2025.NOT_IN_CATALOG",
+            "SELECT interest0 FROM IHS_2025.T",  # Oracle reads this as INTEREST0
+            # Names qualify takes for an alias defined elsewhere; Oracle would run
+            # them as functions (confirmed with decoys on the synthetic database).
+            "WITH q (evil) AS (SELECT 1 FROM DUAL) "
+            "SELECT 'y' FROM DUAL GROUP BY dummy HAVING evil = 'HIJACKED'",
+            "SELECT 'x' AS evil FROM DUAL WHERE 1 = 0 "
+            "UNION ALL SELECT 'y' FROM DUAL GROUP BY dummy HAVING evil = 'x'",
+            "SELECT 1 AS evil FROM DUAL WHERE evil IS NULL",
+        ],
+    )
+    def test_names_that_arent_columns(self, sql):
+        rejected_with_catalog(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT a, b FROM IHS_2025.T WHERE ROWNUM <= 5",
+            'SELECT "interest0" FROM IHS_2025.T',
+            "SELECT t.a, u.c FROM IHS_2025.T t JOIN IHS_2025.U u ON u.a = t.a",
+            "SELECT LEVEL, SYSDATE, USER, SYSTIMESTAMP FROM DUAL CONNECT BY LEVEL <= 3",
+            "SELECT d.dummy FROM DUAL d",
+            "WITH x AS (SELECT a AS n FROM IHS_2025.T) SELECT n FROM x ORDER BY n",
+            "SELECT a AS z, COUNT(*) AS k FROM IHS_2025.T GROUP BY a ORDER BY z",
+            "SELECT a FROM IHS_2025.T WHERE EXISTS (SELECT 1 FROM IHS_2025.U WHERE c = d)",
+            "SELECT s.a FROM (SELECT a FROM IHS_2025.T) s",
+            "SELECT * FROM IHS_2025.T",
+            "SELECT a FROM IHS_2025.T WHERE d >= :start_date",
+            "SELECT a, ROW_NUMBER() OVER (PARTITION BY b ORDER BY d) AS rn FROM IHS_2025.T",
+            "WITH q (n) AS (SELECT a FROM IHS_2025.T) SELECT n FROM q ORDER BY n",
+            "SELECT a AS z FROM IHS_2025.T ORDER BY z + 1",
+            "SELECT a FROM IHS_2025.T t "
+            "WHERE a = (SELECT MAX(u.a) FROM IHS_2025.U u WHERE u.c = t.d)",
+        ],
+    )
+    def test_real_columns_and_pseudo_columns(self, sql):
+        ok_with_catalog(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 1 FROM DUAL FETCH FIRST EVILE ROWS ONLY",
+            "SELECT 1 FROM DUAL FETCH FIRST DBMS_RANDOM.VALUE ROWS ONLY",
+            "SELECT 1 FROM DUAL OFFSET ORA_DATABASE_NAME ROWS",
+        ],
+    )
+    def test_row_counts_must_be_numbers_or_binds(self, sql):
+        assert "FETCH and OFFSET" in rejected_with_catalog(sql)
+
+    def test_row_counts(self):
+        ok_with_catalog("SELECT a FROM IHS_2025.T OFFSET 5 ROWS FETCH NEXT :n ROWS ONLY")
+        ok_with_catalog("SELECT a FROM IHS_2025.T FETCH FIRST 10 ROWS ONLY")
+
+    def test_with_an_empty_catalog_nothing_runs(self):
+        with pytest.raises(SqlRejected):
+            check_sql("SELECT a FROM IHS_2025.T", allowed_schemas=COHORTS, columns={})
+
+
+class TestSecondReview:
+    """From the second security review."""
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT ORA_DATABASE_NAME, DBMS_UTILITY.PORT_STRING FROM (SELECT 1 x FROM DUAL)"
+            " PIVOT (COUNT(*) FOR x IN (1 AS a))",
+            "SELECT ORA_LOGIN_USER FROM (SELECT 1 x FROM DUAL) UNPIVOT (v FOR k IN (x))",
+        ],
+    )
+    def test_pivot_is_refused(self, sql):
+        assert "PIVOT and UNPIVOT aren't supported" in rejected_with_catalog(sql)
+
+    def test_an_alias_in_having(self):
+        sql = "SELECT a AS evil, COUNT(*) FROM IHS_2025.T GROUP BY a HAVING evil IS NULL"
+        assert "HAVING can't use the name" in rejected_with_catalog(sql)
+        ok_with_catalog("SELECT a AS n, COUNT(*) FROM IHS_2025.T GROUP BY a HAVING COUNT(*) > 1")
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 'x' AS evil FROM DUAL WHERE 1=0 UNION ALL"
+            " SELECT 'y' FROM DUAL GROUP BY dummy HAVING evil = 'HIJACKED'",
+            "SELECT 'y' FROM DUAL GROUP BY dummy HAVING ORA_DATABASE_NAME = 'FREEPDB1'"
+            " UNION ALL SELECT 'x' AS ORA_DATABASE_NAME FROM DUAL WHERE 1=0",
+            "SELECT * FROM (SELECT 'x' AS evil FROM DUAL UNION ALL"
+            " SELECT 'y' FROM DUAL GROUP BY dummy HAVING evil = 'x')",
+        ],
+    )
+    def test_an_alias_from_another_branch_in_having(self, sql):
+        assert "HAVING can't use the name" in rejected_with_catalog(sql)
+
+    def test_q_quoted_strings_are_refused_cleanly(self):
+        rejected_with_catalog("SELECT q'[ ' ]' FROM DUAL")
+
+    def test_grouping_sets(self):
+        sql = "SELECT a, b, COUNT(*) FROM IHS_2025.T GROUP BY GROUPING SETS ((a), (b), ())"
+        ok_with_catalog(sql)
+
+    def test_recursive_with_needs_qualified_columns(self):
+        recursive = (
+            "WITH r (n) AS (SELECT 1 FROM DUAL UNION ALL SELECT {n} + 1 FROM r WHERE {n} < 3)"
+        )
+        assert "qualify its columns" in rejected_with_catalog(
+            recursive.format(n="n") + " SELECT n FROM r"
+        )
+        ok_with_catalog(recursive.format(n="r.n") + " SELECT n FROM r")

@@ -62,6 +62,14 @@ class Catalog:
         schema, _, name = qualified_name.upper().partition(".")
         return self._tables.get((schema, name))
 
+    def column_index(self) -> dict[str, dict[str, dict[str, str]]]:
+        """schema -> table -> column -> type, names exactly as Oracle stores them.
+        The SQL check resolves every column a query names against it."""
+        index: dict[str, dict[str, dict[str, str]]] = {}
+        for (schema, name), table in self._tables.items():
+            index.setdefault(schema, {})[name] = {c.name: c.type for c in table.columns}
+        return index
+
     def names(self, schema: str) -> list[str]:
         """The tables and views in one cohort schema."""
         return sorted(name for s, name in self._tables if s == schema.upper())

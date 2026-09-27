@@ -79,7 +79,9 @@ def create_app(
     if catalog is None:
         catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
-    data = DataService(database or _LazyOracle(settings), access_log, settings.limits, allowed)
+    data = DataService(
+        database or _LazyOracle(settings), access_log, settings.limits, allowed, catalog
+    )
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
