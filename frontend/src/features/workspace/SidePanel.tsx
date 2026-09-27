@@ -6,6 +6,7 @@ import { api, type Checkpoint, type Conversation, type WorkspaceFile } from "@/a
 import { shortTable } from "@/components/chat/activity";
 import { SHOW_QUERY } from "@/components/chat/provenance";
 import { Button, Chip, EmptyNote, FileGlyph, Icon, Modal, Tabs } from "@/components/ui";
+import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 import { formatBytes } from "@/lib/csv";
 import type { OpenFile } from "@/lib/files";
 
@@ -300,6 +301,7 @@ function DataAccessed({
     refetchInterval: 3000,
   });
   const loaded = queries.data !== undefined;
+  const [drafting, setDrafting] = useState(false);
   // The entry asked for: scrolled to, focused, and outlined for a few seconds.
   const [lit, setLit] = useState<string | null>(null);
   useEffect(() => {
@@ -320,9 +322,19 @@ function DataAccessed({
   }
   return (
     <>
-      <p className="dl-label mb-2 flex items-center gap-1.5 !text-data">
-        <Icon name="lock" size={11} /> Read-only · every query, newest last
-      </p>
+      <div className="mb-2 flex items-center gap-2">
+        <p className="dl-label flex flex-1 items-center gap-1.5 !text-data">
+          <Icon name="lock" size={11} /> Read-only · every query, newest last
+        </p>
+        {queries.data?.some((q) => q.status === "succeeded") && (
+          <Button variant="ghost" className="px-1.5 py-0.5 text-[12px]" onClick={() => setDrafting(true)}>
+            <Icon name="history" size={12} /> Turn this into a workflow
+          </Button>
+        )}
+      </div>
+      {drafting && (
+        <SaveAsWorkflow source={{ kind: "conversation", conversationId }} onClose={() => setDrafting(false)} />
+      )}
       <ol className="flex flex-col gap-2">
         {queries.data?.map((q) => (
           <li

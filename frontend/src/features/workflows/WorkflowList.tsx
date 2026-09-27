@@ -12,7 +12,9 @@ export function WorkflowList({ workflows, folder }: { workflows: Workflow[]; fol
     return (
       <EmptyNote icon="file" title="No workflows yet">
         Workflow files (.yaml) in {folder ? <span className="font-mono text-[12px]">{folder}</span> : "the workflows folder"}{" "}
-        appear here, checked and ready to run.
+        appear here, checked and ready to run. To make one, use <strong className="font-medium">Save as workflow</strong> in
+        the SQL Playground, or <strong className="font-medium">Turn this into a workflow</strong> in a conversation's
+        Queries.
       </EmptyNote>
     );
   }

@@ -1200,6 +1200,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft
+         * @description A workflow file drafted from SQL and its binds, checked. Nothing is saved.
+         */
+        post: operations["draft_api_workflows_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/saves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save
+         * @description Save a new workflow file the person has reviewed: Save & share into
+         *     the pipelines repo, or written into the local folder (see save_target).
+         */
+        post: operations["save_api_workflows_saves_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/saves/{save_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Save Status
+         * @description A Save & share as it goes (it runs the package's tests, so it takes a while).
+         */
+        get: operations["save_status_api_workflows_saves__save_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/status": {
         parameters: {
             query?: never;
@@ -1962,6 +2023,45 @@ export interface components {
         DiagnosticsOut: {
             /** Text */
             text: string;
+        };
+        /** DraftIn */
+        DraftIn: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Destination */
+            destination?: string | null;
+            /** Queries */
+            queries?: components["schemas"]["DraftQueryIn"][];
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Query Ids */
+            query_ids?: string[];
+        };
+        /** DraftOut */
+        DraftOut: {
+            /** Text */
+            text: string;
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Notes */
+            notes: string[];
+            target: components["schemas"]["SaveTargetOut"];
+        };
+        /** DraftQueryIn */
+        DraftQueryIn: {
+            /** Sql */
+            sql: string;
+            /** Binds */
+            binds?: {
+                [key: string]: boolean | number | string | null;
+            };
         };
         /** EditsIn */
         EditsIn: {
@@ -3150,6 +3250,21 @@ export interface components {
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
         };
+        /** SaveIn */
+        SaveIn: {
+            /** Text */
+            text: string;
+            /** Confirmed */
+            confirmed?: string[];
+            /**
+             * Source
+             * @default playground
+             * @enum {string}
+             */
+            source: "playground" | "conversation";
+            /** Conversation Id */
+            conversation_id?: string | null;
+        };
         /** SaveResultOut */
         SaveResultOut: {
             /** State */
@@ -3175,6 +3290,21 @@ export interface components {
              * @default false
              */
             after_rebase: boolean;
+        };
+        /**
+         * SaveTargetOut
+         * @description Where Save puts a new workflow file on this computer.
+         */
+        SaveTargetOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "share" | "local" | "unavailable";
+            /** Folder */
+            folder: string | null;
+            /** Message */
+            message: string;
         };
         /** SetDestinationKey */
         SetDestinationKey: {
@@ -3519,6 +3649,31 @@ export interface components {
             replay_notes: string[];
             /** Reproduced */
             reproduced: boolean | null;
+        };
+        /** WorkflowSaveOut */
+        WorkflowSaveOut: {
+            /** Id */
+            id: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "saving" | "saved" | "check_failed" | "tests_failed" | "conflict" | "failed";
+            /** Shared */
+            shared: boolean;
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /** Test */
+            test?: string | null;
         };
         /**
          * WorkflowTextOut
@@ -5623,6 +5778,103 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    draft_api_workflows_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_api_workflows_saves_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSaveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_status_api_workflows_saves__save_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                save_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSaveOut"];
+                };
             };
             /** @description Validation Error */
             422: {

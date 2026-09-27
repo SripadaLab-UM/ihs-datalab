@@ -327,8 +327,9 @@ tick, and a Replay that delivers is asked about a second time. A custom
 check's found and wanted values, and a step's counts, are kept as numbers
 only, so text an R check wrote can't carry a value into the record or the
 tab. Destination
-keys are listed read-only; folders are chosen in Settings. Editing waits for
-the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
+keys are listed read-only; folders are chosen in Settings. New files come
+from Save as workflow ([As built](#as-built-save-as-workflow)); editing an
+existing one isn't in the tab yet. The docked chat opens in Data engineering
 until there is a Workflow authoring mode.
 
 ## As built (Pipelines)
@@ -382,6 +383,50 @@ DataLab: ask the agent.
 
 Not built yet: the ad hoc run of a pipeline's workflow, and the converted
 `ihsDataR` itself (its pipelines have no `pipeline.yaml` yet).
+
+## As built (Save as workflow)
+
+The drafting is `backend/src/datalab/workflows/drafts.py`, the routes
+`POST /api/workflows/drafts` and `/saves` (api/workflows.py), and the dialog
+`frontend/src/features/workflows/SaveAsWorkflow.tsx`.
+
+**The draft.** DataLab writes it itself from the SQL and binds, with no
+model and no data. A query the SQL check refuses (with the catalog, as in
+the Playground) makes no draft. Each query becomes a SQL step; `reads:`
+comes from the same analysis as the file check's `reads:` rule; each bind
+becomes a lower-case parameter typed from the value it ran with, which is
+its default unless it looks like it could identify someone (the export
+folder-name scan). A value like that is left out, with a note. Each step
+gets a built-in check: `min_rows: 1`, the named output columns (not after
+`*`), and, when the query aggregates (GROUP BY or an aggregate outside a
+WHERE), `small_cells` over its named `COUNT` columns, `min: 11`. If DataLab
+can't tell which columns are counts, `count_columns` is left empty, so the
+file check asks for them. With a destination key, `deliver:` delivers every
+output. In the real profile a delivered row-level extract then needs a
+reason under `deliver.without_small_cells`, written by the person.
+
+**Review.** The dialog shows the YAML in the editor, editable, with the
+file check's problems marked (checked again after each edit) and the
+draft's notes. Only the person's Save saves anything; drafting saves
+nothing, and no agent tool reaches these routes.
+
+**Saving.** Where the Workflows tab's files are the synced pipelines clone,
+Save is the Pipelines tab's Save & share (`Pipelines.share_workflow`, the
+same `share.save_and_share`): the check, the package's tests on the
+change's tree, a commit as the person with `DataLab-Workflow-From` (and the
+conversation) in its message, rebased and pushed. Possible participant
+data waits for the person to confirm each finding. A file already in the
+repo isn't replaced. Otherwise (practice, no `[repos] pipelines`, or a
+`[workflows] folder`) the file is written into that folder, never over
+another, and the dialog says it isn't shared. With the repo configured but
+not yet synced, Save waits for a sync.
+
+**From a conversation.** Turn this into a workflow is in the Queries panel:
+the person picks among the queries that ran (each SQL once), and the draft
+goes through the same review and Save. It takes the SQL only: the
+workspace's R scripts read `/data/oracle` files and outputs by their own
+paths, not a workflow's `inputs`/`outputs`, so turning them into R steps
+needs the Workflow authoring agent (not built).
 
 ## Open questions
 

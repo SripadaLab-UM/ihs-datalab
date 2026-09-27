@@ -9,6 +9,7 @@ import { type HistoryItem, type SqlCheck, type SqlRun, sqlApi } from "@/api/sql"
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Icon, Tabs } from "@/components/ui";
+import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
 import { History } from "./History";
@@ -35,6 +36,7 @@ export function SqlPage() {
   // A query opened from history, shown instead of the latest run.
   const [opened, setOpened] = useState<HistoryItem | null>(null);
 
+  const [saving, setSaving] = useState(false);
   const [side, setSide] = useState<"tables" | "history">("tables");
   const [drawer, setDrawer] = useState(false);
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
@@ -174,6 +176,15 @@ export function SqlPage() {
               </Button>
             )}
             <CheckSummary sql={sql} check={check} />
+            <Button
+              variant="secondary"
+              className="ml-auto shrink-0 px-2.5 py-1 text-[12.5px]"
+              disabled={!sql.trim() || !check || check.errors.length > 0}
+              title="Turn this query into a workflow that runs the same way every time"
+              onClick={() => setSaving(true)}
+            >
+              <Icon name="history" size={13} /> Save as workflow
+            </Button>
           </div>
           {bindNames.length > 0 && (
             <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-3">
@@ -207,6 +218,14 @@ export function SqlPage() {
           />
         </div>
       </main>
+
+      {saving && (
+        <SaveAsWorkflow
+          source={{ kind: "playground", sql, binds: Object.fromEntries(bindNames.map((name) => [name, binds[name] ?? ""])) }}
+          suggestedName={check?.tables[0]?.split(".").pop() ?? ""}
+          onClose={() => setSaving(false)}
+        />
+      )}
 
       {chatOpen === "open" && (
         <>
