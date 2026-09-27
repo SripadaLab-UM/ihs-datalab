@@ -20,7 +20,10 @@ parts (V1_LABELS). They're read and shown exactly as they were frozen.
 
 from __future__ import annotations
 
+import contextlib
+import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +35,7 @@ ADDITIONAL = "additional"  # the kind of a section with its own title
 MAX_SECTION = 2000
 MAX_TITLE = 80
 MAX_RATIONALE = 300
+MAX_REASON = 500
 MAX_ADDITIONAL = 3
 MAX_SECTIONS = 20
 # All of a plan's text together. One or two screens is the aim; this keeps a
@@ -272,8 +276,27 @@ V1_LABELS: dict[str, str] = {
     "decisions": "Decisions expected along the way",
 }
 
-_TOP_FIELDS = {"schema_version", "analysis_type", "analysis_type_label", "rationale", "sections"}
+_TOP_FIELDS = {
+    "schema_version",
+    "analysis_type",
+    "analysis_type_label",
+    "rationale",
+    "sections",
+    "revises",
+    "revision_reason",
+}
 _SECTION_FIELDS = {"kind", "label", "content"}
+# Row titles the card, the export, and the review's text use for a plan's own
+# parts, so no section of the agent's or person's can take them.
+RESERVED_TITLES = (
+    "Type",
+    "Revises",
+    "Why this kind of analysis",
+    "Why it changed",
+    "What changes, and why",
+)
+_PLAN_ID = re.compile(r"pl_[0-9a-f]{12}")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 # Content that says nothing: a required section needs a reason instead.
 _PLACEHOLDER = re.compile(r"(n/?a|none|not applicable|tbd|to be decided|-+|\.+)\.?", re.I)
 
@@ -287,13 +310,17 @@ def required_kinds(analysis_type: AnalysisType) -> tuple[str, ...]:
     return (*_CORE_KINDS, *analysis_type.required)
 
 
-def clean_plan(raw: Any) -> dict[str, Any]:
+def clean_plan(raw: Any, *, draft: bool = False) -> dict[str, Any]:
     """A version-2 plan as it will be shown, approved, and hashed, or PlanInvalid.
 
     The result has the registry's labels written in, so a frozen plan shows
     exactly as it was approved even if the registry changes later, and its
     sections in a fixed order: core, the type's own, add-ons, then the
     additional sections in the order given.
+
+    A revision names the approved plan it replaces, by id and hash, so the
+    hash of each version covers the version before it. A `draft` (a plan the
+    person sends back unapproved) may leave sections unwritten.
     """
     if not isinstance(raw, dict):
         raise PlanInvalid("A plan must be a set of named parts.")
@@ -311,6 +338,7 @@ def clean_plan(raw: Any) -> dict[str, Any]:
     rationale = _text(raw.get("rationale", ""), "rationale")
     if len(rationale) > MAX_RATIONALE:
         raise PlanInvalid(f"The plan's rationale is longer than {MAX_RATIONALE} characters.")
+    revises, reason = _revision(raw, draft)
 
     sections = raw.get("sections", [])
     if not isinstance(sections, list):
@@ -323,6 +351,8 @@ def clean_plan(raw: Any) -> dict[str, Any]:
     for section in sections:
         kind, label, content = _section_parts(section)
         if kind == ADDITIONAL:
+            if draft and not _text(content, "additional section").strip():
+                continue  # started, not written: nothing to send back
             additional.append(_additional(label, content, additional))
             continue
         known = SECTIONS.get(kind)
@@ -344,7 +374,7 @@ def clean_plan(raw: Any) -> dict[str, Any]:
         registered[kind] = _content(content, known.label)
 
     missing = [SECTIONS[k].label for k in required_kinds(analysis_type) if not registered.get(k)]
-    if missing:
+    if missing and not draft:
         raise PlanInvalid(
             f"A {analysis_type.label} plan needs these sections written: {', '.join(missing)}. "
             "If one can't be settled yet, say so there and say what it depends on."
@@ -361,13 +391,107 @@ def clean_plan(raw: Any) -> dict[str, Any]:
         "rationale": rationale,
         "sections": ordered + additional,
     }
-    size = len(rationale) + sum(len(s["label"]) + len(s["content"]) for s in plan["sections"])
+    if revises:
+        plan["revises"] = revises
+        plan["revision_reason"] = reason
+    size = len(rationale) + len(reason)
+    size += sum(len(s["label"]) + len(s["content"]) for s in plan["sections"])
     if size > MAX_PLAN:
         raise PlanInvalid(
             f"The plan is {size} characters, more than the {MAX_PLAN} a plan can be. Keep "
             "each section to what the person needs to review."
         )
     return plan
+
+
+def _revision(raw: dict[str, Any], draft: bool) -> tuple[dict[str, str] | None, str]:
+    """The approved plan this one revises, and why, if it's a revision."""
+    revises = raw.get("revises")
+    reason = _text(raw.get("revision_reason", ""), "reason for the revision")
+    if revises is None:
+        if reason:
+            raise PlanInvalid("A reason for a revision needs the plan it revises.")
+        return None, ""
+    if (
+        not isinstance(revises, dict)
+        or set(revises) != {"plan_id", "sha256"}
+        or not _PLAN_ID.fullmatch(str(revises["plan_id"]))
+        or not _SHA256.fullmatch(str(revises["sha256"]))
+    ):
+        raise PlanInvalid("A revision names the plan it revises by its plan_id and sha256.")
+    if len(reason) > MAX_REASON:
+        raise PlanInvalid(f"The reason for the revision is longer than {MAX_REASON} characters.")
+    if not reason and not draft:
+        raise PlanInvalid("A revision needs its reason: what changes, and why.")
+    return {"plan_id": revises["plan_id"], "sha256": revises["sha256"]}, reason
+
+
+def plan_answer(
+    proposed: dict[str, Any],
+    approved: bool,
+    edits: Any,
+    change_type: str | None,
+    revises_plan: dict[str, Any] | None = None,
+) -> str:
+    """What the person's answer on a proposed plan hands back, as JSON.
+
+    Approved: the plan to freeze, as they left it; it must be complete, and
+    still revise the plan it was proposed to revise (`revises_plan`), and
+    change something in it. Not approved: "" for a
+    bare no, or {edits, change_type}: their edits, if they're a usable draft
+    that differs from the proposal, and the type they asked for instead. A
+    "no" always counts, whatever comes with it.
+    """
+    if approved:
+        if change_type:
+            raise PlanInvalid("A plan sent back for another type of analysis can't be approved.")
+        plan = clean_plan(edits if edits is not None else proposed)
+        if revision_of(plan) != revision_of(proposed):
+            raise PlanInvalid("Which approved plan this revises can't be changed here.")
+        if revises_plan is not None and same_plan(revises_plan, plan):
+            raise PlanInvalid(
+                "This revision doesn't change anything in the approved plan. Change what needs "
+                "changing, or choose Not yet to keep the approved plan."
+            )
+        return json.dumps(plan)
+    edited = None
+    if edits is not None:
+        with contextlib.suppress(PlanInvalid):
+            draft = clean_plan(edits, draft=True)
+            nothing_new = draft == proposed or not draft["sections"]
+            if not nothing_new and revision_of(draft) == revision_of(proposed):
+                edited = draft
+    if change_type not in TYPES_BY_ID or change_type == proposed.get("analysis_type"):
+        change_type = None
+    if edited is None and change_type is None:
+        return ""
+    return json.dumps({"edits": edited, "change_type": change_type})
+
+
+def revision_of(content: dict[str, Any]) -> dict[str, str] | None:
+    """The plan this one revises ({plan_id, sha256}), or None."""
+    revises = content.get("revises")
+    return revises if isinstance(revises, dict) else None
+
+
+def type_change_note(content: dict[str, Any], new_type: str) -> str:
+    """What the agent needs to rewrite a plan as another type."""
+    old, new = TYPES_BY_ID[content["analysis_type"]], TYPES_BY_ID[new_type]
+    needed = [SECTIONS[k].label for k in new.required]
+    kept = set(allowed_kinds(new))
+    misfits = [s["label"] for s in content["sections"] if s["kind"] not in {*kept, ADDITIONAL}]
+    note = (
+        f"The person asked for a {new.label} plan instead of {old.label}. Propose it again "
+        f"with analysis_type {new.id!r}, keeping their edits (persons_edits). A {new.label} "
+        f"plan needs: {', '.join(needed)}."
+    )
+    if misfits:
+        note += (
+            f" These sections don't belong in it: {', '.join(misfits)}. Carry what still "
+            "matters into the core sections or an additional section, and say in the "
+            "rationale what you left out."
+        )
+    return note
 
 
 def _section_parts(section: Any) -> tuple[str, str | None, Any]:
@@ -390,17 +514,92 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
         raise PlanInvalid("An additional section needs a title.")
     if "\n" in title or len(title) > MAX_TITLE:
         raise PlanInvalid(f"A section title must be one line of at most {MAX_TITLE} characters.")
-    taken = {s.label.casefold() for s in SECTIONS.values()} | {
-        s["label"].casefold() for s in earlier
-    }
-    if title.casefold() in taken:
-        raise PlanInvalid(f"The plan already has a section called {title!r}.")
+    # Checked as typed too: normalizing turns some rare Greek letters into basic ones.
+    typed = label or ""
+    if any(c.isalpha() and not _title_letter(c) for c in title) or any(map(_rare_greek, typed)):
+        # Letters from other scripts, and Greek's rarer letters (yot looks like j),
+        # can look like Latin ones, and aren't needed here.
+        raise PlanInvalid(
+            f"The section title {title!r} has letters from outside the Latin alphabet and "
+            "the basic Greek letters. Write it in those letters (accents are fine)."
+        )
+    taken = {_title_key(t) for t in (*(s.label for s in SECTIONS.values()), *RESERVED_TITLES)}
+    taken |= {_title_key(s["label"]) for s in earlier}
+    if _title_key(title) in taken:
+        raise PlanInvalid(f"The plan already has a section called {title!r}, or one like it.")
     if len(earlier) >= MAX_ADDITIONAL:
         raise PlanInvalid(f"A plan can have at most {MAX_ADDITIONAL} additional sections.")
     body = _content(content, title)
     if not body:
         raise PlanInvalid(f"The section {title!r} is empty. Write it, or remove it.")
     return {"kind": ADDITIONAL, "label": title, "content": body}
+
+
+def _title_key(title: str) -> str:
+    """A title as it reads, to compare with others: accents and punctuation
+    dropped, case folded, and each letter that looks like a Latin letter (a
+    Latin alpha, a dotless i, small capitals, Greek alpha or omicron) taken as
+    that letter."""
+    # The table first: decomposing can turn a look-alike into another letter.
+    looked = "".join(_GREEK_LOOKALIKES.get(c, c) for c in title)
+    bare = (c for c in unicodedata.normalize("NFKD", looked) if not unicodedata.combining(c))
+    words = "".join(_skeleton(c) if c.isalnum() else " " for c in bare)
+    # And the plain letters and digits that pass for each other: I, l, 1; O, 0.
+    return " ".join(words.translate(_ASCII_LOOKALIKES).split())
+
+
+_ASCII_LOOKALIKES = str.maketrans("i1|0", "lllo")
+
+
+def _title_letter(char: str) -> bool:
+    """Whether a title may use this letter: Latin, or basic Greek (U+0386 to U+03CE)."""
+    if unicodedata.name(char, "").startswith("LATIN"):
+        return True
+    return "\u0386" <= char <= "\u03ce"
+
+
+def _rare_greek(char: str) -> bool:
+    """Greek letters outside the basic ones: archaic, symbol, and Coptic-era forms."""
+    return "\u0370" <= char <= "\u0385" or "\u03cf" <= char <= "\u03ff"
+
+
+# Greek letters that look like a Latin one.
+_GREEK_LOOKALIKES = dict(
+    zip(
+        "αβγδεζηικμνοπρστυχωςϲϹϳͿϒϱϐϰΑΒΕΖΗΙΚΜΝΟΡΤΥΧ",
+        "abydeznikuvonpotuxwcccjjypbkabezhikmnoptyx",
+        strict=True,
+    )
+)
+# Latin letters named after the Greek letter they look like (Latin alpha, iota, ...).
+_GREEK_NAMES = {"ALPHA": "a", "IOTA": "i", "UPSILON": "u", "OMEGA": "w", "GAMMA": "y"}
+
+
+def _skeleton(char: str) -> str:
+    """The plain lower-case Latin letter a letter looks like, or the letter itself."""
+    if char.isascii():
+        return char.lower()
+    if char in _GREEK_LOOKALIKES:
+        return _GREEK_LOOKALIKES[char]
+    name = unicodedata.name(char, "")
+    if name.startswith("LATIN"):
+        # "LATIN SMALL LETTER DOTLESS I", "LATIN LETTER SMALL CAPITAL A",
+        # "LATIN SMALL LETTER L WITH STROKE": the last word before any "WITH".
+        base = name.split(" WITH ")[0].split()[-1]
+        if len(base) == 1:
+            return base.lower()
+        return _GREEK_NAMES.get(base, char.casefold())
+    return char.casefold()
+
+
+def same_plan(earlier: dict[str, Any], later: dict[str, Any]) -> bool:
+    """Whether two version-2 plans say the same thing (ignoring any revision link)."""
+
+    def said(plan: dict[str, Any]) -> tuple[Any, ...]:
+        sections = [(s["kind"], s["label"], s["content"]) for s in plan.get("sections", [])]
+        return plan.get("analysis_type"), plan.get("rationale"), sections
+
+    return said(earlier) == said(later)
 
 
 def _content(value: Any, label: str) -> str:
@@ -471,6 +670,7 @@ def card_schema() -> dict[str, Any]:
             "section": MAX_SECTION,
             "title": MAX_TITLE,
             "rationale": MAX_RATIONALE,
+            "reason": MAX_REASON,
             "additional": MAX_ADDITIONAL,
             "plan": MAX_PLAN,
         },
@@ -504,7 +704,9 @@ def tool_description() -> str:
         lines.append(f"  Checks and limitations must address: {t.checks}")
     lines += [
         "",
-        "Add-on sections for any type, in `sections` too. Add one only when it applies:",
+        "Add-on sections for any type, in `sections` too. Add one only when this question "
+        "raises that issue; most plans need none, one, or two, and each is a commitment the "
+        "person has to review:",
         *(line(k) for k in _MODULE_KINDS),
         "",
         f"additional_sections: up to {MAX_ADDITIONAL}, each a title and content, for what the "
@@ -514,6 +716,12 @@ def tool_description() -> str:
         "can't be settled yet says so and what it depends on; \"N/A\" alone isn't accepted.",
         "",
         "The person may edit the plan before approving it. Once approved it is frozen: label "
-        "any later work outside it as exploratory, and propose a new plan if it must change.",
+        "any later work outside it as exploratory.",
+        "",
+        "To change an approved plan, propose a revision: the whole plan as it should now be, "
+        "with `revises` set to the approved plan's plan_id and `revision_reason` saying what "
+        "changes and why (including anything you've already seen in the data that prompted "
+        "it). The person sees what changed and approves the revision; the earlier version is "
+        "kept as it was. For a new question, propose a new plan instead.",
     ]
     return "\n".join(lines)

@@ -173,6 +173,27 @@ it("keeps a version-2 plan whole, its own sections included", () => {
   expect(turns[0].items[0]).toMatchObject({ plan, frozen: { sha256: "abc" } });
 });
 
+it("marks a plan replaced by an approved revision, and keeps what the revision is compared with", () => {
+  const first = { schema_version: 2, analysis_type: "describe", analysis_type_label: "Describe or compare", rationale: "", sections: [] };
+  const second = { ...first, revises: { plan_id: "pl_1", sha256: "a".repeat(64) }, revision_reason: "Add Garmin." };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan: first }),
+    e("approval_answered", { id: "ap1", approved: true }),
+    e("plan_approved", { approval: "ap1", plan_id: "pl_1", plan: first, approved_at: "2026-09-26T12:00:00Z", sha256: "a".repeat(64) }),
+    e("approval_requested", { id: "ap2", kind: "analysis_plan", plan: second, compare_to: { label: "The approved plan it revises", plan: first } }),
+    e("approval_answered", { id: "ap2", approved: true }),
+    e("plan_approved", { approval: "ap2", plan_id: "pl_2", plan: second, approved_at: "2026-09-26T13:00:00Z", sha256: "b".repeat(64) }),
+    e("approval_requested", { id: "ap3", kind: "analysis_plan", plan: first }),
+    e("approval_answered", { id: "ap3", approved: false, change_type: "prediction", change_type_label: "Prediction" }),
+  ]);
+  const [one, two, three] = turns[0].items;
+  expect(one).toMatchObject({ planId: "pl_1", supersededBy: { planId: "pl_2", at: "2026-09-26T13:00:00Z" } });
+  expect(two).toMatchObject({ planId: "pl_2", compareTo: { plan: first } });
+  expect(two).not.toHaveProperty("supersededBy");
+  expect(three).toMatchObject({ state: "declined", changeTypeLabel: "Prediction" });
+});
+
 it("a review that never finished doesn't swallow later turns", () => {
   const turns = buildTranscript([
     e("user_message", { text: "one" }),
@@ -201,4 +222,29 @@ it("turn_done ends the turn and any review still open", () => {
   ]);
   expect(turns[0].status).toBe("completed");
   expect(turns[0].items.find((i) => i.kind === "review")).toMatchObject({ status: "failed" });
+});
+
+it("carries the approved plan, and says a plan the turn ended before freezing wasn't frozen", () => {
+  const proposed = { schema_version: 2, analysis_type: "describe", analysis_type_label: "Describe or compare", rationale: "", sections: [] };
+  const approved = { ...proposed, rationale: "Edited." };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan: proposed }),
+    e("approval_answered", { id: "ap1", approved: true, plan: approved }),
+    e("turn_finished", { status: "interrupted" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({ plan: approved, notFrozen: "The turn ended before the plan was frozen." });
+  expect(turns[0].items[0]).not.toHaveProperty("answer");
+});
+
+it("keeps the reason a plan wasn't frozen when the turn then ends", () => {
+  const plan = { schema_version: 2, analysis_type: "describe", analysis_type_label: "Describe or compare", rationale: "", sections: [] };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan }),
+    e("approval_answered", { id: "ap1", approved: true, plan }),
+    e("plan_not_frozen", { approval: "ap1", reason: "Another revision was approved first." }),
+    e("turn_finished", { status: "completed" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({ notFrozen: "Another revision was approved first." });
 });

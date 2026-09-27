@@ -82,10 +82,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ text, effort }),
     }),
-  answerApproval: (id: string, approvalId: string, approve: boolean, question: string, plan?: PlanV2) =>
+  // For a plan sent back, `changeType` asks for another type of analysis instead.
+  answerApproval: (id: string, approvalId: string, approve: boolean, question: string, plan?: PlanV2, changeType?: string) =>
     request<void>(`/api/conversations/${id}/approvals/${approvalId}`, {
       method: "POST",
-      body: JSON.stringify({ approve, question, plan }),
+      body: JSON.stringify({ approve, question, plan, change_type: changeType }),
     }),
   setRigorReview: (id: string, on: boolean) =>
     request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ rigor_review: on }) }),

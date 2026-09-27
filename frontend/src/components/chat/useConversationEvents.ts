@@ -35,6 +35,7 @@ export const EVENT_TYPES = [
   "approval_withdrawn",
   "helper_answered",
   "plan_approved",
+  "plan_not_frozen",
   "review_started",
   "review",
   "review_finished",

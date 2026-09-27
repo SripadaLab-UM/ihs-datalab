@@ -26,6 +26,7 @@ from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
 
 _HEARTBEAT_SECONDS = 15
+MAX_PLAN_BODY = 100_000
 
 
 def _one_line_title(title: str | None) -> str | None:
@@ -78,6 +79,16 @@ class ApprovalAnswer(BaseModel):
     # Or, for an analysis plan, the plan as the person left it. Checked in
     # full by plan_schema.clean_plan, which explains what's wrong.
     plan: dict[str, Any] | None = None
+    # Or, declining a plan: the type of analysis the person wants instead.
+    change_type: str | None = Field(default=None, max_length=40)
+
+    @field_validator("plan")
+    @classmethod
+    def _plan_size(cls, plan: dict[str, Any] | None) -> dict[str, Any] | None:
+        # Far more than any valid plan; the full check comes after.
+        if plan is not None and len(json.dumps(plan)) > MAX_PLAN_BODY:
+            raise ValueError("the plan is too large")
+        return plan
 
 
 class EventOut(BaseModel):
@@ -126,6 +137,7 @@ class PlanLimitsOut(BaseModel):
     section: int
     title: int
     rationale: int
+    reason: int
     additional: int
     plan: int
 
@@ -310,7 +322,12 @@ def build_conversations_router(
         get_or_404(conversation_id)
         try:
             sessions.answer_approval(
-                conversation_id, approval_id, body.approve, body.question, body.plan
+                conversation_id,
+                approval_id,
+                body.approve,
+                body.question,
+                body.plan,
+                body.change_type,
             )
         except KeyError as error:
             raise HTTPException(

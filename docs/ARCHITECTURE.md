@@ -161,6 +161,15 @@ src/datalab/
   covers them and a frozen plan shows as approved even if the registry
   changes; version-1 plans (seven fixed parts) are read as they were, with
   their original hashes. No migration was needed.
+  A revision names the approved plan it replaces (`revises`: its id and
+  sha256, filled in by the host, not the agent) with a `revision_reason`;
+  only a current plan (one not yet revised) can be revised, and if two
+  revisions of one plan wait at once only the first approved is frozen.
+  The card shows a plan against a `compare_to` (display only, never
+  hashed): the plan it revises, or the version the person last sent back.
+  Sending a plan back can ask for another type (`change_type`); the agent
+  gets the person's draft, which may be unfinished, and what the new type
+  needs.
 - **Tracing** (`sessions/tracing.py`). After each completed turn, DataLab
   takes the numbers in the final answer (leaving out code, links, dates,
   years, small counts, and confidence levels) and looks for each, allowing

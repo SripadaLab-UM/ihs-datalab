@@ -17,6 +17,34 @@ export interface PlanV2 {
   analysis_type_label: string;
   rationale: string;
   sections: PlanSection[];
+  /** A revision: the approved plan it replaces, and why. */
+  revises?: { plan_id: string; sha256: string };
+  revision_reason?: string;
+}
+
+/** What a plan is shown against: the approved plan it revises, or the version the person sent back. */
+export interface PlanComparison {
+  label: string;
+  plan: AnyPlan;
+  plan_id?: string;
+  approved_at?: string;
+  sha256?: string;
+}
+
+export interface PlanChange {
+  label: string;
+  status: "added" | "removed" | "changed";
+  before?: string;
+  after?: string;
+}
+
+export interface PlanDiff {
+  /** False when the earlier plan is version 1: its parts don't line up with sections. */
+  comparable: boolean;
+  type?: { before: string; after: string };
+  rationale?: { before: string; after: string };
+  changes: PlanChange[];
+  unchanged: number;
 }
 
 /** Version 1: seven fixed parts, frozen before plans had types. */
@@ -45,6 +73,65 @@ export function isV2(plan: AnyPlan | undefined): plan is PlanV2 {
 /** A plan from an event, or undefined if there isn't one. */
 export function asPlan(value: unknown): AnyPlan | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyPlan) : undefined;
+}
+
+// Greek letters that look like a Latin one, and Latin letters that aren't a–z
+// but look like one; the backend compares titles the same way (plan_schema.py).
+const pairs = (from: string, to: string): Record<string, string> =>
+  Object.fromEntries(Array.from(from, (c, i) => [c, to[i]]));
+const GREEK = pairs("αβγδεζηικμνοπρστυχωςϲϹϳͿϒϱϐϰΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "abydeznikuvonpotuxwcccjjypbkabezhikmnoptyx");
+const LATIN = pairs("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢ", "aiiguiynbhlacdejkmoptuvwz");
+
+/** A section title as it reads, to match it across versions: accents, case,
+ * punctuation, and look-alike letters (and I, l, 1 or O, 0) don't count. */
+export function titleKey(title: string): string {
+  // The table first: decomposing can turn a look-alike into another letter.
+  const looked = Array.from(title, (c) => GREEK[c] ?? c).join("");
+  const bare = looked.normalize("NFKD").replace(/\p{M}/gu, "");
+  const letters = Array.from(bare, (c) => GREEK[c] ?? LATIN[c] ?? (/[\p{L}\p{N}]/u.test(c) ? c.toLowerCase() : " "));
+  return letters.join("").replace(/[i1]/g, "l").replace(/0/g, "o").split(/\s+/).filter(Boolean).join(" ");
+}
+
+/** A comparison from an event, or undefined if there isn't one. */
+export function asComparison(value: unknown): PlanComparison | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const plan = asPlan((value as PlanComparison).plan);
+  return plan ? { ...(value as PlanComparison), plan } : undefined;
+}
+
+/**
+ * What changed from `before` to `after`, section by section, in `after`'s
+ * order and then what was removed. A section is matched by its kind, or by
+ * its title for the person's own sections (a renamed one shows as removed
+ * and added).
+ */
+export function planChanges(before: AnyPlan, after: PlanV2): PlanDiff {
+  if (!isV2(before)) return { comparable: false, changes: [], unchanged: 0 };
+  const key = (s: PlanSection) => (s.kind === ADDITIONAL ? `${ADDITIONAL}:${titleKey(s.label)}` : s.kind);
+  const earlier = new Map(before.sections.map((s) => [key(s), s]));
+  const seen = new Set<string>();
+  const changes: PlanChange[] = [];
+  let unchanged = 0;
+  for (const section of after.sections) {
+    const was = earlier.get(key(section));
+    seen.add(key(section));
+    if (!was) {
+      if (section.content.trim()) changes.push({ label: section.label, status: "added", after: section.content });
+    } else if (was.content.trim() !== section.content.trim()) {
+      changes.push({ label: section.label, status: "changed", before: was.content, after: section.content });
+    } else unchanged++;
+  }
+  for (const section of before.sections) {
+    if (!seen.has(key(section))) changes.push({ label: section.label, status: "removed", before: section.content });
+  }
+  const diff: PlanDiff = { comparable: true, changes, unchanged };
+  if (before.analysis_type !== after.analysis_type) {
+    diff.type = { before: before.analysis_type_label, after: after.analysis_type_label };
+  }
+  if (before.rationale.trim() !== after.rationale.trim()) {
+    diff.rationale = { before: before.rationale, after: after.rationale };
+  }
+  return diff;
 }
 
 /** The plan's sections, in order, as (label, text). */

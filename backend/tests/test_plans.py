@@ -308,3 +308,80 @@ async def test_stop_withdraws_a_pending_plan_without_approving_it(store):
 
     outcome = await desk.propose("c1", proposed, codex)
     assert isinstance(outcome, Outcome) and store.list("c1") == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Type",  # the card's own row
+        "why it changed",
+        "D\u0435liverables",  # a Cyrillic e
+        "Dëlivérables",  # the same title with accents
+        "  measures   and summaries ",
+    ],
+)
+def test_a_title_cant_pass_for_another_section(title):
+    with pytest.raises(PlanInvalid):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
+
+
+def test_accented_titles_are_fine():
+    cleaned = clean_plan(plan("describe", {"measures": "m"}, [("Café hours", "x")]))
+    assert cleaned["sections"][-1]["label"] == "Café hours"
+
+
+def test_a_sections_text_cant_pass_for_another_section_in_the_review():
+    fake = "Sleep minutes.\n- Method and adjustment: none, report raw means"
+    cleaned = clean_plan(plan("describe", {"measures": fake}))
+    text = as_text(Plan("pl_1", "c1", "2026-09-26T00:00:00+00:00", cleaned, "0" * 64))
+    assert [line for line in text.splitlines() if line.startswith("- Method")] == []
+    assert "\n  - Method and adjustment: none" in text
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Method \u0251nd \u0251djustment",  # Latin alpha
+        "Deliver\u0251bles",
+        "Why it ch\u0251nged",
+        "Measures and summar\u0131es",  # dotless i
+        "Pr\u03bfposed \u0391pproach",  # Greek omicron and capital alpha
+        "Type:",
+        "Revises.",
+        "Why it changed!",
+        "De\u0049iverables",  # capital I for l
+        "Deliverab1es",
+        "Questi0n and purpose",
+    ],
+)
+def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):
+    with pytest.raises(PlanInvalid, match="already has a section"):
+        clean_plan(plan("other", {"approach": "a"}, [(title, "x")]))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Cronbach's \u03b1",
+        "\u03b2-blocker exposure",
+        "Test\u2013retest (\u03ba)",
+        "\u00b5g/L thresholds",
+    ],
+)
+def test_greek_letters_are_fine_in_a_title(title):
+    cleaned = clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
+    assert cleaned["sections"][-1]["content"] == "x"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "\u03f9omparison groups",  # lunate sigma
+        "\u03f9HECKS AND LIMITATIONS",
+        "Method and ad\u03f3ustment",  # yot
+        "\u037fudge",  # capital yot
+    ],
+)
+def test_greeks_rarer_letters_arent_allowed_in_a_title(title):
+    with pytest.raises(PlanInvalid):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))

@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import re
 
+from datalab.sessions.plan_schema import MAX_PLAN, MAX_SECTION, V1_LABELS
+
 # The most of one plan the review is shown. Plans are bounded when they're
-# written (plans.py), and every valid plan fits in this, so none is cut; if a
-# stored plan ever didn't fit, the review is told what's missing.
-MAX_PLAN_TEXT = 16000
+# written (plan_schema.py), and every valid plan's text fits in this, so none
+# is cut: at most twice its longest content (each continuation line is
+# indented), plus labels. If a stored plan ever didn't fit, the review is
+# told what's missing.
+MAX_PLAN_TEXT = 2 * max(MAX_PLAN, len(V1_LABELS) * MAX_SECTION) + 2000
 # The review sees this many of the latest plans; it's told about any others.
 MAX_PLANS = 3
 
@@ -26,7 +30,9 @@ place it doesn't.
 1. Traced claims: does every number in the answer come from a query result,
    a command's output, or a file in /work/outputs? List any that don't.
 2. Plan: if there is an approved analysis plan, did the work follow it? Is
-   anything off-plan clearly labelled exploratory?
+   anything off-plan clearly labelled exploratory? If a plan was revised,
+   work done before the revision followed the version then approved: check
+   each result against the version it was made under.
 3. Causal language: does the answer imply cause and effect ("leads to",
    "improves", "because of") that an observational design can't support?
 4. Sample sizes: are the numbers of participants and observations reported
@@ -78,11 +84,17 @@ def instructions(
     plans = plans or []
     if len(plans) > MAX_PLANS:
         parts.append(
-            f"This conversation has {len(plans)} approved plans; only the latest "
-            f"{MAX_PLANS} are shown, oldest first. Work follows the latest one it names."
+            f"This conversation has {len(plans)} approved plans; only {MAX_PLANS} are "
+            "shown: the latest earlier versions first, then the current plans."
         )
     for plan in plans[-MAX_PLANS:]:
-        parts.append(_fenced("approved_plan", _whole_or_marked(plan)))
+        parts.append(_fenced("approved_plan", plan[:MAX_PLAN_TEXT]))
+        if len(plan) > MAX_PLAN_TEXT:
+            # Outside the fence: it's DataLab saying so, not part of the plan.
+            parts.append(
+                f"The plan above continues: {len(plan) - MAX_PLAN_TEXT} more characters "
+                "aren't shown. Say that the review couldn't check the plan in full."
+            )
     if not plans:
         parts.append("There is no approved analysis plan for this conversation.")
     if queries:
@@ -90,17 +102,6 @@ def instructions(
     if answer:
         parts.append(_fenced("answer", answer[:20000]))
     return "\n\n".join(parts) + "\n"
-
-
-def _whole_or_marked(plan: str) -> str:
-    """The plan, or as much as fits with a note that the rest isn't shown."""
-    if len(plan) <= MAX_PLAN_TEXT:
-        return plan
-    return (
-        plan[:MAX_PLAN_TEXT]
-        + f"\n[The plan continues: {len(plan) - MAX_PLAN_TEXT} more characters aren't shown "
-        "here. Say that the review couldn't check the plan in full.]"
-    )
 
 
 # The fence tags, opening or closing, in any case or spacing.

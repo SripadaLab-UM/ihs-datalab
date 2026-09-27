@@ -27,6 +27,7 @@ def test_api_needs_the_sign_in_cookie(settings, catalog, tmp_path):
     app, browser = make(settings, catalog, tmp_path)
     with TestClient(app) as client:
         assert client.get("/api/conversations").status_code == 401
+        assert client.get("/api/plan-schema").status_code == 401
         assert client.get("/api/health").status_code == 200  # the launcher's readiness check
         signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
         assert signed_in.status_code == 303

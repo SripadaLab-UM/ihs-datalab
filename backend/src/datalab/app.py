@@ -99,6 +99,7 @@ def create_app(
     sessions.plans = plans
     plan_desk = PlanDesk(approvals, plans, conversations.append)
     plan_desk.turn_running = sessions.turn_running
+    plan_desk.current_turn = sessions.current_turn
     agent_tools = build_agent_tools(data, catalog, tokens, research_helper, plan_desk)
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",

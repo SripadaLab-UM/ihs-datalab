@@ -30,8 +30,8 @@ from datalab.sessions.inputs import (
     practice_samples,
     recheck,
 )
-from datalab.sessions.plan_schema import review_checks
-from datalab.sessions.plans import PlanStore, as_text
+from datalab.sessions.plan_schema import TYPES_BY_ID
+from datalab.sessions.plans import PlanStore
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.store import Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens
@@ -336,14 +336,26 @@ class SessionManager:
         approved: bool,
         question: str = "",
         plan: dict[str, Any] | None = None,
+        change_type: str | None = None,
     ) -> None:
         """The person's decision on a question or plan, recorded on the host."""
         pending = self._approvals.get(approval_id, conversation_id)
         kind = pending.kind if pending else ""
-        value = self._approvals.answer(conversation_id, approval_id, approved, question, plan)
+        value = self._approvals.answer(
+            conversation_id, approval_id, approved, question, plan, change_type
+        )
         answered: dict[str, Any] = {"id": approval_id, "approved": approved}
         if approved and kind == "research_helper":
             answered["question"] = value
+        if approved and kind == "analysis_plan":
+            # The plan as approved (with the person's edits), for the card until it's frozen.
+            answered["plan"] = json.loads(value)
+        # A plan sent back: the type the person asked for instead, if they did.
+        sent_back = kind == "analysis_plan" and not approved and value
+        requested = json.loads(value).get("change_type") if sent_back else None
+        if requested:
+            answered["change_type"] = requested
+            answered["change_type_label"] = TYPES_BY_ID[requested].label
         self._store.append(conversation_id, "approval_answered", answered)
 
     def watch_turn(self, session_id: str) -> Callable[[], bool]:
@@ -658,12 +670,12 @@ class SessionManager:
             for e in events
             if e.type == "tool_call" and e.data.get("tool") == "query"
         ]
-        plans = self.plans.list(conversation_id) if self.plans else []
+        plans, checks = self.plans.for_review(conversation_id) if self.plans else ([], [])
         context = rigor.instructions(
             answer=str(answer.data.get("text", "")) if answer else "",
             question=question,
-            plans=[as_text(p) for p in plans],
-            checks=review_checks(plans[-1].content) if plans else [],
+            plans=plans,
+            checks=checks,
             queries=[q for q in queries if q],
         )
         self._store.append(conversation_id, "review_started", {})
@@ -693,6 +705,11 @@ class SessionManager:
             oldest = min(idle, key=lambda c: self._last_used.get(c, 0))
             await self._shutdown(oldest)
             running.remove(oldest)
+
+    def current_turn(self, conversation_id: str) -> object | None:
+        """The running turn (the same object only within one turn), or None."""
+        task = self._turns.get(conversation_id)
+        return task if task is not None and not task.done() else None
 
     def turn_running(self, conversation_id: str) -> bool:
         task = self._turns.get(conversation_id)

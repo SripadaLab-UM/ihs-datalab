@@ -568,3 +568,61 @@ def test_a_review_needs_an_approved_model_and_the_review_switched_on(app):
         store.append(old.id, "review_started", {})
         refused = client.post(f"/api/conversations/{old.id}/review")
         assert refused.status_code == 409 and "isn't approved" in refused.json()["detail"]
+
+
+def open_plan_approval(client, app):
+    """A conversation with a plan waiting for the person, as mid-turn."""
+    from datalab.sessions.plan_schema import clean_plan
+    from tests.test_plans import plan
+
+    conversation = client.post("/api/conversations", json={"mode": "analysis"}).json()
+    proposed = clean_plan(plan("describe", {"measures": "Sleep minutes."}))
+
+    async def open_it():
+        return app.state.services.sessions._approvals.open(
+            conversation["id"], kind="analysis_plan", plan=proposed
+        )
+
+    pending = client.portal.call(open_it)
+    return f"/api/conversations/{conversation['id']}/approvals/{pending.id}", proposed, pending
+
+
+def test_a_plan_edit_that_isnt_valid_is_refused_and_the_plan_stays_waiting(app):
+    with TestClient(app) as client:
+        url, proposed, pending = open_plan_approval(client, app)
+        emptied = {**proposed, "sections": proposed["sections"][1:]}  # no question
+        refused = client.post(url, json={"approve": True, "plan": emptied})
+        assert refused.status_code == 422 and "Question and purpose" in refused.json()["detail"]
+        unknown = client.post(url, json={"approve": True, "plan": {**proposed, "secret": "x"}})
+        assert unknown.status_code == 422 and "no part called 'secret'" in unknown.json()["detail"]
+        huge = {**proposed, "rationale": "x" * 200_000}
+        assert client.post(url, json={"approve": True, "plan": huge}).status_code == 422
+        assert not pending.decision.done()
+        # Then approved as it was proposed.
+        assert client.post(url, json={"approve": True, "plan": proposed}).status_code == 204
+        assert pending.decision.done() and pending.decision.result()[0] is True
+
+
+def test_a_plan_sent_back_as_another_type_over_http(app):
+    with TestClient(app) as client:
+        url, proposed, pending = open_plan_approval(client, app)
+        both = {"approve": True, "plan": proposed, "change_type": "prediction"}
+        assert client.post(url, json=both).status_code == 422
+        assert not pending.decision.done()
+        # A type that doesn't exist isn't a request; the "no" still counts.
+        assert client.post(url, json={"approve": False, "change_type": "causal"}).status_code == 204
+        assert pending.decision.result() == (False, "")
+
+
+def test_an_approved_plans_answer_carries_the_plan_as_approved(app):
+    with TestClient(app) as client:
+        url, proposed, _ = open_plan_approval(client, app)
+        edited = {**proposed, "rationale": "Edited by the person."}
+        assert client.post(url, json={"approve": True, "plan": edited}).status_code == 204
+        cid = url.split("/")[3]
+        [answered] = [
+            e
+            for e in client.get(f"/api/conversations/{cid}/events").json()
+            if e["type"] == "approval_answered"
+        ]
+    assert answered["data"]["plan"]["rationale"] == "Edited by the person."

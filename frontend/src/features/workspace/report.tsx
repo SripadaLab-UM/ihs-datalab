@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { Conversation, QueryRecord } from "@/api/client";
-import { isV2, planSections, planTypeLabel } from "@/components/chat/plan";
+import { isV2, planChanges, planSections, planTypeLabel, type PlanComparison, type PlanV2 } from "@/components/chat/plan";
 import { buildTranscript, finalAnswer, type ConversationEvent, type Turn } from "@/components/chat/transcript";
 
 export interface ReportOptions {
@@ -129,11 +129,17 @@ function Report({
             item.kind === "approval" && item.approvalKind === "analysis_plan" && item.frozen ? (
               <div key={item.id} className="plan">
                 <p>
-                  <strong>Approved analysis plan</strong>{" "}
+                  <strong>{isV2(item.plan) && item.plan.revises ? "Approved revision of the analysis plan" : "Approved analysis plan"}</strong>{" "}
                   <span className="muted">
                     (frozen {new Date(item.frozen.at).toLocaleString()}, {item.frozen.sha256.slice(0, 12)})
                   </span>
                 </p>
+                {item.supersededBy && (
+                  <p className="muted">
+                    Replaced by a revision frozen {new Date(item.supersededBy.at).toLocaleString()}. Kept here as it was approved.
+                  </p>
+                )}
+                {isV2(item.plan) && item.plan.revises && <Revision plan={item.plan} compareTo={item.compareTo} />}
                 <ul>
                   {planTypeLabel(item.plan) && (
                     <li>
@@ -188,6 +194,24 @@ function Report({
         </section>
       )}
     </main>
+  );
+}
+
+/** A revision's link to the plan it replaced, why, and what changed (the same comparison the chat shows). */
+function Revision({ plan, compareTo }: { plan: PlanV2; compareTo?: PlanComparison }) {
+  const diff = compareTo ? planChanges(compareTo.plan, plan) : undefined;
+  const named = (status: string) =>
+    diff?.changes.filter((c) => c.status === status).map((c) => c.label).join(", ");
+  const at = compareTo?.approved_at ? `frozen ${new Date(compareTo.approved_at).toLocaleString()}, ` : "";
+  return (
+    <p className="muted">
+      Revises the plan ({at}
+      {plan.revises?.sha256.slice(0, 12)}). Why: {plan.revision_reason}
+      {diff?.type && ` Type: ${diff.type.before} → ${diff.type.after}.`}
+      {named("changed") && ` Changed: ${named("changed")}.`}
+      {named("added") && ` Added: ${named("added")}.`}
+      {named("removed") && ` Removed: ${named("removed")}.`}
+    </p>
   );
 }
 
