@@ -20,8 +20,8 @@ What goes where:
   folded in, and every Construct in the `features/constructs` glossary;
   QCRule -> `qc/`; the DOIs the Spine cites -> `papers/`, listing only what
   the Spine takes from each paper.
-- Statuses: a Spine `validated` entry becomes `reviewed` only when the
-  evidence the check can verify supports it (see `decide_status`);
+- Statuses: a Spine `validated` entry becomes `reviewed` only when typed
+  evidence of the right kind supports it (see `decide_status`);
   everything else becomes `draft`, with the reason on the page and in the
   report. `reviewed_by` and `reviewed_on` are never written: DataLab's save
   flow fills them in.
@@ -135,6 +135,14 @@ PRIVACY_TEXT = (
 )
 PROFILING_ITEM = re.compile(r"\bobserved\b.*\bcoverage\b|\breturns no rows\b", re.S)
 MACHINERY_TEXT = re.compile(r"\s*\b(?:oracle_(?:query|export)|prop)_[0-9a-f]{32}\b")
+# Fields whose values read like counts but aren't: renamed, values spelled out.
+RELABEL = {
+    "followup_suffix_observed_2026": (
+        "followup_item_suffix_by_survey",
+        "its result identifiers end in {0} (for example down{0})",
+    ),
+}
+RELABEL_WHY = "the values are result-identifier suffixes, not counts"
 # Oracle error codes look like study IDs to the check's scan; say them another way.
 ORACLE_ERROR = re.compile(r"\bORA-(\d{5})\b")
 # Participant-like values the check's scan might miss.
@@ -162,6 +170,7 @@ class Entity:
     data: dict[str, Any]
     file: str
     changed: bool = False  # differs from the Spine's last commit
+    diff: tuple[str, ...] = ()  # which fields, if it does
 
     @property
     def id(self) -> str:
@@ -180,7 +189,8 @@ class Entity:
 class Spine:
     entities: dict[str, dict[str, Entity]]  # list key -> id -> entity
     files: list[str]
-    commit: str | None  # the Spine repo's HEAD
+    commit: str | None  # the Spine repo's HEAD, or the ref read
+    ref: str | None  # the git ref read, or None for the working copy
     repo: str | None  # its name, for code evidence
     code_paths: set[str]  # files in the repo at that commit
 
@@ -198,35 +208,74 @@ def _git(folder: Path, *args: str) -> str | None:
     return result.stdout
 
 
-def read_spine(folder: Path) -> Spine:
+def diff_paths(old: object, new: object, where: str = "") -> list[str]:
+    """Which fields differ between two versions of an entry (names, never values)."""
+    if isinstance(old, dict) and isinstance(new, dict):
+        out = []
+        for key in sorted(set(old) | set(new), key=str):
+            path = f"{where}.{key}" if where else str(key)
+            if key not in old:
+                out.append(f"{path} (added)")
+            elif key not in new:
+                out.append(f"{path} (removed)")
+            else:
+                out += diff_paths(old[key], new[key], path)
+        return out
+    return [] if old == new else [f"{where or 'the entry'} (changed)"]
+
+
+def read_spine(folder: Path, ref: str | None = None) -> Spine:
+    """The Spine's registry: its working copy, or with `ref` as committed there."""
     registry = folder / "registry"
-    commit = (_git(folder, "rev-parse", "HEAD") or "").strip() or None
+    commit = (_git(folder, "rev-parse", ref or "HEAD") or "").strip() or None
+    if ref and not commit:
+        raise SystemExit(f"{folder} has no git ref {ref}")
     prefix = (_git(folder, "rev-parse", "--show-prefix") or "").strip()
     remote = (_git(folder, "remote", "get-url", "origin") or "").strip()
     repo = re.sub(r"\.git$", "", remote.rstrip("/").rsplit("/", 1)[-1]) or None
     listing = (
-        _git(folder, "ls-tree", "-r", "--full-tree", "--name-only", "HEAD") if commit else None
+        _git(folder, "ls-tree", "-r", "--full-tree", "--name-only", commit) if commit else None
     )
     code_paths = set((listing or "").splitlines())
     entities: dict[str, dict[str, Entity]] = {key: {} for key in LIST_KEYS}
     files = []
-    for path in sorted(registry.glob("*.yaml")):
-        files.append(path.name)
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if ref:
+        folder_name = f"{prefix}registry/"
+        names = sorted(
+            n[len(folder_name) :]
+            for n in code_paths
+            if n.startswith(folder_name)
+            and n.endswith(".yaml")
+            and "/" not in n[len(folder_name) :]
+        )
+    else:
+        names = [p.name for p in sorted(registry.glob("*.yaml"))]
+    for name in names:
+        files.append(name)
+        if ref:
+            text = _git(folder, "show", f"{commit}:{prefix}registry/{name}") or ""
+        else:
+            text = (registry / name).read_text(encoding="utf-8")
+        data = yaml.safe_load(text) or {}
         committed: dict[tuple[str, str], Any] = {}
         if commit:
-            old = _git(folder, "show", f"HEAD:{prefix}registry/{path.name}")
+            old = _git(folder, "show", f"{commit}:{prefix}registry/{name}")
             for key, items in (yaml.safe_load(old or "") or {}).items():
                 for item in items or []:
                     committed[(key, str(item.get("id")))] = item
         for key in LIST_KEYS:
             for item in data.get(key) or []:
-                entity = Entity(key, item, path.name)
+                entity = Entity(key, item, name)
                 if entity.id in entities[key]:
                     raise SystemExit(f"Duplicate Spine id {key} {entity.id}")
-                entity.changed = bool(commit) and committed.get((key, entity.id)) != item
+                old_item = committed.get((key, entity.id))
+                entity.changed = bool(commit) and old_item != item
+                if entity.changed:
+                    entity.diff = tuple(
+                        diff_paths(old_item, item) if old_item else ["the whole entry (added)"]
+                    )
                 entities[key][entity.id] = entity
-    return Spine(entities, files, commit, repo, code_paths)
+    return Spine(entities, files, commit, ref, repo, code_paths)
 
 
 def _tables(catalog: Catalog, schema: str) -> list[Any]:
@@ -266,11 +315,21 @@ class Evidence:
     typed: set[tuple[str, str]] = field(default_factory=set)
     cited: list[str] = field(default_factory=list)  # untyped Spine citations
     unresolved: set[str] = field(default_factory=set)  # names not in the catalog
+    # Schema refs found only by looking an unqualified name up in DEFAULT_SCHEMAS.
+    assumed: set[str] = field(default_factory=set)
 
     def add(self, other: Evidence) -> None:
+        # A ref stays assumed only if no side found it any other way.
+        mine = {r for k, r in self.typed if k == "schema" and r not in self.assumed}
+        theirs = {r for k, r in other.typed if k == "schema" and r not in other.assumed}
         self.typed |= other.typed
         self.cited += [c for c in other.cited if c not in self.cited]
         self.unresolved |= other.unresolved
+        self.assumed = (self.assumed | other.assumed) - mine - theirs
+
+    def solid_years(self) -> set[int]:
+        """Years of the schema evidence that doesn't rest on the default lookup."""
+        return {year(r) for k, r in self.typed if k == "schema" and r not in self.assumed}
 
     def kinds(self) -> set[str]:
         return {kind for kind, _ in self.typed}
@@ -310,7 +369,13 @@ class Resolver:
         return None
 
     def objects(
-        self, text: str, schemas: Iterable[str], *, strict: bool = False, columns: bool = False
+        self,
+        text: str,
+        schemas: Iterable[str],
+        *,
+        strict: bool = False,
+        columns: bool = False,
+        assumed: bool = False,
     ) -> Evidence:
         """Oracle names in `text` that are in the catalog. Qualified names
         (IHS_2025.X) that aren't are recorded; unqualified words are only
@@ -326,12 +391,15 @@ class Resolver:
                 continue
             for s in hits:
                 if column and columns and column in self.schema.index[s][table]:
-                    found.typed.add(("schema", f"{s}.{table}.{column}"))
+                    ref = f"{s}.{table}.{column}"
                 else:
-                    found.typed.add(("schema", f"{s}.{table}"))
+                    ref = f"{s}.{table}"
+                found.typed.add(("schema", ref))
+                if assumed and not owner:
+                    found.assumed.add(ref)
         return found
 
-    def anchor(self, anchor: object, schemas: Iterable[str]) -> Evidence:
+    def anchor(self, anchor: object, schemas: Iterable[str], *, assumed: bool = False) -> Evidence:
         found = Evidence()
         if not anchor:
             return found
@@ -354,11 +422,19 @@ class Resolver:
                 if code:
                     found.typed.add(code)
                     typed = True
-            objects = self.objects(part, schemas)
+            objects = self.objects(part, schemas, assumed=assumed)
             found.add(objects)
             if not typed and not objects.typed:
                 found.cited.append(part)
         return found
+
+
+def split_basis(evidence: Evidence) -> dict[str, set[int]]:
+    """The cohort years schema evidence gives: those found where the entry
+    (or its sources) said to look, and those only from the default lookup."""
+    solid = evidence.solid_years()
+    basis = {"schema": solid, "assumed": evidence.years() - solid}
+    return {k: v for k, v in basis.items() if v}
 
 
 def legacy_ref(path: str, script: str, text: str) -> str:
@@ -374,6 +450,7 @@ class Removal:
     entry: str  # e.g. "DataSource `oura`"
     where: str  # e.g. "extra.observed_grain"
     why: str
+    cut: bool = False  # only part of the text went; the rest is kept
 
 
 class Cleaner:
@@ -389,7 +466,9 @@ class Cleaner:
         for pattern in PRIVACY_TEXT:
             if pattern.search(value):
                 value = pattern.sub("", value)
-                self.privacy.append(Removal(entity.label, where, "a count from a live query"))
+                self.privacy.append(
+                    Removal(entity.label, where, "a count from a live query", cut=True)
+                )
         if MACHINERY_TEXT.search(value):
             value = MACHINERY_TEXT.sub("", value)
             self.machinery.append(Removal(entity.label, where, "a prototype query or export id"))
@@ -427,7 +506,13 @@ class Cleaner:
             out = {}
             for key in sorted(value, key=str):
                 path = f"{where}.{key}"
-                if PRIVACY_KEYS.search(str(key)):
+                if key in RELABEL and isinstance(value[key], dict):
+                    name, template = RELABEL[key]
+                    out[name] = {str(k): template.format(v) for k, v in sorted(value[key].items())}
+                    self.reworded.append(
+                        Removal(entity.label, path, f"relabelled `{name}`: {RELABEL_WHY}")
+                    )
+                elif PRIVACY_KEYS.search(str(key)):
                     why = "counts or a value distribution from live data"
                     if "sha256" in str(key):
                         why = "a hash of a query result"
@@ -483,6 +568,9 @@ class Page:
     holds: list[str] = field(default_factory=list)  # why it can't be reviewed
     status: str = "draft"
     assembled: bool = False  # made by the conversion, not one Spine entry
+    # Where the page's cohorts came from ("spine", "schema", "assumed",
+    # "recipe", "inherited"), and the years each gave.
+    cohort_basis: dict[str, set[int]] = field(default_factory=dict)
 
     @property
     def path(self) -> str:
@@ -735,6 +823,7 @@ class Converter:
         for var in sorted(variables, key=lambda e: (str(e.data.get("oracle_column")), e.id)):
             self.variable_section(page, var)
         page.cohorts = years
+        page.cohort_basis["schema"] = set(years)
         page.body += ["", "## Where this came from", ""]
         for entity in entities:
             page.body += provenance(entity, self.clean)
@@ -785,7 +874,9 @@ class Converter:
             page.related.add(f"features/{feature}")
         extra = self.clean.extra(var, data.get("extra"))
         if isinstance(extra, dict) and extra.get("legacy_source"):
-            page.evidence.add(self.resolve.anchor(extra["legacy_source"], DEFAULT_SCHEMAS))
+            page.evidence.add(
+                self.resolve.anchor(extra["legacy_source"], DEFAULT_SCHEMAS, assumed=True)
+            )
         if extra:
             page.body += ["- details from the Spine:", *render_value(extra, 1)]
 
@@ -811,6 +902,7 @@ class Converter:
         )
         self.home[("data_sources", source.id)] = page.ref
         page.cohorts = {year(s) for s in schemas}
+        page.cohort_basis["spine"] = set(page.cohorts)
         page.evidence.add(self.resolve.anchor(data.get("source_anchor"), schemas))
         page.limitations += self.clean.items(
             source, "known_limitations", data.get("known_limitations")
@@ -914,8 +1006,10 @@ class Converter:
                 page.holds.append(f"it names a raw variable `{var_id}` the Spine doesn't have")
         sources = sorted(set(sources))
         schemas = self.source_schemas(sources) or list(DEFAULT_SCHEMAS)
+        assumed = not self.source_schemas(sources)
         for entity in entities:
-            page.evidence.add(self.resolve.anchor(entity.data.get("source_anchor"), schemas))
+            anchor = entity.data.get("source_anchor")
+            page.evidence.add(self.resolve.anchor(anchor, schemas, assumed=assumed))
         if recipe and recipe.data.get("implemented_in"):
             code = self.resolve.code(str(recipe.data["implemented_in"]))
             if code:
@@ -926,11 +1020,15 @@ class Converter:
                     "Spine repo's last commit"
                 )
         page.cohorts = page.evidence.years()
+        page.cohort_basis = split_basis(page.evidence)
         if recipe and page.evidence.kinds() & {"code", "legacy"}:
             # The recipe's sources, in the cohorts the Spine says they cover:
             # what the lab's code and legacy scripts it cites were written for.
             recipe_sources = [str(s) for s in recipe.data.get("sources") or []]
-            page.cohorts |= {year(s) for s in self.source_schemas(recipe_sources)}
+            from_recipe = {year(s) for s in self.source_schemas(recipe_sources)}
+            if from_recipe:
+                page.cohort_basis["recipe"] = from_recipe
+            page.cohorts |= from_recipe
         for source in sources:
             if self.spine.get("data_sources", source):
                 page.related.add(f"sources/{source}")
@@ -1043,7 +1141,9 @@ class Converter:
         for construct in sorted(constructs.values(), key=lambda c: c.id):
             self.home[("constructs", construct.id)] = page.ref
             data = construct.data
-            page.evidence.add(self.resolve.anchor(data.get("source_anchor"), DEFAULT_SCHEMAS))
+            page.evidence.add(
+                self.resolve.anchor(data.get("source_anchor"), DEFAULT_SCHEMAS, assumed=True)
+            )
             page.body += [
                 "",
                 f"## {one_line(data.get('name')) or construct.id} (`{construct.id}`)",
@@ -1083,13 +1183,17 @@ class Converter:
         self.home[("qc_rules", rule.id)] = page.ref
         targets = [str(t) for t in data.get("applies_to") or []]
         extra = self.clean.extra(rule, data.get("extra"))
-        page.evidence.add(self.resolve.anchor(data.get("source_anchor"), DEFAULT_SCHEMAS))
+        page.evidence.add(
+            self.resolve.anchor(data.get("source_anchor"), DEFAULT_SCHEMAS, assumed=True)
+        )
         if isinstance(extra, dict):
             if extra.get("implemented_in"):
                 code = self.resolve.code(str(extra["implemented_in"]))
                 if code:
                     page.evidence.typed.add(code)
-            page.evidence.add(self.resolve.objects(yaml.safe_dump(extra), DEFAULT_SCHEMAS))
+            page.evidence.add(
+                self.resolve.objects(yaml.safe_dump(extra), DEFAULT_SCHEMAS, assumed=True)
+            )
         page.body += [f"# {one_line(data.get('name')) or rule.id}", ""]
         condition = self.text(rule, "condition", data.get("condition"))
         page.body += [condition, ""]
@@ -1131,12 +1235,17 @@ class Converter:
             if page.folder != "qc":
                 continue
             page.cohorts |= page.evidence.years()
+            page.cohort_basis = split_basis(page.evidence)
             if not page.evidence.kinds() & {"code", "legacy"}:
                 continue  # a paper's method holds where the paper says, which isn't recorded
             # Pipeline logic holds wherever the features it's applied to do.
+            inherited: set[int] = set()
             for ref in page.related:
                 if ref.startswith("features/") and ref in self.pages:
-                    page.cohorts |= self.pages[ref].cohorts
+                    inherited |= self.pages[ref].cohorts
+            if inherited:
+                page.cohort_basis["inherited"] = inherited
+            page.cohorts |= inherited
 
     # Papers -------------------------------------------------------------------
 
@@ -1201,9 +1310,9 @@ class Converter:
 
     def decide_status(self, page: Page) -> None:
         """`reviewed` only if every Spine entry on the page is `validated` and
-        unchanged since the Spine's last commit, nothing on it is held, the
-        check can verify evidence of the kind the page needs, every Oracle
-        name it gives is in the catalog, and it says which cohorts it covers."""
+        unchanged since the Spine's last commit, nothing on it is held, it has
+        typed evidence of the kind the page needs, every Oracle name it gives
+        is in the catalog, and it has cohorts (given or inferred)."""
         holds = list(page.holds)
         if page.assembled:
             holds.append("the conversion assembled it; there's no single Spine entry behind it")
@@ -1224,7 +1333,9 @@ class Converter:
         if not kinds & needed and not page.assembled:
             cited = "; ".join(page.evidence.cited) or "nothing"
             holds.append(
-                "no evidence the check can verify supports it (the Spine cites: " + cited + ")"
+                "it has no typed evidence of the kind it needs (the Spine cites only: "
+                + cited
+                + ")"
             )
         if page.evidence.unresolved:
             holds.append(
@@ -1457,12 +1568,13 @@ class Result:
     catalog_tables: int
     export: Path
     spine_dir: Path
+    # With the working copy read: how the pages would differ if built from the
+    # Spine's last commit instead. (path, status now, status from the commit;
+    # None where a page wouldn't exist.)
+    from_commit: list[tuple[str, str | None, str | None]] = field(default_factory=list)
 
 
-def convert(spine_dir: Path, export: Path, out: Path) -> Result:
-    spine = read_spine(spine_dir)
-    catalog = Catalog.from_metadata_export(export)
-    schema = Schema(catalog)
+def build(spine: Spine, schema: Schema) -> Converter:
     converter = Converter(spine, schema)
     converter.locate_variables()
     converter.tables()
@@ -1474,6 +1586,29 @@ def convert(spine_dir: Path, export: Path, out: Path) -> Result:
     converter.papers()
     for page in converter.pages.values():
         converter.decide_status(page)
+    return converter
+
+
+def compare(now: Converter, then: Converter) -> list[tuple[str, str | None, str | None]]:
+    texts_now = {p.path: (p.status, now.render(p)) for p in now.pages.values()}
+    texts_then = {p.path: (p.status, then.render(p)) for p in then.pages.values()}
+    out = []
+    for path in sorted(set(texts_now) | set(texts_then)):
+        a, b = texts_now.get(path), texts_then.get(path)
+        if a != b:
+            out.append((path, a[0] if a else None, b[0] if b else None))
+    return out
+
+
+def convert(spine_dir: Path, export: Path, out: Path, ref: str | None = None) -> Result:
+    spine = read_spine(spine_dir, ref)
+    catalog = Catalog.from_metadata_export(export)
+    schema = Schema(catalog)
+    converter = build(spine, schema)
+    from_commit = []
+    changed = any(e.changed for es in spine.entities.values() for e in es.values())
+    if ref is None and spine.commit and changed:
+        from_commit = compare(converter, build(read_spine(spine_dir, spine.commit), schema))
     prepare(out)
     catalog.save(out / "generated" / "schema")
     when = export_time(export)
@@ -1494,7 +1629,7 @@ def convert(spine_dir: Path, export: Path, out: Path) -> Result:
     (out / "index.md").write_text(report.index, encoding="utf-8", newline="\n")
     disk, others = kb.read_folder(out)
     report = kb.check(disk, others=others)
-    return Result(converter, report, len(catalog), export, spine_dir)
+    return Result(converter, report, len(catalog), export, spine_dir, from_commit)
 
 
 # The review report ---------------------------------------------------------------
@@ -1511,11 +1646,17 @@ def review_md(result: Result) -> str:
         "Nothing here has been committed to `ihs-knowledge`. Read this, then the pages, "
         "then install (at the end).",
         "",
+        *decisions(result),
         "## Inputs",
         "",
-        f"- Spine: `{result.spine_dir}` (repo `{spine.repo}`, last commit `{spine.commit}`), "
-        f"registry files: {', '.join(spine.files)}. The registry's working copy was used, "
-        "including changes made after that commit (flagged below).",
+        f"- Spine: `{result.spine_dir}` (repo `{spine.repo}`, commit `{spine.commit}`), "
+        f"registry files: {', '.join(spine.files)}. "
+        + (
+            f"Read as committed at `{spine.ref}`."
+            if spine.ref
+            else "The registry's working copy was read, including changes made after that "
+            "commit (see decision 2)."
+        ),
         f"- Oracle metadata export: `{result.export}` ({result.catalog_tables} tables and views).",
         "",
         "## Counts",
@@ -1560,25 +1701,51 @@ def review_md(result: Result) -> str:
     out += [
         "The rule: a Spine `validated` entry becomes `reviewed` only if every entry on its "
         "page is `validated` and unchanged since the Spine's last commit, nothing in its own "
-        "text says it's unsettled, the check can verify evidence of the kind the page needs "
+        "text says it's unsettled, it has typed evidence of the kind the page needs "
         "(`schema` for sources and tables; `code`, `legacy`, or `paper` for any page), every "
-        "Oracle name it gives is in the catalog, and it says which cohorts it covers. "
-        "`candidate` becomes `draft`. Pages the conversion assembled (the constructs glossary, "
-        "papers) are drafts. No page has `reviewed_by` or `reviewed_on`: DataLab fills those "
-        "in when a person saves.",
+        "Oracle name it gives is in the catalog, and it has cohorts. `candidate` becomes "
+        "`draft`. Pages the conversion assembled (the constructs glossary, papers) are "
+        "drafts. No page has `reviewed_by` or `reviewed_on` (see decision 1). How far the "
+        "check verifies that evidence, and where cohorts were inferred, are in the next two "
+        "sections.",
+        "",
+        "Per entry (each Spine entry counted once, by the page it went to):",
         "",
     ]
-    moves: dict[str, list[str]] = defaultdict(list)
-    for page in pages:
-        for entity in page.entities:
-            moves[f"{entity.status} → {page.status}"].append(f"{entity.label} (`{page.ref}`)")
+    moves: dict[str, int] = defaultdict(int)
+    for key in LIST_KEYS:
+        for entity in spine.entities[key].values():
+            ref = conv.home.get((key, entity.id))
+            status = conv.pages[ref].status if ref else "not mapped"
+            moves[f"{entity.status} → {status}"] += 1
     for move in sorted(moves):
-        out.append(f"- **{move}**: {len(moves[move])}")
-    out += ["", "### Reviewed pages", ""]
+        out.append(f"- **{move}**: {moves[move]}")
+    out.append(f"- Total: {sum(moves.values())}")
+    shared = [p for p in pages if not p.assembled and len(p.entities) > 1]
+    out += [
+        "",
+        "Per page: a page that holds several entries takes one status for all of them, so "
+        "one unsettled entry makes the whole page a draft. These pages hold more than one:",
+        "",
+    ]
+    for page in shared:
+        statuses = ", ".join(f"`{e.id}` {e.status}" for e in page.entities)
+        out.append(f"- `{page.ref}` ({page.status}): {statuses}")
+    out += [
+        "",
+        "The constructs glossary holds all 40 constructs, and the paper pages list the "
+        "entries that cite them; both are drafts, and the paper pages don't change any "
+        "entry's status above.",
+        "",
+        "### Reviewed pages",
+        "",
+    ]
     for page in pages:
         if page.status == "reviewed":
             kinds = ", ".join(sorted(page.evidence.kinds()))
             out.append(f"- `{page.ref}` (evidence: {kinds}; cohorts {sorted(page.cohorts)})")
+    out += evidence_section(pages)
+    out += cohort_section(pages)
     out += ["", "### Draft pages, and why", ""]
     for page in pages:
         if page.status == "draft":
@@ -1599,8 +1766,14 @@ def review_md(result: Result) -> str:
         "",
     ]
     privacy = list(dict.fromkeys(conv.clean.privacy))
-    out += [f"- {r.entry}, `{r.where}`: {r.why}" for r in privacy] or ["- None."]
+    out += ["Left out altogether:", ""]
+    out += [f"- {r.entry}, `{r.where}`: {r.why}" for r in privacy if not r.cut] or ["- None."]
+    out += ["", "Cut from a sentence; the rest of the text is kept:", ""]
+    out += [f"- {r.entry}, `{r.where}`: {r.why}" for r in privacy if r.cut] or ["- None."]
     out += [
+        "",
+        "Not carried over:",
+        "",
         "- The metadata export's `privileges.csv`, `synonyms.csv` and `referenced_objects.csv`, "
         "and the objects' creation and DDL times, aren't catalog metadata fields "
         "`generated/schema` may hold, so they weren't carried over.",
@@ -1686,7 +1859,157 @@ def review_md(result: Result) -> str:
     return "\n".join(out)
 
 
+def decisions(result: Result) -> list[str]:
+    """What the user decides before anything goes into the real repo."""
+    conv = result.converter
+    spine = conv.spine
+    reviewed = [p for p in conv.pages.values() if p.status == "reviewed"]
+    out = [
+        "## Two decisions before the first commit",
+        "",
+        f"1. **Who reviewed the {len(reviewed)} reviewed pages?** None names a reviewer: the "
+        "conversion never writes `reviewed_by` or `reviewed_on`, and DataLab only fills them "
+        "in when a person saves a page there. Either the person who reviews this conversion "
+        "is named on them (DataLab stamps them the next time each page is saved through it), "
+        "or they are committed as drafts now and promoted one by one through DataLab, which "
+        "records the reviewer as it goes. Until one of these happens the check warns on "
+        "each of them.",
+    ]
+    changed = [e for es in spine.entities.values() for e in es.values() if e.changed]
+    if spine.ref:
+        out.append(
+            f"2. **Source version.** Built from the Spine as committed at `{spine.commit}`, "
+            "so it can be rebuilt exactly."
+        )
+    elif changed:
+        out += [
+            f"2. **The Spine's working copy.** The registry has changes that aren't committed "
+            f"(the conversion read them), so this output can't be rebuilt from `{spine.commit}`. "
+            "Either those changes are committed to the Spine (then this output is what that "
+            "commit gives), or the conversion is run from the commit instead (`--ref HEAD`). "
+            "The changed entries, by field (never values):",
+        ]
+        for e in changed:
+            out.append(f"   - {e.label}: " + "; ".join(e.diff))
+        out.append("   Built from the commit instead, these pages would differ:")
+        for path, now, then in result.from_commit:
+            if now == then:
+                out.append(f"   - `{path}`: different text, still {now}")
+            else:
+                out.append(
+                    f"   - `{path}`: {now or 'no page'} now, {then or 'no page'} from the commit"
+                )
+    else:
+        out.append(
+            f"2. **Source version.** The working copy matches `{spine.commit}`, so the output "
+            "can be rebuilt from that commit."
+        )
+    out.append("")
+    return out
+
+
+def only_legacy(page: Page) -> bool:
+    return page.evidence.kinds() - {"schema"} == {"legacy"}
+
+
+def evidence_section(pages: list[Page]) -> list[str]:
+    reviewed = [p for p in pages if p.status == "reviewed" and p.folder in ("features", "qc")]
+    bare = [p for p in reviewed if p.evidence.kinds() == {"legacy"}]
+    with_schema = [p for p in reviewed if only_legacy(p) and p not in bare]
+    out = [
+        "",
+        "### How far the check verifies evidence",
+        "",
+        "The check resolves `schema` evidence against `generated/schema`. For `code`, "
+        "`legacy`, and `paper` it checks only the format (repo@commit path, a path, a DOI). "
+        "The conversion confirmed that each `code` path exists at the pinned commit of the "
+        "prototype repo. It didn't check the `legacy` paths: `reference/2024/` in "
+        "`ihs-pipelines` is where docs/WORKFLOWS.md says the 2024 scripts go, not somewhere "
+        "they were seen. DOIs weren't looked up.",
+        "",
+        "Reviewed pages whose only evidence is an assumed `reference/2024/` path:",
+        "",
+    ]
+    out += [f"- `{p.ref}`" for p in bare] or ["- None."]
+    out += [
+        "",
+        "Reviewed feature and QC pages whose only evidence besides `schema` (which shows the "
+        "tables exist, not how they're used) is an assumed `reference/2024/` path:",
+        "",
+    ]
+    out += [f"- `{p.ref}`" for p in with_schema] or ["- None."]
+    return out
+
+
+BASIS = {
+    "spine": "the Spine's `available_cohorts` or raw-schema `cohort`",
+    "schema": "the cohort schemas where the tables and columns it names are in generated/schema",
+    "assumed": "tables it names without a schema, looked up in IHS_2024 and IHS_2025 because "
+    "nothing says which cohorts",
+    "recipe": "its recipe's sources' cohorts in the Spine (because it cites code or legacy)",
+    "inherited": "the cohorts of the features it's applied to (because it cites code or legacy)",
+}
+
+
+def thin(page: Page) -> list[str]:
+    """Why a page's inferred cohorts are weakly supported."""
+    basis = page.cohort_basis
+    firm = set().union(*(v for k, v in basis.items() if k != "assumed"))
+    out = []
+    if basis.get("assumed", set()) - firm:
+        years = sorted(basis["assumed"] - firm)
+        out.append(f"{years} only from the default IHS_2024/IHS_2025 lookup")
+    legacy = [r for k, r in page.evidence.typed if k == "legacy" and "/2024/" in r]
+    if legacy and 2024 not in page.cohorts:
+        out.append(f"cites a 2024 legacy script but lists only {sorted(page.cohorts)}")
+    if len(page.cohorts) == 1:
+        out.append("a single cohort")
+    if set(basis) == {"inherited"}:
+        out.append("only from the features it's applied to")
+    if set(basis) == {"recipe"}:
+        out.append("only from its recipe's sources; it names no tables")
+    return out
+
+
+def cohort_section(pages: list[Page]) -> list[str]:
+    out = [
+        "",
+        "### Where cohorts came from",
+        "",
+        "The Spine gives cohorts only for data sources (`available_cohorts`) and raw schemas "
+        "(`cohort`). Every other page's `cohorts` were inferred by the conversion, from one or "
+        "more of:",
+        "",
+    ]
+    out += [f"- **{k}**: {v}" for k, v in BASIS.items() if k != "spine"]
+    out += [
+        "",
+        "A paper's method gets no cohorts this way, so paper-only pages have none. Confirm "
+        "the cohorts on every reviewed page (question 1). The reviewed feature and QC "
+        "pages, with where their years came from:",
+        "",
+    ]
+    for page in pages:
+        if page.status != "reviewed" or page.folder not in ("features", "qc"):
+            continue
+        parts = "; ".join(f"{k} {sorted(v)}" for k, v in sorted(page.cohort_basis.items()))
+        weak = thin(page)
+        note = f" **Thin:** {'; '.join(weak)}." if weak else ""
+        out.append(f"- `{page.ref}` {sorted(page.cohorts)}: {parts}.{note}")
+    out += [
+        "",
+        "Reviewed table pages list the years where the Spine's columns are in the catalog; "
+        "for raw variables without a schema, that lookup used their source's "
+        "`available_cohorts`. Reviewed source pages use the Spine's `available_cohorts` as "
+        "given.",
+    ]
+    return out
+
+
 QUESTIONS = (
+    'Cohorts are inferred on every feature, QC, and table page (see "Where cohorts came '
+    'from"). Please confirm the cohorts on each reviewed page, especially the ones marked '
+    "thin.",
     "Many validated entries cite only unpublished manuscripts or analyses by name "
     "(MoodDriver, Social Smartphone Manuscript, Sleep & Step ETT), which can't be typed "
     "evidence, so their pages are drafts. Can you give a DOI, or a path to the code, for each?",
@@ -1696,8 +2019,7 @@ QUESTIONS = (
     "last commit. Should it be re-pinned to `ihs-pipelines` once `ihsDataR` has moved there?",
     "`legacy` evidence assumes the 2024 scripts will be in `ihs-pipelines` at "
     "`reference/2024/` (docs/WORKFLOWS.md). Is that where they'll be, under these names?",
-    "Two Spine entries were changed after the Spine's last commit (`survey`, "
-    "`depression_survey_items_2025`). Were those changes approved in the prototype?",
+    "Were the Spine changes that aren't committed approved in the prototype (decision 2)?",
     "The Garmin and participant sources say the catalog export has no views; the current "
     "export has them. Should those limitations be dropped?",
     "`resting_heart_rate_day`: its description and its recipe disagree about the Fitbit "
@@ -1711,9 +2033,6 @@ QUESTIONS = (
     "Qualitative notes from looking at data are kept where they have no numbers (for "
     "example, that zero-step Oura rows exist); counts, distributions, and observed date "
     "ranges were removed. Is that the right line?",
-    "Reviewed pages will warn that no reviewer is named until DataLab next saves each "
-    "one. Is that acceptable for the first commit, or should they start as drafts and be "
-    "promoted through DataLab?",
 )
 
 
@@ -1723,11 +2042,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--export", type=Path, required=True, help="the metadata export")
     parser.add_argument("--out", type=Path, required=True, help="where to write the KB")
     parser.add_argument("--review", type=Path, required=True, help="where to write REVIEW.md")
+    parser.add_argument(
+        "--ref", help="read the registry as committed at this git ref, not the working copy"
+    )
     args = parser.parse_args(argv)
     review = args.review.resolve()
     if review.is_relative_to(args.out.resolve()):
         raise SystemExit("--review must be outside --out: the check allows no extra files there")
-    result = convert(args.spine, args.export, args.out)
+    result = convert(args.spine, args.export, args.out, args.ref)
     review.write_text(review_md(result), encoding="utf-8", newline="\n")
     report = result.report
     pages = result.converter.pages.values()

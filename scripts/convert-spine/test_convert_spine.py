@@ -36,6 +36,7 @@ REGISTRY = {
                     "nap_validation_counts": {"AUTO": 17, "DEVICE": 4},
                     "zero_row_query_id": "oracle_query_" + "ab" * 16,
                     "package_reader": "read_fitbit_daily",
+                    "followup_suffix_observed_2026": {"JuneSurvey": "4"},
                 },
                 "status": "validated",
             },
@@ -306,3 +307,60 @@ def test_review_outside_the_knowledge_base(sources, tmp_path):
                     "--review", str(tmp_path / "REVIEW.md")])  # fmt: skip
     assert code == 0
     assert "## Status changes" in (tmp_path / "REVIEW.md").read_text()
+
+
+def test_counts_each_entry_once(sources, tmp_path):
+    result = run(sources, tmp_path / "kb")
+    review = cs.review_md(result)
+    entries = sum(len(es) for es in result.converter.spine.entities.values())
+    per_entry = review.split("Per entry")[1].split("Per page")[0]
+    assert f"- Total: {entries}" in per_entry
+    # Entries are counted by the page they went to, not the paper pages that cite them.
+    assert "papers/" not in per_entry
+
+
+def test_says_what_was_cut_and_what_left(sources, tmp_path):
+    result = run(sources, tmp_path / "kb")
+    privacy = cs.review_md(result).split("## Left out for privacy")[1].split("## Prototype")[0]
+    altogether, cut = privacy.split("Cut from a sentence")
+    assert "known_limitations[0]" in cut and "known_limitations[0]" not in altogether
+    assert "known_limitations[1]" in altogether
+    # The limitation itself is still on the page, without its count.
+    page = (tmp_path / "kb/sources/fitbit.md").read_text()
+    assert "Daily summaries only." in page
+
+
+def test_relabels_suffixes(sources, tmp_path):
+    out = tmp_path / "kb"
+    run(sources, out)
+    page = (out / "sources/fitbit.md").read_text()
+    assert "followup_suffix_observed_2026" not in page
+    assert "`followup_item_suffix_by_survey`" in page
+    assert "its result identifiers end in 4" in page
+
+
+def test_decisions_and_the_committed_version(sources, tmp_path):
+    spine, export = sources
+    result = run(sources, tmp_path / "kb")
+    review = cs.review_md(result)
+    assert review.index("## Two decisions") < review.index("## Inputs")
+    assert "DataSource `diary`: known_limitations (added)" in review
+    assert [p for p, _, _ in result.from_commit] == ["sources/diary.md"]
+    # Built from the commit: nothing counts as changed, and the later edit isn't there.
+    committed = cs.convert(spine, export, tmp_path / "kb-head", ref="HEAD")
+    assert not any(
+        e.changed for es in committed.converter.spine.entities.values() for e in es.values()
+    )
+    assert "Edited later." not in (tmp_path / "kb-head/sources/diary.md").read_text()
+    assert committed.from_commit == []
+    assert "Read as committed at `HEAD`" in cs.review_md(committed)
+
+
+def test_marks_thin_cohorts(sources, tmp_path):
+    result = run(sources, tmp_path / "kb")
+    review = cs.review_md(result)
+    section = review.split("### Where cohorts came from")[1].split("### Draft pages")[0]
+    assert "`qc/steps_positive` [2024, 2025]: inherited [2024, 2025]. **Thin:**" in section
+    assert "`features/steps_day` [2024, 2025]:" in section
+    legacy = review.split("### How far the check verifies evidence")[1]
+    assert "- `qc/steps_positive`" in legacy.split("Reviewed feature and QC")[0]
