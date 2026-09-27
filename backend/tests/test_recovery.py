@@ -130,6 +130,7 @@ def relay_app(
     watch_turn=None,
     during=None,
     tokens: SessionTokens | None = None,
+    session: str = "c_1",
 ):
     """A relay whose upstream answers with `replies`, in order (an error is
     raised, as a connection failure would be). `during(data)` runs as each
@@ -144,13 +145,13 @@ def relay_app(
             raise reply
         return reply
 
-    def on_status(session: str, data: dict) -> None:
-        statuses.append((session, data))
+    def on_status(session_id: str, data: dict) -> None:
+        statuses.append((session_id, data))
         if during is not None:
             during(data)
 
     tokens = tokens or SessionTokens()
-    token = tokens.issue(SessionAccess("c_1", "data", results_dir=Path(".")))
+    token = tokens.issue(SessionAccess(session, "data", results_dir=Path(".")))
     app = FastAPI()
     app.include_router(
         build_relay_router(
@@ -362,6 +363,32 @@ def test_the_managers_check_follows_the_turn_the_request_arrived_in(settings):
     assert over() and not manager.watch_turn("c_1")()
     # Sessions without a runtime here (helpers) rely on their token.
     assert not manager.watch_turn("h_1")()
+
+
+def test_a_real_runtimes_turns_decide_what_the_relay_sends(settings, tmp_path):
+    """The smallest real path: a SessionRuntime's own begin_turn and
+    stop_turn, the manager's watch_turn, and the relay."""
+    from datalab.sessions.manager import SessionManager
+    from tests.test_runtime import FakeContainers, make
+
+    tokens = SessionTokens()
+    runtime, _ = make(tmp_path, FakeContainers(tmp_path / "log.jsonl"), tokens)
+    manager = SessionManager(settings, None, tokens)  # type: ignore[arg-type]  # no store needed
+    manager._runtimes[runtime.session_id] = runtime
+    runtime.begin_turn()
+    call, sent, _ = relay_app(
+        [busy_for("30"), OK],
+        tokens=tokens,
+        session=runtime.session_id,
+        watch_turn=manager.watch_turn,
+        during=lambda _: runtime.begin_turn(),  # a new turn, while the old request waits
+    )
+    assert call().status_code == 429 and len(sent) == 1  # the old turn's: not sent again
+    assert call().status_code == 200 and len(sent) == 2  # the current turn's goes through
+    asyncio.run(runtime.stop_turn())
+    assert call().status_code == 409 and len(sent) == 2  # stopped: nothing sent
+    runtime.begin_turn()
+    assert call().status_code == 200 and len(sent) == 3
 
 
 def test_a_server_wait_means_busy_even_with_a_quota_code():

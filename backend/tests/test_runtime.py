@@ -139,6 +139,29 @@ async def test_stop_during_a_turn_interrupts_it(tmp_path):
     await runtime.close()
 
 
+async def test_a_request_refused_while_stopping_leaves_the_turn_stopped_not_failed(tmp_path):
+    """Stop is recorded before the interrupt reaches Codex. A model request
+    sent in between is refused by the relay, and Codex ends the turn failed
+    with its raw error: that's still the person's Stop, with no error shown
+    (and so no Continue offered)."""
+    containers = FakeContainers(tmp_path / "log.jsonl", mode="stop_race")
+    runtime, events = make(tmp_path, containers)
+    runtime.begin_turn()
+    sending = asyncio.create_task(runtime.send("long job"))
+    for _ in range(100):
+        if "turn/start" in containers.requests():
+            break
+        await asyncio.sleep(0.02)
+    await runtime.stop_turn()
+    result = await asyncio.wait_for(sending, 5)
+    assert (result.status, result.error) == ("interrupted", None)
+    finished = [data for kind, data in events if kind == "turn_finished"]
+    assert [data["status"] for data in finished] == ["interrupted"]
+    assert not any(kind == "error" for kind, _ in events)
+    assert "409" not in json.dumps(events)
+    await runtime.close()
+
+
 async def test_a_crash_mid_turn_ends_the_turn(tmp_path):
     containers = FakeContainers(tmp_path / "log.jsonl", mode="crash")
     runtime, events = make(tmp_path, containers)

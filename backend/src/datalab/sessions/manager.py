@@ -234,7 +234,7 @@ class SessionManager:
 
     def _work_began(self, conversation_id: str, asked: Event) -> Event:
         """The question a turn answers: a turn that Continue started picks up the
-        one before it (which failed or was stopped), and so on back."""
+        one before it (which failed), and so on back."""
         messages = [
             e
             for e in self._store.events_of_types_after(conversation_id, 0, ("user_message",))

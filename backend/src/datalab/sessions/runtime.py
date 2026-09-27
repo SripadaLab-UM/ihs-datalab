@@ -314,6 +314,15 @@ class SessionRuntime:
                     task = asyncio.get_running_loop().create_task(self._interrupt(self._turn))
                     self._background.add(task)
                     task.add_done_callback(self._background.discard)
+        if self._stop_requested:
+            # Stopping. A model request Codex sent before the interrupt reached
+            # it is refused by the relay (its turn is over), and Codex reports
+            # that as an error and a failed turn. It was the person's Stop.
+            if method == "error":
+                return
+            turn = params.get("turn") or {}
+            if method == "turn/completed" and turn.get("status") == "failed":
+                params = {**params, "turn": {**turn, "status": "interrupted", "error": None}}
         event = _to_event(method, params)
         if event:
             await self._emit(*event)
