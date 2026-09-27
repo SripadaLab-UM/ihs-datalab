@@ -152,17 +152,30 @@ class WorkflowSettings:
 class UpdateSettings:
     """`[updates]`: checking for and installing new releases (milestone 7).
 
-    To come: where backups go and how many are kept (see DISTRIBUTION.md).
+    See docs/DISTRIBUTION.md, "Updating". To come: where backups go and how
+    many are kept.
     """
 
-    # Whether DataLab asks GitHub for a newer release when it starts. Nothing
-    # checks yet; the updater will read this.
+    # Whether DataLab asks GitHub for a newer release when it starts. "Check
+    # now" in Settings → Updates works either way.
     check_on_start: bool = True
-    # Where releases come from.
-    repository: str = "SripadaLab-UM/ihs_datalab"
+    # Where releases come from: the app repo's GitHub Releases, read without
+    # signing in (the repo is public).
+    repository: str = "SripadaLab-UM/ihs-datalab"
+    # Which releases are offered: "stable" (full releases only),
+    # "pre-release" (pre-releases too), or "auto": pre-releases while the
+    # installed DataLab is itself a pre-release, else stable only.
+    channel: str = "auto"
 
     def __post_init__(self) -> None:
         _check_repo("updates.repository", self.repository)
+        if self.channel not in UPDATE_CHANNELS:
+            raise ValueError(
+                f"updates.channel must be one of {', '.join(UPDATE_CHANNELS)}, not {self.channel!r}"
+            )
+
+
+UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)

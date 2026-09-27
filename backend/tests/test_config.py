@@ -43,6 +43,14 @@ def test_sections_are_read_from_their_tables(settings_file):
     assert settings.workflows == WorkflowSettings(max_concurrent_runs=2)
     assert settings.updates.check_on_start is False
     assert settings.updates.repository == UpdateSettings.repository
+    assert settings.updates.channel == "auto"
+
+
+def test_releases_come_from_the_app_repo_by_its_real_name(settings_file):
+    # The repo's name has a hyphen; "ihs_datalab" is only the local folder's.
+    assert UpdateSettings().repository == "SripadaLab-UM/ihs-datalab"
+    settings_file.write_text('[updates]\nchannel = "stable"\n')
+    assert load_settings("practice").updates.channel == "stable"
 
 
 def test_sections_are_frozen(settings_file):
@@ -68,6 +76,7 @@ def test_sections_are_frozen(settings_file):
         ('[repos]\nknowledge = "lab/.."\n', "owner/name"),
         ('[repos]\nknowledge = "https://github.com/lab/kb"\n', "owner/name"),
         ('[updates]\nrepository = "lab"\n', "owner/name"),
+        ('[updates]\nchannel = "nightly"\n', "updates.channel"),
         ('[repos]\nclient_id = "Iv23 x; rm"\n', "client id"),
         ("[playground]\npreview_rows = 1.5\n", "playground.preview_rows"),
     ],
