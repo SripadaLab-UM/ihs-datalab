@@ -29,9 +29,20 @@ turn's query results, command output, or data files in `outputs/`:
 A match means the number appears in something the turn produced. It doesn't
 show that it's the right statistic from the right analysis. An unmatched
 number isn't necessarily wrong either (it may be worked out in the text), but
-check it. Dates, years, counts of ten or less, list numbers and citation
-details aren't counted. Numbers from the research helper's web answer are
-flagged on purpose: web content isn't evidence.
+check it.
+
+Some numbers are left out of the count altogether, so "all 12 numbers" means
+all 12 that were checked:
+
+- whole numbers from -10 to 10 ("two tables", "step 3");
+- whole numbers from 1900 to 2100, which are treated as years, even when
+  they're a count;
+- dates, list numbering, numbers inside code and links, and the volume and
+  pages of a citation.
+
+A number with a decimal point, a thousands comma or a % sign is always
+checked. Numbers from the research helper's web answer are flagged on
+purpose: web content isn't evidence.
 
 ## Where a number came from
 

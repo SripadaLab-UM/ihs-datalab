@@ -147,11 +147,13 @@ You need to be [signed in to GitHub](github-sign-in.md).
 ## Workflow
 
 A small recipe file that pulls data, runs fixed steps and checks, and
-delivers the results. A person approves it, and DataLab then runs it the same
-way every time, with no AI involved.
+delivers the results. It's reviewed and saved to the lab's repository, and
+when a person presses Run, DataLab runs it the same way every time, with no
+AI involved.
 
-Workflows live in the lab's `ihs-pipelines` repository on GitHub. Their
-results are delivered only after every check has passed. See
+Workflows live in the lab's `ihs-pipelines` repository on GitHub, saved there
+after review with [Save & share](#save--share). Their results are delivered
+only after every check has passed. See
 [Run a workflow](running-a-workflow.md).
 
 ## Pipeline
@@ -177,13 +179,15 @@ for byte. A replay doesn't deliver unless you ask it to. See
 ## Small cells
 
 Counts of fewer than 11 participants, which mustn't appear in shared results.
-A workflow's `small_cells` check stops delivery when a count from 1 to 10 is
-shown, or when a hidden one can be worked out from the totals shown.
+A workflow's `small_cells` check reads the count columns it's told about and
+stops delivery on a count from 1 to 10 (or up to a higher threshold). It
+can't see everything; a person still reviews.
 
-The threshold is 11 by default and can't be set lower. The check covers the
-table it's given; it can't see differencing between two delivered files,
-percentages it wasn't told about, or means that imply a count, so a person
-still reviews what's delivered. In the real DataLab, every delivered CSV needs
+It works out hidden counts only from the totals it's told about (a total row
+or a total column): without them it checks only the counts shown. The
+threshold is 11 by default and can't be set lower. It can't see columns it
+wasn't told are counts, differencing between two delivered files,
+percentages it wasn't told about, or means that imply a count. In the real DataLab, every delivered CSV needs
 a passing `small_cells` check or a written reason.
 
 ## Data accessed

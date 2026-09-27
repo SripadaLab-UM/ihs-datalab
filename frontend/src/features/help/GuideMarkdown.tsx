@@ -53,7 +53,11 @@ export function GuideMarkdown({
             </Link>
           );
         }
-        return <ExternalLink href={href}>{children}</ExternalLink>;
+        return (
+          <ExternalLink href={href} source="guide">
+            {children}
+          </ExternalLink>
+        );
       },
     };
   }, [page, text, headingOffset, onNavigate]);

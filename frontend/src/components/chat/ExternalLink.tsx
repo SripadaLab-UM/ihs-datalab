@@ -22,11 +22,20 @@ export function describeLink(href: string): { url: string; host: string } | null
 }
 
 /**
- * A link the agent wrote. Opening it is a request to another site that
- * carries everything in the address, so the person sees the full address,
- * not just the link's text, and confirms first.
+ * A link the agent wrote (or, with `source="guide"`, one in DataLab's own
+ * guide). Opening it is a request to another site that carries everything in
+ * the address, so the person sees the full address, not just the link's
+ * text, and confirms first.
  */
-export function ExternalLink({ href, children }: { href: string | undefined; children: ReactNode }) {
+export function ExternalLink({
+  href,
+  children,
+  source = "agent",
+}: {
+  href: string | undefined;
+  children: ReactNode;
+  source?: "agent" | "guide";
+}) {
   const [asking, setAsking] = useState(false);
   const link = href ? describeLink(href) : null;
   if (!link) return <span title="This link can't be opened from DataLab.">{children}</span>;
@@ -37,7 +46,7 @@ export function ExternalLink({ href, children }: { href: string | undefined; chi
       </button>
       {asking && (
         <Modal
-          title="Open a link the agent wrote?"
+          title={source === "guide" ? "Open a link from the guide?" : "Open a link the agent wrote?"}
           onClose={() => setAsking(false)}
           actions={
             <>

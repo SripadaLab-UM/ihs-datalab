@@ -10,8 +10,8 @@ keywords: help, contents, introduction, new, getting started, overview
 DataLab lets you ask an AI agent questions about Intern Health Study data.
 The agent is OpenAI Codex, running on U-M GPT. It works in a sealed workspace
 of its own. It can read the study database but never change it. You see each
-step it takes and everything it reads, and results leave DataLab only when
-you export them.
+step it takes and everything it reads from the database, and results leave
+DataLab only when you export them.
 
 This guide is the same text as DataLab's own Help, its tooltips and the
 first-run tour. It's written for researchers who are new to DataLab.
@@ -56,4 +56,6 @@ first-run tour. It's written for researchers who are new to DataLab.
 
 The exact rules behind each safety promise, and how each one is enforced and
 tested, are in `docs/SAFETY.md` in the DataLab repository on GitHub. The
-**Safety check** in Settings & Safety tests them on your own computer.
+**Safety check** in Settings & Safety tests the first three promises (the
+rest of your computer, the database, and where data can go) live on your own
+computer, when you press **Run safety check**.

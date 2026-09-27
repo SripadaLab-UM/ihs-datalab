@@ -217,10 +217,11 @@ export function WorkspacePage() {
           ref={panelBox}
           aria-label="Files, inputs, queries and history"
           className={clsx(
-            "relative min-h-0 border-l border-line bg-rail",
+            "min-h-0 border-l border-line bg-rail",
+            // One position only: with both, "relative" won and the drawer fell into the grid below the chat.
             panelOpen
-              ? "absolute inset-y-0 right-0 z-30 block w-[min(22rem,100%)] shadow-xl xl:static xl:w-auto xl:shadow-none"
-              : "hidden xl:block",
+              ? "absolute inset-y-0 right-0 z-30 block w-[min(22rem,100%)] shadow-xl xl:relative xl:w-auto xl:shadow-none"
+              : "relative hidden xl:block",
           )}
         >
           {panelOpen && (

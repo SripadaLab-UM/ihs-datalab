@@ -31,15 +31,14 @@ To keep it apart from anything real, the practice DataLab:
 - never signs in to GitHub, and its conversations get no copy of the
   knowledge base, so nothing from practice reaches the lab's repositories.
 
-Other AI tools, such as Claude, may connect to the practice DataLab to use
-and test it. They aren't approved for study data, which is why they're
-allowed only there.
+Other AI tools, such as Claude, aren't approved for study data, so they're
+used only with the practice DataLab, to try and test DataLab.
 
 ## The real DataLab
 
 The real DataLab connects to the IHS study database, read-only, over the
 Michigan Medicine VPN. Everything in [What DataLab will and won't do](safety.md)
-applies. It doesn't accept outside AI tools at all.
+applies. Outside AI tools aren't used with it.
 
 ## Opening the practice DataLab
 

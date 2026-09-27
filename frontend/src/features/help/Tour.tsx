@@ -87,22 +87,45 @@ export function TourProvider({ children }: { children: ReactNode }) {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const { pathname } = useLocation();
   const practice = health.data?.profile === "practice";
-  useEffect(() => {
-    if (practice && pathname.startsWith("/workspace") && !tourSeen()) setOpen(true);
-  }, [practice, pathname]);
-  const start = useCallback(() => {
-    setIndex(0);
+  // Where focus was when the tour opened, to give back when it closes.
+  const returnTo = useRef<HTMLElement | null>(null);
+  const isOpen = useRef(false);
+  // Set when the tour opens: the card takes focus then, not when it comes back after Help.
+  const fresh = useRef(false);
+  const begin = useCallback((restart: boolean) => {
+    if (isOpen.current && !restart) return;
+    if (!isOpen.current) {
+      const active = document.activeElement;
+      returnTo.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    }
+    isOpen.current = true;
+    fresh.current = true;
+    if (restart) setIndex(0);
     setOpen(true);
   }, []);
-  const close = useCallback(() => {
+  useEffect(() => {
+    if (practice && pathname.startsWith("/workspace") && !tourSeen()) begin(false);
+  }, [practice, pathname, begin]);
+  const start = useCallback(() => begin(true), [begin]);
+  const close = useCallback((stepId: string) => {
     markTourSeen();
+    isOpen.current = false;
     setOpen(false);
+    const back = returnTo.current;
+    returnTo.current = null;
+    if (back?.isConnected) back.focus();
+    else focusNear(stepId);
+  }, []);
+  const takeFocus = useCallback(() => {
+    const was = fresh.current;
+    fresh.current = false;
+    return was;
   }, []);
   return (
     <TourContext value={{ open, start }}>
       {children}
       {/* Out of the way while Help is read; it's back on leaving Help. */}
-      {open && !pathname.startsWith("/help") && <TourCard index={index} onStep={setIndex} onClose={close} />}
+      {open && !pathname.startsWith("/help") && <TourCard index={index} onStep={setIndex} onClose={close} takeFocus={takeFocus} />}
     </TourContext>
   );
 }
@@ -115,15 +138,32 @@ function findAnchor(stepId: string): HTMLElement | null {
   return null;
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Where focus goes when what had it before the tour is gone: the step's place, else the page's main part. */
+function focusNear(stepId: string) {
+  const anchor = findAnchor(stepId);
+  const target = anchor?.matches(FOCUSABLE) ? anchor : anchor?.querySelector<HTMLElement>(FOCUSABLE);
+  if (target) return target.focus();
+  const main = document.querySelector<HTMLElement>("main");
+  if (!main) return;
+  if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+  main.focus();
+}
+
 /** One step at a time, in a corner over the conversation list: you can try each step as you read it. */
 export function TourCard({
   index,
   onStep: setIndex,
-  onClose,
+  onClose: close,
+  takeFocus = () => true,
 }: {
   index: number;
   onStep: (index: number) => void;
-  onClose: () => void;
+  /** Given the step it closed on. */
+  onClose: (stepId: string) => void;
+  /** Whether to take focus on mount: yes when the tour has just opened, not when it's back after Help. */
+  takeFocus?: () => boolean;
 }) {
   const steps = useMemo(tourSteps, []);
   const step = steps[index];
@@ -131,10 +171,18 @@ export function TourCard({
   const heading = useRef<HTMLHeadingElement>(null);
   const last = index === steps.length - 1;
 
-  // Focus on the step's title, so it's read out, whenever the step changes.
+  const onClose = () => close(step?.id ?? "");
+  // Focus on the step's title, so it's read out, when the tour opens and when
+  // the step changes; not when the card is back after Help, where the person
+  // may be using a link.
+  const focused = useRef<number | null>(null);
   useEffect(() => {
+    if (focused.current === index) return; // StrictMode's second run
+    const first = focused.current === null;
+    focused.current = index;
+    if (first && !takeFocus()) return;
     heading.current?.focus();
-  }, [index]);
+  }, [index, takeFocus]);
 
   // The place on screen this step is about, outlined while it's shown. The
   // page changes as the person follows along (a conversation opens, an answer

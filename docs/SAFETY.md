@@ -1,6 +1,9 @@
 # DataLab safety promises
 
-Status: **draft** for v1. Under discussion and not yet implemented.
+Status: **implemented** for v1, except the outside-AI connectors (the MCP
+server, and the connector tokens and per-route scopes described under
+"Outside AI connectors"), which aren't built yet. Implemented isn't accepted:
+acceptance is tracked in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 DataLab lets you use an AI agent (OpenAI Codex on U-M GPT) with sensitive IHS
 data. This page says what DataLab promises, how it keeps each promise, and how
@@ -65,14 +68,17 @@ returns an answer and is then deleted.
    Each conversation has a **Data accessed** panel. It lists every query the
    AI ran: which tables, when, how many rows, and where the result went.
 
-8. **You can check all of this.**
-   The **Safety check** screen tests these promises live and shows the results.
+8. **You can check the first three.**
+   The **Safety check** in Settings & Safety tests promises 1 to 3 live when
+   you press **Run safety check** (or run `datalab safety-check`), and shows
+   the results. It doesn't run by itself. The other promises are covered by
+   the rules below and DataLab's automated tests, not by this screen.
 
 ## Outside AI tools
 
-Other AI tools, such as Claude, can connect to DataLab to use and test it.
-They are **not** approved for study data, so what they can reach depends on
-which DataLab they connect to:
+Other AI tools, such as Claude, are used to try and test DataLab. They are
+**not** approved for study data, so what they may use depends on which
+DataLab it is (the connectors for them aren't built yet):
 
 - The **practice** DataLab has only synthetic data, and you can't attach
   your own files to it. Outside tools can do everything there.
@@ -338,6 +344,8 @@ access. It never gains it.
   it.
 
 ### Outside AI connectors
+
+Not built yet: this is the design.
 
 - DataLab exposes its features to outside tools through an MCP server and a
   `datalab` CLI. Both use the same API as the UI, and every request carries a

@@ -7,9 +7,10 @@ keywords: safety, promises, privacy, PHI, study data, internet, boundary, safety
 
 # What DataLab will and won't do
 
-These are the boundaries DataLab enforces. Each is tested by the **Safety
-check** in Settings & Safety, which runs when DataLab starts and whenever you
-press it.
+These are the boundaries DataLab enforces. The first three (the rest of your
+computer, the database, and where data can go) are tested live by the
+**Safety check** in Settings & Safety when you press **Run safety check**.
+Until you do, it says "Not run yet".
 
 ## What DataLab enforces
 
@@ -31,8 +32,9 @@ press it.
   turn, so you can put files back. Nothing is deleted unless you delete it.
 - **Results leave only when you export them.** The agent can prepare files,
   but only you can [export](exporting.md) them, to a folder you chose. The one
-  exception is a [workflow](glossary.md#workflow) you've approved: when it
-  runs, it delivers to the destination set for it.
+  exception is a [workflow](glossary.md#workflow): a file saved to the lab's
+  `ihs-pipelines` repository after review with Save & share. When a person
+  presses **Run**, it delivers to the destination set for it on this computer.
 - **The shared knowledge base gets nothing without your review.** Agents can
   suggest edits, but you see the exact change before it's shared. See
   [Knowledge proposals](knowledge-proposals.md).
@@ -48,6 +50,14 @@ press it.
   The [trace](glossary.md#trace-and-provenance) and the
   [rigor review](glossary.md#rigor-review) help, but neither shows that an
   answer is right.
+- **Plans, pilots and the rigor review guide the agent; they don't bind it.**
+  A plan is a record of what you agreed, not a lock; pilots come from the
+  agent's instructions; the review is the same model checking itself. Your
+  own judgement is the control.
+- **The small-cells check has limits.** It reads only the counts a workflow
+  declares, and works out hidden counts only from the totals it's told about.
+  A person still reviews what's delivered. See
+  [small cells](glossary.md#small-cells).
 - **Exported files are yours to look after.** Once they're in your own
   folder, DataLab no longer controls them. Keep them on approved storage.
 - **Anything you attach to a research session may reach the internet**, and
@@ -58,7 +68,6 @@ press it.
 
 ## Outside AI tools
 
-Other AI tools can connect to DataLab only on the
-[practice](glossary.md#practice) DataLab, which holds made-up data. A
-real-data DataLab doesn't accept them. See
-[Practice and real data](practice-and-real.md).
+Other AI tools, such as Claude, aren't approved for study data, so they're
+used only with the [practice](glossary.md#practice) DataLab, which holds
+made-up data. See [Practice and real data](practice-and-real.md).

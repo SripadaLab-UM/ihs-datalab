@@ -69,6 +69,7 @@ study data, so keep them on approved storage.
 
 - **SQL Playground:** export a query's full result, with a manifest of the
   query that made it. See [The SQL Playground](sql-playground.md).
-- **Workflows:** a workflow you've approved delivers to the destination set
-  for it, once every check has passed. See
+- **Workflows:** a workflow saved to the lab's repository after review
+  delivers, when a person presses **Run**, to the destination set for it,
+  once every check has passed. See
   [Run a workflow](running-a-workflow.md).

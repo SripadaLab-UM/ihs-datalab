@@ -288,21 +288,21 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   });
   return (
     <span className="flex items-center gap-1">
-    <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
-      <input
-        type="checkbox"
-        className="peer sr-only"
-        checked={conversation.rigor_review}
-        onChange={() => toggle.mutate()}
-        disabled={toggle.isPending}
-      />
-      <span
-        aria-hidden="true"
-        className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
-      />
-      Rigor review
-    </label>
-    <InfoTip term="rigor-review" align="end" />
+      <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          checked={conversation.rigor_review}
+          onChange={() => toggle.mutate()}
+          disabled={toggle.isPending}
+        />
+        <span
+          aria-hidden="true"
+          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+        />
+        Rigor review
+      </label>
+      <InfoTip term="rigor-review" align="end" />
     </span>
   );
 }

@@ -91,3 +91,16 @@ it("goes to the term in Help, saying where it came from", () => {
   fireEvent.click(screen.getByRole("link", { name: /Learn more/ }));
   expect(screen.getByText("at /help/glossary#rigor-review from /workspace/c1")).toBeInTheDocument();
 });
+
+it("hides a tip opened by hovering when Escape is pressed, wherever focus is (WCAG 1.4.13)", () => {
+  page(<InfoTip term="checkpoint" />);
+  const trigger = screen.getByRole("button", { name: "About “Checkpoint”" });
+  const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+  elsewhere.focus();
+  fireEvent.mouseEnter(trigger.parentElement!);
+  expect(trigger).toHaveAttribute("aria-expanded", "true");
+  fireEvent.keyDown(elsewhere, { key: "Escape" });
+  expect(trigger).toHaveAttribute("aria-expanded", "false");
+  // Focus stays where it was.
+  expect(elsewhere).toHaveFocus();
+});

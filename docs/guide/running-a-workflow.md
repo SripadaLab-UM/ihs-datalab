@@ -8,8 +8,9 @@ keywords: workflow, run, parameters, delivery, deliver, destination, qc, checks,
 
 # Run a workflow
 
-A [workflow](glossary.md#workflow) is a recipe the lab has approved: pull
-these data, run these steps, check these things, deliver here. DataLab runs
+A [workflow](glossary.md#workflow) is a recipe saved to the lab's
+`ihs-pipelines` repository after review: pull these data, run these steps,
+check these things, deliver here. It runs when a person presses **Run**. DataLab runs
 it the same way every time, with no AI involved, so a workflow run never
 sends data to a model.
 
@@ -41,8 +42,9 @@ means in **Settings & Safety → Workflow destinations**. Until a folder is
 chosen, a run that delivers there fails at delivery. The practice DataLab
 delivers only to its own practice folder.
 
-In the real DataLab, every delivered CSV needs a passing `small_cells` check.
-Any other kind of file needs a written reason in the workflow file. The check
+In the real DataLab, every delivered CSV needs a passing `small_cells` check
+or a written reason under `deliver.without_small_cells` in the workflow file,
+and any other kind of file needs a written reason there. The check
 can't see everything (differencing between two delivered files, for example),
 so read what a workflow delivers before relying on it.
 

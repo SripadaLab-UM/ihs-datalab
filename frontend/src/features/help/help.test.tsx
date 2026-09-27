@@ -165,3 +165,39 @@ it("still works when the browser won't store that it was seen", async () => {
   await screen.findByRole("textbox", { name: "Your question" });
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+it("gives focus back where it was when the tour closes", async () => {
+  app("/workspace");
+  const box = screen.getByRole("textbox", { name: "Your question" });
+  box.focus(); // before the tour opens, which waits for the profile
+  const tour = await screen.findByRole("dialog", { name: "Ask a question" });
+  expect(within(tour).getByRole("heading", { name: "Ask a question" })).toHaveFocus();
+  fireEvent.click(within(tour).getByRole("button", { name: "Skip the tour" }));
+  expect(box).toHaveFocus();
+});
+
+it("gives focus to the step's place when what had it is gone", async () => {
+  localStorage.setItem("datalab.tour.seen", "1");
+  app("/help/tour");
+  fireEvent.click(await screen.findByRole("button", { name: "Take the tour" }));
+  const tour = await screen.findByRole("dialog", { name: "Ask a question" });
+  fireEvent.keyDown(tour, { key: "Escape" });
+  // "Take the tour" left with Help: the question box, which the first step is about.
+  expect(screen.getByRole("textbox", { name: "Your question" })).toHaveFocus();
+});
+
+it("doesn't take focus when it's back after Help", async () => {
+  app("/workspace");
+  await screen.findByRole("dialog", { name: "Ask a question" });
+  fireEvent.click(screen.getByRole("link", { name: /^Help/ }));
+  await screen.findByRole("heading", { level: 1, name: "Ask your first question" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  const back = screen.getByRole("link", { name: /Back to the Workspace/ });
+  back.focus();
+  fireEvent.click(back);
+  const tour = await screen.findByRole("dialog", { name: "Ask a question" });
+  expect(tour.contains(document.activeElement)).toBe(false);
+  // Still open where it was, and it closes as before.
+  fireEvent.click(within(tour).getByRole("button", { name: "Skip the tour" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});

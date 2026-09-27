@@ -57,16 +57,32 @@ export function InfoTip({
   const trigger = useRef<HTMLButtonElement>(null);
   const [pinned, setPinned] = useState(false);
   const [hover, setHover] = useState(false);
-  const [side, setSide] = useState<{ x: "start" | "end"; y: "below" | "above" }>({ x: align ?? "start", y: "below" });
+  const [side, setSide] = useState<{ x: "start" | "end"; y: "below" | "above"; width: number }>({
+    x: align ?? "start",
+    y: "below",
+    width: WIDTH,
+  });
   const open = pinned || hover;
 
-  // Where there's room for it, measured as it opens.
+  // Where there's room for it, measured as it opens: within the window, and
+  // within whatever scrolls around it (a narrow side panel), so it's never
+  // cut off or makes the panel scroll sideways.
   useEffect(() => {
     if (!open || !trigger.current) return;
     const rect = trigger.current.getBoundingClientRect();
+    const clip = clippingBox(trigger.current);
+    const toRight = clip.right - rect.left - GAP; // room for a tip lined up with the start
+    const toLeft = rect.right - clip.left - GAP; // and with the end
+    const roomFor = (side: "start" | "end") => (side === "start" ? toRight : toLeft);
+    let x: "start" | "end" = align ?? (toRight >= WIDTH ? "start" : "end");
+    // The side asked for, unless it's too tight and the other has more room.
+    const other = x === "start" ? "end" : "start";
+    if (roomFor(x) < WIDTH && roomFor(other) > roomFor(x)) x = other;
+    const room = roomFor(x);
     setSide({
-      x: align ?? (rect.left + 320 > window.innerWidth ? "end" : "start"),
-      y: rect.bottom + 220 > window.innerHeight && rect.top > 220 ? "above" : "below",
+      x,
+      y: rect.bottom + 220 > clip.bottom && rect.top - clip.top > 220 ? "above" : "below",
+      width: Math.max(MIN_WIDTH, Math.min(WIDTH, room)),
     });
   }, [open, align]);
 
@@ -79,6 +95,23 @@ export function InfoTip({
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [pinned]);
+
+  // Escape hides a tip wherever focus is, even one only hovered over (WCAG
+  // 1.4.13): without moving the mouse away, the person can get it out of the
+  // way. With focus inside, the wrapper's own handler does it, and gives focus
+  // back to the button.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || box.current?.contains(document.activeElement)) return;
+      // Only the tip: a dialog behind it stays open.
+      event.stopPropagation();
+      setPinned(false);
+      setHover(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   if (!entry) return <>{children}</>;
   const tipId = `${id}-tip`;
@@ -130,11 +163,12 @@ export function InfoTip({
       <span
         id={tipId}
         className={clsx(
-          "absolute z-40 w-[min(19rem,80vw)]",
+          "absolute z-40",
           side.x === "start" ? "left-0" : "right-0",
           side.y === "below" ? "top-full pt-1.5" : "bottom-full pb-1.5",
           open ? "visible" : "invisible",
         )}
+        style={{ width: side.width }}
       >
         <span className="dl-in block rounded-[3px] border border-line bg-surface px-3.5 py-3 text-left font-sans text-[13px] leading-relaxed font-normal tracking-normal text-ink normal-case shadow-[0_12px_32px_-16px_rgba(0,0,0,0.35)]">
           {/* A trigger with its own words (the session badge) already names it. */}
@@ -147,6 +181,26 @@ export function InfoTip({
       </span>
     </span>
   );
+}
+
+const WIDTH = 304;
+const MIN_WIDTH = 180;
+const GAP = 8;
+
+/** The part of the window an element can be seen in: the window, cut by every ancestor that scrolls or clips. */
+function clippingBox(element: HTMLElement): { left: number; right: number; top: number; bottom: number } {
+  const box = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  for (let el = element.parentElement; el && el !== document.body; el = el.parentElement) {
+    const style = getComputedStyle(el);
+    if (/(auto|scroll|hidden|clip)/.test(style.overflowX + style.overflowY)) {
+      const r = el.getBoundingClientRect();
+      box.left = Math.max(box.left, r.left);
+      box.right = Math.min(box.right, r.right);
+      box.top = Math.max(box.top, r.top);
+      box.bottom = Math.min(box.bottom, r.bottom);
+    }
+  }
+  return box;
 }
 
 const LEARN_MORE = "mt-2 inline-block text-ink underline decoration-faint underline-offset-4 hover:decoration-ink";

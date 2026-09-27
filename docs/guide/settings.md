@@ -47,7 +47,8 @@ Conversations are deleted from the Workspace list.
 
 ## Also in Settings & Safety
 
-- **Safety check** tests DataLab's promises on this computer. See
+- **Safety check** tests the isolation, database and network promises live
+  on this computer when you press **Run safety check**. See
   [What DataLab will and won't do](safety.md).
 - **GitHub**: see [Sign in to GitHub](github-sign-in.md).
 - **Export folders** and **Workflow destinations**: see

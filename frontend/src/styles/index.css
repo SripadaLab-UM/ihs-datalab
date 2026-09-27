@@ -242,5 +242,4 @@ input[type="radio"] {
 [data-tour-on] {
   outline: 2px solid var(--color-ink);
   outline-offset: 3px;
-  border-radius: 3px;
 }
