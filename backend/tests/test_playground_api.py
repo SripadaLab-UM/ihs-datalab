@@ -111,6 +111,7 @@ def test_a_query_runs_and_its_result_is_kept_in_the_playground(settings, client,
     assert done["row_count"] == 2
     assert [c["name"] for c in done["columns"]] == ["STUDY_PARTICIPANT_ID", "TRACKERSTEPS"]
     assert done["elapsed_seconds"] is not None
+    assert done["tables"] == ["IHS_2025.VFITBITDAILYDATA"]
     assert database.calls == [(SQL, {})]
 
     page = client.get(f"/api/sql/results/{done['query_id']}").json()

@@ -111,6 +111,8 @@ class RunOut(BaseModel):
     bytes_written: int | None
     elapsed_seconds: float | None
     columns: list[ColumnOut]
+    # The tables it read, as the check found them.
+    tables: list[str]
     warnings: list[str]
 
 
@@ -392,6 +394,7 @@ def _run_out(run: Run) -> RunOut:
         bytes_written=outcome.bytes_written if outcome else None,
         elapsed_seconds=outcome.elapsed_seconds if outcome else None,
         columns=_columns(outcome.columns, outcome.column_types) if outcome else [],
+        tables=list(outcome.tables) if outcome else [],
         warnings=list(outcome.warnings) if outcome else [],
     )
 

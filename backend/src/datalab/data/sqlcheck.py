@@ -556,6 +556,7 @@ def _ctes_in_scope(table: exp.Table) -> set[str]:
 
 def _warnings(statement: exp.Expr) -> tuple[str, ...]:
     warnings: list[str] = []
-    if any(True for _ in statement.find_all(exp.Star)):
+    # COUNT(*) counts rows; it doesn't return every column.
+    if any(not isinstance(star.parent, exp.Count) for star in statement.find_all(exp.Star)):
         warnings.append("SELECT * returns every column; list the columns you need.")
     return tuple(warnings)

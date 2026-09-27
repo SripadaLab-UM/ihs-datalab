@@ -1446,6 +1446,8 @@ export interface components {
             elapsed_seconds: number | null;
             /** Columns */
             columns: components["schemas"]["ColumnOut"][];
+            /** Tables */
+            tables: string[];
             /** Warnings */
             warnings: string[];
         };

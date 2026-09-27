@@ -402,6 +402,9 @@ own slot, and the shared modules offer extension points:
     condition.
 - **Results** stream to CSV in the session's `/data/oracle` folder. Each
   result is immutable once written. A preview goes back to the agent.
+  SQL Playground results go to `<data_dir>/playground/<pg_id>/results/`
+  instead, outside every conversation's folder, so no agent can see them;
+  they leave only through an export (`POST /api/sql/results/{id}/export`).
 - **Catalog** is built from the `generated/schema/` metadata for every cohort.
   It powers `search_catalog`, `describe_table`, and the SQL Playground
   browser.

@@ -55,6 +55,10 @@ class TestAllowed:
 
     def test_select_star_warns(self):
         assert "SELECT *" in ok("SELECT * FROM IHS_2025.T").warnings[0]
+        assert "SELECT *" in ok("SELECT t.* FROM IHS_2025.T t").warnings[0]
+
+    def test_count_star_doesnt_warn(self):
+        assert ok("SELECT COUNT(*) FROM IHS_2025.T").warnings == ()
 
 
 class TestRejected:
