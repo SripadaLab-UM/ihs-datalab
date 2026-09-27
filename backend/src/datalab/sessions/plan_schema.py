@@ -198,8 +198,9 @@ MODULES = (
     Section(
         "pilot_to_full",
         "Pilot, then full run",
-        "What the pilot covers, what it must show before the full run, and what would change "
-        "the plan.",
+        "Only when the pilot settles something this plan leaves open (a threshold, a model, "
+        "whether the full run is worth doing): what it covers, and what it must show. Analysis "
+        "mode always pilots first and asks before the full run, so don't add this to say that.",
         "Pilot: did the full run start only once the pilot showed what the plan asked of it?",
     ),
 )
@@ -576,6 +577,14 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
     taken = {_title_key(t) for t in (*(s.label for s in SECTIONS.values()), *RESERVED_TITLES)}
     taken |= {_title_key(s["label"]) for s in earlier}
     if _title_key(title) in taken:
+        registered = next(
+            (s for s in SECTIONS.values() if _title_key(s.label) == _title_key(title)), None
+        )
+        if registered is not None:
+            raise PlanInvalid(
+                f"{registered.label} is one of the plan's own sections: give it in `sections` "
+                f"as {registered.kind!r}, not as an additional section."
+            )
         raise PlanInvalid(f"The plan already has a section called {title!r}, or one like it.")
     if len(earlier) >= MAX_ADDITIONAL:
         raise PlanInvalid(f"A plan can have at most {MAX_ADDITIONAL} additional sections.")

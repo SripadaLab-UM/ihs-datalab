@@ -585,7 +585,7 @@ TASKS = [
          "Is a shorter night's sleep followed by lower mood the next day, within the same intern, "
          "in the 2025 cohort?",
          "plan type: association, with timing and repeated observations as add-ons",
-         _plan_grader({"association"}, max_add_ons=3,
+         _plan_grader({"association"}, max_add_ons=4,
                       needs=("repeated_observations", "temporal_alignment")), plan_only=True),
     Task("plan_affects", "analysis",
          "Does sleeping less make interns' mood worse in the 2025 cohort?",

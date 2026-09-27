@@ -1,0 +1,119 @@
+{
+  "task": "plan_coverage",
+  "mode": "analysis",
+  "prompt": "How complete is the 2025 cohort's Garmin daily data, month by month?",
+  "tests": "plan type: a coverage audit, with only the add-ons it needs",
+  "passed": false,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Data quality or coverage (proposed data_quality)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": false,
+      "detail": "at most 2 (proposed: pilot_to_full, repeated_observations, temporal_alignment)"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"data_quality\",\n  \"analysis_type_label\": \"Data quality or coverage\",\n  \"rationale\": \"This is a coverage/completeness question about whether expected daily Garmin records are present over time, not an exposure-outcome association.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: How complete is Garmin daily summary data for the IHS 2025 cohort, summarized month by month? Purpose: identify which months have strong or weak Garmin daily coverage and whether gaps reflect participant uptake, missing daily records among Garmin users, duplicate rows, or date-range issues.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025. I have checked catalog metadata for IHS_2025.GARMINDAILYSUMMARY, IHS_2025.VGARMINDAILYSUMMARY, and IHS_2025.STUDYPARTICIPANTS, plus the join path. Primary table: IHS_2025.GARMINDAILYSUMMARY, using PARTICIPANTIDENTIFIER or PARTICIPANTID, SUMMARYID, CALENDARDATE, key daily fields such as STEPS, heart-rate fields, DURATIONINSECONDS, and INSERTEDDATE. Roster table: IHS_2025.STUDYPARTICIPANTS, using participant identifiers, ENROLLMENTDATE, and WITHDRAWDATE if usable. Unit of analysis: participant-day, aggregated to participant-month and calendar month. Scope will be calendar dates observed in the 2025 Garmin daily table, with month-by-month summaries. If the Garmin table includes dates outside 2025, I will report that and summarize 2025 calendar months separately.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Checks: participant ID missingness and mapping consistency; duplicate participant-date records; missing or impossible calendar dates; date range; records outside the cohort year; coverage by month; missingness of core daily fields among present daily records; participants in Garmin not found in STUDYPARTICIPANTS; and whether enrollment/withdrawal dates materially affect the denominator. Limitations: a present Garmin daily summary row is evidence that some daily summary was received, but it cannot prove the participant wore the device all day or that all sensor streams were valid. Without an explicit device assignment/eligibility table, completeness relative to 'expected Garmin users' must be approximated by participants with any Garmin daily data, and completeness relative to all enrolled participants may understate completeness if not everyone was expected to use Garmin.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"I will produce a concise static HTML report in /work/outputs and reproducible analysis source in /work. The report will include a month-by-month coverage table and figure, sample-flow counts, data-quality flags, denominator definitions, exact SQL provenance, and notes on assumptions. It will avoid participant identifiers and suppress any participant counts below 11 as '<11'.\"\n    },\n    {\n      \"kind\": \"expected_structure\",\n      \"label\": \"Expected structure and rules\",\n      \"content\": \"Expected structure: ideally one Garmin daily summary row per participant per calendar day among participants expected to have Garmin data. CALENDARDATE should be non-missing and within the intended observation window; participant identifiers should be non-missing; participant-date duplicates should be absent or rare and counted separately. Core daily summaries such as steps, duration, heart-rate, calories, and stress may be missing independently, so row presence and field completeness will be summarized separately.\"\n    },\n    {\n      \"kind\": \"assessment\",\n      \"label\": \"Assessment method\",\n      \"content\": \"Month-level completeness will be summarized as: observed Garmin participant-days; distinct participants with at least one daily row in the month; observed participant-days divided by possible participant-days among participants with any Garmin daily data active in that month; and, if roster/enrollment dates are usable, observed participant-days divided by possible enrolled participant-days for the full 2025 cohort. I will also report median participant-level days observed per month and the percent of participant-months above practical thresholds such as >=1 day, >=15 days, and >=80% of days in month.\"\n    },\n    {\n      \"kind\": \"flag_handling\",\n      \"label\": \"Flagged records\",\n      \"content\": \"Flagged records will not be corrected silently. Duplicate participant-date records, missing IDs, missing dates, dates outside 2025, and records that do not match the roster will be counted and described. For completeness summaries, the primary row-presence metric will count unique participant-date combinations; duplicates will be retained only in quality checks, not counted as extra complete days.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"The repeated structure is participant-days nested within participants and months. This audit is descriptive; I will report both observation counts and participant counts, and avoid treating participant-days as independent people.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Coverage will be aligned by GARMINDAILYSUMMARY.CALENDARDATE at calendar-day and calendar-month grain. Enrollment and withdrawal dates, if used for the all-cohort denominator, will be converted to dates before comparing with CALENDARDATE. Time-zone offsets will be described but not used to reassign dates unless the data checks show a clear need.\"\n    },\n    {\n      \"kind\": \"pilot_to_full\",\n      \"label\": \"Pilot, then full run\",\n      \"content\": \"Pilot: first run count-level/profile queries and a small reproducible extraction sufficient to verify identifiers, date range, duplicate logic, and monthly aggregation. I will report pilot scope and ask before scaling if the full extraction looks large. If bounded counts show the full monthly aggregation is small, I will run the complete aggregation directly because it returns only aggregate data.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 39.50000834465027,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_9be00cb1b223daa9",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "data_quality",
+        "analysis_type_label": "Data quality or coverage",
+        "rationale": "This is a coverage/completeness question about whether expected daily Garmin records are present over time, not an exposure-outcome association.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: How complete is Garmin daily summary data for the IHS 2025 cohort, summarized month by month? Purpose: identify which months have strong or weak Garmin daily coverage and whether gaps reflect participant uptake, missing daily records among Garmin users, duplicate rows, or date-range issues."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025. I have checked catalog metadata for IHS_2025.GARMINDAILYSUMMARY, IHS_2025.VGARMINDAILYSUMMARY, and IHS_2025.STUDYPARTICIPANTS, plus the join path. Primary table: IHS_2025.GARMINDAILYSUMMARY, using PARTICIPANTIDENTIFIER or PARTICIPANTID, SUMMARYID, CALENDARDATE, key daily fields such as STEPS, heart-rate fields, DURATIONINSECONDS, and INSERTEDDATE. Roster table: IHS_2025.STUDYPARTICIPANTS, using participant identifiers, ENROLLMENTDATE, and WITHDRAWDATE if usable. Unit of analysis: participant-day, aggregated to participant-month and calendar month. Scope will be calendar dates observed in the 2025 Garmin daily table, with month-by-month summaries. If the Garmin table includes dates outside 2025, I will report that and summarize 2025 calendar months separately."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Checks: participant ID missingness and mapping consistency; duplicate participant-date records; missing or impossible calendar dates; date range; records outside the cohort year; coverage by month; missingness of core daily fields among present daily records; participants in Garmin not found in STUDYPARTICIPANTS; and whether enrollment/withdrawal dates materially affect the denominator. Limitations: a present Garmin daily summary row is evidence that some daily summary was received, but it cannot prove the participant wore the device all day or that all sensor streams were valid. Without an explicit device assignment/eligibility table, completeness relative to 'expected Garmin users' must be approximated by participants with any Garmin daily data, and completeness relative to all enrolled participants may understate completeness if not everyone was expected to use Garmin."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "I will produce a concise static HTML report in /work/outputs and reproducible analysis source in /work. The report will include a month-by-month coverage table and figure, sample-flow counts, data-quality flags, denominator definitions, exact SQL provenance, and notes on assumptions. It will avoid participant identifiers and suppress any participant counts below 11 as '<11'."
+          },
+          {
+            "kind": "expected_structure",
+            "label": "Expected structure and rules",
+            "content": "Expected structure: ideally one Garmin daily summary row per participant per calendar day among participants expected to have Garmin data. CALENDARDATE should be non-missing and within the intended observation window; participant identifiers should be non-missing; participant-date duplicates should be absent or rare and counted separately. Core daily summaries such as steps, duration, heart-rate, calories, and stress may be missing independently, so row presence and field completeness will be summarized separately."
+          },
+          {
+            "kind": "assessment",
+            "label": "Assessment method",
+            "content": "Month-level completeness will be summarized as: observed Garmin participant-days; distinct participants with at least one daily row in the month; observed participant-days divided by possible participant-days among participants with any Garmin daily data active in that month; and, if roster/enrollment dates are usable, observed participant-days divided by possible enrolled participant-days for the full 2025 cohort. I will also report median participant-level days observed per month and the percent of participant-months above practical thresholds such as >=1 day, >=15 days, and >=80% of days in month."
+          },
+          {
+            "kind": "flag_handling",
+            "label": "Flagged records",
+            "content": "Flagged records will not be corrected silently. Duplicate participant-date records, missing IDs, missing dates, dates outside 2025, and records that do not match the roster will be counted and described. For completeness summaries, the primary row-presence metric will count unique participant-date combinations; duplicates will be retained only in quality checks, not counted as extra complete days."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "The repeated structure is participant-days nested within participants and months. This audit is descriptive; I will report both observation counts and participant counts, and avoid treating participant-days as independent people."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Coverage will be aligned by GARMINDAILYSUMMARY.CALENDARDATE at calendar-day and calendar-month grain. Enrollment and withdrawal dates, if used for the all-cohort denominator, will be converted to dates before comparing with CALENDARDATE. Time-zone offsets will be described but not used to reassign dates unless the data checks show a clear need."
+          },
+          {
+            "kind": "pilot_to_full",
+            "label": "Pilot, then full run",
+            "content": "Pilot: first run count-level/profile queries and a small reproducible extraction sufficient to verify identifiers, date range, duplicate logic, and monthly aggregation. I will report pilot scope and ask before scaling if the full extraction looks large. If bounded counts show the full monthly aggregation is small, I will run the complete aggregation directly because it returns only aggregate data."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 111421,
+        "inputTokens": 109324,
+        "cachedInputTokens": 41472,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2097,
+        "reasoningOutputTokens": 201
+      },
+      "last": {
+        "totalTokens": 22929,
+        "inputTokens": 21856,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1073,
+        "reasoningOutputTokens": 17
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_097a8190549e8a58",
+  "attempt": 1
+}
