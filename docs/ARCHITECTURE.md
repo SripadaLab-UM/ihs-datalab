@@ -270,7 +270,11 @@ src/datalab/
   reaches services bound to `127.0.0.1` (verified on Mac).
 - **Networks.** For each session, DataLab creates an **internal Docker
   network**, which has no route out. The agent joins only that network. The
-  gateway joins it and the normal bridge.
+  gateway joins it and the normal bridge. Network and container names carry
+  the DataLab instance (a short hash of the data folder) as well as the
+  session (`datalab-<instance>-<session>-agent`), so two DataLabs whose data
+  folders hold the same conversation never share or replace each other's
+  containers. Cleanup finds them by label, never by name.
 - **Research sessions** add **Squid** as a forward proxy for the internet
   (verified in the spike). It is started with `-n` so it doesn't do reverse
   lookups. Its deny rules come *first* and cover the host, private and

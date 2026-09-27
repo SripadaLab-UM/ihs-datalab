@@ -42,6 +42,21 @@ def instance_of(data_dir: Path) -> str:
     return hashlib.sha256(str(Path(data_dir).resolve()).encode()).hexdigest()[:16]
 
 
+def session_name(session_id: str, instance: str) -> str:
+    """The session's network name, and the prefix of its containers' names.
+
+    Names are unique per instance as well as per session: two DataLabs whose
+    data folders hold the same conversation (a copied folder, say) must never
+    share, reuse or replace each other's containers. Containers named before
+    this (`datalab-<session>-agent`) are still found by their labels and
+    cleaned up (see remove_all_session_containers).
+    """
+    if not instance:
+        raise ValueError("A session's containers need their DataLab instance.")
+    short = session_id.replace("_", "-")[-24:]
+    return f"datalab-{instance[:8]}-{short}"
+
+
 # Stops commands a turn left running after an interrupt. Codex 0.157.1 ends
 # the turn but not the shell commands it started (found in the spike).
 _KILL_TURN_PROCESSES = (
@@ -130,7 +145,7 @@ class SessionContainers:
         agent_image: str,
         host_port: int,
         profile: str,
-        instance: str = "",
+        instance: str,
         limits: ContainerLimits | None = None,
         # More `docker run` mount arguments, read when the agent starts: the
         # conversation's attached inputs, all read-only (see inputs.py).
@@ -148,11 +163,10 @@ class SessionContainers:
             "--label", f"{_PROFILE_LABEL}={profile}",
             "--label", f"{_INSTANCE_LABEL}={instance}",
         ]  # fmt: skip
-        short = session_id.replace("_", "-")[-24:]
-        self.network = f"datalab-{short}"
-        self.gateway = f"datalab-{short}-gateway"
-        self.agent = f"datalab-{short}-agent"
-        self.proxy = f"datalab-{short}-proxy"
+        self.network = session_name(session_id, instance)
+        self.gateway = f"{self.network}-gateway"
+        self.agent = f"{self.network}-agent"
+        self.proxy = f"{self.network}-proxy"
 
     async def start(self, token: str) -> None:
         """Create or restart the session's network and containers."""
@@ -377,6 +391,9 @@ async def remove_all_session_containers(profile: str, data_dir: Path) -> None:
     evaluation server, say) may be running now. A container from before
     instances were labelled counts as this one's only if its session's folder
     is in this data folder.
+
+    Found by label, never by name, so containers from before names carried
+    the instance (`datalab-<session>-agent`) are cleaned up too.
     """
     instance = instance_of(data_dir)
     owned = f"label={_PROFILE_LABEL}={profile}"

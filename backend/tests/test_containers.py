@@ -1,15 +1,19 @@
 """Container state checks fail closed: if Docker can't answer, nothing is assumed stopped."""
 
+import os
+import secrets
+
 import pytest
 
 from datalab.sessions import containers as module
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
 
 
-def make(tmp_path):
+def make(tmp_path, instance="abc"):
     return SessionContainers(
-        "c_1", "data", SessionPaths(tmp_path), agent_image="img", host_port=1, profile="practice"
-    )
+        "c_1", "data", SessionPaths(tmp_path), agent_image="img", host_port=1,
+        profile="practice", instance=instance,
+    )  # fmt: skip
 
 
 def fake_docker(monkeypatch, answers):
@@ -35,7 +39,7 @@ async def test_stop_isnt_confirmed_if_docker_cant_answer(tmp_path, monkeypatch):
 
 
 async def test_stop_is_confirmed_when_the_container_is_gone(tmp_path, monkeypatch):
-    fake_docker(monkeypatch, [(1, "", "Error: No such object: datalab-c-1-agent")])
+    fake_docker(monkeypatch, [(1, "", "Error: No such object: datalab-abc-c-1-agent")])
     await make(tmp_path).stop_and_confirm()
 
 
@@ -78,8 +82,60 @@ def test_instance_names_are_stable_per_data_folder(tmp_path):
 
 
 def test_containers_carry_their_instance(tmp_path):
-    containers = SessionContainers(
-        "c_1", "data", SessionPaths(tmp_path), agent_image="img", host_port=1,
-        profile="practice", instance="abc",
-    )  # fmt: skip
-    assert "datalab.instance=abc" in containers._labels
+    assert "datalab.instance=abc" in make(tmp_path)._labels
+
+
+def test_names_are_unique_per_instance(tmp_path):
+    """Two DataLabs whose data folders hold the same conversation (a copied
+    folder, say) must not share a network or a container name: `start()`
+    reuses a network by name and replaces a container by name."""
+    first = make(tmp_path, module.instance_of(tmp_path / "a"))
+    second = make(tmp_path, module.instance_of(tmp_path / "b"))
+    for attribute in ("network", "gateway", "agent", "proxy"):
+        mine, theirs = getattr(first, attribute), getattr(second, attribute)
+        assert mine != theirs
+        assert mine.startswith("datalab-") and "c-1" in mine
+        assert len(mine) <= 63
+    assert first.agent == f"{first.network}-agent"
+
+
+def test_names_need_an_instance(tmp_path):
+    with pytest.raises(ValueError):
+        make(tmp_path, instance="")
+
+
+@pytest.mark.docker
+async def test_cleanup_finds_containers_named_before_instance_names(tmp_path):
+    """Containers and networks named `datalab-<session>` (before names carried
+    the instance) are still this instance's by label, and are cleaned up."""
+    image = os.environ.get("DATALAB_TEST_AGENT_IMAGE", "datalab-probe:ci")
+    if (await module.docker_status("image", "inspect", image))[0] != 0:
+        pytest.skip(f"Build the probe image first: docker build -t {image} images/probe")
+    # A profile of its own, so nothing outside this test can match.
+    profile = f"test-{secrets.token_hex(4)}"
+    tag = secrets.token_hex(4)
+    labelled, unlabelled = f"c_{tag}a", f"c_{tag}b"
+    (tmp_path / "sessions" / unlabelled).mkdir(parents=True)
+    networks, containers = [], []
+    try:
+        for session, instance in ((labelled, module.instance_of(tmp_path)), (unlabelled, "")):
+            old = f"datalab-{session.replace('_', '-')}"
+            labels = [
+                "--label", f"datalab.session={session}",
+                "--label", f"datalab.profile={profile}",
+            ]  # fmt: skip
+            if instance:  # before instance labels, too
+                labels += ["--label", f"datalab.instance={instance}"]
+            await module.docker("network", "create", "--internal", *labels, old)
+            networks.append(old)
+            await module.docker("create", "--name", f"{old}-agent", *labels, image)
+            containers.append(f"{old}-agent")
+        await module.remove_all_session_containers(profile, tmp_path)
+        owned = f"label=datalab.profile={profile}"
+        assert not (await module.docker("ps", "-aq", "--filter", owned)).strip()
+        assert not (await module.docker("network", "ls", "-q", "--filter", owned)).strip()
+    finally:
+        for name in containers:
+            await module.docker("rm", "-f", name, check=False)
+        for name in networks:
+            await module.docker("network", "rm", name, check=False)
