@@ -148,6 +148,19 @@ it("shows an existing conversation as the Workspace does, with nothing added to 
   expect(api.createConversation).not.toHaveBeenCalled();
 });
 
+it("unticks the context when it's about something else, but not when it's edited", async () => {
+  listed = [conversation("c1", "Sleep tables")];
+  const update = show({ conversationId: "c1", context: query });
+  await screen.findByRole("button", { name: /Sleep tables/ });
+  fireEvent.click(include());
+  // The same query, edited: still ticked.
+  update({ context: { ...query, text: "SELECT 2 FROM dual" } });
+  expect(include()).toBeChecked();
+  // Another file altogether: the person ticks it again if they want it sent.
+  update({ context: { label: "ihsDataR/R/steps.R, as on main", text: "x <- 1", language: "r" } });
+  expect(screen.getByRole("checkbox", { name: /Send with your message/ })).not.toBeChecked();
+});
+
 it("shows exactly what would be sent, the first lines and then all of them", async () => {
   const long = { ...query, text: "SELECT a,\n  b,\n  c,\n  d\nFROM t\n" };
   show({ context: long });

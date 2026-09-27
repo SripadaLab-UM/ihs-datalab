@@ -21,6 +21,7 @@ def test_workflows_say_where_their_files_are(client, settings):
     assert client.get("/api/workflows/status").json() == {
         "available": True,
         "folder": str(settings.data_dir / "workflows-local"),
+        "message": None,
     }
     assert client.get("/api/workflows").json() == []
 

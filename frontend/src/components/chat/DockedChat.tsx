@@ -55,6 +55,13 @@ export function DockedChat({
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
   const [includeContext, setIncludeContext] = useState(false);
+  // Context about something else now (another file, say): the person ticks
+  // it again if they want it sent. Edits to the same thing keep the tick.
+  const [contextLabel, setContextLabel] = useState(context?.label);
+  if (context?.label !== contextLabel) {
+    setContextLabel(context?.label);
+    setIncludeContext(false);
+  }
   const id = conversationId ?? started?.id;
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(id) });
   // The list may not have caught up with a conversation just started.

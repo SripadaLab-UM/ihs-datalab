@@ -37,6 +37,7 @@ from datalab.config import Settings
 from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Base, Change, Workspace, fingerprint
 from datalab.pipelines import share
+from datalab.pipelines.check import Report, check
 from datalab.pipelines.proposals import (
     ACTIONABLE,
     PipelineStore,
@@ -373,9 +374,9 @@ class Pipelines:
     def shared_files(self, proposal: Proposal) -> dict[str, bytes | None]:
         return {c.path: self._agent_bytes(proposal.conversation_id, c) for c in proposal.files}
 
-    def preview(self, proposal: Proposal) -> kb.Report:
+    def preview(self, proposal: Proposal) -> Report:
         """The check, as Save & share would run it first."""
-        return share.check(self.shared_files(proposal))
+        return check(self.shared_files(proposal))
 
     def get(self, proposal_id: str) -> Proposal:
         proposal = self.store.get(proposal_id)

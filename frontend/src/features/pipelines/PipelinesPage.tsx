@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { type PipelineProposal, pipelinesApi } from "@/api/pipelines";
@@ -47,6 +47,12 @@ export function PipelinesPage() {
   const [chatId, setChatId] = useTabState("datalab:pipelines:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
+  // Below these widths each is a drawer over the page.
+  const drawerBox = useRef<HTMLElement>(null);
+  const chatBox = useRef<HTMLElement>(null);
+  useOverlay(drawer, () => setDrawer(false), drawerBox, "(min-width: 1024px)");
+  // The button that opened the chat is gone while it's open: its successor gets focus back.
+  useOverlay(chatOpen === "open", () => setChatOpen("closed"), chatBox, WIDE, askButton);
 
   const file = useQuery({
     queryKey: ["pipelines-file", status.data?.head, path],
@@ -124,6 +130,7 @@ export function PipelinesPage() {
     >
       {drawer && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
       <aside
+        ref={drawerBox}
         aria-label="Files and changes"
         className={clsx(
           "min-h-0 overflow-hidden border-r border-line bg-rail",
@@ -163,7 +170,12 @@ export function PipelinesPage() {
             </p>
           </div>
           {chatOpen === "closed" && (
-            <Button variant="secondary" className="shrink-0 px-2.5 py-1 text-[12.5px]" onClick={() => setChatOpen("open")}>
+            <Button
+              data-opens-chat=""
+              variant="secondary"
+              className="shrink-0 px-2.5 py-1 text-[12.5px]"
+              onClick={() => setChatOpen("open")}
+            >
               <Icon name="spark" size={13} /> Ask the agent
             </Button>
           )}
@@ -213,6 +225,7 @@ export function PipelinesPage() {
         <>
           <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
+            ref={chatBox}
             aria-label="Data engineering chat"
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
@@ -324,6 +337,43 @@ function Overview({
     </div>
   );
 }
+
+/**
+ * A drawer over the page, below `wide`: focus goes into it as it opens and back
+ * to what opened it as it closes, and Escape closes it (unless a dialog, such
+ * as a number's sources, is open: that closes first).
+ */
+function useOverlay(
+  open: boolean,
+  close: () => void,
+  box: RefObject<HTMLElement | null>,
+  wide: string,
+  // Where focus goes back to if what opened it isn't there any more.
+  returnTo?: () => HTMLElement | null,
+) {
+  const closing = useRef(close);
+  closing.current = close;
+  useEffect(() => {
+    if (!open || window.matchMedia?.(wide).matches) return;
+    // (Not the page itself, when the button that opened it is already gone.)
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body ? active : null;
+    if (!box.current?.contains(document.activeElement)) {
+      box.current?.querySelector<HTMLElement>("textarea, input, button, a[href]")?.focus();
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !document.querySelector("[role=dialog]")) closing.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      if (opener?.isConnected) opener.focus();
+      else returnTo?.()?.focus();
+    };
+  }, [open, box, wide, returnTo]);
+}
+
+const askButton = () => document.querySelector<HTMLElement>("[data-opens-chat]");
 
 /** A chat kept from before that isn't in DataLab any more (deleted): start afresh. */
 function useForgetMissingChat(chatId: string, forget: () => void) {

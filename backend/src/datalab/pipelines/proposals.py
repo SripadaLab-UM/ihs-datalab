@@ -115,19 +115,6 @@ def _grouped(refused: list[Refusal], most: int = 10) -> list[Refusal]:
     return out
 
 
-def data_findings(files: dict[str, bytes | None]) -> kb.Report:
-    """The participant-data scan (the knowledge base's) over the changed files."""
-    report = kb.Report()
-    for path, content in sorted(files.items()):
-        if content is None:
-            continue
-        report.findings += kb.name_findings(path)
-        text = kb.as_text(content)
-        if text is not None:
-            report.findings += kb.data_findings(path, text)
-    return report
-
-
 # Storage --------------------------------------------------------------------
 
 
@@ -207,13 +194,12 @@ class PipelineStore:
         with self._lock:
             self._db.execute(
                 "INSERT INTO pipeline_proposals (id, conversation_id, created_at, updated_at, "
-                "turn, checkpoint, base, tree, fingerprint, status, files_json, refused_json, "
-                "result_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
+                "turn, checkpoint, base, proposal_commit, tree, fingerprint, status, "
+                "files_json, refused_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
                 (
-                    proposal.id, conversation_id, now, now, turn, checkpoint, base, tree,
+                    proposal.id, conversation_id, now, now, turn, checkpoint, base, commit, tree,
                     fingerprint, json.dumps([c.to_dict() for c in files]),
                     json.dumps([{"path": r.path, "reason": r.reason} for r in refused]),
-                    json.dumps({"proposal_commit": commit}),
                 ),
             )  # fmt: skip
         return proposal
@@ -249,7 +235,7 @@ class PipelineStore:
                 "decided_by = ?, updated_at = ? WHERE id = ?",
                 (
                     proposal.status,
-                    json.dumps({**proposal.result, "proposal_commit": proposal.commit}),
+                    json.dumps(proposal.result),
                     proposal.saved_commit,
                     proposal.decided_by,
                     proposal.updated_at,
@@ -263,14 +249,10 @@ class PipelineStore:
         now = _now()
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, result_json FROM pipeline_proposals WHERE status = 'saving'"
+                "SELECT id FROM pipeline_proposals WHERE status = 'saving'"
             ).fetchall()
             for row in rows:
-                result = {
-                    **json.loads(row["result_json"]),
-                    "state": "failed",
-                    "message": "DataLab stopped while saving. Try again.",
-                }
+                result = {"state": "failed", "message": "DataLab stopped while saving. Try again."}
                 self._db.execute(
                     "UPDATE pipeline_proposals SET status = 'failed', result_json = ?, "
                     "updated_at = ? WHERE id = ?",
@@ -347,8 +329,6 @@ class PipelineStore:
 
 
 def _proposal(row: sqlite3.Row) -> Proposal:
-    result = json.loads(row["result_json"])
-    commit = result.pop("proposal_commit", "")
     return Proposal(
         id=row["id"],
         conversation_id=row["conversation_id"],
@@ -357,13 +337,13 @@ def _proposal(row: sqlite3.Row) -> Proposal:
         turn=row["turn"],
         checkpoint=row["checkpoint"],
         base=row["base"],
-        commit=commit,
+        commit=row["proposal_commit"],
         tree=row["tree"],
         fingerprint=row["fingerprint"],
         status=row["status"],
         files=[Change.from_dict(c) for c in json.loads(row["files_json"])],
         refused=[Refusal(r["path"], r["reason"]) for r in json.loads(row["refused_json"])],
-        result=result,
+        result=json.loads(row["result_json"]),
         saved_commit=row["commit_sha"],
         decided_by=row["decided_by"],
     )

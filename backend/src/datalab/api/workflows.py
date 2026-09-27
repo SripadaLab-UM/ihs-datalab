@@ -8,7 +8,8 @@ no-network containers (see workflows/runner.py). Run records are migration
 
 Workflow files are read from the synced `ihs-pipelines` repo, `[workflows]
 folder` in settings.toml, or `<data folder>/workflows-local/`
-(`workflows_root` in workflows/source.py).
+(`workflows_folder` in workflows/source.py). A run reads a snapshot of them,
+taken when it starts.
 """
 
 from __future__ import annotations
@@ -44,7 +45,7 @@ from datalab.workflows.model import (
 from datalab.workflows.records import RunStore
 from datalab.workflows.runner import ReplayNotExact, RunRefused, WorkflowRunner
 from datalab.workflows.sandbox import DockerSandbox, Sandbox, StepLimits
-from datalab.workflows.source import SourceError, WorkflowFolder, workflows_root
+from datalab.workflows.source import SourceError, workflows_folder
 
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
@@ -71,6 +72,8 @@ DeliveryStatus = Literal["none", "pending", "delivered", "skipped", "failed"]
 class WorkflowsStatus(BaseModel):
     available: bool
     folder: str
+    # Why the files come from that folder, when it isn't the expected one.
+    message: str | None = None
 
 
 class ProblemOut(BaseModel):
@@ -254,7 +257,7 @@ class SetDestinationKey(BaseModel):
 
 def build_workflows_router(services: WorkflowServices) -> APIRouter:
     settings = services.settings
-    folder = WorkflowFolder(workflows_root(settings))
+    folder = workflows_folder(settings)
     destinations = DestinationStore(services.database)
     limits = settings.workflows
     sandbox = services.sandbox or DockerSandbox(
@@ -307,7 +310,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 
     @router.get("/status")
     def status() -> WorkflowsStatus:
-        return WorkflowsStatus(available=True, folder=str(folder.root))
+        return WorkflowsStatus(available=True, folder=str(folder.root), message=folder.note)
 
     @router.get("")
     def list_workflows() -> list[WorkflowOut]:

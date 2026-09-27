@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import httpx
@@ -22,9 +22,11 @@ from fastapi.testclient import TestClient
 from datalab import db
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
 from datalab.config import RepoSettings, Settings, WorkflowSettings
+from datalab.pipelines.check import check
 from datalab.pipelines.proposals import Proposal
+from datalab.pipelines.proposals import TestRun as Run
 from datalab.pipelines.service import UNAVAILABLE_NOTE, Pipelines
-from datalab.pipelines.testing import COMMAND, read_results
+from datalab.pipelines.testing import COMMAND, PackageTests, read_results
 from datalab.repos.github import Account, GitHubAuth, Tokens, TokenStore
 from datalab.sessions.checkpoints import Checkpoints
 from datalab.sessions.hooks import TurnInfo
@@ -32,8 +34,8 @@ from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
 from datalab.workflows.sandbox import ContainerOutcome, ContainerStep, ImageFacts
-from datalab.workflows.source import workflows_root
-from tests.kb_fixtures import Remote
+from datalab.workflows.source import workflows_folder
+from tests.kb_fixtures import Remote, git
 
 TOKEN = "ghu_test_access_token_0123456789"
 REFRESH = "ghr_test_refresh_token_0123456789"
@@ -470,6 +472,36 @@ def test_others_changes_to_the_package_are_tested_again_before_the_push(lab):
     assert "ihsDataR/R/dates.R" in lab.sandbox.trees[1]
     assert lab.sandbox.steps[1].binds[0].source != lab.sandbox.steps[0].binds[0].source
     assert lab.remote.show("ihsDataR/R/dates.R") == "to_date <- function(x) x"
+    # The pushed commit names the run that passed on it: the second.
+    message = git("log", "-1", "--format=%B", "main", cwd=lab.remote.bare)
+    assert f"DataLab-Tests: {done['result']['test']}" in message
+    first = lab.pipelines.store.latest_test(proposal.tree)
+    assert first is not None and first.id != done["result"]["test"]
+
+
+def test_install_and_load_code_waits_for_the_person_to_confirm(lab):
+    synced(lab)
+    cid = conversation(lab)
+    hook = STEPS_R + "\n.onLoad <- function(libname, pkgname) {\n  system('curl x')\n}\n"
+    proposal = turn(
+        lab,
+        cid,
+        {"ihsDataR/R/steps.R": hook, "ihsDataR/configure": "#!/bin/sh\necho hi\n"},
+    )
+    assert proposal is not None
+    findings = lab.client.get(f"/api/pipelines/proposals/{proposal.id}").json()["findings"]
+    code = {(f["path"], f["rule"]): f for f in findings if f["severity"] == "code"}
+    assert set(code) == {
+        ("ihsDataR/R/steps.R", "load_hook"),
+        ("ihsDataR/configure", "install_script"),
+    }
+    assert code[("ihsDataR/R/steps.R", "load_hook")]["text"].startswith(".onLoad <- function")
+    assert code[("ihsDataR/R/steps.R", "load_hook")]["line"] == 5
+    done = accept(lab, proposal)["proposal"]
+    assert done["status"] == "check_failed"
+    assert {f["rule"] for f in done["result"]["findings"]} == {"load_hook", "install_script"}
+    saved = accept(lab, proposal, [f["id"] for f in code.values()])["proposal"]
+    assert saved["status"] == "saved"
 
 
 def test_others_changes_elsewhere_dont_need_the_tests_again(lab):
@@ -560,20 +592,209 @@ def test_a_save_cut_off_by_datalab_stopping_says_so(lab):
 # Where workflow files come from -------------------------------------------------
 
 
-def test_workflows_come_from_the_pipelines_clone_when_its_set(tmp_path):
-    data = tmp_path / "data"
-    repos = RepoSettings(pipelines="SripadaLab-UM/ihs-pipelines", client_id="Iv23liTESTCLIENT")
-    real = Settings(profile="real", data_dir=data, oracle=None, repos=repos)
-    assert workflows_root(real) == data / "repos" / "ihs-pipelines"
-    assert not (data / "repos" / "ihs-pipelines").exists()  # made by the first sync, not here
-    folder = Settings(
+def lab_settings(lab: Lab) -> Settings:
+    return Settings(
         profile="real",
-        data_dir=data,
+        data_dir=lab.pipelines.tests.folder.parent,
         oracle=None,
-        repos=repos,
-        workflows=WorkflowSettings(folder=str(tmp_path / "mine")),
+        repos=RepoSettings(pipelines="SripadaLab-UM/ihs-pipelines", client_id="Iv23liTESTCLIENT"),
     )
-    assert workflows_root(folder) == tmp_path / "mine"
-    practice = Settings(profile="practice", data_dir=data, oracle=None, repos=repos)
-    assert workflows_root(practice) == data / "workflows-local"
-    assert (data / "workflows-local").is_dir()
+
+
+def test_workflows_come_from_the_pipelines_clone_once_its_synced(lab, tmp_path):
+    settings = lab_settings(lab)
+    local = settings.data_dir / "workflows-local"
+    folder = workflows_folder(settings)
+    # Until the first sync: the local folder, and it says so.
+    assert folder.root == local and "hasn't been synced yet" in (folder.note or "")
+    synced(lab)
+    assert folder.root == lab.pipelines._repo().clone.path and folder.note is None
+    assert folder.paths() == ["workflows/weekly.yaml"]
+    # A folder in settings.toml wins; practice never uses the lab's repos.
+    mine = WorkflowSettings(folder=str(tmp_path / "mine"))
+    assert workflows_folder(replace(settings, workflows=mine)).root == tmp_path / "mine"
+    assert workflows_folder(replace(settings, profile="practice")).root == local
+
+
+def test_a_runs_snapshot_is_one_commit_whatever_syncs_meanwhile(lab, tmp_path):
+    synced(lab)
+    folder = workflows_folder(lab_settings(lab))
+    first = lab.remote.head()
+    run = folder.snapshot(tmp_path / "run" / "source")
+    # Someone saves a new package and workflow; the tab syncs mid-run.
+    changed = {"ihsDataR/R/steps.R": NEW_STEPS.encode(), "workflows/weekly.yaml": b"name: w\n"}
+    lab.remote.write(changed, "Someone else")
+    synced(lab)
+    assert (folder.root / "ihsDataR/R/steps.R").read_text() == NEW_STEPS  # the checkout moved on
+    # The run's copy didn't: it's all from the commit it started on, and says so.
+    assert (run.package_dir / "R" / "steps.R").read_text() == STEPS_R
+    workflow = run.read("workflows/weekly.yaml")
+    assert (workflow.source, workflow.commit, workflow.text) == (
+        "git",
+        first,
+        "name: weekly\nsteps: []\n",
+    )
+    assert run.package().tree_sha256 != folder.package().tree_sha256
+    # Only what a run needs: not AGENTS.md, reference/ or .github/.
+    copied = sorted(p.name for p in (tmp_path / "run" / "source").iterdir())
+    assert copied == ["ihsDataR", "workflows"]
+
+
+DEVICES_PIPELINE = b"""\
+name: weekly_devices
+reads:
+  - object: IHS_2025.WEARABLE_DAILY
+    columns: [STUDY_PARTICIPANT_ID, RECORD_DATE, DEVICE, STEPS]
+    where: RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+parameters: [start_date]
+outputs: { devices: devices.csv }
+"""
+DEVICES_WORKFLOW = b"""\
+name: devices
+reads: [IHS_2025.WEARABLE_DAILY]
+parameters:
+  start_date: { type: date, default: 2025-04-15 }
+steps:
+  - id: extract
+    sql: |
+      SELECT STUDY_PARTICIPANT_ID, RECORD_DATE, DEVICE, STEPS
+      FROM IHS_2025.WEARABLE_DAILY
+      WHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+    output: raw.csv
+  - id: wait
+    r: Sys.sleep(1)
+    inputs: { raw: extract }
+  - id: metrics
+    pipeline: weekly_devices
+"""
+
+
+async def test_a_run_uses_the_commit_it_started_on_though_the_repo_syncs_mid_run(lab, tmp_path):
+    from tests.workflow_fakes import FakeRun, FakeSandbox, Harness
+
+    lab.remote.write(
+        {
+            "ihsDataR/inst/pipelines/weekly_devices/pipeline.yaml": DEVICES_PIPELINE,
+            "ihsDataR/inst/pipelines/weekly_devices/run.R": b"write.csv(x, outputs$devices)\n",
+            "workflows/devices.yaml": DEVICES_WORKFLOW,
+        },
+        "Add the devices pipeline",
+    )
+    synced(lab)
+    started_on = lab.remote.head()
+    release = asyncio.Event()
+    waiting = asyncio.Event()
+
+    async def wait(run: FakeRun) -> int:
+        waiting.set()
+        await release.wait()
+        run.result()
+        return 0
+
+    def metrics(run: FakeRun) -> int:
+        run.output("devices").write_text("DEVICE,days\nfitbit,3\n")
+        run.result()
+        return 0
+
+    class Sandbox(FakeSandbox):
+        async def run(self, step: ContainerStep) -> ContainerOutcome:
+            if step.name.startswith("build-"):
+                self.steps.append(step)
+                return ContainerOutcome(exit_code=0, log=b"")
+            return await super().run(step)
+
+    h = Harness(tmp_path, sandbox=Sandbox({"wait": wait, "metrics": metrics}))
+    h.runner.folder = workflows_folder(lab_settings(lab))
+    run_id = await h.runner.start("workflows/devices.yaml")
+    await waiting.wait()
+    # Mid-run: someone saves a new package, and the Pipelines tab syncs.
+    lab.remote.write({"ihsDataR/R/steps.R": NEW_STEPS.encode()}, "Someone else")
+    await asyncio.to_thread(lab.pipelines.sync)
+    assert (lab.pipelines._repo().clone.path / "ihsDataR/R/steps.R").read_text() == NEW_STEPS
+    release.set()
+    run = await h.finish(run_id)
+    assert run["status"] == "succeeded", [(s["step_id"], s["message"]) for s in run["steps"]]
+    # Recorded, and built, from the commit it started on.
+    assert (run["workflow_source"], run["repo_commit"]) == ("git", started_on)
+    built = h.run_dir(run) / "package-src"
+    assert (built / "R" / "steps.R").read_text() == STEPS_R
+
+
+# The check ------------------------------------------------------------------------
+
+
+def test_a_small_id_map_is_caught_even_where_the_knowledge_bases_scan_isnt():
+    fixture = b"participant_id,first_visit\n1001,2019-03-02\n1002,2019-03-09\n1003,2019-04-01\n"
+    report = check({"ihsDataR/tests/testthat/fixtures/oracle_results/id_map.csv": fixture})
+    rules = [f.rule for f in report.findings]
+    assert rules.count("data_file") == 1 and rules.count("id_columns") == 1
+    assert rules.count("date_near_number") == 3
+    columns = next(f for f in report.findings if f.rule == "id_columns")
+    assert "participant_id" in columns.message and columns.line == 1
+    dated = [f for f in report.findings if f.rule == "date_near_number"]
+    assert dated[0].text == "1001,2019-03-02"
+    # Every one waits for the person; a confirmed one no longer does.
+    assert len(report.blocking()) == len(report.findings)
+    assert len(report.blocking([f.id for f in report.findings])) == 0
+
+
+def test_test_code_with_ids_and_dates_is_flagged_but_ordinary_code_isnt():
+    test = b'x <- data.frame(id = 204512, day = as.Date("2025-03-01"))\n'
+    assert [f.rule for f in check({"ihsDataR/tests/testthat/test-x.R": test}).findings] == [
+        "date_near_number"
+    ]
+    code = b'weekly <- function(x, since = as.Date("2025-01-01")) head(x, 1000)\n'
+    assert check({"ihsDataR/R/weekly.R": code}).findings == []
+    # A year isn't an ID.
+    assert check({"ihsDataR/tests/testthat/test-y.R": b'"2025-03-01" # FY2025\n'}).findings == []
+
+
+def test_code_that_runs_outside_the_test_container_is_named():
+    files = {
+        "ihsDataR/.Rprofile": b"options(x = 1)\n",
+        "ihsDataR/cleanup": b"rm -f src/*.o\n",
+        "ihsDataR/src/Makevars": b"PKG_LIBS = -lm\n",
+        "ihsDataR/R/zzz.R": b".onAttach <- function(...) packageStartupMessage('hi')\n",
+        "ihsDataR/R/ok.R": b"# not .onLoad\nf <- function() 1\n",
+    }
+    rules = {f.path: f.rule for f in check(files).findings if f.severity == "code"}
+    assert rules == {
+        "ihsDataR/.Rprofile": "startup_code",
+        "ihsDataR/cleanup": "install_script",
+        "ihsDataR/src/Makevars": "compiled_code",
+        "ihsDataR/R/zzz.R": "load_hook",
+    }
+
+
+async def test_only_a_few_test_runs_go_at_once(tmp_path, monkeypatch):
+    from datalab.pipelines import testing
+
+    tests = PackageTests(sandbox=FakeSandbox(), image="x", store=None, folder=tmp_path)  # type: ignore[arg-type]
+    going = most = 0
+
+    async def slow(self, run, clone, commit, place):
+        nonlocal going, most
+        going += 1
+        most = max(most, going)
+        await asyncio.sleep(0.05)
+        going -= 1
+        return run
+
+    monkeypatch.setattr(testing.PackageTests, "_run", slow)
+    runs = [Run(f"pt_{i}", "t", None, "c", "running", "") for i in range(5)]
+    await asyncio.gather(*(tests.execute(run, None) for run in runs))  # type: ignore[arg-type]
+    assert most == testing.MAX_AT_ONCE == 2
+
+
+def test_tests_get_a_folder_of_their_own_where_compiled_code_can_run(lab):
+    synced(lab)
+    cid = conversation(lab)
+    proposal = turn(lab, cid, {"ihsDataR/R/steps.R": NEW_STEPS})
+    assert proposal is not None
+    lab.client.post(f"/api/pipelines/proposals/{proposal.id}/tests")
+    settled(lab, proposal.id)
+    [step] = lab.sandbox.steps
+    binds = {b.target: b.readonly for b in step.binds}
+    assert binds == {"/run/src": True, "/run/out": False, "/run/work": False}
+    assert step.env == {"TMPDIR": "/run/work/tmp"}
+    assert "cp -r /run/src/ihsDataR /run/work/pkg" in step.command[-1]

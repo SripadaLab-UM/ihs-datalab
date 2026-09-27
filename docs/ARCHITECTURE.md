@@ -511,7 +511,7 @@ own slot, and the shared modules offer extension points:
      commit.
 
   As built, for both repos, step 4 re-runs the checks (and, for pipelines,
-  the tests when others changed `ihsDataR/`) and pushes if they pass,
+  the tests when the rebased `ihsDataR` tree differs) and pushes if they pass,
   without showing the person the others' changes first.
 - The participant-data scan covers workflow files too, since SQL literals,
   comments, and parameter defaults could contain IDs.

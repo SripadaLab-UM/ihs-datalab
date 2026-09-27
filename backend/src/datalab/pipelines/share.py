@@ -2,18 +2,20 @@
 
 As for the knowledge base (knowledge/share.py), with the package's tests:
 
-1. Check the change: nothing outside `ihsDataR/` and `workflows/`, nothing
-   in `.github/` (the sign-in's Contents permission can't change it), and
-   the participant-data scan. An error, or a data hit the person hasn't
-   confirmed as a false positive, stops here.
+1. Check the change (check.py): nothing outside `ihsDataR/` and
+   `workflows/`, nothing in `.github/` (the sign-in's Contents permission
+   can't change it), the participant-data scan, and code that would run on
+   install or load. An error, or a finding the person hasn't confirmed,
+   stops here.
 2. The tests must have passed on the proposal's own tree (Save & share runs
    them first if they haven't run yet).
 3. Commit it on the conversation's base, as the person, with trailers
    naming the conversation, the proposal and the test run.
 4. Fetch, and rebase that commit onto GitHub's `main`. Where someone else
    changed the same lines, stop: nothing is pushed.
-5. Check the rebased commit again. If others changed the package meanwhile,
-   run the tests again on it: the tests must pass on what's pushed.
+5. Check the rebased commit again. If its package (the `ihsDataR` tree) isn't
+   the one the tests passed on, run them again on it: the tests must pass
+   on what's pushed, and its message then names that run.
 6. Push exactly that commit, never forcing. If `main` moved on meanwhile,
    go back to 4 (a few times at most).
 
@@ -29,16 +31,11 @@ from collections.abc import Awaitable, Callable, Collection
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from datalab.knowledge import check as kb
-from datalab.pipelines.proposals import (
-    EDITABLE,
-    Proposal,
-    TestRun,
-    data_findings,
-    proposal_problem,
-)
+from datalab.pipelines.check import Report, check
+from datalab.pipelines.proposals import Proposal, TestRun
 from datalab.repos.git import Clone, GitError, Identity
 from datalab.repos.github import GitHubUnavailable, SignInNeeded
+from datalab.workflows.source import PACKAGE
 
 SaveState = Literal[
     "saved", "nothing to save", "conflict", "check_failed", "tests_failed", "failed"
@@ -85,18 +82,6 @@ class Share:
     confirmed: Collection[str] = ()
 
 
-def check(files: dict[str, bytes | None], confirmed: Collection[str] = ()) -> kb.Report:
-    """What stops a save: paths that can't be changed, and the data scan."""
-    report = data_findings(files)
-    for path in sorted(files):
-        problem = proposal_problem(path)
-        if problem:
-            report.findings.append(
-                kb.Finding(path, "not_editable", "error", problem.capitalize() + ".")
-            )
-    return report
-
-
 async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResult:
     try:
         return await _save(clone, share, tester)
@@ -109,14 +94,14 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
     report = check(share.files)
     if report.blocking(share.confirmed):
         return _check_failed(report, share.confirmed, after_rebase=False)
-    tested = await tester(proposal.commit, proposal.tree)
-    if tested.status != "passed":
-        return _tests_failed(tested, after_rebase=False)
-    message = _message(share, tested)
+    first = await tester(proposal.commit, proposal.tree)
+    if first.status != "passed":
+        return _tests_failed(first, after_rebase=False)
     # The proposal's own tree, as the person's commit.
     ours = await asyncio.to_thread(
-        clone.commit_files, proposal.base, share.files, message, share.author
+        clone.commit_files, proposal.base, share.files, _message(share, first), share.author
     )
+    tested_package = await asyncio.to_thread(_package_tree, clone, proposal.commit)
     for _ in range(_ATTEMPTS):
         await asyncio.to_thread(clone.fetch)
         upstream = await asyncio.to_thread(clone.remote_head)
@@ -151,14 +136,23 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         again = check(contents)
         if again.blocking(share.confirmed):
             return _check_failed(again, share.confirmed, after_rebase=upstream != proposal.base)
-        # Others' changes to the package since the base: the tests run again on
-        # the commit that will be pushed.
-        theirs = await asyncio.to_thread(clone.changed_paths, proposal.base, upstream)
-        if any(p.startswith(EDITABLE[0]) for p in theirs):
+        # The package as it will be pushed, if others' changes made it another
+        # one than the tests passed on: tested again, and the message says so.
+        tested = first
+        if await asyncio.to_thread(_package_tree, clone, candidate) != tested_package:
             tree = await asyncio.to_thread(clone.text, "rev-parse", f"{candidate}^{{tree}}")
             tested = await tester(candidate, tree)
             if tested.status != "passed":
                 return _tests_failed(tested, after_rebase=True)
+            if tested.id != first.id:
+                candidate = await asyncio.to_thread(
+                    clone.commit_files,
+                    upstream,
+                    {},
+                    _message(share, tested),
+                    share.author,
+                    tree_of=candidate,
+                )
         pushed = await asyncio.to_thread(clone.push, candidate)
         if pushed.state == "pushed":
             return SaveResult(
@@ -174,30 +168,36 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
     return SaveResult("failed", "GitHub's pipelines repo kept changing. Try again in a moment.")
 
 
+def _package_tree(clone: Clone, commit: str) -> str | None:
+    """The id of the package's tree in `commit`: the same id, the same files."""
+    done = clone.git("rev-parse", "--verify", "-q", f"{commit}:{PACKAGE}", check=False)
+    if done.returncode != 0:
+        return None
+    return done.stdout.decode().strip() or None
+
+
 def _contents(clone: Clone, commit: str, paths: list[str]) -> dict[str, bytes | None]:
     entries = clone.ls_tree(commit)
     blobs = clone.read_blobs(entries[p].blob for p in paths if p in entries)
     return {p: blobs.get(entries[p].blob, b"") if p in entries else None for p in paths}
 
 
-def _check_failed(
-    report: kb.Report, confirmed: Collection[str], *, after_rebase: bool
-) -> SaveResult:
+def _check_failed(report: Report, confirmed: Collection[str], *, after_rebase: bool) -> SaveResult:
     blocking = report.blocking(confirmed)
     if report.errors:
         message = "The check found problems to fix before this can be shared."
     else:
         message = (
-            "The check found text that may be participant data. Confirm each one is "
-            "a false positive, or ask the agent to take it out, then save again."
+            "The check found things for you to confirm: text that may be participant "
+            "data, or code that would run on everyone's computer. Confirm each one, or "
+            "ask the agent to change it, then save again."
         )
     if after_rebase:
         message = "With the changes others saved meanwhile, " + message[0].lower() + message[1:]
-    unconfirmed = [f for f in blocking if f.severity == "data"]
     return SaveResult(
         "check_failed",
         message,
-        findings=[f.to_dict() for f in report.errors + unconfirmed],
+        findings=[f.to_dict() for f in blocking],
         after_rebase=after_rebase,
     )
 

@@ -23,6 +23,7 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
     refetchInterval: (query) => (query.state.data && busy(query.state.data.proposal) ? 1500 : false),
   });
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
+  const [discarding, setDiscarding] = useState(false);
   const settle = (data: PipelineProposalDetail) => {
     queryClient.setQueryData(["pipeline-proposal", id], data);
     void queryClient.invalidateQueries({ queryKey: ["pipeline-proposals"] });
@@ -43,9 +44,8 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
   const chip = proposalChip(proposal);
   const actionable = ACTIONABLE.has(proposal.status);
   const working = busy(proposal) || test.isPending || accept.isPending || reject.isPending;
-  const data = findings.filter((f) => f.severity === "data");
   const errors = findings.filter((f) => f.severity === "error");
-  const unconfirmed = data.filter((f) => !confirmed.has(f.id));
+  const unconfirmed = findings.filter((f) => f.severity !== "error" && !confirmed.has(f.id));
   const canSave = actionable && !working && files.length > 0 && errors.length === 0 && unconfirmed.length === 0;
 
   return (
@@ -87,7 +87,7 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
           <h3 id={`${id}-check`} className="dl-label mb-2">
             Check
           </h3>
-          <Findings errors={errors} data={data} confirmed={confirmed} onConfirm={setConfirmed} disabled={!actionable || working} />
+          <Findings findings={findings} confirmed={confirmed} onConfirm={setConfirmed} disabled={!actionable || working} />
         </section>
       )}
 
@@ -96,9 +96,28 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
           <Button variant="primary" onClick={() => accept.mutate()} disabled={!canSave}>
             <Icon name="send" size={13} /> Save &amp; share
           </Button>
-          <Button variant="danger" onClick={() => reject.mutate()} disabled={working}>
-            Discard
-          </Button>
+          {discarding ? (
+            <span role="group" aria-label="Discard this change?" className="flex flex-wrap items-center gap-2">
+              <span className="font-sans text-[13px] text-ink">Discard it? Nothing is shared, and it can't be undone.</span>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  setDiscarding(false);
+                  reject.mutate();
+                }}
+                disabled={working}
+              >
+                Discard it
+              </Button>
+              <Button variant="ghost" onClick={() => setDiscarding(false)}>
+                Keep it
+              </Button>
+            </span>
+          ) : (
+            <Button variant="danger" onClick={() => setDiscarding(true)} disabled={working}>
+              Discard
+            </Button>
+          )}
           <p className="max-w-[34rem] font-sans text-[12.5px] text-muted">
             {proposal.test?.status === "passed"
               ? "Saves it to GitHub's main as you, once it's checked again with anything others saved meanwhile."
@@ -205,20 +224,27 @@ function Outcome({ detail }: { detail: PipelineProposalDetail }) {
 }
 
 function Findings({
-  errors,
-  data,
+  findings,
   confirmed,
   onConfirm,
   disabled,
 }: {
-  errors: PipelineFinding[];
-  data: PipelineFinding[];
+  findings: PipelineFinding[];
   confirmed: Set<string>;
   onConfirm: (next: Set<string>) => void;
   disabled: boolean;
 }) {
+  const errors = findings.filter((f) => f.severity === "error");
+  const data = findings.filter((f) => f.severity === "data");
+  const code = findings.filter((f) => f.severity === "code");
+  const toggle = (id: string, on: boolean) => {
+    const next = new Set(confirmed);
+    if (on) next.add(id);
+    else next.delete(id);
+    onConfirm(next);
+  };
   return (
-    <div className="flex flex-col gap-3 font-sans text-[13px]">
+    <div className="flex flex-col gap-4 font-sans text-[13px]">
       {errors.length > 0 && (
         <ul className="flex flex-col gap-1 text-danger">
           {errors.map((f) => (
@@ -228,41 +254,68 @@ function Findings({
           ))}
         </ul>
       )}
-      {data.length > 0 && (
-        <>
+      {code.length > 0 && (
+        <div className="flex flex-col gap-1.5">
           <p className="text-attn">
-            This may be participant data. Look at each line, and confirm it isn't before saving (fixtures made up
-            for the tests are fine); otherwise ask the agent to take it out.
+            Code that runs outside DataLab's test container once this is shared: on the computer of everyone who
+            installs or loads the package. Read it, and confirm each one should.
           </p>
-          <ul className="flex flex-col gap-1.5">
-            {data.map((f) => (
-              <li key={f.id}>
-                <label className="flex items-start gap-2">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={confirmed.has(f.id)}
-                    disabled={disabled}
-                    onChange={(e) => {
-                      const next = new Set(confirmed);
-                      if (e.target.checked) next.add(f.id);
-                      else next.delete(f.id);
-                      onConfirm(next);
-                    }}
-                  />
-                  <span>
-                    <span className="font-mono text-[12.5px] text-ink">
-                      {f.path}
-                      {f.line ? `:${f.line}` : ""}
-                    </span>{" "}
-                    {f.message} <span className="text-muted">I've checked: it isn't participant data.</span>
-                  </span>
-                </label>
-              </li>
-            ))}
-          </ul>
-        </>
+          <Confirmable items={code} confirmed={confirmed} onToggle={toggle} disabled={disabled} agree="I've read it: it should run there." />
+        </div>
+      )}
+      {data.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          <p className="text-attn">
+            This may be participant data. Look at each one, and confirm it isn't before saving (rows made up for the
+            tests are fine); otherwise ask the agent to take it out.
+          </p>
+          <Confirmable items={data} confirmed={confirmed} onToggle={toggle} disabled={disabled} agree="I've checked: it isn't participant data." />
+        </div>
       )}
     </div>
+  );
+}
+
+function Confirmable({
+  items,
+  confirmed,
+  onToggle,
+  disabled,
+  agree,
+}: {
+  items: PipelineFinding[];
+  confirmed: Set<string>;
+  onToggle: (id: string, on: boolean) => void;
+  disabled: boolean;
+  agree: string;
+}) {
+  return (
+    <ul className="flex flex-col gap-2">
+      {items.map((f) => (
+        <li key={f.id}>
+          <label className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={confirmed.has(f.id)}
+              disabled={disabled}
+              onChange={(e) => onToggle(f.id, e.target.checked)}
+            />
+            <span className="min-w-0">
+              <span className="font-mono text-[12.5px] text-ink">
+                {f.path}
+                {f.line ? `:${f.line}` : ""}
+              </span>{" "}
+              {f.message} <span className="text-muted">{agree}</span>
+              {f.text && (
+                <code className="mt-1 block overflow-x-auto rounded-[3px] bg-sunken px-1.5 py-0.5 font-mono text-[12px] whitespace-pre text-ink">
+                  {f.text}
+                </code>
+              )}
+            </span>
+          </label>
+        </li>
+      ))}
+    </ul>
   );
 }

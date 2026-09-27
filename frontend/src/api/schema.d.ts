@@ -2475,11 +2475,16 @@ export interface components {
              * Severity
              * @enum {string}
              */
-            severity: "error" | "data" | "warning";
+            severity: "error" | "data" | "code";
             /** Message */
             message: string;
             /** Line */
             line?: number | null;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
         };
         /** PipelineProposalDetail */
         PipelineProposalDetail: {
@@ -3489,6 +3494,8 @@ export interface components {
             available: boolean;
             /** Folder */
             folder: string;
+            /** Message */
+            message?: string | null;
         };
     };
     responses: never;

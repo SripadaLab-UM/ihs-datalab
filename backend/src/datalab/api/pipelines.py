@@ -107,10 +107,14 @@ class PipelineFindingOut(BaseModel):
     id: str
     path: str
     rule: str
-    # data: may be participant data; blocks Save & share until confirmed.
-    severity: Literal["error", "data", "warning"]
+    # error: can't be shared. data: may be participant data. code: runs on
+    # install or load, on everyone's computer. data and code block Save &
+    # share until the person confirms each one.
+    severity: Literal["error", "data", "code"]
     message: str
     line: int | None = None
+    # The line it's about, for the person to judge (at most 200 characters).
+    text: str = ""
 
 
 class PipelineRefusedOut(BaseModel):

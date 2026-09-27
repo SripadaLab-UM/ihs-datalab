@@ -14,8 +14,9 @@ CREATE TABLE pipeline_bases (
 );
 
 -- As kb_proposals. The agent's files stay in the conversation's checkpoint
--- store (by content hash). `tree` is the git tree of the base with the
--- proposal's files: what the tests ran on, and what Save & share shares.
+-- store (by content hash). `proposal_commit` is the base with the agent's
+-- files, never pushed; `tree` is its tree: what the tests run on, and what
+-- Save & share shares. `commit_sha` is what was pushed, once saved.
 CREATE TABLE pipeline_proposals (
     id               TEXT PRIMARY KEY,
     conversation_id  TEXT NOT NULL REFERENCES conversations (id) ON DELETE CASCADE,
@@ -24,6 +25,7 @@ CREATE TABLE pipeline_proposals (
     turn             INTEGER NOT NULL,
     checkpoint       INTEGER NOT NULL,
     base             TEXT NOT NULL,
+    proposal_commit  TEXT NOT NULL,
     tree             TEXT NOT NULL,
     fingerprint      TEXT NOT NULL,
     status           TEXT NOT NULL CHECK (status IN (

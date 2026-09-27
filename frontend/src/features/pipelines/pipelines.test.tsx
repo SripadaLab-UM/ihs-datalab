@@ -189,17 +189,27 @@ it("reviews a change: its diff, its tests, what wasn't proposed, and Save & shar
   expect(await screen.findByText(/Saving: checking and sharing it/)).toBeInTheDocument();
 });
 
-it("won't save possible participant data until each line is confirmed", async () => {
-  const finding = {
+it("won't save possible participant data, or install-time code, until each is confirmed", async () => {
+  const data = {
     id: "f1",
     path: "ihsDataR/tests/testthat/fixtures/steps.csv",
-    rule: "study_id",
+    rule: "date_near_number",
     severity: "data" as const,
-    message: "This looks like a participant or study ID.",
+    message: "A date next to a number that could be a participant ID.",
     line: 2,
+    text: "1001,2019-03-02",
   };
-  vi.mocked(pipelinesApi.proposal).mockResolvedValue(detail({ test: passed }, [finding]));
-  vi.mocked(pipelinesApi.accept).mockResolvedValue(detail({ status: "saving", test: passed }, [finding]));
+  const code = {
+    id: "f2",
+    path: "ihsDataR/R/zzz.R",
+    rule: "load_hook",
+    severity: "code" as const,
+    message: ".onLoad runs whenever the package is loaded, on everyone's computer.",
+    line: 3,
+    text: ".onLoad <- function(libname, pkgname) {",
+  };
+  vi.mocked(pipelinesApi.proposal).mockResolvedValue(detail({ test: passed }, [data, code]));
+  vi.mocked(pipelinesApi.accept).mockResolvedValue(detail({ status: "saving", test: passed }, [data, code]));
   render(
     <QueryClientProvider client={client()}>
       <ProposalView id="pp_1" onBack={vi.fn()} />
@@ -207,10 +217,68 @@ it("won't save possible participant data until each line is confirmed", async ()
   );
   const save = await screen.findByRole("button", { name: "Save & share" });
   expect(save).toBeDisabled();
+  // Each shows the line it's about, for the person to judge.
+  expect(screen.getByText("1001,2019-03-02")).toBeInTheDocument();
+  expect(screen.getByText(".onLoad <- function(libname, pkgname) {")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("checkbox", { name: /steps.csv:2.*it isn't participant data/ }));
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: /zzz.R:3.*it should run there/ }));
   expect(save).toBeEnabled();
   fireEvent.click(save);
-  await waitFor(() => expect(pipelinesApi.accept).toHaveBeenCalledWith("pp_1", ["f1"]));
+  await waitFor(() => expect(pipelinesApi.accept).toHaveBeenCalledWith("pp_1", ["f1", "f2"]));
+});
+
+it("asks before discarding a change", async () => {
+  vi.mocked(pipelinesApi.proposal).mockResolvedValue(detail());
+  vi.mocked(pipelinesApi.reject).mockResolvedValue(detail({ status: "rejected" }));
+  render(
+    <QueryClientProvider client={client()}>
+      <ProposalView id="pp_1" onBack={vi.fn()} />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
+  expect(pipelinesApi.reject).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Keep it" }));
+  fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+  within(screen.getByRole("group", { name: "Discard this change?" })).getByText(/Nothing is shared/);
+  fireEvent.click(screen.getByRole("button", { name: "Discard it" }));
+  await waitFor(() => expect(pipelinesApi.reject).toHaveBeenCalledWith("pp_1"));
+});
+
+it("closes the files drawer and the chat with Escape, and gives focus back", async () => {
+  sessionStorage.setItem("datalab:pipelines:chat-open", "closed");
+  render(
+    <QueryClientProvider client={client()}>
+      <PipelinesPage />
+    </QueryClientProvider>,
+  );
+  const show = await screen.findByRole("button", { name: "Show files and changes" });
+  show.focus();
+  fireEvent.click(show);
+  const drawer = screen.getByRole("complementary", { name: "Files and changes" });
+  await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(show).toHaveFocus());
+  const ask = screen.getByRole("button", { name: /Ask the agent/ });
+  ask.focus();
+  fireEvent.click(ask);
+  expect(await screen.findByText("The engineering chat")).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByText("The engineering chat")).toBeNull());
+  expect(screen.getByRole("button", { name: /Ask the agent/ })).toHaveFocus();
+});
+
+it("says whether each folder is open", async () => {
+  render(
+    <QueryClientProvider client={client()}>
+      <PipelinesPage />
+    </QueryClientProvider>,
+  );
+  const folder = await screen.findByRole("button", { name: "ihsDataR" });
+  expect(folder).toHaveAttribute("aria-expanded", "true");
+  fireEvent.click(folder);
+  expect(folder).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByRole("button", { name: "steps.R" })).toBeNull();
 });
 
 it("says how each ending went: saved as a commit, or why nothing was shared", async () => {

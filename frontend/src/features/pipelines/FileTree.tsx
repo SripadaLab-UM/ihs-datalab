@@ -42,7 +42,7 @@ export function FileTree({
           className="min-w-0 flex-1 bg-transparent font-sans text-[13px] outline-none"
         />
       </label>
-      <ul role="tree" aria-label="The pipelines repo's files" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      <ul aria-label="The pipelines repo's files" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         <Items folder={shown} depth={0} open={filter ? null : open} toggle={toggle} selected={selected} onOpen={onOpen} />
       </ul>
       {files.length > 0 && shown.folders.length === 0 && shown.files.length === 0 && (
@@ -74,9 +74,10 @@ function Items({
       {folder.folders.map((child) => {
         const expanded = open === null || open.has(child.path);
         return (
-          <li key={child.path} role="treeitem" aria-expanded={expanded}>
+          <li key={child.path}>
             <button
               type="button"
+              aria-expanded={expanded}
               onClick={() => toggle(child.path)}
               style={indent}
               className="flex w-full items-center gap-1.5 rounded-[3px] py-1 pr-2 text-left font-sans text-[13px] text-ink hover:bg-surface/70"
@@ -87,7 +88,7 @@ function Items({
               {child.name}
             </button>
             {expanded && (
-              <ul role="group">
+              <ul aria-label={child.name}>
                 <Items folder={child} depth={depth + 1} open={open} toggle={toggle} selected={selected} onOpen={onOpen} />
               </ul>
             )}
@@ -95,9 +96,10 @@ function Items({
         );
       })}
       {folder.files.map((file) => (
-        <li key={file.path} role="treeitem" aria-selected={file.path === selected}>
+        <li key={file.path}>
           <button
             type="button"
+            aria-current={file.path === selected ? "true" : undefined}
             onClick={() => onOpen(file.path)}
             style={{ paddingLeft: `${1.35 + depth * 0.85}rem` }}
             className={clsx(

@@ -8,15 +8,24 @@ read-only, as the workflow runner gives a pipeline's package (runner.py,
 network, a read-only root, no capabilities, a non-root user, time and
 memory limits (workflows/sandbox.py).
 
-Inside, the package is copied to /tmp (its tests may write snapshots) and
-`testthat::test_local()` runs it. A small R wrapper writes each test's
+Inside, the package is copied to /run/work (its tests may write snapshots,
+and compiled code must be able to run: unlike /tmp, which is noexec in every
+step container, /run/work is a folder of this run's own, for tests only)
+and `testthat::test_local()` runs it. A small R wrapper writes each test's
 counts to /run/out/results.csv with base R only, so the image needs nothing
 beyond testthat. The log (up to 1 MB) is kept in
 `<data folder>/pipeline-tests/<id>.log`, for the person to read in the
 Pipelines tab; nothing from it leaves this computer.
 
+**A quality check, not a safety gate.** results.csv is written by the same R
+process that runs the code under test, so that code could write whatever
+counts it likes. The tests tell the person the change works as its tests
+say; the sandbox (no network, nothing of DataLab's mounted) and the person's
+review of the diff are what keep it safe.
+
 Recorded against the tree, so a result holds for exactly those files: Save &
-share pushes only a commit whose tree passed.
+share pushes only a commit whose tree passed. At most `MAX_AT_ONCE` run at
+a time; the rest wait their turn (still "running").
 """
 
 from __future__ import annotations
@@ -41,6 +50,7 @@ log = logging.getLogger(__name__)
 MAX_OUTPUT_BYTES = 200 * 1024**2
 MAX_LISTED = 200  # files and failures kept in a summary
 LOG_TAIL_BYTES = 64 * 1024
+MAX_AT_ONCE = 2
 _R = (
     'r <- testthat::test_local(".", stop_on_failure = FALSE, stop_on_warning = FALSE); '
     "d <- as.data.frame(r); "
@@ -50,8 +60,11 @@ _R = (
 )
 COMMAND = (
     "sh", "-c",
-    f"cp -r /run/src/{PACKAGE} /tmp/pkg && cd /tmp/pkg && Rscript --vanilla -e '{_R}'",
+    f"mkdir -p /run/work/tmp && cp -r /run/src/{PACKAGE} /run/work/pkg && cd /run/work/pkg "
+    f"&& Rscript --vanilla -e '{_R}'",
 )  # fmt: skip
+# R's own temporary files (and anything compiled there) go to the exec-able folder.
+ENV = {"TMPDIR": "/run/work/tmp"}
 
 
 class PackageTests:
@@ -60,6 +73,7 @@ class PackageTests:
         self.image = image
         self.store = store
         self.folder = folder  # <data folder>/pipeline-tests
+        self._slots = asyncio.Semaphore(MAX_AT_ONCE)
 
     def log_path(self, test_id: str) -> Path:
         return self.folder / f"{test_id}.log"
@@ -85,7 +99,8 @@ class PackageTests:
         commit = run.commit
         place = self.folder / run.id
         try:
-            return await self._run(run, clone, commit, place)
+            async with self._slots:
+                return await self._run(run, clone, commit, place)
         except asyncio.CancelledError:
             await asyncio.to_thread(
                 self.store.finish_test, run, "error", message="The test run was stopped."
@@ -111,9 +126,13 @@ class PackageTests:
                 "error",
                 message=f"The agent image ({self.image}) isn't on this computer.",
             )
-        source, out = place / "src", place / "out"
+        # The package, read-only; and what the run may write: its results, and
+        # its working copy of the package.
+        source, writable = place / "src", place / "rw"
+        out, work = writable / "out", writable / "work"
         await asyncio.to_thread(_write_tree, clone, commit, source)
         out.mkdir(parents=True)
+        work.mkdir()
         if not (source / PACKAGE / "DESCRIPTION").is_file():
             return await asyncio.to_thread(
                 self.store.finish_test,
@@ -128,10 +147,15 @@ class PackageTests:
                     run_id=run.id,
                     name="tests",
                     image=facts.digest,
-                    binds=[Bind(source, "/run/src"), Bind(out, "/run/out", readonly=False)],
-                    watch=out,
+                    binds=[
+                        Bind(source, "/run/src"),
+                        Bind(out, "/run/out", readonly=False),
+                        Bind(work, "/run/work", readonly=False),
+                    ],
+                    watch=writable,
                     max_bytes=MAX_OUTPUT_BYTES,
                     command=COMMAND,
+                    env=dict(ENV),
                 )
             )
         finally:

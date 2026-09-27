@@ -226,8 +226,10 @@ class Clone:
         self._allow_local = allow_local
         self._before_network = before_network
         self._helper = helper_args(python)
-        # Held for anything that reads and then changes the clone.
-        self.lock = threading.RLock()
+        # Held for anything that reads and then changes the clone. One per
+        # folder, shared by every Clone of it (the Pipelines tab's, and the
+        # workflow runner's that copies a run's files from it).
+        self.lock = _lock_for(path)
 
     # Running git ------------------------------------------------------------
 
@@ -538,6 +540,16 @@ class Clone:
             if re.search(r"non-fast-forward|fetch first|\[rejected\]", said):
                 return PushResult("rejected", _message("push", done.stderr))
             return PushResult("failed", _message("push", done.stderr))
+
+
+_LOCKS: dict[str, threading.RLock] = {}
+_LOCKS_LOCK = threading.Lock()
+
+
+def _lock_for(path: Path) -> threading.RLock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _LOCKS_LOCK:
+        return _LOCKS.setdefault(key, threading.RLock())
 
 
 def _message(command: str, stderr: bytes) -> str:
