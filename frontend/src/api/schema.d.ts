@@ -1200,6 +1200,159 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_pipelines_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Files */
+        get: operations["files_api_pipelines_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** File */
+        get: operations["file_api_pipelines_files__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposals */
+        get: operations["proposals_api_pipelines_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposal */
+        get: operations["proposal_api_pipelines_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test */
+        post: operations["test_api_pipelines_proposals__proposal_id__tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept */
+        post: operations["accept_api_pipelines_proposals__proposal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject */
+        post: operations["reject_api_pipelines_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/tests/{test_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Test Log */
+        get: operations["test_log_api_pipelines_tests__test_id__log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/provenance/{path}": {
         parameters: {
             query?: never;
@@ -2251,10 +2404,310 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** PipelineAcceptIn */
+        PipelineAcceptIn: {
+            /**
+             * Confirmed
+             * @default []
+             */
+            confirmed: string[];
+        };
+        /** PipelineAccountOut */
+        PipelineAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** PipelineFileChange */
+        PipelineFileChange: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+        };
+        /** PipelineFileDiff */
+        PipelineFileDiff: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+            /** Before */
+            before: string | null;
+            /** After */
+            after: string | null;
+            /** Binary */
+            binary: boolean;
+            /** Diff */
+            diff: string;
+        };
+        /** PipelineFileOut */
+        PipelineFileOut: {
+            /** Path */
+            path: string;
+            /** Head */
+            head: string;
+            /** Size */
+            size: number;
+            /** Text */
+            text: string | null;
+            /**
+             * Too Large
+             * @default false
+             */
+            too_large: boolean;
+        };
+        /** PipelineFindingOut */
+        PipelineFindingOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "data" | "warning";
+            /** Message */
+            message: string;
+            /** Line */
+            line?: number | null;
+        };
+        /** PipelineProposalDetail */
+        PipelineProposalDetail: {
+            proposal: components["schemas"]["PipelineProposalOut"];
+            /** Files */
+            files: components["schemas"]["PipelineFileDiff"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** PipelineProposalOut */
+        PipelineProposalOut: {
+            /** Id */
+            id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "superseded" | "withdrawn" | "rejected" | "saving" | "saved" | "conflict" | "check_failed" | "tests_failed" | "failed";
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Turn */
+            turn: number;
+            /** Base */
+            base: string;
+            /** Files */
+            files: components["schemas"]["PipelineFileChange"][];
+            /** Refused */
+            refused: components["schemas"]["PipelineRefusedOut"][];
+            result?: components["schemas"]["PipelineSaveResultOut"] | null;
+            /** Commit */
+            commit?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            test?: components["schemas"]["PipelineTestOut"] | null;
+        };
+        /** PipelineRefusedOut */
+        PipelineRefusedOut: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PipelineSaveResultOut */
+        PipelineSaveResultOut: {
+            /** State */
+            state: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /** Upstream */
+            upstream?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: string[];
+            /**
+             * After Rebase
+             * @default false
+             */
+            after_rebase: boolean;
+            /** Test */
+            test?: string | null;
+        };
+        /** PipelineTestFailureOut */
+        PipelineTestFailureOut: {
+            /** File */
+            file: string;
+            /** Test */
+            test: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "failure" | "error";
+        };
+        /** PipelineTestFileOut */
+        PipelineTestFileOut: {
+            /** File */
+            file: string;
+            /** Tests */
+            tests: number;
+            /** Failed */
+            failed: number;
+            /** Skipped */
+            skipped: number;
+            /** Errors */
+            errors: number;
+        };
+        /** PipelineTestLogOut */
+        PipelineTestLogOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** PipelineTestOut */
+        PipelineTestOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "passed" | "failed" | "error";
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Commit */
+            commit?: string | null;
+            /** Message */
+            message?: string | null;
+            /**
+             * Tests
+             * @default 0
+             */
+            tests: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Warnings
+             * @default 0
+             */
+            warnings: number;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["PipelineTestFileOut"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+            /**
+             * Failures
+             * @default []
+             */
+            failures: components["schemas"]["PipelineTestFailureOut"][];
+        };
+        /** PipelineTreeFile */
+        PipelineTreeFile: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /** PipelineTreeOut */
+        PipelineTreeOut: {
+            /** Head */
+            head: string | null;
+            /** Files */
+            files: components["schemas"]["PipelineTreeFile"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+        };
         /** PipelinesStatus */
         PipelinesStatus: {
             /** Available */
             available: boolean;
+            /**
+             * Repo
+             * @default not configured
+             * @enum {string}
+             */
+            repo: "not configured" | "signed out" | "no access" | "not cloned" | "in sync" | "behind" | "diverged" | "sync failed";
+            /** Name */
+            name?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["PipelineAccountOut"] | null;
+            /** Head */
+            head?: string | null;
+            /** Last Sync */
+            last_sync?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Message */
+            message?: string | null;
         };
         /** PlanLimitsOut */
         PlanLimitsOut: {
@@ -5120,6 +5573,267 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    sync_api_pipelines_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    files_api_pipelines_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTreeOut"];
+                };
+            };
+        };
+    };
+    file_api_pipelines_files__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineFileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_pipelines_proposals_get: {
+        parameters: {
+            query?: {
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposal_api_pipelines_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_api_pipelines_proposals__proposal_id__tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_api_pipelines_proposals__proposal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineAcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_api_pipelines_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_log_api_pipelines_tests__test_id__log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTestLogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

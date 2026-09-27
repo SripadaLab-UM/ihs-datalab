@@ -2,7 +2,8 @@
 
 Status: **draft** for v1. The runner, run records, Run again, Replay and
 delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core)),
-and so is the Workflows tab, read-only for now; the Pipelines tab is not yet.
+and so are the Workflows tab, read-only for now, and the Pipelines tab
+([As built](#as-built-pipelines)).
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -218,10 +219,13 @@ The backend is in `backend/src/datalab/workflows/`, with its routes under
 `/api/workflows`. The design and its evidence are in the runner spike
 (`spikes/2026-09-27-workflow-runner/README.md`).
 
-**Where files come from.** For now, a folder: `[workflows] folder` in
-`settings.toml`, or `<data folder>/workflows-local/`. It is laid out like
-`ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds the YAML files
-directly. Milestone 5 swaps in the synced repo.
+**Where files come from.** The synced `ihs-pipelines` clone
+(`<data folder>/repos/ihs-pipelines`) when `[repos] pipelines` is set;
+`[workflows] folder` in `settings.toml` overrides it, and with neither,
+`<data folder>/workflows-local/` (`workflows_root` in workflows/source.py).
+The folder is laid out like `ihs-pipelines` (`workflows/*.yaml`,
+`ihsDataR/`), or holds the YAML files directly. The runner reads the
+clone's checkout as it is; a sync fast-forwards it between runs.
 
 **What the file check adds to the example above:**
 
@@ -316,6 +320,42 @@ tab. Destination
 keys are listed read-only; folders are chosen in Settings. Editing waits for
 the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
 until there is a Workflow authoring mode.
+
+## As built (Pipelines)
+
+The backend is in `backend/src/datalab/pipelines/`, with its routes under
+`/api/pipelines`; the tab is `frontend/src/features/pipelines/`.
+
+**The repo.** `[repos] pipelines` is cloned and synced like the knowledge
+base (`repos/sync.py`, with milestone 5's isolation: no global or system
+config, every filter and driver switched off, `--no-ext-diff`). There's one
+GitHub sign-in for both repos; signing in is in Settings → GitHub. The tab
+browses GitHub's `main` as last synced, read-only.
+
+**Changes.** Each new Data engineering conversation gets its own copy of
+the repo at `/work/pipelines` (without `.github/`, and with no repository
+metadata or credentials). After each turn, what the agent changed in
+`ihsDataR/` and `workflows/` becomes one proposal, replacing any earlier
+one still open; changes anywhere else in the copy, and anything in
+`.github/`, are listed as not proposed. Proposals are shown in the
+Pipelines tab only, for now (not as cards in the chat).
+
+**Tests.** The package's tests (`testthat::test_local`) run on the
+proposal's exact tree, in the workflow sandbox's container: no network, a
+read-only root, the agent image. The counts, the failing tests, and the log
+are kept against that tree (migration 0010).
+
+**Save & share** checks the change (only `ihsDataR/` and `workflows/`,
+nothing in `.github/`, and the knowledge base's participant-data scan, whose
+hits the person confirms line by line), requires the tests to have passed on
+it (running them first if not), commits it as the person, rebases onto
+`main`, runs the tests again if others changed the package meanwhile, and
+pushes exactly that commit. A conflict shares nothing: discard the change
+and ask the agent to make it again. The change isn't edited in DataLab: ask
+the agent.
+
+Not built yet: the ad hoc run of a pipeline's workflow, and the converted
+`ihsDataR` itself (its pipelines have no `pipeline.yaml` yet).
 
 ## Open questions
 

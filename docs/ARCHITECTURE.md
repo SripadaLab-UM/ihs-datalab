@@ -491,8 +491,10 @@ own slot, and the shared modules offer extension points:
   keychain and passed to git through a credential helper. The token never goes
   on disk in plain text, and never enters a container. (Implemented in
   `repos/`: the device flow and refresh in `github.py`, the helper in
-  `credential_helper.py`, git and the clones in `git.py`; see
-  KNOWLEDGE_BASE.md, "How it's built".)
+  `credential_helper.py`, git and the clones in `git.py`, keeping a clone
+  in step with GitHub in `sync.py`; see KNOWLEDGE_BASE.md, "How it's
+  built", and WORKFLOWS.md, "As built (Pipelines)". One `GitHubAuth` serves
+  both repos, since each token refresh replaces the refresh token.)
 - **The checks are DataLab's own code.** The knowledge-base check and the
   workflow-file check ship with DataLab. DataLab never runs a script taken
   from a repo on the host. Repo tests, such as `ihsDataR`'s R tests, run in a
@@ -507,6 +509,10 @@ own slot, and the shared modules offer extension points:
      Show the user what changed before pushing.
   5. Push the exact commit that passed. Record the test result against that
      commit.
+
+  As built, for both repos, step 4 re-runs the checks (and, for pipelines,
+  the tests when others changed `ihsDataR/`) and pushes if they pass,
+  without showing the person the others' changes first.
 - The participant-data scan covers workflow files too, since SQL literals,
   comments, and parameter defaults could contain IDs.
 - If another person changed the same lines, a plain two-version screen appears
