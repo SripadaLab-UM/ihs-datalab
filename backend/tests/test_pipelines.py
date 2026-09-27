@@ -9,6 +9,7 @@ testthat's results as the real wrapper does.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -396,6 +397,19 @@ def test_results_are_read_from_testthats_data_frame(tmp_path):
     }
     assert summary["failures"] == [{"file": "test-b.R", "test": "boom", "kind": "error"}]
     assert read_results(tmp_path / "missing.csv") is None
+
+
+def test_results_the_container_links_elsewhere_or_makes_a_pipe_arent_read(tmp_path):
+    # The results folder is the container's to write: a link there would point
+    # at the host's files, and a pipe would never end.
+    secret = tmp_path / "secret.csv"
+    secret.write_text(
+        '"file","test","nb","failed","skipped","error","warning"\n"x","y",1,0,0,0,0\n'
+    )
+    (tmp_path / "linked.csv").symlink_to(secret)
+    assert read_results(tmp_path / "linked.csv") is None
+    os.mkfifo(tmp_path / "pipe.csv")
+    assert read_results(tmp_path / "pipe.csv") is None
 
 
 # Save & share -----------------------------------------------------------------

@@ -25,7 +25,9 @@ import asyncio
 import csv
 import io
 import logging
+import os
 import shutil
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -184,10 +186,18 @@ def _write_tree(clone: Clone, commit: str, folder: Path) -> None:
 
 def read_results(path: Path) -> dict[str, Any] | None:
     """The counts from results.csv: one row per test (as testthat's data frame has them)."""
+    # Written by the container: never a link (it would point at the host's
+    # files) or anything but a plain file (a pipe would never end).
     try:
-        text = path.read_bytes()[: 8 * 1024**2].decode("utf-8", "replace")
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        )
     except OSError:
         return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            return None
+        text = handle.read(8 * 1024**2).decode("utf-8", "replace")
     rows = list(csv.DictReader(io.StringIO(text)))
     per_file: dict[str, dict[str, Any]] = {}
     failures: list[dict[str, str]] = []
