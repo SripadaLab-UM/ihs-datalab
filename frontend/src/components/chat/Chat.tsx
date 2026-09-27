@@ -17,15 +17,22 @@ import { useConversationEvents } from "./useConversationEvents";
 // Events that start or end a turn or its review: DataLab's busy flag changes.
 const TURN_EVENTS = new Set(["user_message", "turn_started", "turn_finished", "review_started", "review_finished", "turn_done"]);
 
-/** The shared chat. Every tab that needs an agent uses this component. */
+/** The shared chat. Every tab that needs an agent uses this component (docked
+ *  beside a tab's own content through DockedChat). */
 export function Chat({
   conversation,
   headerStart,
   headerActions,
+  prepareMessage,
+  composerNote,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
   headerActions?: ReactNode;
+  /** What's sent for what the person typed (or the starter they picked): DockedChat adds its context here. */
+  prepareMessage?: (text: string) => string;
+  /** A line above the message box, such as what will be sent along with the message. */
+  composerNote?: ReactNode;
 }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
@@ -40,7 +47,7 @@ export function Chat({
   const queryClient = useQueryClient();
   // A starter question is sent as it is, so the agent starts at once.
   const start = useMutation({
-    mutationFn: (text: string) => api.send(conversation.id, text, effort),
+    mutationFn: (text: string) => api.send(conversation.id, prepareMessage ? prepareMessage(text) : text, effort),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
 
@@ -98,20 +105,20 @@ export function Chat({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-8">
-        {headerStart}
-        <Title conversation={conversation} />
-        <SessionBadge kind={conversation.kind} />
-        <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-faint">
-          {conversation.model}
-          <span aria-hidden>·</span>
-          <EffortSelect effort={effort} onChange={setEffort} />
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
-          {headerActions}
-        </div>
-      </header>
+      <ChatHeader
+        start={headerStart}
+        title={<Title conversation={conversation} />}
+        kind={conversation.kind}
+        model={conversation.model}
+        effort={effort}
+        onEffort={setEffort}
+        actions={
+          <>
+            {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
+            {headerActions}
+          </>
+        }
+      />
       <div
         className="relative min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8"
         onScroll={(e) => {
@@ -122,7 +129,8 @@ export function Chat({
         <div className="mx-auto flex max-w-[48rem] flex-col gap-14 2xl:max-w-[54rem]">
           {turns.length === 0 && (
             <EmptyState
-              conversation={conversation}
+              mode={conversation.mode}
+              kind={conversation.kind}
               onPick={(text) => start.mutate(text)}
               starting={start.isPending || start.isSuccess || running}
               error={start.error?.message}
@@ -151,8 +159,47 @@ export function Chat({
           </div>
         )}
       </div>
-      <Composer conversation={conversation} running={running || start.isPending} effort={effort} />
+      <Composer
+        conversation={conversation}
+        running={running || start.isPending}
+        effort={effort}
+        prepareMessage={prepareMessage}
+        note={composerNote}
+      />
     </div>
+  );
+}
+
+/** The line over a chat: its title, which session it is, the model and how hard it thinks. */
+export function ChatHeader({
+  start,
+  title,
+  kind,
+  model,
+  effort,
+  onEffort,
+  actions,
+}: {
+  start?: ReactNode;
+  title: ReactNode;
+  kind: "data" | "research";
+  model: string;
+  effort: Effort;
+  onEffort: (effort: Effort) => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-8">
+      {start}
+      {title}
+      <SessionBadge kind={kind} />
+      <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-faint">
+        {model}
+        <span aria-hidden>·</span>
+        <EffortSelect effort={effort} onChange={onEffort} />
+      </span>
+      <div className="ml-auto flex items-center gap-2">{actions}</div>
+    </header>
   );
 }
 
@@ -253,20 +300,23 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   );
 }
 
-function EmptyState({
-  conversation,
+/** What a conversation with no questions yet shows: what its mode is for, and starters to pick. */
+export function EmptyState({
+  mode: modeId,
+  kind,
   onPick,
   starting,
   error,
 }: {
-  conversation: Conversation;
+  mode: string;
+  kind: "data" | "research";
   onPick: (text: string) => void;
   starting: boolean;
   error?: string;
 }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
-  const mode = modes.data?.find((m) => m.id === conversation.mode);
-  const data = conversation.kind === "data";
+  const mode = modes.data?.find((m) => m.id === modeId);
+  const data = kind === "data";
   return (
     <div className="mt-6 flex flex-col gap-10">
       <div>
@@ -680,7 +730,59 @@ function ReviewBox({
   );
 }
 
-function Composer({ conversation, running, effort }: { conversation: Conversation; running: boolean; effort: Effort }) {
+function Composer({
+  conversation,
+  running,
+  effort,
+  prepareMessage,
+  note,
+}: {
+  conversation: Conversation;
+  running: boolean;
+  effort: Effort;
+  prepareMessage?: (text: string) => string;
+  note?: ReactNode;
+}) {
+  const queryClient = useQueryClient();
+  const send = useMutation({
+    mutationFn: (text: string) => api.send(conversation.id, prepareMessage ? prepareMessage(text) : text, effort),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  const stop = useMutation({
+    mutationFn: () => api.stop(conversation.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  return (
+    <ComposerBox
+      running={running}
+      sending={send.isPending}
+      error={send.error?.message}
+      onSend={(text) => send.mutateAsync(text)}
+      onStop={() => stop.mutate()}
+      stopping={stop.isPending}
+      note={note}
+    />
+  );
+}
+
+/** The message box under a chat. It clears once `onSend` has succeeded. */
+export function ComposerBox({
+  running,
+  sending,
+  error,
+  onSend,
+  onStop,
+  stopping = false,
+  note,
+}: {
+  running: boolean;
+  sending: boolean;
+  error?: string;
+  onSend: (text: string) => Promise<unknown>;
+  onStop?: () => void;
+  stopping?: boolean;
+  note?: ReactNode;
+}) {
   const [text, setText] = useState("");
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -690,27 +792,17 @@ function Composer({ conversation, running, effort }: { conversation: Conversatio
     element.style.height = "auto";
     element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
   }, [text]);
-  const queryClient = useQueryClient();
-  const send = useMutation({
-    mutationFn: () => api.send(conversation.id, text.trim(), effort),
-    onSuccess: () => {
-      setText("");
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-    },
-  });
-  const stop = useMutation({
-    mutationFn: () => api.stop(conversation.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-  });
 
   const submit = () => {
-    if (text.trim() && !running && !send.isPending) send.mutate();
+    // A failed send keeps what was typed; the error shows above the box.
+    if (text.trim() && !running && !sending) onSend(text.trim()).then(() => setText(""), () => undefined);
   };
 
   return (
     <footer className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
-        {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
+        {error && <p className="mb-2 text-sm text-danger">{error}</p>}
+        {note}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
         <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
           <textarea
@@ -729,11 +821,11 @@ function Composer({ conversation, running, effort }: { conversation: Conversatio
             className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
           />
           {running ? (
-            <Button variant="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
+            <Button variant="secondary" onClick={onStop} disabled={stopping || !onStop}>
               <Icon name="stop" size={14} /> Stop
             </Button>
           ) : (
-            <Button variant="primary" onClick={submit} disabled={!text.trim() || send.isPending}>
+            <Button variant="primary" onClick={submit} disabled={!text.trim() || sending}>
               <Icon name="send" size={14} /> Send
             </Button>
           )}
@@ -749,7 +841,7 @@ function Composer({ conversation, running, effort }: { conversation: Conversatio
 const EFFORT_KEY = "datalab.effort";
 
 /** How hard the agent thinks, remembered in this browser as the default for new messages. */
-function useEffortChoice(): [Effort, (effort: Effort) => void] {
+export function useEffortChoice(): [Effort, (effort: Effort) => void] {
   const [effort, setEffort] = useState<Effort>(() => {
     try {
       const saved = localStorage.getItem(EFFORT_KEY);

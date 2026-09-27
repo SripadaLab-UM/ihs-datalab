@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { api, type Conversation, type Mode } from "@/api/client";
-import { Chat } from "@/components/chat/Chat";
+import { DockedChat } from "@/components/chat/DockedChat";
 import { Button, Icon, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
@@ -152,9 +152,10 @@ export function WorkspacePage() {
       <main className="min-h-0">
         {current ? (
           <OpenFileContext value={setOpen}>
-            <Chat
+            <DockedChat
               key={current.id}
-              conversation={current}
+              mode={current.mode}
+              conversationId={current.id}
               headerStart={showRail}
               headerActions={
                 <>
