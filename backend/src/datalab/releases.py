@@ -13,10 +13,14 @@ Which release is offered (docs/DISTRIBUTION.md, "Which releases are offered"):
 - pre-releases only on the "pre-release" channel, or on "auto" while the
   installed DataLab is itself a pre-release;
 - only a release that carries everything an update needs: the DataLab
-  package for exactly that version, `constraints.txt`, `images.json` and
-  `SHA256SUMS`, with `SHA256SUMS` listing the other three (and agreeing with
-  the checksums GitHub keeps for each file, where it has them). Anything
-  else is skipped, and the newest of the rest is offered.
+  package for exactly that version, `requirements.txt` (every dependency
+  pinned by hash), `images.json`, `SHA256SUMS` listing those three, and
+  `SHA256SUMS.sig`, the lab's release key's signature of it (signing.py).
+  GitHub must give its own checksum of every one of them, and they must
+  agree. Anything else is skipped, and the newest of the rest is offered.
+- nothing at all while this DataLab trusts no release key (release_keys.py
+  still has its placeholder): the check says updates aren't set up, and
+  doesn't ask GitHub.
 
 Being offline, rate-limited, or unable to see the releases (while the repo
 was private, GitHub answered 404) never shows as an error: the check says it
@@ -31,7 +35,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,18 +45,24 @@ from urllib.parse import urlsplit
 import httpx
 from packaging.version import InvalidVersion, Version
 
-from datalab import __version__
+from datalab import __version__, release_keys, signing
 from datalab.config import Settings
 
 log = logging.getLogger(__name__)
 
 API = "https://api.github.com"
 SUMS = "SHA256SUMS"
-CONSTRAINTS = "constraints.txt"
+REQUIREMENTS = "requirements.txt"
+SIGNATURE = signing.SIGNATURE
 IMAGES = "images.json"
 # The most release notes shown, and the most of SHA256SUMS read.
 MAX_NOTES = 20_000
 MAX_SUMS_BYTES = 64 * 1024
+MAX_SIGNATURE_BYTES = 1024
+# Where GitHub serves release files from, after the API redirects there.
+DOWNLOAD_HOSTS = frozenset(
+    {"objects.githubusercontent.com", "release-assets.githubusercontent.com", "github.com"}
+)
 # Asked for by the person ("Check now"): at most this often.
 MIN_CHECK_SECONDS = 60
 _TIMEOUT = httpx.Timeout(connect=10, read=30, write=10, pool=10)
@@ -61,7 +71,14 @@ _WHEEL = re.compile(r"datalab-([A-Za-z0-9.+!]+)-py3-none-any\.whl")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 CheckState = Literal[
-    "not-checked", "up-to-date", "available", "offline", "rate-limited", "not-visible", "failed"
+    "not-checked",
+    "not-configured",
+    "up-to-date",
+    "available",
+    "offline",
+    "rate-limited",
+    "not-visible",
+    "failed",
 ]
 
 
@@ -76,6 +93,16 @@ class CheckProblem(RuntimeError):
 
 class ChecksumMismatch(RuntimeError):
     """A release's files don't match its SHA256SUMS (or GitHub's own checksums)."""
+
+
+class NotSigned(ChecksumMismatch):
+    """A release's SHA256SUMS has no valid signature from a trusted key."""
+
+
+NOT_CONFIGURED = (
+    "Updates aren't set up in this DataLab: it has no release signing key to check new "
+    "versions with, so it never installs one. Install new versions with the installer."
+)
 
 
 def parse_version(text: str) -> Version | None:
@@ -97,8 +124,9 @@ class Asset:
     # The API's address for the file (`.../releases/assets/<id>`).
     url: str
     size: int
-    # GitHub's own SHA-256 of the file, where it keeps one.
-    sha256: str | None = None
+    # GitHub's own SHA-256 of the file (its `digest`). Required: a release
+    # file without one is never used.
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -111,14 +139,15 @@ class Release:
     published_at: str | None
     page: str | None
     wheel: Asset
-    constraints: Asset
+    requirements: Asset
     images: Asset
     sums: Asset
+    signature: Asset
 
     @property
     def files(self) -> tuple[Asset, ...]:
-        """What an update downloads, besides SHA256SUMS."""
-        return (self.wheel, self.constraints, self.images)
+        """What an update downloads, besides SHA256SUMS and its signature."""
+        return (self.wheel, self.requirements, self.images)
 
 
 def releases_from(raw: Any, repository: str) -> tuple[list[Release], list[str]]:
@@ -184,7 +213,7 @@ def expected_sha256(release: Release, sums: dict[str, str], asset: Asset) -> str
     listed = sums.get(asset.name)
     if listed is None:
         raise ChecksumMismatch(f"SHA256SUMS for {release.tag} doesn't list {asset.name}.")
-    if asset.sha256 is not None and asset.sha256 != listed:
+    if asset.sha256 != listed:
         raise ChecksumMismatch(
             f"{asset.name} in {release.tag}: SHA256SUMS and GitHub have different checksums."
         )
@@ -214,19 +243,19 @@ class ReleaseSource:
             raise CheckProblem("failed", "GitHub's list of releases couldn't be read.") from None
 
     def read_small(self, asset: Asset, limit: int) -> bytes:
-        """A small release file (SHA256SUMS), whole, checked against GitHub's checksum."""
-        if asset.size > limit:
-            raise ChecksumMismatch(f"{asset.name} is larger than a checksum file should be.")
+        """A small release file (SHA256SUMS, its signature), whole, checked
+        against GitHub's checksum."""
+        limit = min(limit, asset.size)
+        if asset.size > limit or asset.size == 0:
+            raise ChecksumMismatch(f"{asset.name} isn't the size a checksum file should be.")
         chunks = bytearray()
         with self._download(asset) as response:
             for chunk in response.iter_bytes():
                 chunks.extend(chunk)
                 if len(chunks) > limit:
-                    raise ChecksumMismatch(
-                        f"{asset.name} is larger than a checksum file should be."
-                    )
+                    raise ChecksumMismatch(f"{asset.name} is larger than GitHub said.")
         data = bytes(chunks)
-        if asset.sha256 is not None and hashlib.sha256(data).hexdigest() != asset.sha256:
+        if hashlib.sha256(data).hexdigest() != asset.sha256:
             raise ChecksumMismatch(f"{asset.name} doesn't match GitHub's checksum for it.")
         return data
 
@@ -245,7 +274,7 @@ class ReleaseSource:
                     if cancel is not None and cancel():
                         raise CheckProblem("failed", "The download was cancelled.")
                     size += len(chunk)
-                    if size > max(asset.size, 1) * 2 + 1024:
+                    if size > asset.size:
                         raise ChecksumMismatch(f"{asset.name} is larger than GitHub said.")
                     digest.update(chunk)
                     out.write(chunk)
@@ -261,8 +290,8 @@ class ReleaseSource:
         if not asset.url.startswith(prefix):
             raise ChecksumMismatch(f"{asset.name} isn't a file of {self.repository}'s releases.")
         url = asset.url
-        # Redirects are followed by hand, and only to https: GitHub sends
-        # release files from its own storage host.
+        # Redirects are followed by hand, and only to GitHub's own hosts, over
+        # https: GitHub sends release files from its storage.
         for _ in range(5):
             try:
                 request = self._http.build_request(
@@ -275,7 +304,7 @@ class ReleaseSource:
                 location = response.headers.get("location", "")
                 response.close()
                 target = urlsplit(str(httpx.URL(url).join(location)))
-                if target.scheme != "https" or not target.hostname:
+                if target.scheme != "https" or target.hostname not in DOWNLOAD_HOSTS:
                     raise CheckProblem("failed", "GitHub sent the download somewhere unexpected.")
                 url = target.geturl()
                 continue
@@ -355,15 +384,21 @@ class UpdateChecker:
         source: ReleaseSource | None = None,
         current: str = __version__,
         clock: Callable[[], float] = time.time,
+        keys: Sequence[str] | None = None,
     ) -> None:
         self.settings = settings
         self.current = current
+        # The public keys a release must be signed with (release_keys.py).
+        self.keys = tuple(release_keys.trusted_keys() if keys is None else keys)
         self.source = source or ReleaseSource(settings.updates.repository)
         self._clock = clock
         self._lock = threading.Lock()
         self._checked_at: float | None = None
         channel = settings.updates.channel
         off = not settings.updates.check_on_start
+        if not self.keys:
+            self._last = CheckResult("not-configured", NOT_CONFIGURED, current, channel)
+            return
         self._last = CheckResult(
             "not-checked",
             "Checking for updates when DataLab starts is off (updates.check_on_start). "
@@ -386,6 +421,8 @@ class UpdateChecker:
 
     def check(self) -> CheckResult:
         """Ask GitHub, unless it asked DataLab to wait or the last check was a moment ago."""
+        if not self.keys:
+            return self._last  # never asks GitHub, never offers a release
         with self._lock:
             now = self._clock()
             last = self._last
@@ -407,9 +444,11 @@ class UpdateChecker:
             release = choose(releases, self.current, channel)
             if release is None:
                 return replace(base, message=self._up_to_date(channel))
-            sums = parse_sums(
-                self.source.read_small(release.sums, MAX_SUMS_BYTES).decode("utf-8", "replace")
-            )
+            raw_sums = self.source.read_small(release.sums, MAX_SUMS_BYTES)
+            signature = self.source.read_small(release.signature, MAX_SIGNATURE_BYTES)
+            if not signing.verify(raw_sums, signature, self.keys):
+                raise NotSigned(f"{release.tag}'s SHA256SUMS isn't signed by the lab's release key")
+            sums = parse_sums(raw_sums.decode("utf-8", "replace"))
             expected = check_listing(release, sums)
         except CheckProblem as problem:
             return replace(
@@ -417,6 +456,14 @@ class UpdateChecker:
                 state=problem.state,
                 message=self._problem(problem),
                 retry_at=problem.retry_at,
+            )
+        except NotSigned as error:
+            log.warning("update check: %s", error)
+            return replace(
+                base,
+                state="failed",
+                message=f"A newer release was found, but it isn't signed by the lab's release "
+                f"key ({error}), so DataLab won't offer it. Tell the DataLab maintainer.",
             )
         except ChecksumMismatch as error:
             log.warning("update check: %s", error)
@@ -473,20 +520,30 @@ def _release(item: dict[str, Any], tag: str, repository: str) -> tuple[Release |
     if version is None:
         return None, "the tag isn't a version"
     assets: dict[str, Asset] = {}
-    wheels: list[Asset] = []
+    unchecked: set[str] = set()
+    wheels: list[str] = []
     for raw in item.get("assets") or []:
-        asset = _asset(raw, repository)
-        if asset is None:
+        listed = _asset(raw, repository)
+        if listed is None:
             continue
-        assets[asset.name] = asset
-        match = _WHEEL.fullmatch(asset.name)
+        name, asset = listed
+        if asset is None:
+            unchecked.add(name)
+        else:
+            assets[name] = asset
+        match = _WHEEL.fullmatch(name)
         if match and parse_version(match.group(1)) == version:
-            wheels.append(asset)
-    missing = [n for n in (CONSTRAINTS, IMAGES, SUMS) if n not in assets]
+            wheels.append(name)
+    needed = [*wheels, REQUIREMENTS, IMAGES, SUMS, SIGNATURE]
+    missing = [n for n in needed[len(wheels) :] if n not in assets and n not in unchecked]
     if len(wheels) != 1:
         missing.insert(0, f"the DataLab {version} package")
     if missing:
         return None, f"it doesn't have {', '.join(missing)}"
+    # GitHub's own checksum of every file used is required, never optional.
+    without = sorted(n for n in needed if n in unchecked)
+    if without:
+        return None, f"GitHub gives no checksum for {', '.join(without)}"
     notes = str(item.get("body") or "")
     return (
         Release(
@@ -497,16 +554,19 @@ def _release(item: dict[str, Any], tag: str, repository: str) -> tuple[Release |
             notes=notes[:MAX_NOTES],
             published_at=_text(item.get("published_at")),
             page=_github_page(item.get("html_url")),
-            wheel=wheels[0],
-            constraints=assets[CONSTRAINTS],
+            wheel=assets[wheels[0]],
+            requirements=assets[REQUIREMENTS],
             images=assets[IMAGES],
             sums=assets[SUMS],
+            signature=assets[SIGNATURE],
         ),
         "",
     )
 
 
-def _asset(raw: Any, repository: str) -> Asset | None:
+def _asset(raw: Any, repository: str) -> tuple[str, Asset | None] | None:
+    """A listed file of this repo's release: its name, and the Asset if GitHub
+    gave its checksum (None if it didn't)."""
     if not isinstance(raw, dict):
         return None
     name, url = raw.get("name"), raw.get("url")
@@ -515,12 +575,11 @@ def _asset(raw: Any, repository: str) -> Asset | None:
     if not url.startswith(f"{API}/repos/{repository}/releases/assets/"):
         return None
     digest = raw.get("digest")
-    sha256 = None
-    if isinstance(digest, str) and digest.startswith("sha256:"):
-        value = digest.removeprefix("sha256:").lower()
-        sha256 = value if _SHA256.fullmatch(value) else None
+    value = digest.removeprefix("sha256:").lower() if isinstance(digest, str) else ""
+    if not (isinstance(digest, str) and digest.startswith("sha256:") and _SHA256.fullmatch(value)):
+        return name, None
     size = raw.get("size")
-    return Asset(name, url, size if isinstance(size, int) and size >= 0 else 0, sha256)
+    return name, Asset(name, url, size if isinstance(size, int) and size >= 0 else 0, value)
 
 
 def _plain_name(name: str) -> bool:

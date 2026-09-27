@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28",
     "starlette>=0.48",
     "packaging>=24",
+    "cryptography>=43",
 ]
 
 [project.scripts]
