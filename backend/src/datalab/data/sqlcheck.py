@@ -35,9 +35,11 @@ MAX_SQL_BYTES = 64 * 1024
 # Allowing built-in names is safe because an unqualified built-in name always
 # runs the built-in: Oracle doesn't let a same-named function in the session's
 # schema, or a public synonym, take its place. Tested for every name here on
-# the synthetic database (tests/test_sqlcheck_oracle.py). Built-ins newer than
-# Oracle 19c (ANY_VALUE, KURTOSIS_*, SKEWNESS_*) are left out: on an older
-# production database they aren't built-ins, so a same-named function could run.
+# the synthetic database (tests/test_sqlcheck_oracle.py), which runs 23ai. The
+# production database runs 19c (19.32), so every name here must be a built-in
+# in 19c: checked against the 19c SQL Language Reference. Newer built-ins
+# (ANY_VALUE, KURTOSIS_*, SKEWNESS_*) are left out: in 19c they aren't
+# built-ins, so a same-named function could run.
 ORACLE_FUNCTIONS = frozenset(
     """
     ABS ACOS ASIN ATAN ATAN2 BITAND CEIL COS COSH EXP FLOOR LN LOG MOD NANVL

@@ -191,6 +191,10 @@ access. It never gains it.
     runs the built-in, and a control name that isn't a built-in is taken
     over, as expected. A name can't be added without a sample call that this
     test runs.
+  - The synthetic database runs Oracle 23ai; production runs 19c (19.32).
+    Every allowed name is a built-in in 19c (checked against the 19c SQL
+    Language Reference), so none is open to takeover in production for
+    lack of a built-in. Built-ins added after 19c stay off the list.
   - Calls are checked by the name as written, not as the parser reads it
     (it maps some names, such as IFNULL, onto its own functions). A quoted
     name must match exactly: Oracle treats `"nvl"` as a different object
