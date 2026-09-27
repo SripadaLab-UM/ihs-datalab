@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 import uvicorn
 
-from datalab import credentials, datalock
+from datalab import app, credentials, datalock
 from datalab.config import OracleSettings, QueryLimits, Settings
 from datalab.data.catalog import Catalog, Column, TableInfo
 from datalab.data.oracle import ExtractResult, QueryCancelled
@@ -33,6 +33,22 @@ def no_real_model_key(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda service, account: (
             None if service == credentials.MODEL_KEY_SERVICE else real(service, account)
         ),
+    )
+
+
+# The real check, for the test that it's there.
+REQUIRE_DATA_FOLDER_LOCK = app.require_data_folder_lock
+
+
+@pytest.fixture(autouse=True)
+def lock_data_folders_for_create_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    """create_app needs its data folder locked, as the CLI does before calling
+    it. In tests, it takes the lock itself (released after each test);
+    test_app_needs_the_data_folder_lock checks the real requirement."""
+    monkeypatch.setattr(
+        app,
+        "require_data_folder_lock",
+        lambda settings: datalock.refuse_second_instance(settings.data_dir, settings.profile),
     )
 
 

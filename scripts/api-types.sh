@@ -11,7 +11,10 @@ trap 'rm -rf "$scratch"' EXIT
 import json
 from datalab.app import create_app
 from datalab.config import load_settings
-print(json.dumps(create_app(load_settings("practice"), manage_containers=False).openapi()))
+from datalab.datalock import refuse_second_instance
+settings = load_settings("practice")
+refuse_second_instance(settings.data_dir, settings.profile)
+print(json.dumps(create_app(settings, manage_containers=False).openapi()))
 ' > "$scratch/openapi.json"
 )
 cd "$root/frontend"

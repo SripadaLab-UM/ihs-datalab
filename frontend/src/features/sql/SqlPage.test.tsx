@@ -215,7 +215,7 @@ it("exports a result to the chosen folder", async () => {
   expect(await within(dialog).findByText("/x/2026-09-27 SQL Playground")).toBeInTheDocument();
 });
 
-it("lets the keyboard scroll the rows and read a value that's cut short", async () => {
+it("reads the rows with the arrow keys, one tab stop for the grid", async () => {
   const long = "x".repeat(120);
   vi.mocked(sqlApi.results).mockResolvedValue({
     query_id: done.query_id!, columns: done.columns, row_count: 2, offset: 0,
@@ -226,6 +226,12 @@ it("lets the keyboard scroll the rows and read a value that's cut short", async 
   const rows = await screen.findByRole("region", { name: "Result rows" });
   expect(rows).toHaveAttribute("tabindex", "0");
   const cell = await within(rows).findByText(long);
-  expect(cell).toHaveAttribute("tabindex", "0");
-  expect(within(rows).getByText("SYN001")).not.toHaveAttribute("tabindex");
+  expect(within(rows).queryAllByRole("cell").some((c) => c.hasAttribute("tabindex"))).toBe(false);
+  expect(cell.className).toContain("truncate");
+  fireEvent.keyDown(rows, { key: "ArrowDown" });
+  fireEvent.keyDown(rows, { key: "ArrowDown" });
+  // The row it's on shows its values in full, and is read out.
+  expect(cell.className).not.toContain("truncate");
+  expect(cell.closest("tr")).toHaveAttribute("aria-current", "true");
+  expect(within(rows).getByText(/^Row 2: STUDY_PARTICIPANT_ID x+$/)).toBeInTheDocument();
 });

@@ -384,7 +384,11 @@ def build_conversations_router(
                 tables=r.tables,
                 row_count=r.row_count,
                 elapsed_ms=r.elapsed_ms,
-                result_file=r.result_path.rsplit("/", 1)[-1] if r.result_path else None,
+                # Only a query that succeeded has a result (a running one's path is
+                # where its result will go).
+                result_file=r.result_path.rsplit("/", 1)[-1]
+                if r.result_path and r.status == "succeeded"
+                else None,
                 message=r.message,
             )
             for r in access_log.for_session(conversation_id)

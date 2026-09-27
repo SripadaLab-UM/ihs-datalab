@@ -115,6 +115,7 @@ class DataService:
             binds=binds,
             tables=tables,
             origin=origin,
+            result_path=out_path,
         )
         cancel = threading.Event()
         try:
@@ -131,7 +132,7 @@ class DataService:
                 )
                 result = await _cancel_on_task_cancel(work, cancel)
         except QueryCancelled as error:
-            self._log.finished(query_id, status="cancelled", message=str(error))
+            self._log.finished(query_id, status="cancelled", message=str(error), reason="stopped")
             raise
         except QueryFailed as error:
             self._log.finished(query_id, status="failed", message=str(error))
@@ -139,7 +140,7 @@ class DataService:
         except asyncio.CancelledError:
             # Stopped just as it finished: the result isn't kept, as the log says.
             out_path.unlink(missing_ok=True)
-            self._log.finished(query_id, status="cancelled", message="Stopped.")
+            self._log.finished(query_id, status="cancelled", message="Stopped.", reason="stopped")
             raise
         except BaseException:
             # Anything else (a bug, an unexpected error): never left as running.

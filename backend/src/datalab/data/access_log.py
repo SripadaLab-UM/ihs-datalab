@@ -76,13 +76,27 @@ class AccessLog:
         binds: dict[str, Any],
         tables: list[str],
         origin: Origin = "conversation",
+        result_path: Path | None = None,
     ) -> None:
+        """A query about to run. `result_path` is where its result will be
+        written, so a result a crash left behind can be found and removed
+        (see `end_cut_off_queries`); it's only a result once `finished` says
+        the query succeeded."""
         check_owner(origin, session_id)
         with self._lock:
             self._db.execute(
                 "INSERT INTO queries (id, session_id, origin, started_at, status, sql_text, "
-                "binds_json, tables_json) VALUES (?, ?, ?, ?, 'running', ?, ?, ?)",
-                (query_id, session_id, origin, _now(), sql, _json(binds), _json(tables)),
+                "binds_json, tables_json, result_path) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)",
+                (
+                    query_id,
+                    session_id,
+                    origin,
+                    _now(),
+                    sql,
+                    _json(binds),
+                    _json(tables),
+                    str(result_path) if result_path else None,
+                ),
             )
 
     def finished(
@@ -95,7 +109,11 @@ class AccessLog:
         elapsed_ms: int | None = None,
         result_path: Path | None = None,
         message: str | None = None,
+        reason: str | None = None,
     ) -> None:
+        """How a query ended. `reason` says why a cancelled one was, for the
+        audit log: `stopped` (Stop was pressed, or its request ended) or
+        `datalab_stopped` (DataLab itself ended before the query did)."""
         with self._lock:
             self._db.execute(
                 "UPDATE queries SET finished_at = ?, status = ?, row_count = ?, bytes_written = ?, "
@@ -113,7 +131,7 @@ class AccessLog:
             )
             record = self._get(query_id)
             if record:
-                self._append_audit(record)
+                self._append_audit(record, reason)
 
     def rejected(
         self,
@@ -131,24 +149,27 @@ class AccessLog:
         self.finished(query_id, status="rejected", message=reason)
 
     def end_cut_off_queries(self) -> int:
-        """Mark queries a previous run of DataLab left running as cancelled.
+        """End the queries a previous run of DataLab left running.
 
         Called at startup, when no query can be running (one DataLab per
         data folder). The log has no "interrupted" status, so they're
-        cancelled, and the message says why. Returns how many there were.
+        cancelled, with `datalab_stopped` as the reason in the audit log. A
+        query can be cut off after its result was written but before it was
+        logged: that result, and any half-written one, is removed, so what
+        the message says is true. Returns how many there were.
         """
         with self._lock:
-            ids = [
-                row["id"]
-                for row in self._db.execute("SELECT id FROM queries WHERE status = 'running'")
-            ]
-        for query_id in ids:
+            rows = self._db.execute(
+                "SELECT id, result_path FROM queries WHERE status = 'running'"
+            ).fetchall()
+        for row in rows:
             self.finished(
-                query_id,
+                row["id"],
                 status="cancelled",
-                message="DataLab stopped before this query finished. Nothing was kept.",
+                message=_remove_cut_off_result(row["id"], row["result_path"]),
+                reason="datalab_stopped",
             )
-        return len(ids)
+        return len(rows)
 
     def record_export(
         self,
@@ -191,7 +212,7 @@ class AccessLog:
         row = self._db.execute("SELECT * FROM queries WHERE id = ?", (query_id,)).fetchone()
         return _record(row) if row else None
 
-    def _append_audit(self, record: QueryRecord) -> None:
+    def _append_audit(self, record: QueryRecord, reason: str | None = None) -> None:
         entry = {
             "ts": record.finished_at,
             "query_id": record.id,
@@ -204,9 +225,30 @@ class AccessLog:
             "row_count": record.row_count,
             "bytes": record.bytes_written,
             "elapsed_ms": record.elapsed_ms,
+            **({"reason": reason} if reason else {}),
         }
         with self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
+
+
+def _remove_cut_off_result(query_id: str, result_path: str | None) -> str:
+    """Remove what a cut-off query wrote, and say what became of it."""
+    stopped = "DataLab stopped before this query finished."
+    result = Path(result_path) if result_path else None
+    # Only the file DataLab names for the query (the data service's <id>.csv).
+    # Without one (a query logged before DataLab recorded where results go),
+    # nothing is claimed about a result.
+    if result is None or result.name != f"{query_id}.csv":
+        return stopped
+    left: list[Path] = []
+    for path in (result, result.with_name(result.name + ".partial")):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            left.append(path)
+    if left:
+        return f"{stopped} Its result file couldn't be removed: {', '.join(p.name for p in left)}."
+    return f"{stopped} Nothing was kept."
 
 
 def _record(row: sqlite3.Row) -> QueryRecord:

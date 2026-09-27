@@ -272,3 +272,78 @@ def test_queries_a_previous_run_left_running_are_ended(tmp_path, log):
         assert record.status == "cancelled"
         assert "DataLab stopped" in (record.message or "")
     assert log.end_cut_off_queries() == 0
+
+
+def test_a_result_written_just_before_datalab_stopped_is_removed(tmp_path, log):
+    """Cut off after the result was written but before it was logged: the
+    result goes, so the agent can't read what the log says wasn't kept."""
+    result = tmp_path / "q_20260101T000000_aaaaaa.csv"
+    partial = tmp_path / "q_20260101T000001_bbbbbb.csv.partial"
+    log.started(
+        query_id=result.stem, session_id="c1", sql="S", binds={}, tables=[], result_path=result
+    )
+    log.started(
+        query_id="q_20260101T000001_bbbbbb",
+        session_id="c1",
+        sql="S",
+        binds={},
+        tables=[],
+        result_path=partial.with_suffix(""),
+    )
+    result.write_text("A\n1\n")
+    partial.write_text("A\n")
+    log.end_cut_off_queries()
+    assert not result.exists() and not partial.exists()
+    for record in log.for_session("c1"):
+        assert record.message == "DataLab stopped before this query finished. Nothing was kept."
+        assert record.result_path is None
+
+
+async def test_the_audit_log_tells_a_stop_from_datalab_stopping(tmp_path, log):
+    database = FakeDatabase(block=True)
+    task = asyncio.create_task(
+        service(database, log).run_query(
+            session_id="s1", sql=SQL, binds={"d": 1}, results_dir=tmp_path
+        )
+    )
+    await asyncio.to_thread(database.started.wait, 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    log.started(query_id="q2", session_id="s1", sql="S", binds={}, tables=[])
+    log.end_cut_off_queries()
+    stopped, cut_off = audit_entries(tmp_path)
+    assert (stopped["status"], stopped["reason"]) == ("cancelled", "stopped")
+    assert (cut_off["status"], cut_off["reason"]) == ("cancelled", "datalab_stopped")
+
+
+def test_a_running_query_has_no_result_file_in_its_panel(settings, catalog):
+    """The planned result path of a running query isn't shown as its result."""
+    from fastapi.testclient import TestClient
+
+    from datalab.app import create_app
+
+    app = create_app(
+        settings,
+        database=FakeDatabase(),
+        catalog=catalog,
+        manage_containers=False,
+        protect_api=False,
+    )
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"title": "A study"}).json()["id"]
+        client.app.state.services.access_log.started(  # type: ignore[attr-defined]
+            query_id="q1",
+            session_id=cid,
+            sql="S",
+            binds={},
+            tables=[],
+            result_path=tmp_path_of(settings),
+        )
+        [entry] = client.get(f"/api/conversations/{cid}/data-accessed").json()
+        assert entry["status"] == "running"
+        assert entry["result_file"] is None
+
+
+def tmp_path_of(settings):
+    return settings.data_dir / "sessions" / "x" / "oracle" / "q1.csv"

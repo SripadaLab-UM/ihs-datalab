@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 
-from datalab import __version__, db
+from datalab import __version__, datalock, db
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
@@ -81,6 +81,7 @@ def create_app(
     protect_api: bool = True,
     web_dist: Path | None = None,
 ) -> FastAPI:
+    require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
     access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
     if catalog is None:
@@ -248,6 +249,25 @@ def create_app(
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(app, browser, web_dist)
     return app
+
+
+class DataFolderNotLocked(RuntimeError):
+    """create_app was called without holding the data folder's lock."""
+
+
+def require_data_folder_lock(settings: Settings) -> None:
+    """Refuse to build DataLab on a data folder this process hasn't locked.
+
+    At startup DataLab ends the turns and queries the last run left going
+    and removes its containers and half-written results: with a second
+    DataLab on the same folder, that would be done to one still working. So
+    every caller takes the lock first (`datalock.refuse_second_instance`).
+    """
+    if not datalock.held(settings.data_dir):
+        raise DataFolderNotLocked(
+            f"DataLab needs the lock on its data folder ({settings.data_dir}) before it "
+            "starts: call datalock.refuse_second_instance first."
+        )
 
 
 class _LazyOracle:

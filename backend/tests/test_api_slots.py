@@ -6,7 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from datalab.app import create_app
-from tests.conftest import FakeDatabase
+from tests.conftest import REQUIRE_DATA_FOLDER_LOCK, FakeDatabase
 
 
 @pytest.fixture
@@ -38,3 +38,15 @@ def test_the_areas_are_in_the_api_schema(client):
     paths = client.app.openapi()["paths"]  # type: ignore[attr-defined]
     for area in ("sql", "knowledge", "workflows", "pipelines", "settings"):
         assert f"/api/{area}/status" in paths
+
+
+def test_app_needs_the_data_folder_lock(settings, catalog, monkeypatch):
+    from datalab import app as app_module
+    from datalab import datalock
+
+    # The real check, not the tests' stand-in (see conftest.py).
+    monkeypatch.setattr(app_module, "require_data_folder_lock", REQUIRE_DATA_FOLDER_LOCK)
+    with pytest.raises(app_module.DataFolderNotLocked):
+        create_app(settings, database=FakeDatabase(), catalog=catalog, manage_containers=False)
+    datalock.refuse_second_instance(settings.data_dir, settings.profile)
+    create_app(settings, database=FakeDatabase(), catalog=catalog, manage_containers=False)

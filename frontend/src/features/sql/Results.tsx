@@ -1,5 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import clsx from "clsx";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { sqlApi } from "@/api/sql";
 import { Button, Chip, EmptyNote, Icon } from "@/components/ui";
@@ -35,6 +36,26 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
   const count = result.rowCount ?? data?.row_count ?? null;
   const shownTo = data ? data.offset + data.rows.length : 0;
   const beyondPreview = count !== null && limit > 0 && count > limit;
+  // The row the arrow keys are on, in this page.
+  const [current, setCurrent] = useState<number | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const hintId = useId();
+  useEffect(() => setCurrent(null), [offset]);
+  const onKey = (event: React.KeyboardEvent) => {
+    const last = (data?.rows.length ?? 0) - 1;
+    const move: Record<string, (at: number | null) => number> = {
+      ArrowDown: (at) => Math.min(last, (at ?? -1) + 1),
+      ArrowUp: (at) => Math.max(0, (at ?? 1) - 1),
+      Home: () => 0,
+      End: () => last,
+    };
+    if (last < 0 || !(event.key in move)) return;
+    event.preventDefault();
+    setCurrent((at) => move[event.key](at));
+  };
+  useEffect(() => {
+    if (current !== null) box.current?.querySelector(`[data-row="${current}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [current]);
 
   return (
     <section aria-label="Result" className="flex min-h-0 flex-1 flex-col">
@@ -58,13 +79,28 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
           {warning}
         </p>
       ))}
-      {/* Focusable, so the rows can be scrolled with the keyboard too. */}
+      {/* One tab stop for the whole grid: the arrow keys move from row to row,
+          and the row they're on shows its values in full. */}
       <div
+        ref={box}
         tabIndex={0}
         role="region"
         aria-label="Result rows"
+        aria-describedby={hintId}
+        onKeyDown={onKey}
+        onBlur={() => setCurrent(null)}
         className="min-h-0 flex-1 overflow-auto focus-visible:outline-offset-[-2px]"
       >
+        <span id={hintId} className="sr-only">
+          Use the up and down arrow keys to read the rows.
+        </span>
+        <span aria-live="polite" className="sr-only">
+          {data && current !== null && data.rows[current]
+            ? `Row ${data.offset + current + 1}: ${data.rows[current]
+                .map((cell, c) => `${data.columns[c]?.name ?? ""} ${cell || "empty"}`)
+                .join(", ")}`
+            : ""}
+        </span>
         {page.isError && <p className="px-5 py-3 font-sans text-[13px] text-danger">{page.error.message}</p>}
         {data && data.columns.length > 0 && (
           <table className="min-w-full border-separate border-spacing-0 font-mono text-[12px]">
@@ -83,15 +119,25 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
             </thead>
             <tbody>
               {data.rows.map((row, r) => (
-                <tr key={data.offset + r} className="hover:bg-sunken">
+                <tr
+                  key={data.offset + r}
+                  data-row={r}
+                  aria-current={current === r ? "true" : undefined}
+                  onClick={() => setCurrent(r)}
+                  className={clsx("hover:bg-sunken", current === r && "bg-sunken")}
+                >
                   <td className="border-b border-line/70 px-3 py-1 text-right text-faint tabular">{data.offset + r + 1}</td>
                   {row.map((cell, c) => (
                     <td
                       key={c}
-                      // A long value is cut short: hover or focus it to see all of it.
+                      // A long value is cut short: hover it, or move to its row, to see all of it.
                       title={cell.length > LONG_CELL ? cell : undefined}
-                      tabIndex={cell.length > LONG_CELL ? 0 : undefined}
-                      className="max-w-[28rem] truncate border-b border-line/70 px-3 py-1 whitespace-nowrap text-ink focus:max-w-[40rem] focus:overflow-visible focus:bg-sunken focus:whitespace-pre-wrap focus:[overflow-wrap:anywhere] focus-visible:outline-offset-[-2px]"
+                      className={clsx(
+                        "border-b border-line/70 px-3 py-1 text-ink",
+                        current === r
+                          ? "max-w-[40rem] whitespace-pre-wrap [overflow-wrap:anywhere]"
+                          : "max-w-[28rem] truncate whitespace-nowrap",
+                      )}
                     >
                       {cell === "" ? <span className="text-faint">·</span> : cell}
                     </td>
