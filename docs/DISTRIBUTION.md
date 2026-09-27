@@ -234,7 +234,22 @@ It never touches export destinations.
 
 - Docker Desktop needs WSL2. That means one administrator step and usually a
   restart; the installer resumes where it left off. On Michigan Medicine
-  managed machines this may need temporary elevation, the normal JIT process.
+  managed machines this may need temporary elevation, the normal JIT process,
+  so the installer asks people to request it before they continue.
+  - Built (`install.ps1`): the installer asks Windows for permission once, up
+    front, and only if something is missing. That one step turns on the WSL
+    features, installs WSL and Docker Desktop (pinned versions, checked by
+    SHA-256, and Docker's installer by its signature), and adds the person to
+    `docker-users` by SID (a name lookup needs the domain controller, which
+    isn't reachable off the VPN). Then it offers the restart and opens again
+    after sign-in, from a logon task for that person; nothing after this
+    needs an administrator.
+  - Before starting Docker Desktop, it moves aside socket files an earlier
+    Docker left behind, and stops a leftover Docker VM: either stops Docker
+    Desktop from starting.
+  - uv cuts a `--constraints` path at its first space, and downloads on these
+    machines usually sit under `OneDrive - Michigan Medicine`, so the installer
+    hands uv a copy of `constraints.txt` under a plain name.
 - Credentials go in Windows Credential Manager, and paths use
   `%LOCALAPPDATA%`.
 - Windows must be tested on a real managed machine before it's promised to

@@ -149,10 +149,15 @@ def _docker_quiet(*query: str, then: str) -> None:
     """Run a docker listing, then apply `then` to whatever it returned."""
     if shutil.which("docker") is None:
         return
-    listing = subprocess.run(["docker", *query], capture_output=True, text=True)
-    ids = listing.stdout.split()
-    if ids:
-        subprocess.run(["docker", *then.split(), *ids], capture_output=True)
+    # A Docker Desktop whose engine is stuck can leave `docker` waiting forever;
+    # uninstalling carries on without it rather than hanging.
+    try:
+        listing = subprocess.run(["docker", *query], capture_output=True, text=True, timeout=30)
+        ids = listing.stdout.split()
+        if ids:
+            subprocess.run(["docker", *then.split(), *ids], capture_output=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        print(f"  Docker didn't answer, so this was skipped: docker {' '.join(query)}")
 
 
 def _size(folder: Path) -> str:

@@ -189,10 +189,34 @@ def _pull_images(settings) -> int:
         print(f"Using the local agent image {settings.agent_image} (not downloaded).")
     for image in images:
         print(f"Downloading {image.split('@')[0]} …", flush=True)
-        if subprocess.run(["docker", "pull", "-q", image]).returncode != 0:
-            print(f"Couldn't download {image}. Is Docker Desktop running?")
+        pulled = subprocess.run(["docker", "pull", "-q", image], stderr=subprocess.PIPE, text=True)
+        if pulled.returncode != 0:
+            error = pulled.stderr.strip()
+            print(error)
+            print(f"Couldn't download {image}.")
+            print(_pull_failure_hint(error))
             return 1
     return 0
+
+
+def _pull_failure_hint(error: str) -> str:
+    """What to do about a failed `docker pull`, in words for someone non-technical."""
+    lowered = error.lower()
+    if "unauthorized" in lowered or "denied" in lowered:
+        return (
+            "The registry wouldn't let this computer download it. That's not something you "
+            "did: the DataLab maintainer needs to make the image available. Send them this message."
+        )
+    if (
+        "cannot connect" in lowered
+        or "pipe" in lowered
+        or ("daemon" in lowered and "running" in lowered)
+    ):
+        return (
+            "Docker Desktop doesn't seem to be running. Start it, wait until it says "
+            "'Engine running', then try again."
+        )
+    return "Check the internet connection (and the VPN, if you're on one), then try again."
 
 
 def _backup(settings) -> int:
