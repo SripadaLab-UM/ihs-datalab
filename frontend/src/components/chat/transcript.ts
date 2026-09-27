@@ -1,6 +1,6 @@
 // Turns a conversation's event log into what the chat shows.
 import type { Approval } from "./ApprovalCard";
-import { asPlan } from "./plan";
+import { asComparison, asPlan, isV2 } from "./plan";
 //
 // The event log (see backend sessions/runtime.py) is a flat, append-only list:
 // user messages, streamed answer text, reasoning, commands, tool calls, and
@@ -118,6 +118,12 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         if (item) {
           item.plan = asPlan(data.plan) ?? item.plan;
           item.frozen = { at: text(data.approved_at), sha256: text(data.sha256) };
+          item.planId = text(data.plan_id);
+          // A revision: the plan it replaces is marked as replaced.
+          const revises = isV2(item.plan) ? item.plan.revises?.plan_id : undefined;
+          for (const earlier of approvals.values()) {
+            if (revises && earlier.planId === revises) earlier.supersededBy = { planId: item.planId, at: item.frozen.at };
+          }
         }
         break;
       }
@@ -222,6 +228,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           approvalKind: data.kind === "analysis_plan" ? "analysis_plan" : "research_helper",
           question: text(data.question),
           plan: asPlan(data.plan),
+          compareTo: asComparison(data.compare_to),
           state: "pending",
         };
         approvals.set(id, item);
@@ -233,6 +240,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         if (item) {
           item.state = data.approved ? "approved" : "declined";
           if (data.approved) item.sent = text(data.question);
+          if (data.change_type_label) item.changeTypeLabel = text(data.change_type_label);
         }
         break;
       }

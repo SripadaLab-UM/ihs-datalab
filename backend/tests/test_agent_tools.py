@@ -242,3 +242,11 @@ async def test_a_plan_that_isnt_well_formed_is_refused_with_a_reason(
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         result = await session.call_tool("propose_plan", {**PLAN_ARGS, **change})
     assert result.is_error and says in result.content[0].text
+
+
+async def test_a_revision_must_name_an_approved_plan(server, tmp_path):
+    base_url, services, _ = server
+    args = {**PLAN_ARGS, "revises": "pl_000000000000", "revision_reason": "Add a device."}
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        result = await session.call_tool("propose_plan", args)
+    assert result.is_error and "no approved plan to revise" in result.content[0].text

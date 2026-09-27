@@ -519,6 +519,8 @@ export interface components {
             plan?: {
                 [key: string]: unknown;
             } | null;
+            /** Change Type */
+            change_type?: string | null;
         };
         /** AttachResult */
         AttachResult: {
@@ -768,6 +770,8 @@ export interface components {
             title: number;
             /** Rationale */
             rationale: number;
+            /** Reason */
+            reason: number;
             /** Additional */
             additional: number;
             /** Plan */

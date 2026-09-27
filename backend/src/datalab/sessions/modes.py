@@ -70,7 +70,10 @@ Plan before you look:
   answer changes the plan.
 - Once a plan is approved it's frozen. Say which results follow the plan,
   and label anything else "exploratory (off-plan)", in the chat and in
-  reports. If the plan needs to change, propose a new one.
+  reports. If the plan needs to change, propose a revision of it (the
+  tool's `revises`), saying what changes and why, including anything you
+  saw in the data that prompted it. Results from before the revision stay
+  labelled by the plan they followed.
 - Small follow-ups on an approved plan, or questions about the data
   itself (coverage, definitions), don't need a new plan.
 - If the person doesn't want a plan and would rather explore, go ahead, and

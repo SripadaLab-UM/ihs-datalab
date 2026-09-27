@@ -7,7 +7,7 @@ import clsx from "clsx";
 import { Button, Chip, Icon } from "@/components/ui";
 
 import { Markdown } from "./Markdown";
-import type { AnyPlan } from "./plan";
+import type { AnyPlan, PlanComparison } from "./plan";
 import { PlanCard } from "./PlanCard";
 
 export interface Approval {
@@ -16,7 +16,14 @@ export interface Approval {
   approvalKind: "research_helper" | "analysis_plan";
   question: string;
   plan?: AnyPlan;
+  /** What the plan is shown against: the approved plan it revises, or what the person sent back. */
+  compareTo?: PlanComparison;
   frozen?: { at: string; sha256: string };
+  planId?: string;
+  /** A later revision replaced this plan. */
+  supersededBy?: { planId: string; at: string };
+  /** Sent back: the type of analysis the person asked for instead. */
+  changeTypeLabel?: string;
   state: "pending" | "approved" | "declined" | "withdrawn";
   sent?: string;
   answer?: string;

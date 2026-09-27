@@ -166,6 +166,8 @@ def build_agent_tools(
             rationale: str = "",
             sections: dict[str, str] | None = None,
             additional_sections: list[AdditionalSection] | None = None,
+            revises: str = "",
+            revision_reason: str = "",
         ) -> str:
             access = _session(ctx, tokens)
             core = {
@@ -174,22 +176,25 @@ def build_agent_tools(
                 "checks_and_limitations": checks_and_limitations,
                 "deliverables": deliverables,
             }
+            raw: dict[str, Any] = {
+                "schema_version": plan_schema.SCHEMA_VERSION,
+                "analysis_type": analysis_type,
+                "rationale": rationale,
+                "sections": [
+                    *({"kind": k, "content": v} for k, v in core.items()),
+                    *({"kind": k, "content": v} for k, v in (sections or {}).items()),
+                    *(
+                        {"kind": ADDITIONAL, "label": a.title, "content": a.content}
+                        for a in additional_sections or []
+                    ),
+                ],
+                "revision_reason": revision_reason,
+            }
             try:
-                content = clean_plan(
-                    {
-                        "schema_version": plan_schema.SCHEMA_VERSION,
-                        "analysis_type": analysis_type,
-                        "rationale": rationale,
-                        "sections": [
-                            *({"kind": k, "content": v} for k, v in core.items()),
-                            *({"kind": k, "content": v} for k, v in (sections or {}).items()),
-                            *(
-                                {"kind": ADDITIONAL, "label": a.title, "content": a.content}
-                                for a in additional_sections or []
-                            ),
-                        ],
-                    }
-                )
+                if revises:
+                    # Named by the host from its own record, so the hash is right.
+                    raw["revises"] = plans.revision_link(access.session_id, revises)
+                content = clean_plan(raw)
             except PlanInvalid as error:
                 raise ToolError(str(error)) from error
 
@@ -202,16 +207,24 @@ def build_agent_tools(
 
             plan = await plans.propose(access.session_id, content, elicit)
             if isinstance(plan, Outcome):
-                return _json(
-                    {"status": "not approved", "note": plan.note, "persons_edits": plan.suggested}
-                )
+                refused: dict[str, Any] = {
+                    "status": "not approved",
+                    "note": plan.note,
+                    "persons_edits": plan.suggested,
+                }
+                if plan.change_type:
+                    refused["requested_type"] = plan.change_type
+                return _json(refused)
             return _json(
                 {
                     "status": "approved",
+                    "plan_id": plan.id,
+                    "sha256": plan.sha256,
                     "plan": plan.content,
                     "approved_at": plan.approved_at,
                     "note": "The plan is frozen. Say which work follows it, and label anything "
-                    "else exploratory (off-plan).",
+                    f"else exploratory (off-plan). To change it, propose a revision with "
+                    f"revises={plan.id!r}.",
                 }
             )
 

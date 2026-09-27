@@ -130,9 +130,17 @@ the rigor review checks that it did.
   exposure or outcome to invent.
 - It appears as a card. You can edit any section, add or remove optional
   ones, and **approve** it; it is then frozen with a timestamp and a hash
-  that cover everything shown. For a different type of analysis, choose
-  **Not yet** and say which. A plan that passes DataLab's checks is well
+  that cover everything shown. A plan that passes DataLab's checks is well
   formed; that doesn't make the analysis right.
+- **A different kind of analysis:** from the card, send the plan back as
+  another type. The agent rewrites it as that type, keeping your edits, and
+  the new card shows what changed from the version you sent back.
+- **Revisions:** an approved plan is never changed. To change it, the agent
+  proposes a **revision**, saying what changes and why. The card shows it
+  against the approved plan, section by section, and you approve the
+  revision like any plan. It's frozen as a new version whose hash covers
+  the one before it; the earlier version is kept as it was and marked as
+  revised, and exports show both.
 - Plans approved before plan types existed keep their original seven parts,
   labels, and hash.
 - Later work is labelled **per plan** or **exploratory (off-plan)**, in the chat

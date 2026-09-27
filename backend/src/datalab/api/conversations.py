@@ -78,6 +78,8 @@ class ApprovalAnswer(BaseModel):
     # Or, for an analysis plan, the plan as the person left it. Checked in
     # full by plan_schema.clean_plan, which explains what's wrong.
     plan: dict[str, Any] | None = None
+    # Or, declining a plan: the type of analysis the person wants instead.
+    change_type: str | None = Field(default=None, max_length=40)
 
 
 class EventOut(BaseModel):
@@ -126,6 +128,7 @@ class PlanLimitsOut(BaseModel):
     section: int
     title: int
     rationale: int
+    reason: int
     additional: int
     plan: int
 
@@ -307,7 +310,12 @@ def build_conversations_router(
         get_or_404(conversation_id)
         try:
             sessions.answer_approval(
-                conversation_id, approval_id, body.approve, body.question, body.plan
+                conversation_id,
+                approval_id,
+                body.approve,
+                body.question,
+                body.plan,
+                body.change_type,
             )
         except KeyError as error:
             raise HTTPException(

@@ -92,3 +92,37 @@ it("exports the approved plan whole, with its type, labels, and the person's own
   expect(html).toContain("<em>Devices</em>: <span class=\"pre\">Garmin\nonly.</span>");
   expect(html).toContain("<em>Cohort, time window, and exclusions</em>");
 });
+
+it("exports a revision with what it replaced and what changed", async () => {
+  const first = {
+    schema_version: 2,
+    analysis_type: "describe",
+    analysis_type_label: "Describe or compare",
+    rationale: "",
+    sections: [{ kind: "measures", label: "Measures and summaries", content: "Fitbit sleep." }],
+  };
+  const second = {
+    ...first,
+    revises: { plan_id: "pl_000000000001", sha256: "a".repeat(64) },
+    revision_reason: "Garmin data became available.",
+    sections: [{ kind: "measures", label: "Measures and summaries", content: "Fitbit and Garmin sleep." }],
+  };
+  const html = await buildReport(
+    conversation,
+    [
+      { seq: 1, type: "user_message", data: { text: "Sleep?" } },
+      { seq: 2, type: "approval_requested", data: { id: "ap1", kind: "analysis_plan", plan: first } },
+      { seq: 3, type: "approval_answered", data: { id: "ap1", approved: true } },
+      { seq: 4, type: "plan_approved", data: { approval: "ap1", plan_id: "pl_000000000001", plan: first, approved_at: "2026-09-26T12:00:00Z", sha256: "a".repeat(64) } },
+      { seq: 5, type: "approval_requested", data: { id: "ap2", kind: "analysis_plan", plan: second, compare_to: { label: "The approved plan it revises", plan: first, approved_at: "2026-09-26T12:00:00Z" } } },
+      { seq: 6, type: "approval_answered", data: { id: "ap2", approved: true } },
+      { seq: 7, type: "plan_approved", data: { approval: "ap2", plan_id: "pl_000000000002", plan: second, approved_at: "2026-09-26T13:00:00Z", sha256: "b".repeat(64) } },
+    ],
+    [],
+    { includeWork: false },
+  );
+  expect(html).toContain("Replaced by a revision frozen");
+  expect(html).toContain("Approved revision of the analysis plan");
+  expect(html).toContain("Why: Garmin data became available. Changed: Measures and summaries.");
+  expect(html).toContain("Fitbit sleep."); // the earlier version, as it was approved
+});

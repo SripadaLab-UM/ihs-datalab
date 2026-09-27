@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import re
 import secrets
 import unicodedata
@@ -91,6 +90,9 @@ class Pending:
     kind: str  # "research_helper" or "analysis_plan"
     question: str = ""  # a research-helper question
     plan: dict[str, Any] | None = None  # an analysis plan
+    # For a plan: what to show it against ({label, plan, ...}), such as the
+    # approved plan it revises. For display only; never part of what's approved.
+    compare_to: dict[str, Any] | None = None
     # Set once Codex has forwarded the request: only then is it shown for review.
     shown: bool = False
     # (approved, what was approved: the question's text, or the plan as JSON)
@@ -101,7 +103,12 @@ class Pending:
     def card(self) -> dict[str, Any]:
         """What the chat shows for review: always the host's stored copy."""
         if self.kind == "analysis_plan":
-            return {"id": self.id, "kind": self.kind, "plan": self.plan}
+            return {
+                "id": self.id,
+                "kind": self.kind,
+                "plan": self.plan,
+                "compare_to": self.compare_to,
+            }
         return {"id": self.id, "kind": self.kind, "question": self.question}
 
 
@@ -116,8 +123,11 @@ class Approvals:
         *,
         kind: str = "research_helper",
         plan: dict[str, Any] | None = None,
+        compare_to: dict[str, Any] | None = None,
     ) -> Pending:
-        pending = Pending(f"ap_{secrets.token_hex(8)}", conversation_id, kind, question, plan)
+        pending = Pending(
+            f"ap_{secrets.token_hex(8)}", conversation_id, kind, question, plan, compare_to
+        )
         self._pending[pending.id] = pending
         return pending
 
@@ -134,25 +144,21 @@ class Approvals:
         approved: bool,
         text: str = "",
         plan: dict[str, Any] | None = None,
+        change_type: str | None = None,
     ) -> str:
-        """Record the person's decision. Returns what was approved ("" if declined)."""
+        """Record the person's decision. Returns what was approved ("" if declined).
+
+        For a plan, a "no" may carry the person's edits and a request for
+        another type of analysis (plan_schema.plan_answer).
+        """
         pending = self.get(approval_id, conversation_id)
         if pending is None or pending.decision.done():
             raise KeyError(approval_id)
         approved_value = ""
         if pending.kind == "analysis_plan":
-            from datalab.sessions.plan_schema import PlanInvalid, clean_plan
+            from datalab.sessions.plan_schema import plan_answer
 
-            if approved:
-                # The plan to freeze, as the person left it.
-                approved_value = json.dumps(clean_plan(plan if plan is not None else pending.plan))
-            elif plan is not None:
-                # A "no" always counts. Edits go to the agent as suggestions,
-                # if there are any and they're a valid plan.
-                with contextlib.suppress(PlanInvalid):
-                    edited = clean_plan(plan)
-                    if edited != clean_plan(pending.plan):
-                        approved_value = json.dumps(edited)
+            approved_value = plan_answer(pending.plan or {}, approved, plan, change_type)
         elif approved:
             approved_value = clean_question(text)
         pending.decision.set_result((approved, approved_value))

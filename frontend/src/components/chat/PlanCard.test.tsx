@@ -28,7 +28,7 @@ const schema: PlanSchema = {
   core: ["question_and_purpose", "data_and_scope", "checks_and_limitations", "deliverables"],
   modules: ["missing_data"],
   types: [{ id: "describe", label: "Describe or compare", summary: "", required: ["measures"], optional: ["comparison"], checks: "" }],
-  limits: { section: 2000, title: 80, rationale: 300, additional: 3, plan: 12000 },
+  limits: { section: 2000, title: 80, rationale: 300, reason: 500, additional: 3, plan: 12000 },
 };
 
 const proposed: PlanV2 = {
@@ -112,4 +112,67 @@ it("shows a version-1 plan with the labels it was frozen with", () => {
   fireEvent.click(screen.getByRole("button", { name: "Show the frozen plan" }));
   expect(screen.getByText("Outcome")).toBeInTheDocument();
   expect(screen.queryByText("Estimand (what exactly is estimated)")).toBeNull();
+});
+
+const revision: PlanV2 = {
+  ...proposed,
+  revises: { plan_id: "pl_000000000001", sha256: "a".repeat(64) },
+  revision_reason: "Garmin data became available.",
+  sections: proposed.sections.map((s) => (s.kind === "additional" ? { ...s, content: "Fitbit and Garmin." } : s)),
+};
+const comparedWithApproved = { label: "The approved plan it revises", plan: proposed, approved_at: "2026-09-26T12:00:00Z" };
+
+it("shows a revision against the plan it revises, and needs its reason", async () => {
+  show({ ...pending, plan: revision, compareTo: comparedWithApproved });
+  expect(screen.getByText("Revised analysis plan")).toBeInTheDocument();
+  expect(screen.getByText("Changes from the approved plan it revises")).toBeInTheDocument();
+  expect(screen.getByText("Fitbit only.")).toBeInTheDocument(); // what it was
+  expect(screen.getByText("5 other sections unchanged.")).toBeInTheDocument();
+  await screen.findByRole("combobox"); // the schema has loaded
+  const reason = screen.getByDisplayValue("Garmin data became available.");
+  fireEvent.change(reason, { target: { value: "" } });
+  expect(screen.getByRole("button", { name: "Approve revision" })).toBeDisabled();
+  fireEvent.change(reason, { target: { value: "Garmin data became available in May." } });
+  fireEvent.click(screen.getByRole("button", { name: "Approve revision" }));
+  await waitFor(() => expect(api.answerApproval).toHaveBeenCalled());
+  const sent = vi.mocked(api.answerApproval).mock.calls[0][4] as PlanV2;
+  expect(sent.revises).toEqual(revision.revises);
+  expect(sent.revision_reason).toBe("Garmin data became available in May.");
+});
+
+it("sends a plan back for another type of analysis, with the person's edits", async () => {
+  vi.mocked(api.planSchema).mockResolvedValue({
+    ...schema,
+    types: [...schema.types, { id: "prediction", label: "Prediction", summary: "Predict an outcome.", required: [], optional: [], checks: "" }],
+  });
+  show(pending);
+  fireEvent.change(screen.getByDisplayValue("Sleep minutes."), { target: { value: "Sleep minutes, weeks 1 to 4." } });
+  fireEvent.click(await screen.findByRole("button", { name: "A different kind of analysis?" }));
+  fireEvent.change(screen.getByDisplayValue("Choose a type…"), { target: { value: "prediction" } });
+  expect(screen.getByText("Predict an outcome.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  await waitFor(() => expect(api.answerApproval).toHaveBeenCalled());
+  const [, , approve, , sent, changeType] = vi.mocked(api.answerApproval).mock.calls[0];
+  expect([approve, changeType]).toEqual([false, "prediction"]);
+  expect((sent as PlanV2).sections.find((s) => s.kind === "measures")?.content).toBe("Sleep minutes, weeks 1 to 4.");
+});
+
+it("says when a frozen plan was replaced by a revision, and what a revision changed", () => {
+  show({
+    ...pending,
+    state: "approved",
+    frozen: { at: "2026-09-26T12:00:00Z", sha256: "abcdef0123" },
+    supersededBy: { planId: "pl_2", at: "2026-09-26T13:00:00Z" },
+  });
+  expect(screen.getByText("revised later")).toBeInTheDocument();
+  expect(screen.getByText(/A revision replaced it/)).toBeInTheDocument();
+});
+
+it("lets a frozen revision show what changed", () => {
+  show({ ...pending, plan: revision, compareTo: comparedWithApproved, state: "approved", frozen: { at: "2026-09-26T13:00:00Z", sha256: "0123456789" } });
+  expect(screen.queryByText("Changes from the approved plan it revises")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show what changed" }));
+  expect(screen.getByText("Changes from the approved plan it revises")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Show the frozen plan" }));
+  expect(screen.getByText("Why it changed")).toBeInTheDocument();
 });
