@@ -399,7 +399,9 @@ access. It never gains it.
     email addresses and dates, and every title (the model's, or the
     question's first words when there's no model) is scrubbed before it's
     stored: long digit runs, ID-shaped words such as `P-0001` or
-    `IHS2025_00123`, email addresses and dates are removed. The folder
+    `IHS2025_00123`, phone-like digit groups, numbers labelled as someone's
+    ("participant 0001", "#1234"), email addresses and dates are removed,
+    and a title with nothing meaningful left stays "New conversation". The folder
     name, the manifest and the report's page title are scrubbed again at
     export, so a title typed by the person can't name a participant there
     either. Names can't be recognised reliably; that part rests on the
