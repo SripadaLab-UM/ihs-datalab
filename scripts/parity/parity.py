@@ -194,7 +194,11 @@ class V1Server:
         deadline = time.time() + 3600
         while time.time() < deadline:
             run = self.client.get(f"/api/workflows/runs/{run_id}").json()
-            if run["status"] in {"succeeded", "failed", "cancelled", "interrupted"}:
+            # A run is marked finished just before its delivery is.
+            delivering = run.get("delivery_status") in {"pending", "delivering"}
+            if run["status"] in {"succeeded", "failed", "cancelled", "interrupted"} and not (
+                run["status"] == "succeeded" and delivering
+            ):
                 return run
             time.sleep(1)
         raise SystemExit(f"The v1 run {run_id} didn't finish in an hour.")
@@ -470,6 +474,18 @@ def compare_one(name: str, proto: Path, v1: Path) -> dict[str, Any]:
     v_dl = {
         str(p.relative_to(v1 / "delivered")) for p in (v1 / "delivered").rglob("*") if p.is_file()
     }
+    if name == PIPELINE and v_dl and not p_dl:
+        comparisons.append(
+            Comparison(
+                "delivered",
+                "v1_only",
+                [
+                    f"v1 delivered {len(v_dl)} files; the prototype's package run keeps its "
+                    "outputs and doesn't deliver them."
+                ],
+            )
+        )
+        v_dl = set()
     for file in sorted(p_dl | v_dl):
         comparisons.append(
             compare_file(
