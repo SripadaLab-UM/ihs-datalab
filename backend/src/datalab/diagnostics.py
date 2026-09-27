@@ -152,7 +152,9 @@ def build(
     else:
         fact("Database", "practice (synthetic)" if settings.profile == "practice" else "configured")
         fact("Read-only roles", f"{len(oracle.read_only_roles)} set")
-        fact("Database password", _source(lambda: setup.oracle_password_source(oracle)))
+        lab = setup.asks_for_oracle_password(settings)
+        if lab is not None:
+            fact("Database password", _source(lambda: setup.oracle_password_source(lab)))
     fact("U-M GPT key", _source(setup.model_key_source))
     fact("Knowledge repo", "configured" if settings.repos.knowledge else "not configured")
     fact("Pipelines repo", "configured" if settings.repos.pipelines else "not configured")

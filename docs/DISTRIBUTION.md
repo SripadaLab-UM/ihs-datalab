@@ -82,8 +82,10 @@ protect.
 
 ### How updating keeps the database safe
 
-This part is built (milestone 7); the updater that calls it, the **Update
-available** pill, and the Storage view come later.
+This part is built (milestone 7), and Settings shows it (**Updates**: the
+version, an update in progress, what the startup recovery did, and the
+backups). The updater that calls it and the **Update available** pill come
+later: Settings says "Update checks aren't set up yet".
 
 **Backups.** Before any migration runs on a database that has data, and
 before an update switches versions, DataLab backs up `datalab.sqlite`:
@@ -130,8 +132,9 @@ newest backup this version can read.
   rollback doesn't happen. Only values in columns the older layout lacks stay
   behind, in the "restore" backup, and they are listed as dropped.
 - It backs up the database it replaces (reason "restore"), so a rollback can
-  itself be undone. These backups are kept indefinitely; the Storage view
-  (still to come) will show them and let the person delete them.
+  itself be undone. These backups are kept indefinitely; Settings →
+  Storage shows them and deletes one only after the person confirms that
+  it may hold the only copy of what the rollback dropped.
 - Upgrading again after a rollback puts each query back under its owner: a
   migration that adds a column the rollback couldn't keep derives it again
   where it can (0006 reads a query's origin from its owner id).
@@ -218,11 +221,23 @@ named folders set up in Settings:
   Dropbox isn't installed, the option says so.
 
 **Nothing is deleted automatically.** Settings has a **Storage** view that
-shows disk use per conversation and per run, and offers one-click cleanup of
-old ones. This matches the promise "nothing is deleted unless you delete it".
-The SQL Playground's results (`<data_dir>/playground/<pg_id>/results/`, one
-CSV per query, up to the extraction cap each) are never cleaned up either,
-so the Storage view should show them too, with a way to remove old ones.
+shows disk use: the database, each conversation (workspace, checkpoints,
+query results), the SQL Playground's results
+(`<data_dir>/playground/<pg_id>/results/`, one CSV per query), each workflow
+run's folder, the backups, exports and logs. This matches the promise
+"nothing is deleted unless you delete it". The person can remove, one at a
+time and each confirmed (`datalab/storage.py`):
+
+- a Playground result, unless its query is running (the query stays in the
+  history);
+- a finished run's files, unless a Replay of it is going. Its record stays,
+  in the database and as `record.json`; the run can't be replayed after;
+- a backup, except one an update in progress relies on. A rollback's backup
+  needs an extra confirmation.
+
+Never the database, the audit log, exports, or anything else; items are
+named by id, never by path, and links are never followed. Conversations are
+deleted from the Workspace.
 
 ## Uninstalling
 
@@ -263,8 +278,12 @@ It never touches export destinations.
 - Everything is pinned: Python dependencies (`uv.lock`), npm
   (`package-lock.json`), base images, and the Codex CLI version.
 - **Diagnostics instead of bug-report uploads.** "Copy diagnostics" in
-  Settings produces a metadata-only report: versions, Safety check results,
-  and recent errors without content. The user pastes it into an email or a
+  Settings produces a metadata-only report (`datalab/diagnostics.py`):
+  versions, OS and Docker, the profile, data-folder paths with the home
+  folder as `~`, whether keys are saved (never the keys, the database server
+  or account), Safety check results by check id, the database layout and
+  update state, failure counts, and recent problems as DataLab's own message
+  templates without their values. The user pastes it into an email or a
   GitHub issue. The prototype's feedback flow could zip query results and
   upload them to Dropbox; nothing like that exists in v1.
 

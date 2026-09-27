@@ -265,8 +265,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             ),
             read_only_because=(
                 "Practice DataLab uses the local synthetic database, whose settings are "
-                "fixed. It uses the U-M GPT key the real DataLab saved (or `datalab setup "
-                "--profile practice --update`)."
+                "fixed. It uses the U-M GPT key the real DataLab saved, or one saved with "
+                "datalab setup --profile practice --update."
                 if practice
                 else None
             ),
