@@ -26,7 +26,7 @@ use an AI agent on sensitive IHS data, safely. It replaces the
 | Safety promises are internal | Written for colleagues and future maintainers: short and plain |
 | "No data loss" covers both researchers' work and source data | Local files untouchable unless attached; the Oracle database is read-only and protected from load |
 | Oracle access goes through DataLab's own data service | The agent never holds database credentials |
-| Two session types: 🔒 Data (default) and 🌐 Research | Data sessions have the database but no internet; research sessions have the internet but no database. Chosen at start and fixed. Files move research → data only |
+| Two session types: 🔒 Data (default) and 🌐 Research | Data sessions have the database (read-only) and reach only U-M GPT and DataLab; research sessions have the web but no database connection. Chosen at start and fixed. Files move research → data only |
 | Data sessions can use a research helper | The agent asks a question and the user approves or edits it. A temporary no-data research container answers it. No auto-approval in v1 |
 | Knowledge base is collective and tracked in GitHub | Every user can edit, and git provides history, attribution, and reverts. DataLab handles pull, commit, and push behind a "Save & share" button, since most users don't use git directly. Agents propose edits; a person reviews the diff and shares it |
 | Knowledge base lives in its own GitHub repo | Separate from app code and releases. DataLab signs users in through GitHub's browser (device) flow. The token lives in the OS keychain and is used only by the host app, never in containers. Access comes from an org team (`datalab-users`) with write access; you add people. DataLab detects missing access and says whom to ask |
@@ -253,8 +253,12 @@ final look.
    including screenshots made by a script from the practice profile so they
    stay current.
 
-Open: where the site is hosted (public, or U-M sign-in only), and who
-records the videos.
+Decided (2026-09-26), to pick up later:
+- The docs site is public. It may be hosted on the AWS setup the lab already
+  uses for cap-study.
+- Claude generates the videos in full: scripted walkthroughs recorded on the
+  practice profile, narrated with AWS Polly. Narration scripts and footage
+  show synthetic data only, since both leave the laptop.
 
 ## Open decisions (waiting on the lab, noted 2026-09-26)
 

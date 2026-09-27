@@ -38,9 +38,15 @@ Two decisions shape it:
    and things that checked out; amber is the research session and heads-ups;
    blue is waiting for you; red is an error. Everything else is ink on paper
    (the live "working" dot too), so a coloured word is always worth reading.
-8. **Safety is always visible.** The session line (data: reads the database,
-   no internet; research: the internet, no study data) is in the header of
-   every conversation, and each conversation in the list says which it is.
+8. **Safety is always visible, and exact.** The session line is in the header
+   of every conversation, and each conversation in the list says which it is.
+   It says only what DataLab enforces:
+   - data: "database access, web blocked", with the model on U-M's approved
+     GPT service;
+   - research: "web access, no database connection". DataLab can't know what
+     an attached file contains, so the wording makes no claim about it.
+   The trace says numbers were "matched to this turn's outputs", never that
+   they are right.
 
 ## What a step shows
 

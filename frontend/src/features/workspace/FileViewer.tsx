@@ -110,6 +110,9 @@ function HtmlPreview({ conversationId, file }: { conversationId: string; file: O
         src={preview.data.url}
         sandbox=""
         referrerPolicy="no-referrer"
+        // Kept out of the Tab order: focus inside a frame can't be held in the
+        // dialog, and with scripts off the page has nothing to operate.
+        tabIndex={-1}
         className="min-h-0 w-full flex-1 rounded-lg border border-line bg-white"
       />
     </div>

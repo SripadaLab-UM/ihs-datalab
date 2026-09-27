@@ -66,7 +66,11 @@ def test_web_ui_serves_files_and_falls_back_to_index(settings, catalog, tmp_path
     app, _ = make(settings, catalog, tmp_path)
     with TestClient(app) as client:
         assert client.get("/assets/app.js").text == "console.log(1)"
-        assert client.get("/workspace/c_123").text == "<html>DataLab</html>"
+        page = client.get("/workspace/c_123")
+        assert page.text == "<html>DataLab</html>"
+        # The page always revalidates, so an update shows on the next load.
+        assert page.headers["cache-control"] == "no-cache"
+        assert client.get("/index.html").headers["cache-control"] == "no-cache"
         # Outside the built folder: never served.
         assert "not for the browser" not in client.get("/../secret.txt").text
         assert "not for the browser" not in client.get("/assets/%2e%2e/%2e%2e/secret.txt").text

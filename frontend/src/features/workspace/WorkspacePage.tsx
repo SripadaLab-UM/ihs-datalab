@@ -50,7 +50,7 @@ export function WorkspacePage() {
                     {c.busy && <span className="dl-breathe size-[7px] shrink-0 rounded-full bg-ink" title="Working" />}
                   </span>
                   <span className={clsx("dl-label", c.kind === "data" ? "!text-data" : "!text-research")}>
-                    {c.kind === "data" ? "data · no internet" : "research · no study data"}
+                    {c.kind === "data" ? "data · web blocked" : "research · no database"}
                   </span>
                 </Link>
               </li>
@@ -185,8 +185,8 @@ function NewConversation({ onClose }: { onClose: () => void }) {
             <Icon name={chosen.kind === "research" ? "globe" : "lock"} size={16} className="mt-px shrink-0" />
             <span>
               {chosen.kind === "research"
-                ? "Research sessions have the internet but no study data. Anything you attach may reach the internet."
-                : "Data sessions can query the study database, read-only, but have no internet."}
+                ? "Research sessions can use the web but have no connection to the study database. Anything you attach may reach the web."
+                : "Data sessions can query the study database, read-only. Websites are blocked; the model runs on U-M's approved GPT service."}
             </span>
           </div>
         )}

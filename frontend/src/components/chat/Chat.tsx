@@ -158,14 +158,14 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
         {(data
           ? [
-              ["db", "Reads the IHS database, read-only"],
+              ["db", "Queries the IHS database, read-only"],
               ["eye", "Shows you everything it reads and runs"],
-              ["lock", "No internet: nothing leaves this computer"],
+              ["lock", "Websites blocked; the model is U-M's approved GPT service"],
             ]
           : [
               ["globe", "Searches the web and reads papers"],
               ["eye", "Shows you everything it reads"],
-              ["lock", "Has no access to study data"],
+              ["lock", "No connection to the study database"],
             ]
         ).map(([icon, text]) => (
           <li key={text} className="flex items-start gap-2">
@@ -302,16 +302,15 @@ function TraceChip({ trace }: { trace: NonNullable<Turn["trace"]> }) {
     "DataLab looks for each number in this turn's query results, command output, and data files. A match only means the number appears there, not that it's right.";
   if (trace.untraced.length === 0) {
     return (
-      <Chip tone="good" title={how}>
-        <Icon name="check" size={12} />{" "}
-        {trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} found in this turn's results
+      <Chip title={how}>
+        {trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs
       </Chip>
     );
   }
   return (
     <>
       <Chip tone="attn" title={how}>
-        {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not found in this turn's results
+        {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not matched to this turn's outputs
       </Chip>
       {trace.untraced.slice(0, 8).map((n) => (
         <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">

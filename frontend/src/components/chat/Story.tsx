@@ -361,7 +361,7 @@ export function DetailView({ detail }: { detail: Detail }) {
       return (
         <>
           <Caption>
-            In this conversation's own container, which has no internet.
+            In this conversation's own sealed container.
             {detail.exitCode !== null && detail.exitCode !== 0 && <span className="text-danger"> It stopped with an error.</span>}
           </Caption>
           <Mono>
