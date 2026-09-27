@@ -130,6 +130,17 @@ class WorkflowFolder:
         return self._root
 
     @property
+    def shared(self) -> bool:
+        """Whether the files are the synced pipelines clone's: new ones are
+        saved with Save & share, never written here."""
+        return self._clone is not None and self.root == self._root
+
+    @property
+    def waiting_for_sync(self) -> bool:
+        """Whether the files will come from the pipelines clone once it's synced."""
+        return self._clone is not None and self.root == self._fallback
+
+    @property
     def note(self) -> str | None:
         """Why the files come from somewhere other than expected, if they do."""
         if self.root == self._fallback:
@@ -217,6 +228,29 @@ class WorkflowFolder:
         if blob is not None:
             return WorkflowFile(path, text, "git", blob, commit)
         return WorkflowFile(path, text, "file", f"sha256:{hashlib.sha256(data).hexdigest()}", None)
+
+    def add(self, name: str, text: str) -> str:
+        """Write a new workflow file, `<name>.yaml`, into the workflows folder,
+        and give its path. Never replaces a file (whatever its case, or .yml),
+        and never writes into the pipelines clone: that's Save & share's."""
+        if self._clone is not None and self.root == self._root:
+            raise SourceError("Workflow files in the pipelines repo are saved with Save & share.")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
+            raise SourceError("A workflow's name is lower case letters, digits, - and _.")
+        folder = self.workflows_dir
+        folder.mkdir(parents=True, exist_ok=True)
+        taken = {entry.name.lower() for entry in folder.iterdir()}
+        if {f"{name}.yaml", f"{name}.yml"} & taken:
+            raise FileExistsError(f"There's already a workflow file called {name}.yaml.")
+        data = text.encode("utf-8")
+        if len(data) > MAX_FILE_BYTES:
+            raise SourceError(f"The file is larger than {MAX_FILE_BYTES // 1024} KB.")
+        target = folder / f"{name}.yaml"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(target, flags, 0o644)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        return target.relative_to(self.root).as_posix()
 
     def pipeline(self, name: str) -> Pipeline | None:
         """A pipeline from the package, or None if there's none by that name."""

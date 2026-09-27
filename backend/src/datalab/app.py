@@ -233,14 +233,23 @@ def create_app(
             KnowledgeServices(settings, connection, conversations, sessions, auth=github)
         )
     )
-    app.include_router(
-        build_workflows_router(WorkflowServices(settings, connection, data, access_log))
+    pipelines = build_pipelines_router(
+        PipelineServices(settings, connection, conversations, sessions, auth=github)
     )
     app.include_router(
-        build_pipelines_router(
-            PipelineServices(settings, connection, conversations, sessions, auth=github)
+        build_workflows_router(
+            WorkflowServices(
+                settings,
+                connection,
+                data,
+                access_log,
+                catalog=catalog,
+                # New workflow files are shared with the pipelines repo's Save & share.
+                pipelines=pipelines.pipelines,  # type: ignore[attr-defined]
+            )
         )
     )
+    app.include_router(pipelines)
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )

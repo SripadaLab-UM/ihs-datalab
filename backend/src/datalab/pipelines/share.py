@@ -7,10 +7,11 @@ As for the knowledge base (knowledge/share.py), with the package's tests:
    can't change it), the participant-data scan, and code that would run on
    install or load. An error, or a finding the person hasn't confirmed,
    stops here.
-2. The tests must have passed on the proposal's own tree (Save & share runs
+2. The tests must have passed on the change's own tree (Save & share runs
    them first if they haven't run yet).
-3. Commit it on the conversation's base, as the person, with trailers
-   naming the conversation, the proposal and the test run.
+3. Commit it on its base, as the person, with trailers naming where it came
+   from (a conversation's proposal, or a workflow saved from the Playground
+   or a conversation's queries: api/workflows.py) and the test run.
 4. Fetch, and rebase that commit onto GitHub's `main`. Where someone else
    changed the same lines, stop: nothing is pushed.
 5. Check the rebased commit again. If its package (the `ihsDataR` tree) isn't
@@ -74,12 +75,45 @@ class SaveResult:
 
 @dataclass(frozen=True)
 class Share:
-    proposal: Proposal
+    """A change to share: `commit` is `base` with `files` written (never
+    pushed); `tree` is its tree, what the tests run on."""
+
+    base: str
+    commit: str
+    tree: str
     # The files as they'll be shared (None deletes).
     files: dict[str, bytes | None]
     author: Identity
     login: str
     confirmed: Collection[str] = ()
+    # The commit message's last lines: where the change came from.
+    trailers: tuple[tuple[str, str], ...] = ()
+    # The commit message's subject starts with this.
+    subject: str = "Pipelines"
+
+    @classmethod
+    def of_proposal(
+        cls,
+        proposal: Proposal,
+        files: dict[str, bytes | None],
+        author: Identity,
+        login: str,
+        confirmed: Collection[str] = (),
+    ) -> Share:
+        """A Data engineering conversation's proposal."""
+        return cls(
+            base=proposal.base,
+            commit=proposal.commit,
+            tree=proposal.tree,
+            files=files,
+            author=author,
+            login=login,
+            confirmed=confirmed,
+            trailers=(
+                ("DataLab-Conversation", proposal.conversation_id),
+                ("DataLab-Proposal", proposal.id),
+            ),
+        )
 
 
 async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResult:
@@ -90,25 +124,24 @@ async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResu
 
 
 async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
-    proposal = share.proposal
     report = check(share.files)
     if report.blocking(share.confirmed):
         return _check_failed(report, share.confirmed, after_rebase=False)
-    first = await tester(proposal.commit, proposal.tree)
+    first = await tester(share.commit, share.tree)
     if first.status != "passed":
         return _tests_failed(first, after_rebase=False)
-    # The proposal's own tree, as the person's commit.
+    # The change's own tree, as the person's commit.
     ours = await asyncio.to_thread(
-        clone.commit_files, proposal.base, share.files, _message(share, first), share.author
+        clone.commit_files, share.base, share.files, _message(share, first), share.author
     )
-    tested_package = await asyncio.to_thread(_package_tree, clone, proposal.commit)
+    tested_package = await asyncio.to_thread(_package_tree, clone, share.commit)
     for _ in range(_ATTEMPTS):
         await asyncio.to_thread(clone.fetch)
         upstream = await asyncio.to_thread(clone.remote_head)
         if upstream is None:
             return SaveResult("failed", "GitHub's pipelines repo has no main branch.")
         rebased = await asyncio.to_thread(
-            clone.rebase, ours, onto=upstream, old_base=proposal.base, committer=share.author
+            clone.rebase, ours, onto=upstream, old_base=share.base, committer=share.author
         )
         if rebased.state == "conflict":
             names = ", ".join(rebased.conflicts)
@@ -135,7 +168,7 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         contents = await asyncio.to_thread(_contents, clone, candidate, changed)
         again = check(contents)
         if again.blocking(share.confirmed):
-            return _check_failed(again, share.confirmed, after_rebase=upstream != proposal.base)
+            return _check_failed(again, share.confirmed, after_rebase=upstream != share.base)
         # The package as it will be pushed, if others' changes made it another
         # one than the tests passed on: tested again, and the message says so.
         tested = first
@@ -213,9 +246,9 @@ def _tests_failed(run: TestRun, *, after_rebase: bool) -> SaveResult:
 
 def _message(share: Share, tested: TestRun) -> str:
     changed = sorted(share.files)
-    subject = f"Pipelines: {', '.join(p.split('/')[-1] for p in changed)}"
+    subject = f"{share.subject}: {', '.join(p.split('/')[-1] for p in changed)}"
     if len(subject) > 72:
-        subject = f"Pipelines: {len(changed)} files"
+        subject = f"{share.subject}: {len(changed)} files"
     body = "\n".join(f"- {'deleted' if share.files[p] is None else 'updated'} {p}" for p in changed)
     passed = tested.summary.get("tests", 0)
     return (
@@ -223,9 +256,8 @@ def _message(share: Share, tested: TestRun) -> str:
         f"Reviewed and saved in DataLab by {share.author.name} (@{share.login}).\n"
         f"The package's {passed} tests passed on this change.\n\n"
         f"{body}\n\n"
-        f"DataLab-Conversation: {share.proposal.conversation_id}\n"
-        f"DataLab-Proposal: {share.proposal.id}\n"
-        f"DataLab-Tests: {tested.id}\n"
+        + "".join(f"{key}: {value}\n" for key, value in share.trailers)
+        + f"DataLab-Tests: {tested.id}\n"
     )
 
 

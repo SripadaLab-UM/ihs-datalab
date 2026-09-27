@@ -10,6 +10,15 @@ Workflow files are read from the synced `ihs-pipelines` repo, `[workflows]
 folder` in settings.toml, or `<data folder>/workflows-local/`
 (`workflows_folder` in workflows/source.py). A run reads a snapshot of them,
 taken when it starts.
+
+New files (Save as workflow in the SQL Playground, Turn this into a workflow
+in a conversation): `POST /drafts` writes a draft from SQL and its binds
+(workflows/drafts.py), which the person reviews, may edit (`POST /validate`
+checks it again), and saves with `POST /saves`. Where the files are the
+synced pipelines clone, saving is the Pipelines tab's Save & share (the
+check, the package's tests, a commit as the person, pushed); otherwise the
+file is written into the local folder, and isn't shared. Only the person
+saves: no agent tool reaches these routes.
 """
 
 from __future__ import annotations
@@ -27,11 +36,24 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from datalab.api.pipelines import PipelineFindingOut
 from datalab.config import Settings
-from datalab.data.access_log import AccessLog
+from datalab.data.access_log import AccessLog, check_owner
+from datalab.data.catalog import Catalog
 from datalab.data.service import DataService
+from datalab.data.sqlcheck import MAX_SQL_BYTES
 from datalab.exports import DestinationStore
+from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
+from datalab.repos.git import GitError
+from datalab.repos.github import GitHubUnavailable, SignInNeeded
 from datalab.sessions.containers import instance_of
+from datalab.workflows.drafts import (
+    MAX_QUERIES,
+    DraftQuery,
+    DraftRefused,
+    draft_workflow,
+    queries_from_log,
+)
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
     Problem,
@@ -60,6 +82,10 @@ class WorkflowServices:
     access_log: AccessLog  # a run's queries: `for_origin("run", run_id)`
     # Where container steps run: Docker, unless a test gives another.
     sandbox: Sandbox | None = None
+    # A draft's SQL is checked against the catalog, as the Playground's is.
+    catalog: Catalog | None = None
+    # Save & share, when the files are the synced pipelines clone.
+    pipelines: Pipelines | None = None
 
 
 # ------------------------------------------------------------------ models
@@ -250,6 +276,63 @@ class DestinationKeyOut(BaseModel):
 
 class SetDestinationKey(BaseModel):
     destination_id: str
+
+
+class DraftQueryIn(BaseModel):
+    sql: str = Field(max_length=2 * MAX_SQL_BYTES)
+    binds: dict[str, Scalar | None] = Field(default_factory=dict, max_length=100)
+
+
+class DraftIn(BaseModel):
+    name: str = Field(max_length=200)
+    description: str = Field(default="", max_length=500)
+    # A destination key, for `deliver:`; none means no delivery.
+    destination: str | None = Field(default=None, max_length=200)
+    # The Playground's query (with the values it ran with)…
+    queries: list[DraftQueryIn] = Field(default_factory=list, max_length=MAX_QUERIES)
+    # …or queries from a conversation's Data accessed log, by id.
+    conversation_id: str | None = Field(default=None, max_length=100)
+    query_ids: list[str] = Field(default_factory=list, max_length=MAX_QUERIES)
+
+
+class SaveTargetOut(BaseModel):
+    """Where Save puts a new workflow file on this computer."""
+
+    kind: Literal["share", "local", "unavailable"]
+    folder: str | None
+    message: str
+
+
+class DraftOut(BaseModel):
+    text: str
+    valid: bool
+    problems: list[ProblemOut]
+    # What the person should know before saving (a default left out, and why).
+    notes: list[str]
+    target: SaveTargetOut
+
+
+class SaveIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+    # Ids of the check's findings the person has confirmed aren't participant data.
+    confirmed: list[str] = Field(default_factory=list, max_length=200)
+    # Where the draft came from, for the commit message when it's shared.
+    source: Literal["playground", "conversation"] = "playground"
+    conversation_id: str | None = Field(default=None, max_length=100)
+
+
+SaveState = Literal["saving", "saved", "check_failed", "tests_failed", "conflict", "failed"]
+
+
+class WorkflowSaveOut(BaseModel):
+    id: str | None  # a Save & share's, to follow it with GET /saves/{id}
+    state: SaveState
+    shared: bool
+    path: str  # the file, as the Workflows tab lists it
+    message: str
+    commit: str | None = None  # what was pushed, once shared
+    findings: list[PipelineFindingOut] = []
+    test: str | None = None  # the package's test run behind the outcome
 
 
 # ------------------------------------------------------------------ router
@@ -498,6 +581,138 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         if not destinations.set_key(body.destination_id, key):
             raise HTTPException(404, "No such export folder.")
 
+    def save_target() -> SaveTargetOut:
+        if folder.shared:
+            share = services.pipelines
+            if share is None or not share.available:
+                why = share.unavailable if share else "Save & share isn't set up here."
+                return SaveTargetOut(kind="unavailable", folder=None, message=why or "")
+            return SaveTargetOut(
+                kind="share",
+                folder=None,
+                message=(
+                    "Save & share checks it, runs the pipelines package's tests, commits it as "
+                    "you and pushes it to the lab's pipelines repo, as workflows/<name>.yaml."
+                ),
+            )
+        if folder.waiting_for_sync:
+            return SaveTargetOut(
+                kind="unavailable",
+                folder=None,
+                message=(
+                    "Workflows are shared through the lab's pipelines repo, which hasn't been "
+                    "synced yet. Sync it in the Pipelines tab, then save."
+                ),
+            )
+        where = str(folder.workflows_dir)
+        if practice:
+            why = "Practice DataLab keeps workflows on this computer"
+        elif settings.workflows.folder:
+            why = "Saved in the workflows folder set in settings.toml"
+        else:
+            why = "The lab's pipelines repo isn't set up here, so this is saved on this computer"
+        return SaveTargetOut(
+            kind="local",
+            folder=where,
+            message=f"{why}, in {where}. It isn't shared with the lab.",
+        )
+
+    @router.post("/drafts")
+    def draft(body: DraftIn) -> DraftOut:
+        """A workflow file drafted from SQL and its binds, checked. Nothing is saved."""
+        try:
+            if body.conversation_id is not None:
+                if body.queries:
+                    raise DraftRefused("Give queries, or a conversation's query ids, not both.")
+                try:
+                    records = services.access_log.for_session(body.conversation_id)
+                except ValueError:
+                    raise DraftRefused("That isn't a conversation.") from None
+                queries = queries_from_log(records, body.query_ids)
+            else:
+                queries = [DraftQuery(q.sql, q.binds) for q in body.queries]
+            made = draft_workflow(
+                queries,
+                name=body.name,
+                description=body.description,
+                destination=body.destination or None,
+                allowed_schemas=runner.allowed_schemas,
+                columns=services.catalog.column_index() if services.catalog else None,
+            )
+        except DraftRefused as error:
+            raise HTTPException(422, str(error)) from error
+        try:
+            runner.check_text(made.text)
+        except WorkflowInvalid as error:
+            problems = _problems_out(error.problems, made.text)
+        else:
+            problems = []
+        return DraftOut(
+            text=made.text,
+            valid=not problems,
+            problems=problems,
+            notes=made.notes,
+            target=save_target(),
+        )
+
+    @router.post("/saves", status_code=201)
+    async def save(body: SaveIn) -> WorkflowSaveOut:
+        """Save a new workflow file the person has reviewed: Save & share into
+        the pipelines repo, or written into the local folder (see save_target)."""
+        try:
+            workflow = runner.check_text(body.text)
+        except WorkflowInvalid as error:
+            raise _unprocessable(error) from error
+        target = save_target()
+        if target.kind == "unavailable":
+            raise HTTPException(409, target.message)
+        if target.kind == "local":
+            try:
+                path = folder.add(workflow.name, body.text)
+            except FileExistsError as error:
+                raise HTTPException(409, f"{error} Choose another name.") from error
+            except (SourceError, OSError) as error:
+                raise HTTPException(422, f"It couldn't be saved: {error}") from error
+            return WorkflowSaveOut(
+                id=None,
+                state="saved",
+                shared=False,
+                path=path,
+                message=f"Saved on this computer, in {folder.workflows_dir}. It isn't shared.",
+            )
+        assert services.pipelines is not None
+        trailers: tuple[tuple[str, str], ...] = (("DataLab-Workflow-From", "SQL Playground"),)
+        if body.source == "conversation":
+            trailers = (("DataLab-Workflow-From", "a conversation's queries"),)
+            if body.conversation_id:
+                with contextlib.suppress(ValueError):
+                    check_owner("conversation", body.conversation_id)
+                    trailers += (("DataLab-Conversation", body.conversation_id),)
+        try:
+            job = await services.pipelines.share_workflow(
+                f"workflows/{workflow.name}.yaml",
+                body.text.encode("utf-8"),
+                confirmed=body.confirmed,
+                trailers=trailers,
+            )
+        except (NotActionable, NotAvailable) as error:
+            raise HTTPException(409, str(error)) from error
+        except SignInNeeded as error:
+            raise HTTPException(403, str(error)) from error
+        except (GitHubUnavailable, GitError) as error:
+            raise HTTPException(502, str(error)) from error
+        return _save_out(job)
+
+    @router.get("/saves/{save_id}")
+    def save_status(save_id: str) -> WorkflowSaveOut:
+        """A Save & share as it goes (it runs the package's tests, so it takes a while)."""
+        if services.pipelines is None:
+            raise HTTPException(404, "No such save.")
+        try:
+            return _save_out(services.pipelines.workflow_save(save_id))
+        except NotFound as error:
+            raise HTTPException(404, str(error)) from error
+
     return router
 
 
@@ -511,6 +726,20 @@ def _problems_out(problems: list[Problem], text: str | None = None) -> list[Prob
         line, column = where or (None, None)
         out.append(ProblemOut(path=p.path, message=p.message, line=line, column=column))
     return out
+
+
+def _save_out(job: Any) -> WorkflowSaveOut:
+    state = job.state if job.state != "nothing to save" else "saved"
+    return WorkflowSaveOut(
+        id=job.id,
+        state=state,
+        shared=True,
+        path=job.path,
+        message=job.message,
+        commit=job.commit,
+        findings=[PipelineFindingOut(**f) for f in job.findings],
+        test=job.test,
+    )
 
 
 def _unprocessable(error: WorkflowInvalid) -> HTTPException:

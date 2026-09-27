@@ -27,9 +27,11 @@ import asyncio
 import hashlib
 import logging
 import os
+import secrets
 import threading
 from collections import defaultdict
-from dataclasses import dataclass
+from collections.abc import Collection
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,7 @@ from datalab.pipelines.proposals import (
     TestRun,
     compare,
     copied,
+    proposal_problem,
 )
 from datalab.pipelines.testing import PackageTests
 from datalab.repos.git import GitError, Identity, TreeEntry
@@ -66,6 +69,7 @@ _REFS = "refs/datalab/pipelines"  # keeps each proposal's commit, per conversati
 _DATALAB = Identity("DataLab", "datalab@localhost")
 MAX_BROWSE_FILES = 5000
 MAX_READ_BYTES = 1024 * 1024
+_KEEP_WORKFLOW_SAVES = 50
 UNAVAILABLE_NOTE = """\
 # The lab's pipelines repo isn't here
 
@@ -94,6 +98,19 @@ class FileView:
     before: str | None  # the base's text
     after: str | None  # the agent's
     binary: bool = False
+
+
+@dataclass
+class WorkflowSave:
+    """One Save & share of a new workflow file, while DataLab runs."""
+
+    id: str
+    path: str  # in the repo: workflows/<name>.yaml
+    state: str  # "saving", then share.SaveState
+    message: str
+    commit: str | None = None  # what was pushed, once saved
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    test: str | None = None
 
 
 class Pipelines:
@@ -148,6 +165,7 @@ class Pipelines:
         # Test runs going now, by tree (one per tree), and saves, by proposal.
         self._testing: dict[str, asyncio.Task[TestRun]] = {}
         self._saving: dict[str, asyncio.Task[None]] = {}
+        self._workflow_saves: dict[str, WorkflowSave] = {}
         if self.repo is not None:
             self.store.end_interrupted()
             self._prune_quietly()
@@ -411,7 +429,7 @@ class Pipelines:
         task.add_done_callback(lambda _: self._testing.pop(run.tree, None))
         return task
 
-    async def _tested(self, proposal: Proposal, commit: str, tree: str) -> TestRun:
+    async def _tested(self, commit: str, tree: str, proposal_id: str | None = None) -> TestRun:
         """A passing run on `tree` if there is one, the run going now, or a new run."""
         running = self._testing.get(tree)
         if running is not None and not running.done():
@@ -419,7 +437,7 @@ class Pipelines:
         found = await asyncio.to_thread(self.store.latest_test, tree)
         if found is not None and found.status == "passed":
             return found
-        run = await asyncio.to_thread(self.tests.begin, commit, tree, proposal_id=proposal.id)
+        run = await asyncio.to_thread(self.tests.begin, commit, tree, proposal_id=proposal_id)
         return await self._start_test(run)
 
     # Save & share, discard --------------------------------------------------
@@ -441,12 +459,12 @@ class Pipelines:
                 return self.store.update(proposal, status="saving", result={}), files
 
         proposal, files = await asyncio.to_thread(begin)
-        request = share.Share(
-            proposal=proposal,
-            files=files,
-            author=Identity(account.display_name, account.email),
-            login=account.login,
-            confirmed=confirmed,
+        request = share.Share.of_proposal(
+            proposal,
+            files,
+            Identity(account.display_name, account.email),
+            account.login,
+            confirmed,
         )
         task = asyncio.create_task(self._save(proposal, request))
         self._saving[proposal.id] = task
@@ -457,7 +475,7 @@ class Pipelines:
         repo = self._repo()
         try:
             result = await share.save_and_share(
-                repo.clone, request, lambda commit, tree: self._tested(proposal, commit, tree)
+                repo.clone, request, lambda commit, tree: self._tested(commit, tree, proposal.id)
             )
         except asyncio.CancelledError:
             await asyncio.to_thread(
@@ -492,6 +510,113 @@ class Pipelines:
             )
 
         await asyncio.to_thread(finish)
+
+    # A workflow file saved from outside a conversation's copy -----------------
+
+    async def share_workflow(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        confirmed: Collection[str] = (),
+        trailers: tuple[tuple[str, str], ...] = (),
+    ) -> WorkflowSave:
+        """Start Save & share of one new workflow file (`workflows/<name>.yaml`),
+        as the signed-in person; the save, as it starts. It's the same Save &
+        share as a proposal's (share.py): the check, the package's tests on
+        the change's tree, a commit as the person, rebased and pushed.
+
+        Used by Save as workflow in the SQL Playground and Turn this into a
+        workflow in a conversation (api/workflows.py), once the person has
+        reviewed the file. A file already in the repo isn't replaced."""
+        repo = self._repo()
+        problem = proposal_problem(path)
+        if problem or not path.startswith("workflows/"):
+            raise NotActionable(f"{path} can't be saved here.")
+        account = await asyncio.to_thread(repo.auth.account)
+        if account is None:
+            raise SignInNeeded("Sign in to GitHub to share workflows.")
+
+        def begin() -> tuple[str, str, str]:
+            with repo.clone.lock:
+                base = repo.clone.remote_head()
+                if base is None:
+                    raise NotAvailable(
+                        "The pipelines repo hasn't been downloaded yet: sync it (Pipelines tab)."
+                    )
+                if path in repo.clone.ls_tree(base):
+                    raise NotActionable(
+                        f"The pipelines repo already has {path}. Choose another name."
+                    )
+                commit = repo.clone.commit_files(
+                    base, {path: content}, f"{path}, saved in DataLab\n\nNever pushed.\n", _DATALAB
+                )
+                tree = repo.clone.text("rev-parse", f"{commit}^{{tree}}")
+            return base, commit, tree
+
+        base, commit, tree = await asyncio.to_thread(begin)
+        job = WorkflowSave(
+            id=f"ws_{secrets.token_hex(8)}",
+            path=path,
+            state="saving",
+            message="Checking, testing and sharing it.",
+        )
+        request = share.Share(
+            base=base,
+            commit=commit,
+            tree=tree,
+            files={path: content},
+            author=Identity(account.display_name, account.email),
+            login=account.login,
+            confirmed=confirmed,
+            trailers=trailers,
+            subject="Workflows",
+        )
+        self._workflow_saves[job.id] = job
+        while len(self._workflow_saves) > _KEEP_WORKFLOW_SAVES:
+            del self._workflow_saves[next(iter(self._workflow_saves))]
+        task = asyncio.create_task(self._save_workflow(job, request))
+        self._saving[job.id] = task
+        task.add_done_callback(lambda _: self._saving.pop(job.id, None))
+        return job
+
+    def workflow_save(self, save_id: str) -> WorkflowSave:
+        found = self._workflow_saves.get(save_id)
+        if found is None:
+            raise NotFound("No such save. Saves are forgotten when DataLab restarts.")
+        return found
+
+    async def _save_workflow(self, job: WorkflowSave, request: share.Share) -> None:
+        repo = self._repo()
+        try:
+            result = await share.save_and_share(
+                repo.clone, request, lambda commit, tree: self._tested(commit, tree)
+            )
+        except asyncio.CancelledError:
+            job.state, job.message = "failed", "Saving was stopped. Nothing was shared."
+            raise
+        except Exception as error:
+            log.exception("Save & share failed for %s", job.path)
+            result = share.SaveResult("failed", f"Saving failed ({type(error).__name__}).")
+        if result.state in ("saved", "nothing to save"):
+            await asyncio.to_thread(repo.saved, result.commit)
+        job.state = "saved" if result.state == "nothing to save" else result.state
+        job.message = result.message
+        job.commit = result.commit if job.state == "saved" else None
+        job.findings = result.findings
+        job.test = result.test
+        if result.state == "conflict":
+            job.message = (
+                f"Someone else saved {job.path} meanwhile. Nothing was shared: choose another "
+                "name and save again."
+            )
+        elif result.state == "check_failed" and not any(
+            f["severity"] == "error" for f in result.findings
+        ):
+            job.message = (
+                "The check found text that may be participant data. Confirm each one isn't, "
+                "or change the file, then save again."
+            )
 
     def reject(self, proposal_id: str) -> Proposal:
         """Discard the proposal: nothing is shared, and the conversation's next

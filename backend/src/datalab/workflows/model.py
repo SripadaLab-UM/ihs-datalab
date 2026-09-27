@@ -722,7 +722,7 @@ def _check_extracts(
         label = f"Pipeline {pipeline.name!r} reads[{index}]"
         sql = extract_sql(entry)
         try:
-            checked = check_sql(sql, allowed_schemas=allowed or _schemas_named(sql), columns=None)
+            checked = check_sql(sql, allowed_schemas=allowed or schemas_named(sql), columns=None)
         except SqlRejected as error:
             problems.append(Problem(where, f"{label}: {error}"))
             continue
@@ -741,7 +741,7 @@ def _check_sql_step(
 ) -> list[Problem]:
     try:
         checked = check_sql(
-            step.sql, allowed_schemas=allowed or _schemas_named(step.sql), columns=None
+            step.sql, allowed_schemas=allowed or schemas_named(step.sql), columns=None
         )
     except SqlRejected as error:
         return [Problem(f"{where}.sql", str(error))]
@@ -755,7 +755,7 @@ def _check_sql_step(
     return problems
 
 
-def _schemas_named(sql: str) -> frozenset[str]:
+def schemas_named(sql: str) -> frozenset[str]:
     try:
         tree = sqlglot.parse_one(sql, read="oracle")
     except SqlglotError:
@@ -765,12 +765,12 @@ def _schemas_named(sql: str) -> frozenset[str]:
 
 def sql_tables(sql: str) -> frozenset[str]:
     """The objects a SQL step reads, as SCHEMA.OBJECT (it must pass the SQL check)."""
-    checked = check_sql(sql, allowed_schemas=_schemas_named(sql), columns=None)
+    checked = check_sql(sql, allowed_schemas=schemas_named(sql), columns=None)
     return frozenset(str(t) for t in checked.tables)
 
 
 def sql_binds(sql: str) -> tuple[str, ...]:
-    return check_sql(sql, allowed_schemas=_schemas_named(sql), columns=None).binds
+    return check_sql(sql, allowed_schemas=schemas_named(sql), columns=None).binds
 
 
 def check_reads(workflow: Workflow, pipeline_reads: Mapping[str, set[str]]) -> list[Problem]:
