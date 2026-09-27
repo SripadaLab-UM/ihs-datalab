@@ -31,9 +31,12 @@ class FakeContainers:
 class FakeRuntime:
     """Replays a scripted turn instead of running Codex in Docker."""
 
-    def __init__(self, emit, *, hold: asyncio.Event | None = None) -> None:
+    def __init__(
+        self, emit, *, hold: asyncio.Event | None = None, outcomes: list[str] | None = None
+    ) -> None:
         self.emit = emit
         self.hold = hold
+        self.outcomes = outcomes if outcomes is not None else []  # each turn's; then completed
         self.sent: list[str] = []
         self.stopped = False
         self.containers = FakeContainers()
@@ -49,7 +52,7 @@ class FakeRuntime:
         await self.emit("answer_delta", {"text": "Hello"})
         if self.hold:
             await self.hold.wait()
-        status = "interrupted" if self.stopped else "completed"
+        status = "interrupted" if self.stopped else (self.outcomes or ["completed"]).pop(0)
         await self.emit("turn_finished", {"turn_id": "t1", "status": status})
         return TurnResult("t1", status)
 
@@ -95,7 +98,9 @@ def app(settings, catalog):
     )
 
 
-def use_fake_runtime(app, hold: asyncio.Event | None = None) -> list[FakeRuntime]:
+def use_fake_runtime(
+    app, hold: asyncio.Event | None = None, outcomes: list[str] | None = None
+) -> list[FakeRuntime]:
     made: list[FakeRuntime] = []
     manager = app.state.services.sessions
     store = app.state.services.conversations
@@ -104,7 +109,7 @@ def use_fake_runtime(app, hold: asyncio.Event | None = None) -> list[FakeRuntime
         async def emit(kind, data):
             store.append(conversation.id, kind, data)
 
-        runtime = FakeRuntime(emit, hold=hold)
+        runtime = FakeRuntime(emit, hold=hold, outcomes=outcomes)
         made.append(runtime)
         manager._runtimes[conversation.id] = runtime
         return runtime
@@ -378,7 +383,7 @@ def test_a_review_that_couldnt_finish_can_be_run_again_without_redoing_the_turn(
 def test_continue_picks_up_in_the_same_thread_and_the_review_reads_the_original_question(app):
     from datalab.sessions.manager import CONTINUE_TEXT
 
-    made = use_fake_runtime(app)
+    made = use_fake_runtime(app, outcomes=["failed"])
     store = app.state.services.conversations
     manager = app.state.services.sessions
     with TestClient(app) as client:
@@ -411,3 +416,107 @@ def test_a_review_cut_short_by_a_restart_can_be_run_again(app):
         # DataLab stopped mid-review: a start, and no finish.
         store.append(cid, "review_started", {})
         assert client.post(f"/api/conversations/{cid}/review").status_code == 202
+
+
+def test_continue_needs_a_turn_that_failed(app):
+    """The chat's rule for offering Continue, checked here too."""
+    use_fake_runtime(app)
+    store = app.state.services.conversations
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        # Nothing asked yet.
+        refused = client.post(f"/api/conversations/{cid}/continue")
+        assert refused.status_code == 409 and "nothing to continue" in refused.json()["detail"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "turn_done")
+        # It finished: nothing to pick up.
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 409
+        # Stopped by the person: not failed.
+        store.append(cid, "user_message", {"text": "and now?"})
+        store.append(cid, "turn_finished", {"status": "interrupted"})
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 409
+        # Failed, but with a used-up allowance: waiting won't fix it.
+        store.append(cid, "user_message", {"text": "and now?"})
+        store.append(cid, "model_status", {"state": "failed", "kind": "quota"})
+        store.append(cid, "turn_finished", {"status": "failed"})
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 409
+
+
+@pytest.mark.parametrize(
+    ("events", "continuable"),
+    [
+        ([("model_status", {"state": "failed", "kind": "busy"})], True),
+        ([("model_status", {"state": "failed", "kind": "auth"})], False),
+        # The agent worked again after the trouble: the trouble is over.
+        (
+            [
+                ("model_status", {"state": "failed", "kind": "quota"}),
+                ("answer_delta", {"text": "x"}),
+            ],
+            True,
+        ),
+        ([("model_status", {"state": "recovered"})], True),
+    ],
+)
+def test_continue_follows_the_turns_model_trouble(app, events, continuable):
+    store = app.state.services.conversations
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    for kind, data in events:
+        store.append(cid, kind, data)
+    store.append(cid, "turn_finished", {"status": "failed"})
+    assert app.state.services.sessions._last_turn_failed(cid) is continuable
+
+
+def test_continue_reads_the_turn_not_its_review_or_later_notices(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    store.append(cid, "turn_finished", {"status": "completed"})
+    # The review's own turn failed: the review didn't finish, the turn did.
+    store.append(cid, "review_started", {})
+    store.append(cid, "turn_finished", {"status": "failed"})
+    store.append(cid, "review_finished", {"status": "failed"})
+    assert not manager._last_turn_failed(cid)
+
+    store.append(cid, "user_message", {"text": "and now?"})
+    store.append(cid, "turn_finished", {"status": "failed"})
+    assert manager._last_turn_failed(cid)
+    # The chat shows an attachment as its own entry after the failed turn.
+    store.append(cid, "input_attached", {"items": []})
+    assert not manager._last_turn_failed(cid)
+
+
+def test_continue_while_busy_is_refused(app):
+    hold = asyncio.Event()
+    use_fake_runtime(app, hold=hold, outcomes=["failed"])
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "answer_delta")
+        refused = client.post(f"/api/conversations/{cid}/continue")
+        assert refused.status_code == 409 and "still working" in refused.json()["detail"]
+        hold.set()
+        wait_for(client, cid, "turn_done")
+
+
+def test_a_review_needs_an_approved_model_and_the_review_switched_on(app):
+    use_fake_runtime(app)
+    store = app.state.services.conversations
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "turn_done")
+        store.append(cid, "review_started", {})  # cut short: it could be run again
+
+        client.patch(f"/api/conversations/{cid}", json={"rigor_review": False})
+        refused = client.post(f"/api/conversations/{cid}/review")
+        assert refused.status_code == 409 and "switched off" in refused.json()["detail"]
+
+        # A model that was approved when the conversation began, and isn't now.
+        old = store.create(kind="data", mode="analysis", title="t", model="claude-opus-5")
+        store.append(old.id, "user_message", {"text": "how many?"})
+        store.append(old.id, "review_started", {})
+        refused = client.post(f"/api/conversations/{old.id}/review")
+        assert refused.status_code == 409 and "isn't approved" in refused.json()["detail"]

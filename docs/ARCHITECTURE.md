@@ -250,11 +250,16 @@ src/datalab/
   - Responses stream straight through. The relay adds no buffering.
   - **When U-M GPT is busy** (429, or a 5xx before any of the answer has
     streamed), the relay itself retries the same checked request, honouring
-    the server's `Retry-After`, up to three attempts within 60 seconds
+    the server's `Retry-After`, up to three attempts within 60 seconds and
+    at least a second apart, even when `Retry-After` is 0 or missing
     (`relay/recovery.py`). It never retries a used-up allowance, a refused
-    key, a missing model or a bad request, and nothing after Stop. Codex's own
-    request retries are kept to one, so a request makes at most two rounds of
-    relay attempts (six upstream calls, about two minutes of waiting at most).
+    key, a missing model or a bad request. Before every attempt, the first
+    too, it checks the request's turn is still going: nothing more is sent
+    after Stop (even once a new turn has begun), or once the session's token
+    is revoked (the conversation was deleted, shut down or reaped, or a
+    helper was cancelled). Codex's own request retries are kept to one, so a
+    request makes at most two rounds of relay attempts (six upstream calls,
+    about two minutes of waiting at most).
     A failure mid-stream is Codex's to retry (up to twice), as before. Each failure is
     recorded as metadata only (kind, status, provider code, wait), and the
     conversation gets a `model_status` event, so the chat can say "busy,

@@ -102,6 +102,12 @@ class TestNextDelay:
         assert first is not None and 1.6 <= first <= 2.4
         assert second is not None and 3.2 <= second <= 4.8
 
+    def test_never_again_at_once(self, monkeypatch):
+        # "Retry-After: 0" (or none) still waits a moment.
+        assert recovery.next_delay(self.busy(0), attempt=1, waited=0) == recovery.MIN_DELAY
+        monkeypatch.setattr(recovery, "FIRST_DELAY", 0.01)
+        assert recovery.next_delay(self.busy(), attempt=1, waited=0) == recovery.MIN_DELAY
+
     def test_bounded_attempts(self):
         assert recovery.next_delay(self.busy(0), attempt=recovery.MAX_ATTEMPTS, waited=0) is None
 
@@ -111,16 +117,39 @@ class TestNextDelay:
         assert recovery.next_delay(trouble, attempt=1, waited=0) is None
 
 
-def relay_app(replies: list[httpx.Response], stopped=None):
-    """A relay whose upstream answers with `replies`, in order."""
+@pytest.fixture
+def quick(monkeypatch):
+    """Retries without the real waits."""
+    monkeypatch.setattr(recovery, "MIN_DELAY", 0.01)
+    monkeypatch.setattr(recovery, "FIRST_DELAY", 0.01)
+
+
+def relay_app(
+    replies: list[httpx.Response | httpx.HTTPError],
+    *,
+    watch_turn=None,
+    during=None,
+    tokens: SessionTokens | None = None,
+):
+    """A relay whose upstream answers with `replies`, in order (an error is
+    raised, as a connection failure would be). `during(data)` runs as each
+    model status is reported, before any wait."""
     sent: list[httpx.Request] = []
     statuses: list[tuple[str, dict]] = []
 
     def upstream(request: httpx.Request) -> httpx.Response:
         sent.append(request)
-        return replies[min(len(sent), len(replies)) - 1]
+        reply = replies[min(len(sent), len(replies)) - 1]
+        if isinstance(reply, httpx.HTTPError):
+            raise reply
+        return reply
 
-    tokens = SessionTokens()
+    def on_status(session: str, data: dict) -> None:
+        statuses.append((session, data))
+        if during is not None:
+            during(data)
+
+    tokens = tokens or SessionTokens()
     token = tokens.issue(SessionAccess("c_1", "data", results_dir=Path(".")))
     app = FastAPI()
     app.include_router(
@@ -129,8 +158,8 @@ def relay_app(replies: list[httpx.Response], stopped=None):
             lambda: "sk-real",
             "https://umgpt.example/v1",
             httpx.AsyncClient(transport=httpx.MockTransport(upstream)),
-            on_status=lambda session, data: statuses.append((session, data)),
-            stopped=stopped,
+            on_status=on_status,
+            watch_turn=watch_turn,
         )
     )
     client = TestClient(app)
@@ -150,11 +179,14 @@ OK = httpx.Response(
 )
 
 
-def test_a_busy_service_is_retried_after_its_wait_and_the_session_is_told():
-    busy = httpx.Response(
-        429, content=error_body("rate_limit_exceeded"), headers={"retry-after": "0"}
+def busy_for(seconds: str = "1") -> httpx.Response:
+    return httpx.Response(
+        429, content=error_body("rate_limit_exceeded"), headers={"retry-after": seconds}
     )
-    call, sent, statuses = relay_app([busy, OK])
+
+
+def test_a_busy_service_is_retried_after_its_wait_and_the_session_is_told(quick):
+    call, sent, statuses = relay_app([busy_for("0"), OK])
     response = call()
     assert response.status_code == 200
     assert b"event: done" in response.content
@@ -162,6 +194,27 @@ def test_a_busy_service_is_retried_after_its_wait_and_the_session_is_told():
     assert len(sent) == 2 and sent[0].content == sent[1].content
     assert [(s, d["state"]) for s, d in statuses] == [("c_1", "retrying"), ("c_1", "recovered")]
     assert statuses[0][1]["kind"] == "busy" and statuses[0][1]["model"] == "gpt-5.5"
+
+
+def test_a_retry_is_the_same_request_and_the_key_stays_out_of_the_status(quick):
+    call, sent, statuses = relay_app([busy_for("0"), OK])
+    assert call().status_code == 200
+    assert len(sent) == 2
+    assert sent[0].url == sent[1].url == "https://umgpt.example/v1/responses"
+    assert sent[0].content == sent[1].content
+    assert all(r.headers["authorization"] == "Bearer sk-real" for r in sent)
+    # What the chat is told has nothing secret in it.
+    shown = json.dumps(statuses)
+    assert "sk-real" not in shown and "dls_" not in shown
+
+
+def test_a_connection_failure_is_retried(quick):
+    call, sent, statuses = relay_app([httpx.ConnectError("refused"), OK])
+    response = call()
+    assert response.status_code == 200
+    assert len(sent) == 2 and sent[0].content == sent[1].content
+    assert [d["state"] for _, d in statuses] == ["retrying", "recovered"]
+    assert statuses[0][1]["kind"] == "connection" and statuses[0][1]["code"] == "ConnectError"
 
 
 def test_a_used_up_allowance_isnt_retried():
@@ -173,8 +226,7 @@ def test_a_used_up_allowance_isnt_retried():
     assert statuses[-1][1]["state"] == "failed" and statuses[-1][1]["kind"] == "quota"
 
 
-def test_the_error_and_the_servers_wait_reach_codex_when_retries_run_out(monkeypatch):
-    monkeypatch.setattr(recovery, "FIRST_DELAY", 0.01)
+def test_the_error_and_the_servers_wait_reach_codex_when_retries_run_out(quick):
     busy = httpx.Response(503, content=error_body("server_busy"), headers={"retry-after-ms": "10"})
     call, sent, statuses = relay_app([busy])
     response = call()
@@ -194,17 +246,122 @@ def test_nothing_is_retried_once_codex_has_stopped_waiting():
     assert asyncio.run(_wait_unless_gone(Gone(), 30)) is False  # returns at once
 
 
+class Turns:
+    """Stands in for the session manager's view of one conversation's turns."""
+
+    def __init__(self) -> None:
+        self.stopped = False
+        self.number = 1
+        self.shut_down = False
+
+    def watch_turn(self, session_id: str):
+        number = self.number
+        return lambda: self.shut_down or self.stopped or self.number != number
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def begin_turn(self) -> None:
+        self.stopped = False
+        self.number += 1
+
+
 def test_nothing_is_retried_after_the_person_presses_stop():
     """Stop may not close Codex's connection through the gateway, so the
-    relay also asks the session whether its turn was stopped."""
-    busy = httpx.Response(
-        429, content=error_body("rate_limit_exceeded"), headers={"retry-after": "1"}
+    relay also asks the session whether its turn was stopped. The wait ends
+    at once, and nothing more is sent."""
+    turns = Turns()
+    call, sent, statuses = relay_app(
+        [busy_for("30"), OK], watch_turn=turns.watch_turn, during=lambda _: turns.stop()
     )
-    call, sent, statuses = relay_app([busy, OK], stopped=lambda session: session == "c_1")
     response = call()
     assert response.status_code == 429
     assert len(sent) == 1
     assert [d["state"] for _, d in statuses] == ["retrying"]
+
+
+def test_nothing_is_sent_for_a_turn_already_stopped():
+    turns = Turns()
+    turns.stop()
+    call, sent, statuses = relay_app([OK], watch_turn=turns.watch_turn)
+    response = call()
+    assert response.status_code == 409 and "turn is over" in response.text
+    assert sent == [] and statuses == []
+
+
+def test_a_new_turn_after_stop_doesnt_revive_the_old_retries():
+    """Stop, then a new message, both during the wait: beginning the new turn
+    clears Stop, but the old request still belongs to the stopped turn."""
+    turns = Turns()
+
+    def stop_and_start_again(data: dict) -> None:
+        if data["state"] == "retrying":
+            turns.stop()
+            turns.begin_turn()
+
+    call, sent, _ = relay_app(
+        [busy_for("30"), OK], watch_turn=turns.watch_turn, during=stop_and_start_again
+    )
+    assert call().status_code == 429
+    assert len(sent) == 1
+    # The new turn's own requests go through.
+    assert call().status_code == 200 and len(sent) == 2
+
+
+def test_a_revoked_token_during_a_wait_stops_the_retries():
+    """Revoking a session's token is its kill switch: a helper cancelled, or
+    a conversation closed. Nothing more is sent for it."""
+    tokens = SessionTokens()
+    call, sent, statuses = relay_app(
+        [busy_for("30"), OK], tokens=tokens, during=lambda _: tokens.revoke_session("c_1")
+    )
+    assert call().status_code == 429
+    assert len(sent) == 1
+    assert [d["state"] for _, d in statuses] == ["retrying"]
+
+
+def test_a_conversation_deleted_during_a_wait_stops_the_retries(settings):
+    """A deleted, shut-down or reaped conversation has no runtime any more:
+    the manager's check says its turn is over, even with the token still
+    valid (it's revoked too, as the runtime closes)."""
+    from datalab.sessions.manager import SessionManager
+
+    class Runtime:
+        stop_requested = False
+        turn_number = 1
+
+    tokens = SessionTokens()
+    manager = SessionManager(settings, None, tokens)  # type: ignore[arg-type]  # no store needed
+    manager._runtimes["c_1"] = Runtime()  # type: ignore[assignment]
+    call, sent, _ = relay_app(
+        [busy_for("30"), OK],
+        tokens=tokens,
+        watch_turn=manager.watch_turn,
+        during=lambda _: manager._runtimes.pop("c_1"),
+    )
+    assert call().status_code == 429
+    assert len(sent) == 1
+
+
+def test_the_managers_check_follows_the_turn_the_request_arrived_in(settings):
+    from datalab.sessions.manager import SessionManager
+
+    class Runtime:
+        stop_requested = False
+        turn_number = 1
+
+    manager = SessionManager(settings, None, SessionTokens())  # type: ignore[arg-type]
+    runtime = Runtime()
+    manager._runtimes["c_1"] = runtime  # type: ignore[assignment]
+    over = manager.watch_turn("c_1")
+    assert not over()
+    runtime.stop_requested = True
+    assert over()
+    # A new turn clears Stop; the old request's turn is still over.
+    runtime.stop_requested, runtime.turn_number = False, 2
+    assert over() and not manager.watch_turn("c_1")()
+    # Sessions without a runtime here (helpers) rely on their token.
+    assert not manager.watch_turn("h_1")()
 
 
 def test_a_server_wait_means_busy_even_with_a_quota_code():

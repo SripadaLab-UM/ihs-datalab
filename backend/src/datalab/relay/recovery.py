@@ -29,8 +29,13 @@ Kind = Literal["busy", "quota", "model_unavailable", "auth", "request", "connect
 RETRYABLE: frozenset[Kind] = frozenset({"busy", "connection"})
 
 # Bounds on retrying one request (tuning values, not measured service limits).
+# So one request from Codex costs at most MAX_ATTEMPTS upstream calls, at
+# least MIN_DELAY apart (a `Retry-After: 0`, or none, isn't a reason to send
+# again at once) and within BUDGET_SECONDS of waiting. With Codex's one retry
+# of its own, that's at most 2 x MAX_ATTEMPTS calls for one model request.
 MAX_ATTEMPTS = 3
 BUDGET_SECONDS = 60.0
+MIN_DELAY = 1.0
 FIRST_DELAY = 2.0
 MAX_DELAY = 30.0
 
@@ -120,7 +125,8 @@ def next_delay(trouble: Trouble, attempt: int, waited: float) -> float | None:
     """How long to wait before attempt `attempt + 1`, or None to stop.
 
     A server's wait is never shortened: if it doesn't fit in what's left of
-    the budget, the relay stops and says so, rather than retrying early.
+    the budget, the relay stops and says so, rather than retrying early. Nor
+    is any wait shorter than MIN_DELAY.
     """
     if trouble.kind not in RETRYABLE or attempt >= MAX_ATTEMPTS:
         return None
@@ -129,6 +135,7 @@ def next_delay(trouble: Trouble, attempt: int, waited: float) -> float | None:
     else:
         delay = min(MAX_DELAY, FIRST_DELAY * 2 ** (attempt - 1))
         delay *= random.uniform(0.8, 1.2)  # jitter, so sessions don't retry in step
+    delay = max(MIN_DELAY, delay)
     return delay if waited + delay <= BUDGET_SECONDS else None
 
 
