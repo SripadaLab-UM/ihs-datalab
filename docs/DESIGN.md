@@ -112,6 +112,14 @@ palette that follows the system setting.
 - `components/chat/Chat.tsx`: turns, the answer card, trace and review, the
   composer. The chat follows new steps only while you're at the bottom;
   scroll up and it stays put, with "Jump to latest".
+- `components/chat/DockedChat.tsx`: the same chat, docked beside a tab's own
+  content. It opens a conversation, or starts one of a given mode with the
+  first message, and can send context from the tab (the SQL being edited)
+  with each message.
+- `components/editor`: `CodeEditor` (CodeMirror 6: SQL, YAML, Markdown, R or
+  text, with problems marked by line and column) and `DiffView`. Both use the
+  paper tokens, so they follow light and dark, and load as their own chunk.
+  Syntax is weight and italics, not colour; only problems are coloured.
 
 ## Writing
 
