@@ -2,7 +2,9 @@
 what may be participant data, and code that would run on colleagues' computers.
 
 - **Errors** stop a save: a path outside `ihsDataR/` and `workflows/`, or in
-  `.github/` (proposals.py).
+  `.github/` (proposals.py), and a workflow file that fails DataLab's
+  workflow check (with the real profile's small-cell rule, and pipelines as
+  in the change's own tree).
 - **Data** findings wait for the person to confirm each one isn't
   participant data: the knowledge base's scan (knowledge/check.py:
   `data_findings`, `name_findings`), and, since fixtures are where real
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -96,8 +98,16 @@ class Report:
         ]
 
 
-def check(files: Mapping[str, bytes | None]) -> Report:
-    """The check on a change's files (None: deleted)."""
+# The problems DataLab's workflow check finds in a workflow file's text, with
+# pipelines looked up in the tree being checked (service.py).
+WorkflowCheck = Callable[[str], list[str]]
+MAX_WORKFLOW_FINDINGS = 20  # per file; then one saying how many more
+
+
+def check(files: Mapping[str, bytes | None], workflows: WorkflowCheck | None = None) -> Report:
+    """The check on a change's files (None: deleted). With `workflows`, each
+    changed workflow file must also pass the workflow check: a file that
+    wouldn't run is an error, not something to find out later."""
     report = Report()
     for path in sorted(files):
         problem = proposal_problem(path)
@@ -114,11 +124,37 @@ def check(files: Mapping[str, bytes | None]) -> Report:
         if text is None:
             continue
         report.findings += [_from_kb(f) for f in kb.data_findings(path, text)]
+        if workflows is not None and is_workflow_file(path):
+            report.findings += _workflow_findings(path, workflows(text))
         if is_data_file(path):
             report.findings += data_file_findings(path, text)
         elif "/tests/" in f"/{path}":
             report.findings += _capped(path, "date_near_number", _dates_near_numbers(text))
     return report
+
+
+def is_workflow_file(path: str) -> bool:
+    """A workflow file, as the Workflows tab lists them: workflows/<name>.yaml."""
+    name = path.removeprefix("workflows/")
+    return (
+        path.startswith("workflows/")
+        and "/" not in name
+        and not name.startswith(".")
+        and name.lower().endswith((".yaml", ".yml"))
+    )
+
+
+def _workflow_findings(path: str, problems: list[str]) -> list[Finding]:
+    found = [
+        Finding(path, "workflow", "error", f"The workflow check: {why}")
+        for why in problems[:MAX_WORKFLOW_FINDINGS]
+    ]
+    if len(problems) > MAX_WORKFLOW_FINDINGS:
+        more = len(problems) - MAX_WORKFLOW_FINDINGS
+        found.append(
+            Finding(path, "workflow", "error", f"The workflow check: {more} more problems.")
+        )
+    return found
 
 
 def is_data_file(path: str) -> bool:

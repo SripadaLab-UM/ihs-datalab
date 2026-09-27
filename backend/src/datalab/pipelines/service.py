@@ -40,7 +40,7 @@ from datalab.config import Settings
 from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Base, Change, Workspace, fingerprint
 from datalab.pipelines import share
-from datalab.pipelines.check import Report, check
+from datalab.pipelines.check import Report, WorkflowCheck, check
 from datalab.pipelines.proposals import (
     ACTIONABLE,
     PipelineStore,
@@ -58,7 +58,9 @@ from datalab.sessions.checkpoints import Entry
 from datalab.sessions.hooks import TurnInfo
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import Conversation, ConversationStore
+from datalab.workflows.model import WorkflowInvalid, load_workflow
 from datalab.workflows.sandbox import Sandbox
+from datalab.workflows.source import pipelines_in
 
 log = logging.getLogger(__name__)
 
@@ -127,6 +129,7 @@ class Pipelines:
         sandbox: Sandbox,
         remote: str | None = None,
     ) -> None:
+        self._settings = settings
         repos = settings.repos
         if settings.profile == "practice":
             self.unavailable: str | None = "Practice DataLab doesn't use the lab's repositories."
@@ -396,7 +399,41 @@ class Pipelines:
 
     def preview(self, proposal: Proposal) -> Report:
         """The check, as Save & share would run it first."""
-        return check(self.shared_files(proposal))
+        return check(self.shared_files(proposal), self.workflow_check(proposal.commit))
+
+    def workflow_check(self, commit: str) -> WorkflowCheck:
+        """DataLab's workflow check, with pipelines as in `commit`'s tree and
+        the real profile's small-cell rule: these files are shared with the
+        lab, and run there."""
+        clone = self._repo().clone
+        entries: dict[str, TreeEntry] | None = None
+
+        def read(path: str) -> bytes | None:
+            nonlocal entries
+            with clone.lock:
+                if entries is None:
+                    entries = clone.ls_tree(commit)
+                entry = entries.get(path)
+                if entry is None or not entry.regular:
+                    return None
+                return clone.read_blobs([entry.blob]).get(entry.blob)
+
+        lookup = pipelines_in(read)
+        oracle = self._settings.oracle
+
+        def problems(text: str) -> list[str]:
+            try:
+                load_workflow(
+                    text,
+                    pipelines=lookup,
+                    allowed_schemas=oracle.allowed_schemas if oracle else None,
+                    require_small_cells=True,
+                )
+            except WorkflowInvalid as error:
+                return [str(p) for p in error.problems]
+            return []
+
+        return problems
 
     def get(self, proposal_id: str) -> Proposal:
         proposal = self.store.get(proposal_id)
@@ -467,6 +504,7 @@ class Pipelines:
             Identity(account.display_name, account.email),
             account.login,
             confirmed,
+            workflows=self.workflow_check,
         )
         task = asyncio.create_task(self._save(proposal, request))
         self._saving[proposal.id] = task
@@ -576,6 +614,7 @@ class Pipelines:
             confirmed=confirmed,
             trailers=trailers,
             subject="Workflows",
+            workflows=self.workflow_check,
         )
         self._workflow_saves[job.id] = job
         while len(self._workflow_saves) > _KEEP_WORKFLOW_SAVES:

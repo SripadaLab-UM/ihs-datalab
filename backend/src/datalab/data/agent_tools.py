@@ -190,7 +190,8 @@ def build_agent_tools(
                     "valid": not problems,
                     "problems": problems,
                     "note": "Fix every problem before you finish. DataLab checks the file "
-                    "again when it lists it and before every run.",
+                    "again before Save & share, with the pipelines in your change and the "
+                    "real study data's small-cell rule, and a file that fails can't be saved.",
                 }
             )
 

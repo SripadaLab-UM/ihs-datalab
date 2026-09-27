@@ -66,7 +66,8 @@ def test_workflow_authorings_instructions():
     assert "every bind (`:start_date`)\n  must be a declared parameter" in text
     # It checks its own drafts, and says what DataLab checks again.
     assert "call `check_workflow`" in text
-    assert "won't run a file that\n  fails" in text
+    assert "DataLab checks the file again before Save & share" in text
+    assert "A file that fails can't be saved" in text
     # Read-only SQL with the extraction guardrails.
     assert "describe_table" in text and "read-only" in text
     assert "never paste results" in text

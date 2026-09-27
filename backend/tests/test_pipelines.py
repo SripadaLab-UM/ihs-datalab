@@ -814,3 +814,74 @@ def test_tests_get_a_folder_of_their_own_where_compiled_code_can_run(lab):
     assert binds == {"/run/src": True, "/run/out": False, "/run/work": False}
     assert step.env == {"TMPDIR": "/run/work/tmp"}
     assert "cp -r /run/src/ihsDataR /run/work/pkg" in step.command[-1]
+
+
+def test_save_and_share_runs_the_workflow_check_with_the_changes_own_pipelines(lab):
+    """A workflow file that wouldn't run is an error that stops the save. Its
+    pipelines are looked up in the change's own tree, so a pipeline added in
+    the same change counts; and the real profile's small-cell rule applies."""
+    from tests.test_workflow_model import PIPELINE, USES_PIPELINE
+
+    synced(lab)
+    cid = conversation(lab, mode="workflows")
+    before = lab.remote.head()
+    broken = USES_PIPELINE.replace("qc: { file: metrics", "qc: { file: nowhere")
+    proposal = turn(lab, cid, {"workflows/metrics.yaml": broken})
+    assert proposal is not None
+    detail = lab.client.get(f"/api/pipelines/proposals/{proposal.id}").json()
+    errors = [f for f in detail["findings"] if f["rule"] == "workflow"]
+    assert {f["severity"] for f in errors} == {"error"}
+    messages = " ".join(f["message"] for f in errors)
+    assert "There's no pipeline 'daily_metrics'" in messages  # not in main's tree
+    assert "'nowhere' isn't an earlier step" in messages
+    done = accept(lab, proposal)["proposal"]
+    assert done["status"] == "check_failed" and lab.remote.head() == before
+    assert lab.sandbox.steps == []  # stopped before the tests
+
+    # The pipeline in the same change, and a delivered CSV without a
+    # small-cell check: the real profile's rule, though this DataLab is a test.
+    delivers = (
+        USES_PIPELINE
+        + "deliver:\n  destination: practice-folder\n  folder: m\n  files: [metrics]\n"
+    )
+    again = turn(
+        lab,
+        cid,
+        {
+            "workflows/metrics.yaml": delivers,
+            "ihsDataR/inst/pipelines/daily_metrics/pipeline.yaml": PIPELINE,
+            "ihsDataR/inst/pipelines/daily_metrics/run.R": "x <- 1\n",
+        },
+    )
+    assert again is not None
+    detail = lab.client.get(f"/api/pipelines/proposals/{again.id}").json()
+    [error] = [f for f in detail["findings"] if f["rule"] == "workflow"]
+    assert "needs a small_cells check" in error["message"]
+    # Fixed: it saves.
+    fixed = delivers.replace(
+        "  folder: m\n",
+        "  folder: m\n  without_small_cells: { metrics: A row-level file the person asked for. }\n",
+    )
+    last = turn(lab, cid, {"workflows/metrics.yaml": fixed})
+    assert last is not None
+    detail = lab.client.get(f"/api/pipelines/proposals/{last.id}").json()
+    assert [f for f in detail["findings"] if f["rule"] == "workflow"] == []
+    assert accept(lab, last)["proposal"]["status"] == "saved"
+    assert "without_small_cells" in lab.remote.show("workflows/metrics.yaml")
+
+
+def test_only_workflow_files_get_the_workflow_check():
+    from datalab.pipelines.check import is_workflow_file
+
+    assert is_workflow_file("workflows/weekly.yaml") and is_workflow_file("workflows/a.YML")
+    for path in ("workflows/nested/a.yaml", "workflows/.hidden.yaml", "workflows/notes.md",
+                 "ihsDataR/inst/pipelines/p/pipeline.yaml"):  # fmt: skip
+        assert not is_workflow_file(path)
+    seen: list[str] = []
+    files = {"workflows/a.yaml": b"name: a\n", "ihsDataR/R/x.R": b"x <- 1\n"}
+    report = check(files, lambda text: seen.append(text) or ["one", "two"])
+    assert seen == ["name: a\n"]
+    assert [(f.path, f.severity, f.message) for f in report.findings if f.rule == "workflow"] == [
+        ("workflows/a.yaml", "error", "The workflow check: one"),
+        ("workflows/a.yaml", "error", "The workflow check: two"),
+    ]

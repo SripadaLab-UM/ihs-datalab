@@ -35,6 +35,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -43,6 +44,7 @@ from datalab.repos.git import Clone, git_env
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
     Pipeline,
+    PipelineLookup,
     WorkflowInvalid,
     load_pipeline_file,
 )
@@ -403,6 +405,28 @@ def _copy_package(source: Path, dest: Path) -> str | None:
                 )
             shutil.copyfile(path, target / name, follow_symlinks=False)
     return None
+
+
+def pipelines_in(read: Callable[[str], bytes | None]) -> PipelineLookup:
+    """Find pipelines in a tree that isn't on disk (a commit of the pipelines
+    repo): `read(path)` gives a file's bytes, or None. As
+    `WorkflowFolder.pipeline`."""
+
+    def find(name: str) -> Pipeline | None:
+        if not PIPELINE_NAME.fullmatch(name):
+            return None
+        folder = f"{PACKAGE}/inst/pipelines/{name}"
+        spec, script = read(f"{folder}/pipeline.yaml"), read(f"{folder}/run.R")
+        if spec is None or script is None or max(len(spec), len(script)) > MAX_FILE_BYTES:
+            return None
+        try:
+            parsed = load_pipeline_file(spec.decode("utf-8"))
+            text = script.decode("utf-8")
+        except (WorkflowInvalid, UnicodeDecodeError):
+            return None
+        return Pipeline(name=name, spec=parsed, script=text) if parsed.name == name else None
+
+    return find
 
 
 def _plain_file(path: Path) -> bool:

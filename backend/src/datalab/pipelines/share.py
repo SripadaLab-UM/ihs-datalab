@@ -28,11 +28,11 @@ aren't held up.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from datalab.pipelines.check import Report, check
+from datalab.pipelines.check import Report, WorkflowCheck, check
 from datalab.pipelines.proposals import Proposal, TestRun
 from datalab.repos.git import Clone, GitError, Identity
 from datalab.repos.github import GitHubUnavailable, SignInNeeded
@@ -90,6 +90,9 @@ class Share:
     trailers: tuple[tuple[str, str], ...] = ()
     # The commit message's subject starts with this.
     subject: str = "Pipelines"
+    # The workflow check for a commit's tree (service.py), if workflow files
+    # are to be checked: pipelines are looked up in that same tree.
+    workflows: Callable[[str], WorkflowCheck] | None = None
 
     @classmethod
     def of_proposal(
@@ -99,8 +102,9 @@ class Share:
         author: Identity,
         login: str,
         confirmed: Collection[str] = (),
+        workflows: Callable[[str], WorkflowCheck] | None = None,
     ) -> Share:
-        """A Data engineering conversation's proposal."""
+        """A Data engineering or Workflow authoring conversation's proposal."""
         return cls(
             base=proposal.base,
             commit=proposal.commit,
@@ -113,7 +117,13 @@ class Share:
                 ("DataLab-Conversation", proposal.conversation_id),
                 ("DataLab-Proposal", proposal.id),
             ),
+            workflows=workflows,
         )
+
+
+def _checked(share: Share, files: Mapping[str, bytes | None], commit: str) -> Report:
+    """The check, on a worker thread (the workflow check reads git and parses)."""
+    return check(files, share.workflows(commit) if share.workflows else None)
 
 
 async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResult:
@@ -124,7 +134,7 @@ async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResu
 
 
 async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
-    report = check(share.files)
+    report = await asyncio.to_thread(_checked, share, share.files, share.commit)
     if report.blocking(share.confirmed):
         return _check_failed(report, share.confirmed, after_rebase=False)
     first = await tester(share.commit, share.tree)
@@ -166,7 +176,7 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         # Checked again as it will be pushed: what it changes on top of main.
         changed = await asyncio.to_thread(clone.changed_paths, upstream, candidate)
         contents = await asyncio.to_thread(_contents, clone, candidate, changed)
-        again = check(contents)
+        again = await asyncio.to_thread(_checked, share, contents, candidate)
         if again.blocking(share.confirmed):
             return _check_failed(again, share.confirmed, after_rebase=upstream != share.base)
         # The package as it will be pushed, if others' changes made it another

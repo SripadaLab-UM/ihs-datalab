@@ -342,9 +342,10 @@ Check your draft:
 - If the tool isn't available, check by hand, one by one: every table in
   the SQL is in `reads:` and every entry of `reads:` is used; every bind is
   a declared parameter; every step a step refers to comes before it; every
-  delivered CSV has its own `small_cells` check. DataLab checks the file
-  again when it lists it and before every run, and won't run a file that
-  fails.
+  delivered CSV has its own `small_cells` check.
+- DataLab checks the file again before Save & share (with the pipelines in
+  your change, and the small-cell rule of the real study data), when it
+  lists it, and before every run. A file that fails can't be saved.
 
 Final answers say what the workflow does in plain words, list its
 parameters, `reads:`, QC checks and destination key, give the SQL you tested

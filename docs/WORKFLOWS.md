@@ -376,9 +376,11 @@ the person to confirm, one by one, with the line shown:
   `configure`, `cleanup`, compiled code in `src/`, and `.onLoad`,
   `.onAttach` and the like in `R/`.
 
-**Save & share** runs the check, requires the tests to have passed on the
-change (running them first if not), commits it as the person, rebases onto
-`main`, runs the tests again when the rebased package (the `ihsDataR` tree)
+**Save & share** runs the check (which includes the workflow file check on
+every changed `workflows/*.yaml`, with pipelines looked up in the change's
+own tree and the real profile's small-cell rule: a failure is an error),
+requires the tests to have passed on the change (running them first if
+not), commits it as the person, rebases onto `main`, runs the tests again when the rebased package (the `ihsDataR` tree)
 isn't the one they passed on, and pushes exactly that commit, whose message
 names the test run that passed on it. A conflict shares nothing: discard the
 change and ask the agent to make it again. The change isn't edited in
