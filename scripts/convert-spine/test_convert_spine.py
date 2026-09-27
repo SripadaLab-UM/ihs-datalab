@@ -302,9 +302,9 @@ def test_review_outside_the_knowledge_base(sources, tmp_path):
     out = tmp_path / "kb"
     with pytest.raises(SystemExit):
         cs.main(["--spine", str(spine), "--export", str(export), "--out", str(out),
-                 "--review", str(out / "REVIEW.md")])  # fmt: skip
+                 "--review", str(out / "REVIEW.md"), "--ref", "HEAD"])  # fmt: skip
     code = cs.main(["--spine", str(spine), "--export", str(export), "--out", str(out),
-                    "--review", str(tmp_path / "REVIEW.md")])  # fmt: skip
+                    "--review", str(tmp_path / "REVIEW.md"), "--ref", "HEAD"])  # fmt: skip
     assert code == 0
     assert "## Status changes" in (tmp_path / "REVIEW.md").read_text()
 
@@ -343,7 +343,7 @@ def test_decisions_and_the_committed_version(sources, tmp_path):
     spine, export = sources
     result = run(sources, tmp_path / "kb")
     review = cs.review_md(result)
-    assert review.index("## Two decisions") < review.index("## Inputs")
+    assert "`--working-copy`" in review.split("## Inputs")[0]
     assert "DataSource `diary`: known_limitations (added)" in review
     assert [p for p, _, _ in result.from_commit] == ["sources/diary.md"]
     # Built from the commit: nothing counts as changed, and the later edit isn't there.
@@ -353,7 +353,11 @@ def test_decisions_and_the_committed_version(sources, tmp_path):
     )
     assert "Edited later." not in (tmp_path / "kb-head/sources/diary.md").read_text()
     assert committed.from_commit == []
-    assert "Read as committed at `HEAD`" in cs.review_md(committed)
+    head = cs.review_md(committed)
+    assert head.index("## Decided: converted from") < head.index("## Inputs")
+    assert "Read as committed at `HEAD`" in head
+    # What the working copy has that the commit doesn't is said, and left out.
+    assert "DataSource `diary`: known_limitations (added)" in head
 
 
 def test_marks_thin_cohorts(sources, tmp_path):
@@ -364,3 +368,33 @@ def test_marks_thin_cohorts(sources, tmp_path):
     assert "`features/steps_day` [2024, 2025]:" in section
     legacy = review.split("### How far the check verifies evidence")[1]
     assert "- `qc/steps_positive`" in legacy.split("Reviewed feature and QC")[0]
+
+
+def test_stamps_the_reviewer_at_install(sources, tmp_path):
+    spine, export = sources
+    out = tmp_path / "kb"
+    result = cs.convert(spine, export, out, ref="HEAD")
+    assert not [f for f in result.report.errors + result.report.data]
+    before = [f for f in result.report.warnings if f.rule == "reviewed_by"]
+    reviewed = sorted(p.path for p in result.converter.pages.values() if p.status == "reviewed")
+    assert reviewed and len(before) == len(reviewed)
+    for page in result.converter.pages.values():  # nobody named before reviewing
+        assert "reviewed_by" not in meta(out, page.path)
+        assert "reviewed_on" not in meta(out, page.path)
+    code = cs.main(["--stamp-reviewer", "ataxali", "--out", str(out), "--on", "2026-10-01"])
+    assert code == 0
+    for path in reviewed:
+        fields = meta(out, path)
+        assert fields["reviewed_by"] == "ataxali"
+        assert str(fields["reviewed_on"]) == "2026-10-01"
+    drafts = [p.path for p in result.converter.pages.values() if p.status == "draft"]
+    assert all("reviewed_by" not in meta(out, p) for p in drafts)
+    files, others = kb.read_folder(out)
+    report = kb.check(files, others=others)
+    assert report.blocking() == []
+    assert not [f for f in report.findings if f.rule == "reviewed_by"]
+    # Stamped exactly as DataLab's Save & share would stamp them.
+    text = (out / reviewed[0]).read_text()
+    assert kb.stamp_review(text, "ataxali", cs.datetime.date(2026, 10, 1)) == text
+    with pytest.raises(SystemExit):
+        cs.main(["--stamp-reviewer", "not a login", "--out", str(out)])

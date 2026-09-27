@@ -10,6 +10,13 @@ review before the first commit to `ihs-knowledge`, plus a review report:
         --export <metadata export folder> \\
         --out <staging folder> --review <REVIEW.md>
 
+It reads the registry as committed at SPINE_COMMIT unless told otherwise
+(`--ref`, `--working-copy`). After the reviewer has reviewed the output, and
+just before the first commit, they name themselves on its reviewed pages:
+
+    cd backend && uv run python ../scripts/convert-spine/convert_spine.py \\
+        --stamp-reviewer <GitHub login> --out <the knowledge base>
+
 Tests: `cd backend && uv run pytest -q ../scripts/convert-spine`.
 
 What goes where:
@@ -23,8 +30,9 @@ What goes where:
 - Statuses: a Spine `validated` entry becomes `reviewed` only when typed
   evidence of the right kind supports it (see `decide_status`);
   everything else becomes `draft`, with the reason on the page and in the
-  report. `reviewed_by` and `reviewed_on` are never written: DataLab's save
-  flow fills them in.
+  report. The conversion never writes `reviewed_by` or `reviewed_on`; the
+  reviewer adds them with `--stamp-reviewer` once they have reviewed, the
+  way DataLab's Save & share does.
 - Nothing that could be participant data is carried over: counts and value
   distributions from queries, results' hashes, and profiling observations
   are left out (the report lists where, never what), and every page is run
@@ -53,6 +61,13 @@ import yaml
 
 from datalab.data.catalog import Catalog
 from datalab.knowledge import check as kb
+
+# The Spine commit the knowledge base is converted from (the user's decision:
+# its last commit, without the working copy's uncommitted changes).
+SPINE_COMMIT = "eea768cef048dacfc1b5e9925b9deafc624ea619"
+# Who reviews the conversion and is stamped on its reviewed pages at install.
+REVIEWER = "ataxali"
+_LOGIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 
 LIST_KEYS = (
     "data_sources",
@@ -1572,6 +1587,9 @@ class Result:
     # Spine's last commit instead. (path, status now, status from the commit;
     # None where a page wouldn't exist.)
     from_commit: list[tuple[str, str | None, str | None]] = field(default_factory=list)
+    # With a commit read: working-copy entries that differ from it, left out.
+    excluded: list[tuple[str, list[str]]] = field(default_factory=list)
+    reviewer: str = REVIEWER
 
 
 def build(spine: Spine, schema: Schema) -> Converter:
@@ -1609,6 +1627,7 @@ def convert(spine_dir: Path, export: Path, out: Path, ref: str | None = None) ->
     changed = any(e.changed for es in spine.entities.values() for e in es.values())
     if ref is None and spine.commit and changed:
         from_commit = compare(converter, build(read_spine(spine_dir, spine.commit), schema))
+    excluded = left_out(spine, read_spine(spine_dir)) if ref else []
     prepare(out)
     catalog.save(out / "generated" / "schema")
     when = export_time(export)
@@ -1629,7 +1648,48 @@ def convert(spine_dir: Path, export: Path, out: Path, ref: str | None = None) ->
     (out / "index.md").write_text(report.index, encoding="utf-8", newline="\n")
     disk, others = kb.read_folder(out)
     report = kb.check(disk, others=others)
-    return Result(converter, report, len(catalog), export, spine_dir, from_commit)
+    return Result(converter, report, len(catalog), export, spine_dir, from_commit, excluded)
+
+
+def left_out(read: Spine, working: Spine) -> list[tuple[str, list[str]]]:
+    """Working-copy entries that differ from the version read, by field."""
+    out = []
+    for key in LIST_KEYS:
+        for entity_id in sorted(set(read.entities[key]) | set(working.entities[key])):
+            a, b = read.entities[key].get(entity_id), working.entities[key].get(entity_id)
+            if a and b and a.data != b.data:
+                out.append((a.label, diff_paths(a.data, b.data)))
+            elif a is None and b is not None:
+                out.append((b.label, ["the whole entry (only in the working copy)"]))
+            elif b is None and a is not None:
+                out.append((a.label, ["the whole entry (removed in the working copy)"]))
+    return out
+
+
+def stamp(folder: Path, reviewer: str, day: datetime.date) -> tuple[list[str], kb.Report]:
+    """Name `reviewer` on every reviewed page, as DataLab's Save & share does
+    (`stamp_review`), rewrite index.md, and check the result. Run by the
+    reviewer, after their review, just before the first commit."""
+    if not _LOGIN.fullmatch(reviewer):
+        raise SystemExit(f"{reviewer!r} isn't a GitHub login")
+    files, others = kb.read_folder(folder)
+    stamped = []
+    for path, content in sorted(files.items()):
+        text = kb.as_text(content)
+        if kb.place(path) != "page" or text is None:
+            continue
+        fields, _ = kb.front_matter(text)
+        if not fields or fields.get("status") != "reviewed":
+            continue
+        new = kb.stamp_review(text, reviewer, day)
+        if new != text:
+            (folder / path).write_text(new, encoding="utf-8", newline="\n")
+        stamped.append(path)
+    files, others = kb.read_folder(folder)
+    report = kb.check(files, others=others)
+    (folder / "index.md").write_text(report.index, encoding="utf-8", newline="\n")
+    files, others = kb.read_folder(folder)
+    return stamped, kb.check(files, others=others)
 
 
 # The review report ---------------------------------------------------------------
@@ -1646,7 +1706,7 @@ def review_md(result: Result) -> str:
         "Nothing here has been committed to `ihs-knowledge`. Read this, then the pages, "
         "then install (at the end).",
         "",
-        *decisions(result),
+        *decided(result),
         "## Inputs",
         "",
         f"- Spine: `{result.spine_dir}` (repo `{spine.repo}`, commit `{spine.commit}`), "
@@ -1654,8 +1714,7 @@ def review_md(result: Result) -> str:
         + (
             f"Read as committed at `{spine.ref}`."
             if spine.ref
-            else "The registry's working copy was read, including changes made after that "
-            "commit (see decision 2)."
+            else "The registry's working copy was read, including changes made after that commit."
         ),
         f"- Oracle metadata export: `{result.export}` ({result.catalog_tables} tables and views).",
         "",
@@ -1705,7 +1764,7 @@ def review_md(result: Result) -> str:
         "(`schema` for sources and tables; `code`, `legacy`, or `paper` for any page), every "
         "Oracle name it gives is in the catalog, and it has cohorts. `candidate` becomes "
         "`draft`. Pages the conversion assembled (the constructs glossary, papers) are "
-        "drafts. No page has `reviewed_by` or `reviewed_on` (see decision 1). How far the "
+        "drafts. No page has `reviewed_by` or `reviewed_on` yet (see Decided). How far the "
         "check verifies that evidence, and where cohorts were inferred, are in the next two "
         "sections.",
         "",
@@ -1832,9 +1891,9 @@ def review_md(result: Result) -> str:
         out.append(f"- {severity} `{rule}` ({len(paths)}): {message} {shown}{more}")
     out += [
         "",
-        "Reviewed pages are warned about because they don't name a reviewer yet: DataLab "
-        "fills `reviewed_by` and `reviewed_on` in on its next save of each page. Empty "
-        "`cohorts` warnings are drafts whose years the Spine doesn't give.",
+        "Reviewed pages are warned about because they don't name a reviewer yet; the "
+        "stamp at install (step 4) clears those warnings. Empty `cohorts` and `evidence` "
+        "warnings are drafts whose years or evidence the Spine doesn't give.",
         "",
         "## Questions for the reviewer",
         "",
@@ -1850,61 +1909,62 @@ def review_md(result: Result) -> str:
         "`ihs-knowledge/.github/workflows/kb-check.yml`, and set `DATALAB_REF` in it to the "
         "DataLab release the lab runs. DataLab's GitHub App can't push workflows, so this "
         "has to be a person's own push.",
-        "4. Run the check in the clone: `cd <DataLab>/backend && uv run datalab kb-check "
-        "<path to ihs-knowledge>`.",
-        '5. Make the first commit and push: `git add -A && git commit -m "Knowledge base '
+        f"4. Once {result.reviewer} has finished reviewing, stamp the reviewed pages in the "
+        "clone: `cd <DataLab>/backend && uv run python "
+        f"../scripts/convert-spine/convert_spine.py --stamp-reviewer {result.reviewer} "
+        "--out <path to ihs-knowledge>`. It sets `reviewed_by` and `reviewed_on` (today) on "
+        "every `status: reviewed` page and runs the check.",
+        "5. Run the check in the clone: `cd <DataLab>/backend && uv run datalab kb-check "
+        "<path to ihs-knowledge>`. It should report no errors, no possible participant data, "
+        "and no `reviewed_by` warnings.",
+        '6. Make the first commit and push: `git add -A && git commit -m "Knowledge base '
         'converted from the prototype Spine" && git push origin main`.',
         "",
     ]
     return "\n".join(out)
 
 
-def decisions(result: Result) -> list[str]:
-    """What the user decides before anything goes into the real repo."""
+def decided(result: Result) -> list[str]:
+    """What the user decided before anything goes into the real repo."""
     conv = result.converter
     spine = conv.spine
     reviewed = [p for p in conv.pages.values() if p.status == "reviewed"]
+    commit = (spine.commit or "")[:7]
     out = [
-        "## Two decisions before the first commit",
+        f"## Decided: converted from {commit}; the reviewer, {result.reviewer}, is stamped "
+        "at install after review",
         "",
-        f"1. **Who reviewed the {len(reviewed)} reviewed pages?** None names a reviewer: the "
-        "conversion never writes `reviewed_by` or `reviewed_on`, and DataLab only fills them "
-        "in when a person saves a page there. Either the person who reviews this conversion "
-        "is named on them (DataLab stamps them the next time each page is saved through it), "
-        "or they are committed as drafts now and promoted one by one through DataLab, which "
-        "records the reviewer as it goes. Until one of these happens the check warns on "
-        "each of them.",
     ]
-    changed = [e for es in spine.entities.values() for e in es.values() if e.changed]
     if spine.ref:
         out.append(
-            f"2. **Source version.** Built from the Spine as committed at `{spine.commit}`, "
-            "so it can be rebuilt exactly."
+            f"- **Source.** The Spine's registry as committed at `{spine.commit}`, so this "
+            "output can be rebuilt exactly from that commit."
         )
-    elif changed:
-        out += [
-            f"2. **The Spine's working copy.** The registry has changes that aren't committed "
-            f"(the conversion read them), so this output can't be rebuilt from `{spine.commit}`. "
-            "Either those changes are committed to the Spine (then this output is what that "
-            "commit gives), or the conversion is run from the commit instead (`--ref HEAD`). "
-            "The changed entries, by field (never values):",
-        ]
-        for e in changed:
-            out.append(f"   - {e.label}: " + "; ".join(e.diff))
-        out.append("   Built from the commit instead, these pages would differ:")
-        for path, now, then in result.from_commit:
-            if now == then:
-                out.append(f"   - `{path}`: different text, still {now}")
-            else:
-                out.append(
-                    f"   - `{path}`: {now or 'no page'} now, {then or 'no page'} from the commit"
-                )
+        if result.excluded:
+            out.append(
+                "  The Spine's working copy has changes that aren't committed; they are left "
+                "out. By field (never values):"
+            )
+            out += [f"  - {label}: " + "; ".join(diff) for label, diff in result.excluded]
     else:
         out.append(
-            f"2. **Source version.** The working copy matches `{spine.commit}`, so the output "
-            "can be rebuilt from that commit."
+            "- **Source.** The Spine's working copy (`--working-copy`), not a commit: this "
+            "output can't be rebuilt from a commit."
         )
-    out.append("")
+        changed = [e for es in spine.entities.values() for e in es.values() if e.changed]
+        out += [f"  - {e.label}: " + "; ".join(e.diff) for e in changed]
+    out += [
+        f"- **Reviewer.** {result.reviewer} reviews this conversion and is named on the "
+        f"{len(reviewed)} reviewed pages. So that nobody is named before reviewing, the "
+        "staging output has no `reviewed_by` or `reviewed_on`: step 4 of the install stamps "
+        f"`reviewed_by: {result.reviewer}` and `reviewed_on:` the day it's run on every "
+        "`status: reviewed` page, just before the first commit. It uses DataLab's own "
+        "stamping (`stamp_review`, as Save & share does), so the fields are exactly what "
+        "DataLab would write; the check has no history to compare in a first commit, and "
+        "afterwards DataLab keeps them until a person saves the page again. Drafts are left "
+        "unstamped.",
+        "",
+    ]
     return out
 
 
@@ -2019,7 +2079,8 @@ QUESTIONS = (
     "last commit. Should it be re-pinned to `ihs-pipelines` once `ihsDataR` has moved there?",
     "`legacy` evidence assumes the 2024 scripts will be in `ihs-pipelines` at "
     "`reference/2024/` (docs/WORKFLOWS.md). Is that where they'll be, under these names?",
-    "Were the Spine changes that aren't committed approved in the prototype (decision 2)?",
+    "The Spine's uncommitted changes are left out (see Decided). Should they be proposed "
+    "through DataLab once the knowledge base is live?",
     "The Garmin and participant sources say the catalog export has no views; the current "
     "export has them. Should those limitations be dropped?",
     "`resting_heart_rate_day`: its description and its recipe disagree about the Fitbit "
@@ -2038,18 +2099,48 @@ QUESTIONS = (
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").split("\n\n")[0])
-    parser.add_argument("--spine", type=Path, required=True, help="the Spine's folder")
-    parser.add_argument("--export", type=Path, required=True, help="the metadata export")
-    parser.add_argument("--out", type=Path, required=True, help="where to write the KB")
-    parser.add_argument("--review", type=Path, required=True, help="where to write REVIEW.md")
+    parser.add_argument("--spine", type=Path, help="the Spine's folder")
+    parser.add_argument("--export", type=Path, help="the metadata export")
+    parser.add_argument("--out", type=Path, required=True, help="the knowledge base's folder")
+    parser.add_argument("--review", type=Path, help="where to write REVIEW.md")
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument(
+        "--ref",
+        default=SPINE_COMMIT,
+        help=f"read the registry as committed at this git ref (default {SPINE_COMMIT[:7]})",
+    )
+    source.add_argument(
+        "--working-copy", action="store_true", help="read the registry's working copy instead"
+    )
     parser.add_argument(
-        "--ref", help="read the registry as committed at this git ref, not the working copy"
+        "--reviewer", default=REVIEWER, help="who the report says will review and be stamped"
+    )
+    parser.add_argument(
+        "--stamp-reviewer",
+        metavar="LOGIN",
+        help="install step, after review: name LOGIN on every reviewed page in --out",
+    )
+    parser.add_argument(
+        "--on", type=datetime.date.fromisoformat, help="the stamp's date (default today)"
     )
     args = parser.parse_args(argv)
+    if args.stamp_reviewer:
+        day = args.on or datetime.date.today()
+        stamped, report = stamp(args.out, args.stamp_reviewer, day)
+        print(f"Stamped {len(stamped)} reviewed pages: reviewed_by {args.stamp_reviewer}, {day}.")
+        print(
+            f"Check: {len(report.errors)} error(s), {len(report.data)} possible participant-data "
+            f"hit(s), {len(report.warnings)} warning(s)."
+        )
+        return 1 if report.blocking() else 0
+    if not (args.spine and args.export and args.review):
+        parser.error("--spine, --export and --review are needed to convert")
     review = args.review.resolve()
     if review.is_relative_to(args.out.resolve()):
         raise SystemExit("--review must be outside --out: the check allows no extra files there")
-    result = convert(args.spine, args.export, args.out, args.ref)
+    ref = None if args.working_copy else args.ref
+    result = convert(args.spine, args.export, args.out, ref)
+    result.reviewer = args.reviewer
     review.write_text(review_md(result), encoding="utf-8", newline="\n")
     report = result.report
     pages = result.converter.pages.values()
