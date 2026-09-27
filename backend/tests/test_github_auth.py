@@ -252,3 +252,62 @@ def test_tokens_that_cant_be_read_count_as_signed_out(github_keychain):
     assert TokenStore().load() is None
     assert Tokens.from_json(json.dumps({"no": "token"})) is None
     assert saved_token_values() == []
+
+
+@pytest.mark.parametrize("error", ["bad_refresh_token", "invalid_grant"])
+def test_only_a_refresh_token_github_calls_bad_signs_out(auth, github, clock, error):
+    signed_in(auth, github, clock)
+    clock.now += 9 * 3600
+    github.fail_refresh = error
+    with pytest.raises(SignInNeeded):
+        auth.access_token()
+    assert auth.status().state == "signed out"
+
+
+def test_other_refresh_answers_keep_the_sign_in(auth, github, clock, github_keychain):
+    signed_in(auth, github, clock)
+    clock.now += 9 * 3600
+    github.fail_refresh = "slow_down"  # anything but a refused token
+    with pytest.raises(GitHubUnavailable):
+        auth.access_token()
+    github.fail_refresh = None
+    real = github.handler
+
+    def rate_limited(request):
+        if request.url.path == "/login/oauth/access_token":
+            return httpx.Response(429, json={"message": "rate limited"})
+        return real(request)
+
+    limited = GitHubAuth(
+        CLIENT_ID, http=httpx.Client(transport=httpx.MockTransport(rate_limited)), clock=clock
+    )
+    with pytest.raises(GitHubUnavailable):
+        limited.access_token()
+    assert saved(github_keychain)["refresh_token"] == "ghr_refresh_1"
+    assert auth.access_token() == "ghu_access_2"
+
+
+def test_a_keychain_that_wont_save_the_rotated_tokens_doesnt_lose_them(
+    auth, github, clock, github_keychain
+):
+    signed_in(auth, github, clock)
+    clock.now += 9 * 3600
+    real_save = github_keychain.set_password
+
+    def broken(*args):
+        raise RuntimeError("keychain locked")
+
+    github_keychain.set_password = broken
+    assert auth.access_token() == "ghu_access_2"  # rotated, kept in memory
+    assert saved(github_keychain)["refresh_token"] == "ghr_refresh_1"
+    status = auth.status()
+    assert status.state == "signed in" and "couldn't save" in (status.message or "")
+    # git's helper reads the keychain, so git waits until it's saved.
+    with pytest.raises(GitHubUnavailable):
+        auth.token_for_git()
+    clock.now += 9 * 3600
+    assert auth.access_token() == "ghu_access_3"  # refreshed with the kept token
+    github_keychain.set_password = real_save
+    auth.token_for_git()  # saved on the next use
+    assert saved(github_keychain)["refresh_token"] == "ghr_refresh_3"
+    assert auth.status().message is None

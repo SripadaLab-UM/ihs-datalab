@@ -159,8 +159,11 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   in DataLab. The tokens live in the OS keychain (`datalab-github`). The
   8-hour user token is refreshed ten minutes before it expires, and the
   refresh token (about six months) is replaced by GitHub on every use, so
-  both new tokens are saved before either is used. When the refresh token
-  runs out, the person signs in again. The practice profile never signs in.
+  both new tokens are saved before either is used. Only GitHub refusing the
+  refresh token (`bad_refresh_token`, `invalid_grant`) signs the person out;
+  a rate limit or a network error keeps the sign-in. If the keychain won't
+  take the new pair, DataLab keeps it in memory, says so, and saves it again
+  at each use (git waits meanwhile, since its helper reads the keychain). The practice profile never signs in.
 - **Git** runs in DataLab's process and reads only the clone's own config,
   never the person's global or the system's, so no filter, merge or diff
   driver, URL rewrite, or rerere from them applies. `.git/info/attributes`
@@ -202,9 +205,13 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   on the next try. A failed check stops with the findings.
 - **The base moves on.** After a proposal is saved or discarded, the
   conversation's base becomes its old base plus the agent's files as they
-  were (a local commit under `refs/datalab/kb-bases/`). So the next proposal
-  shows only what's new, and saving it replays only that onto `main`,
-  keeping the person's edits and others' changes.
+  were, with the review fields as the base had them (a local commit under
+  `refs/datalab/kb-bases/`). So the next proposal shows only what's new, and
+  saving it replays only that onto `main`, keeping the person's edits and
+  others' changes. The review fields of every page saved are set by DataLab
+  alone, whatever the agent's text, a person's edit, or a conflict
+  resolution says. A deleted conversation's base is removed (and `git gc`
+  prunes its commits) when DataLab starts and after each sync.
 - The API is `/api/knowledge/…`: `status`, `sync`, `sign-in` (start, poll,
   cancel), `sign-out`, and `proposals` (list, get, `edits`, `accept`,
   `reject`). The tables are migration 0007.

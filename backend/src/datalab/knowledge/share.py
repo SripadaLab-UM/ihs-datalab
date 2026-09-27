@@ -92,24 +92,35 @@ def tree_files(
 
 
 def _stamped(
-    files: Mapping[str, bytes | None], share: Share, pages: Collection[str]
+    files: Mapping[str, bytes | None],
+    share: Share,
+    pages: Collection[str],
+    reference: Mapping[str, bytes],
 ) -> dict[str, bytes | None]:
-    """`files` with who reviewed the reviewed pages among `pages`, and when."""
+    """`files` with the review fields of `pages` as DataLab sets them: as in
+    `reference` (the version they're saved over), whatever the text says
+    (the agent's, a person's edit, or a conflict resolution), and then, on a
+    reviewed page, who saved it and when."""
     out = dict(files)
     for path in pages:
         content = out.get(path)
         text = kb.as_text(content) if content is not None else None
-        if text is not None and kb.place(path) == "page":
-            out[path] = kb.stamp_review(text, share.reviewer, share.today).encode()
+        if text is None or kb.place(path) != "page":
+            continue
+        old = reference.get(path)
+        text = kb.keep_review_fields(text, kb.as_text(old) if old is not None else None)
+        out[path] = kb.stamp_review(text, share.reviewer, share.today).encode()
     return out
 
 
 def prepare(clone: Clone, share: Share) -> tuple[dict[str, bytes], kb.Report]:
     """The knowledge base as it would be with this change on the
     conversation's base (stamped, with index.md), and its check."""
+    base, _ = tree_files(clone, share.base)
     files, others = tree_files(clone, share.base, share.files)
     changed = [p for p, c in share.files.items() if c is not None]
-    files = {p: c for p, c in _stamped(files, share, changed).items() if c is not None}
+    stamped = _stamped(files, share, changed, base)
+    files = {p: c for p, c in stamped.items() if c is not None}
     report = kb.check(files, others=others, only=set(share.files))
     files["index.md"] = report.index.encode()
     return files, report
@@ -180,8 +191,9 @@ def _save(clone: Clone, share: Share) -> SaveResult:
 def _finish(clone: Clone, commit: str, upstream: str, share: Share, message: str) -> str:
     """The rebased commit, with the review stamps and a fresh index.md."""
     files, others = tree_files(clone, commit)
+    theirs, _ = tree_files(clone, upstream)
     changed = [p for p, c in share.files.items() if c is not None and p in files]
-    stamped = _stamped(files, share, changed)
+    stamped = _stamped(files, share, changed, theirs)
     overlay = {p: c for p, c in stamped.items() if c is not None and c != files.get(p)}
     final = {p: c for p, c in {**files, **overlay}.items() if c is not None}
     index = kb.check(final, others=others, only=set()).index.encode()

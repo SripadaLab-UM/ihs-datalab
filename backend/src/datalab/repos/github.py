@@ -42,6 +42,12 @@ _DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
 # starts with one that runs out part-way.
 _REFRESH_MARGIN = 10 * 60
 _TIMEOUT = httpx.Timeout(15)
+# What GitHub says when a refresh token can never work again.
+_REFUSED_REFRESH = ("bad_refresh_token", "invalid_grant")
+_UNSAVED = (
+    "DataLab couldn't save your GitHub sign-in to the keychain, and keeps trying. "
+    "Until it can, syncing and sharing wait; if DataLab stops first, sign in again."
+)
 
 
 class SignInNeeded(RuntimeError):
@@ -183,6 +189,9 @@ class GitHubAuth:
         self._flow: _DeviceFlow | None = None
         # How the last flow ended, until the next one starts.
         self._ended: SignIn | None = None
+        # Tokens GitHub gave that the keychain wouldn't take: kept here (the
+        # old refresh token no longer works) and saved again at each use.
+        self._unsaved: Tokens | None = None
 
     # The device flow --------------------------------------------------------
 
@@ -191,9 +200,10 @@ class GitHubAuth:
         with self._lock:
             if self._flow is not None:
                 return self._waiting(self._flow)
-            tokens = self._store.load()
+            tokens = self._load()
             if tokens is not None and not self._refresh_expired(tokens):
-                return SignIn("signed in", account=tokens.account)
+                message = _UNSAVED if self._unsaved is not None else None
+                return SignIn("signed in", account=tokens.account, message=message)
             return self._ended or SignIn("signed out")
 
     def start(self) -> SignIn:
@@ -253,15 +263,16 @@ class GitHubAuth:
                 message = _github_error(raw, "GitHub didn't finish the sign-in.")
                 return self._end(SignIn("failed", message=message))
             tokens = self._tokens_from(raw, now)
-            self._store.save(tokens)
+            self._save(tokens)
             self._flow = None
             # Who signed in: commits are attributed to them.
             account = self._fetch_account(tokens.access_token)
             if account is not None:
                 tokens = replace(tokens, account=account)
-                self._store.save(tokens)
+                self._save(tokens)
             self._ended = None
-            return SignIn("signed in", account=account)
+            message = _UNSAVED if self._unsaved is not None else None
+            return SignIn("signed in", account=account, message=message)
 
     def cancel(self) -> SignIn:
         with self._lock:
@@ -277,13 +288,13 @@ class GitHubAuth:
         with self._lock:
             self._flow = None
             self._ended = None
-            self._store.clear()
+            self._forget()
             return SignIn("signed out")
 
     # Tokens -----------------------------------------------------------------
 
     def signed_in(self) -> bool:
-        tokens = self._store.load()
+        tokens = self._load()
         return tokens is not None and not self._refresh_expired(tokens)
 
     def access_token(self) -> str:
@@ -293,7 +304,7 @@ class GitHubAuth:
         GitHubUnavailable if a refresh couldn't reach GitHub (the old tokens
         are kept, so it can be tried again)."""
         with self._lock:
-            tokens = self._store.load()
+            tokens = self._load()
             if tokens is None:
                 raise SignInNeeded("Sign in to GitHub first.")
             now = self._clock()
@@ -306,7 +317,7 @@ class GitHubAuth:
             if not tokens.refresh_token or refresh_ran_out:
                 if expires > now:
                     return tokens.access_token  # good for a few minutes more
-                self._store.clear()
+                self._forget()
                 raise SignInNeeded("The GitHub sign-in has run out. Sign in again.")
             raw = self._post(
                 f"{GITHUB}/login/oauth/access_token",
@@ -317,20 +328,29 @@ class GitHubAuth:
                 },
             )
             if "access_token" not in raw:
-                # A refresh token GitHub won't take (expired, revoked, or
-                # already used) can't be tried again.
-                log.warning("GitHub refused the refresh token: %s", raw.get("error"))
-                self._store.clear()
-                raise SignInNeeded("The GitHub sign-in has run out. Sign in again.")
+                if raw.get("error") in _REFUSED_REFRESH:
+                    # Expired, revoked, or already used: it can't be tried again.
+                    log.warning("GitHub refused the refresh token: %s", raw.get("error"))
+                    self._forget()
+                    raise SignInNeeded("The GitHub sign-in has run out. Sign in again.")
+                # Anything else may pass: keep the sign-in, try again later.
+                raise GitHubUnavailable(_github_error(raw, "GitHub didn't refresh the sign-in."))
             fresh = replace(self._tokens_from(raw, now), account=tokens.account)
             # Saved before it's used: the old refresh token no longer works.
-            self._store.save(fresh)
+            self._save(fresh)
             return fresh.access_token
+
+    def token_for_git(self) -> None:
+        """Make sure git's credential helper, which reads the keychain, will
+        find a fresh token there."""
+        self.access_token()
+        if self._unsaved is not None:
+            raise GitHubUnavailable(_UNSAVED)
 
     def account(self) -> Account | None:
         """Who is signed in, asking GitHub if it isn't known yet."""
         with self._lock:
-            tokens = self._store.load()
+            tokens = self._load()
             if tokens is None:
                 return None
             if tokens.account is not None:
@@ -338,9 +358,9 @@ class GitHubAuth:
         account = self._fetch_account(self.access_token())
         if account is not None:
             with self._lock:
-                current = self._store.load()
+                current = self._load()
                 if current is not None:
-                    self._store.save(replace(current, account=account))
+                    self._save(replace(current, account=account))
         return account
 
     def repo_access(self, repo: str) -> RepoAccess:
@@ -364,6 +384,26 @@ class GitHubAuth:
         return "write" if permissions.get("push") else "read"
 
     # ------------------------------------------------------------------------
+
+    def _load(self) -> Tokens | None:
+        if self._unsaved is not None:
+            self._save(self._unsaved)  # try the keychain again
+            if self._unsaved is not None:
+                return self._unsaved
+        return self._store.load()
+
+    def _save(self, tokens: Tokens) -> None:
+        try:
+            self._store.save(tokens)
+        except Exception as error:  # a locked or broken keychain
+            log.error("couldn't save the GitHub sign-in to the keychain: %s", type(error).__name__)
+            self._unsaved = tokens
+        else:
+            self._unsaved = None
+
+    def _forget(self) -> None:
+        self._unsaved = None
+        self._store.clear()
 
     def _tokens_from(self, raw: dict[str, Any], now: float) -> Tokens:
         def at(key: str) -> float | None:
@@ -400,7 +440,7 @@ class GitHubAuth:
             raise GitHubUnavailable(
                 f"GitHub couldn't be reached ({type(error).__name__})."
             ) from None
-        if response.status_code >= 500:
+        if response.status_code >= 500 or response.status_code == 429:
             raise GitHubUnavailable(f"GitHub answered {response.status_code}. Try again later.")
         try:
             raw = response.json()

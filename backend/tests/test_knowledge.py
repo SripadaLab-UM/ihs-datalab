@@ -683,3 +683,70 @@ def test_a_lab_skill_named_like_an_app_skill_isnt_copied(lab):
     assert not (kb_dir(lab, cid) / "skills" / "kb-use").exists()
     assert (kb_dir(lab, cid) / "sources" / "fitbit.md").exists()
     assert turn(lab, cid, {}) is None  # its absence isn't a deletion to propose
+
+
+def test_review_fields_only_ever_come_from_datalab(lab):
+    synced(lab)
+    cid = conversation(lab)
+    faked = MIDNIGHT.replace("status: draft\n", "status: draft\nreviewed_by: codex\n")
+    first = turn(lab, cid, {"qc/midnight-sleep.md": faked + "\nMore.\n"})
+    assert first is not None
+    lab.client.post(f"/api/knowledge/proposals/{first.id}/reject")
+    # The discarded fake isn't part of the new base either.
+    base = lab.knowledge.base(cid) or ""
+    assert "codex" not in (lab.knowledge.clone.show(base, "qc/midnight-sleep.md") or b"").decode()
+    fake_new = NEW_PAGE.replace("status: draft\n", "status: draft\nreviewed_by: codex\n")
+    later = turn(lab, cid, {"qc/wear-time.md": fake_new})
+    assert later is not None
+    [view] = lab.client.get(f"/api/knowledge/proposals/{later.id}").json()["files"]
+    assert "codex" not in view["after"]
+    # A person's edit can't set them on a draft...
+    mallory = view["after"].replace("status: draft\n", "status: draft\nreviewed_by: mallory\n")
+    lab.client.put(
+        f"/api/knowledge/proposals/{later.id}/edits",
+        json={"files": {"qc/wear-time.md": mallory}},
+    )
+    assert accept(lab, later)["proposal"]["status"] == "saved"
+    shared = lab.remote.show("qc/wear-time.md")
+    assert "reviewed_by" not in shared and "10 hours" in shared
+    # ...nor through a conflict's resolution on a reviewed page.
+    ours = FITBIT.replace("Wear time isn't recorded.", "Wear time is recorded from 2025.")
+    proposal = turn(lab, cid, {"sources/fitbit.md": ours})
+    assert proposal is not None
+    lab.remote.write(
+        {"sources/fitbit.md": FITBIT.replace("isn't recorded.", "isn't kept.").encode()}, "Theirs"
+    )
+    assert accept(lab, proposal)["proposal"]["status"] == "conflict"
+    resolution = ours.replace("reviewed_by: yfang", "reviewed_by: mallory").replace(
+        "reviewed_on: 2026-09-01", "reviewed_on: 2020-01-01"
+    )
+    lab.client.put(
+        f"/api/knowledge/proposals/{proposal.id}/edits",
+        json={"files": {"sources/fitbit.md": resolution}},
+    )
+    done = accept(lab, proposal)["proposal"]
+    assert done["status"] == "saved", done["result"]
+    shared = lab.remote.show("sources/fitbit.md")
+    assert "mallory" not in shared and "2020-01-01" not in shared
+    assert f"reviewed_by: yfang\nreviewed_on: {time.strftime('%Y-%m-%d')}" in shared
+
+
+def test_a_deleted_conversations_base_is_pruned(lab):
+    synced(lab)
+    cid = conversation(lab)
+    keep = conversation(lab)
+    proposal = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE})
+    kept = turn(lab, keep, {"qc/other.md": page("other", "qc", "qc")})
+    assert proposal is not None and kept is not None
+    lab.client.post(f"/api/knowledge/proposals/{proposal.id}/reject")
+    lab.client.post(f"/api/knowledge/proposals/{kept.id}/reject")
+    clone = lab.knowledge.clone
+    base = clone.resolve(f"refs/datalab/kb-bases/{cid}")
+    assert base is not None and base == lab.knowledge.base(cid)
+    lab.store.delete(cid)
+    synced(lab)  # prunes
+    assert clone.resolve(f"refs/datalab/kb-bases/{cid}") is None
+    exists = clone.git("cat-file", "-e", f"{base}^{{commit}}", check=False)
+    assert exists.returncode != 0  # the commit only it kept is gone
+    assert clone.resolve(f"refs/datalab/kb-bases/{keep}") is not None
+    assert lab.knowledge.prune_bases() == 0

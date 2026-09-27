@@ -141,6 +141,7 @@ class Knowledge:
         self._sha256: dict[str, str] = {}  # blob id -> sha256 of its content
         if self.unavailable is None:
             self.store.end_interrupted_saves()
+            self._prune_quietly()
             sessions.register_workspace_seed(SEED, self._seed, into="kb")
             sessions.register_after_turn(self._after_turn)
 
@@ -198,7 +199,34 @@ class Knowledge:
         else:
             self._problem = None
             self.store.record_sync(REPO, head=head)
+            self._prune_quietly()
         return self.status()
+
+    def prune_bases(self) -> int:
+        """Remove the base refs of conversations that no longer exist, and the
+        commits only they kept (there's no hook for a conversation being
+        deleted, so this runs when DataLab starts and after each sync). How
+        many were removed."""
+        if not self.clone.exists():
+            return 0
+        with self.clone.lock:
+            refs = self.clone.text("for-each-ref", "--format=%(refname)", _BASE_REFS)
+            gone = [
+                ref
+                for ref in refs.splitlines()
+                if self._conversations.get(ref.rsplit("/", 1)[-1]) is None
+            ]
+            for ref in gone:
+                self.clone.git("update-ref", "-d", ref)
+            if gone:
+                self.clone.git("gc", "--quiet", "--prune=now")
+        return len(gone)
+
+    def _prune_quietly(self) -> None:
+        try:
+            self.prune_bases()
+        except GitError as error:
+            log.warning("couldn't prune the knowledge base's old bases: %s", error)
 
     def _why_not(self, failure: str) -> tuple[str, str]:
         """Missing access looks like any other failure to git: GitHub's API
@@ -218,7 +246,7 @@ class Knowledge:
     def _fresh_token(self) -> None:
         if self.auth is None:
             raise SignInNeeded("Sign in to GitHub first.")
-        self.auth.access_token()
+        self.auth.token_for_git()
 
     # The copy in each conversation ------------------------------------------
 
@@ -543,10 +571,14 @@ class Knowledge:
             for view in views:
                 if view.change.sha256 is None:
                     agent[view.change.path] = None
-                    continue
-                fd = checkpoints.open_object(Entry("", view.change.sha256, 0, 0, False))
-                with os.fdopen(fd, "rb") as handle:
-                    agent[view.change.path] = handle.read()
+                elif view.agent is not None:
+                    # With the review fields as they were: the agent's own
+                    # never become part of any base (or a resolution's text).
+                    agent[view.change.path] = view.agent.encode()
+                else:
+                    fd = checkpoints.open_object(Entry("", view.change.sha256, 0, 0, False))
+                    with os.fdopen(fd, "rb") as handle:
+                        agent[view.change.path] = handle.read()
             base = self.clone.commit_files(
                 proposal.base,
                 agent,
