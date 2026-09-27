@@ -116,7 +116,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 fetch() {
   case "$1" in
-    https://*) curl -fsSL --proto '=https' -o "$2" "$1" ;;
+    https://*) curl -fsSL --proto '=https' --proto-redir '=https' -o "$2" "$1" ;;
     *://*) echo "Only https downloads: $1"; exit 2 ;;
     *) cp "$1" "$2" ;;
   esac

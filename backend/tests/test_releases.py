@@ -407,13 +407,27 @@ def test_without_a_pinned_key_nothing_is_ever_offered(tmp_path, github):
     assert github.requests == []  # GitHub isn't even asked
 
 
-def test_the_package_pins_only_the_placeholder_so_far():
-    from datalab import release_keys
+def test_the_keys_the_package_pins_are_real_keys_and_no_test_key():
+    """Holds before and after the maintainer pastes the real key in."""
+    from datalab import release_keys, signing
+    from tests.release_fakes import OTHER_PUBLIC
 
-    assert release_keys.RELEASE_KEYS == (release_keys.PLACEHOLDER,)
-    assert release_keys.trusted_keys() == ()
+    pinned = release_keys.trusted_keys()
+    assert all(signing.valid_public(key) for key in pinned)
+    assert not {TEST_PUBLIC, OTHER_PUBLIC} & set(pinned)
+    assert release_keys.PLACEHOLDER not in pinned
     settings = Settings(profile="real", data_dir=Path("/nonexistent"), oracle=None)
-    assert UpdateChecker(settings).last.state == "not-configured"
+    expected = "not-checked" if pinned else "not-configured"
+    assert UpdateChecker(settings).last.state == expected
+
+
+@pytest.mark.parametrize("bad", ["not base64!", "AAAA", "A" * 42 + "==", TEST_PUBLIC + "AAAA", ""])
+def test_a_pinned_key_that_isnt_one_turns_updates_off_and_says_so(tmp_path, github, bad):
+    github.release("v0.1.0-alpha.3", prerelease=True)
+    check = checker(tmp_path, github, keys=(TEST_PUBLIC, bad))
+    assert check.last.state == "not-configured"
+    assert "isn't a valid key" in check.last.message
+    assert check.check().release is None and github.requests == []
 
 
 @pytest.mark.parametrize(

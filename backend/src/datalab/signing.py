@@ -45,6 +45,15 @@ def public_key(text: str) -> Ed25519PublicKey:
     return Ed25519PublicKey.from_public_bytes(_decode(text, 32))
 
 
+def valid_public(text: str) -> bool:
+    """Whether `text` is a base64 Ed25519 public key (32 bytes)."""
+    try:
+        public_key(text)
+    except (BadKey, ValueError):
+        return False
+    return True
+
+
 def verify(sums: bytes, signature: bytes, keys: Iterable[str]) -> bool:
     """Whether `signature` (SHA256SUMS.sig's contents) is one of `keys`'s over `sums`."""
     try:

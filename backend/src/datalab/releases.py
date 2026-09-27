@@ -99,6 +99,11 @@ class NotSigned(ChecksumMismatch):
     """A release's SHA256SUMS has no valid signature from a trusted key."""
 
 
+BAD_KEY = (
+    "Updates aren't set up in this DataLab: the release signing key it pins isn't a valid "
+    "key (release_keys.py needs the public key exactly as sign-release.py --new-key printed "
+    "it), so it never installs one. Tell the DataLab maintainer."
+)
 NOT_CONFIGURED = (
     "Updates aren't set up in this DataLab: it has no release signing key to check new "
     "versions with, so it never installs one. Install new versions with the installer."
@@ -389,7 +394,11 @@ class UpdateChecker:
         self.settings = settings
         self.current = current
         # The public keys a release must be signed with (release_keys.py).
-        self.keys = tuple(release_keys.trusted_keys() if keys is None else keys)
+        pinned = tuple(release_keys.trusted_keys() if keys is None else keys)
+        invalid = [k for k in pinned if not signing.valid_public(k)]
+        # A key that isn't one (a typo when pasting it in) trusts nothing,
+        # rather than the other keys quietly: updates stay off, and say why.
+        self.keys = () if invalid else pinned
         self.source = source or ReleaseSource(settings.updates.repository)
         self._clock = clock
         self._lock = threading.Lock()
@@ -397,7 +406,10 @@ class UpdateChecker:
         channel = settings.updates.channel
         off = not settings.updates.check_on_start
         if not self.keys:
-            self._last = CheckResult("not-configured", NOT_CONFIGURED, current, channel)
+            message = BAD_KEY if invalid else NOT_CONFIGURED
+            if invalid:
+                log.error("release_keys.py pins %d key(s) that aren't Ed25519 keys", len(invalid))
+            self._last = CheckResult("not-configured", message, current, channel)
             return
         self._last = CheckResult(
             "not-checked",

@@ -56,17 +56,20 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
-        <span className="flex-1" />
-        <UpdatePill />
-        {health.data?.profile === "practice" && (
-          <span
-            className="ml-auto shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
-            title="The practice profile: synthetic data only, never the real study database"
-          >
-            practice · synthetic data
-          </span>
-        )}
-        <HelpLink />
+        {/* The pill, the practice badge and Help sit together at the right,
+            closer to each other than to the tabs. */}
+        <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
+          <UpdatePill />
+          {health.data?.profile === "practice" && (
+            <span
+              className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
+              title="The practice profile: synthetic data only, never the real study database"
+            >
+              practice · synthetic data
+            </span>
+          )}
+          <HelpLink />
+        </div>
       </header>
       <div className="min-h-0 flex-1">
         <TourProvider>

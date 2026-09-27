@@ -110,3 +110,38 @@ def test_locks_left_by_a_test_are_let_go(tmp_path):
     assert datalock._held == {}
     with hold(tmp_path):
         pass
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file locks")
+def test_a_datalab_starting_during_a_probe_waits_instead_of_refusing(tmp_path):
+    """Another DataLab's update probes this folder's lock (datalock.in_use),
+    holding it for an instant: a DataLab starting then must not give up."""
+    import fcntl
+    import threading
+    import time
+
+    from datalab import datalock
+
+    (tmp_path / ".lock").write_text("")
+    probe = (tmp_path / ".lock").open("a+b")
+    fcntl.flock(probe.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    threading.Timer(0.2, probe.close).start()  # the probe lets go
+    started = time.monotonic()
+    with datalock.hold(tmp_path):
+        assert 0.1 < time.monotonic() - started < datalock._POSIX_RETRY_SECONDS + 0.5
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file locks")
+def test_a_lock_held_for_longer_still_refuses_and_the_probe_never_waits(tmp_path):
+    import time
+
+    from datalab import datalock
+
+    with datalock.hold(tmp_path):
+        started = time.monotonic()
+        with pytest.raises(datalock.DataFolderInUse):
+            datalock.hold(tmp_path)
+        assert time.monotonic() - started >= datalock._POSIX_RETRY_SECONDS
+        started = time.monotonic()
+        assert datalock.in_use(tmp_path) is True
+        assert time.monotonic() - started < 0.2

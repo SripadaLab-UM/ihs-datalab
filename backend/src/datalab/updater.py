@@ -90,6 +90,8 @@ _HASH = re.compile(r"--hash=sha256:([0-9a-f]{64})")
 # How long the updater waits, before restarting, for work begun before the
 # gate closed to finish.
 SETTLE_SECONDS = 60
+# How long stopping the conversations (their containers) may take.
+STOP_SECONDS = 120
 _DIGEST = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 _COMPLETE = ".complete"
 # How long the helper waits: for this DataLab to quit, for the new one to take
@@ -467,6 +469,7 @@ class Updater:
         gate: UpdateGate | None = None,
         other_data_dirs: Callable[[], list[Path]] | None = None,
         settle: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        stop_timeout: float = STOP_SECONDS,
     ) -> None:
         self.settings = settings
         self.checker = checker
@@ -484,6 +487,7 @@ class Updater:
         self.gate = gate or UpdateGate()
         self._other_data_dirs = other_data_dirs or self._default_other_data_dirs
         self._settle = settle
+        self._stop_timeout = stop_timeout
         self._progress = Progress()
         self._task: asyncio.Task[None] | None = None
 
@@ -573,7 +577,14 @@ class Updater:
                     raise UpdateFailed(f"{busy} Nothing was changed.")
                 self._set("stopping", version, "Stopping conversations…")
                 if self._stop_sessions is not None:
-                    await self._stop_sessions()
+                    try:
+                        await asyncio.wait_for(self._stop_sessions(), self._stop_timeout)
+                    except TimeoutError:
+                        raise UpdateFailed(
+                            f"The conversations didn't stop within {self._stop_timeout:.0f} "
+                            "seconds (is Docker Desktop answering?), so DataLab didn't update. "
+                            "Nothing was changed; you can try again."
+                        ) from None
                 await asyncio.to_thread(self.apply, staged)
             finally:
                 shutil.rmtree(staged.folder, ignore_errors=True)

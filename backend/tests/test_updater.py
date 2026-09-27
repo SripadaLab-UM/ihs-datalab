@@ -1064,3 +1064,17 @@ def test_the_helper_doesnt_go_back_while_something_holds_the_folder(switched):
     fake.on_launch = lambda: setattr(fake, "held", True)  # a DataLab that records no owner
     assert fake.relaunch().run() == "stuck"
     assert len(fake.launched) == 1 and switched.layout.pointer() == (NEW, OLD)
+
+
+async def test_conversations_that_wont_stop_abandon_the_update(world):
+    import asyncio
+
+    async def stuck() -> None:
+        await asyncio.sleep(3600)
+
+    update = await install(world, stop_sessions=stuck, stop_timeout=0.05)
+    assert update.progress.state == "failed"
+    assert "didn't stop within" in update.progress.message
+    assert world.gate.closed_for is None  # open again: DataLab carries on
+    assert_nothing_changed(world)
+    assert world.backups() == [] and "venv" not in world.events

@@ -142,7 +142,12 @@ the host.
 
 A release's `SHA256SUMS` is signed with the lab's **release key** (Ed25519),
 in the release workflow, as `SHA256SUMS.sig` (`datalab/signing.py`,
-`scripts/sign-release.py`). Each DataLab trusts only the public keys pinned in
+`scripts/sign-release.py`). The signing is a job of its own (`sign`), the only
+one in the "release" environment: on a fresh runner, it gets the release's
+files from the build job, checks them against `SHA256SUMS`, installs only
+the tag's locked Python dependencies, signs, and hands back only the
+signature. It never runs npm or the build, whose dependencies' install
+scripts therefore never see the key (a CI test keeps it that way). Each DataLab trusts only the public keys pinned in
 its own package (`datalab/release_keys.py`), and refuses a release with a
 missing or bad signature. Since `SHA256SUMS` names every other file by its
 checksum, including `requirements.txt` (every dependency by hash) and
@@ -163,10 +168,13 @@ releases but doesn't hold the signing key: a GitHub token or account that can
 upload or replace release assets, or create a release; a release file changed
 on GitHub's storage or on the way; an index serving different dependency
 files (their hashes are signed, and only PyPI is used). The key lives only in
-the "release" environment, behind its required reviewers, so a workflow run
-on any other branch or tag can't use it.
+the "release" environment, behind its required reviewers and limited to `v*`
+tags, so a workflow run on any other branch or tag can't use it.
 
 **What it doesn't.** Code merged into `main` and released the normal way;
+the build's own dependencies (npm and Python packages, the build tools and
+the GitHub Actions used): the package is built with them, and whatever they
+put in it is signed with everything else;
 anyone who can approve a run of the release environment, or steal the key;
 GitHub withholding new releases (an update that never comes looks like none
 being out); the first install, which trusts whatever installer and package
@@ -183,7 +191,8 @@ the key):
    step (a password manager copy is fine); never commit or paste it anywhere
    else.
 2. In the app repo's Settings → Environments, create **release**, add
-   **required reviewers** (the maintainers), and add the private key as the
+   **required reviewers** (the maintainers), restrict its **deployment
+   branches and tags** to tags matching `v*`, and add the private key as the
    environment secret `RELEASE_SIGNING_KEY`.
 3. In Settings → General → Releases, turn on **immutable releases**, so a
    published release's files can't be replaced.
@@ -195,7 +204,10 @@ the key):
    version with the installer, once.
 
 Until step 5, the release workflow stops at signing, so no unsigned release
-is published.
+is published. A release whose signing fails (or is never approved) still
+leaves its agent image pushed to the container registry, since the image is
+built first. That's harmless: DataLab runs images only by the digests in a
+signed `images.json`, and a failed release publishes none.
 
 ### How an update is installed
 
