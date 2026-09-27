@@ -451,9 +451,9 @@ def proposed_after_text(content: dict[str, Any]) -> str:
     if record["more_tables"]:
         tables += f", and {record['more_tables']} more"
     return (
-        f"{queries} {'query' if queries == 1 else 'queries'} had already returned data (or were "
-        f"running) in this conversation, from {tables}. Results seen before a plan aren't "
-        f"prespecified by it. {not_counted}"
+        f"{queries} {'query' if queries == 1 else 'queries'} in this conversation had returned "
+        f"data or {'was' if queries == 1 else 'were'} still running, reading {tables}. Results "
+        f"seen before a plan aren't prespecified by it. {not_counted}"
     )
 
 

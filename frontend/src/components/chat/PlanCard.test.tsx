@@ -291,7 +291,7 @@ it("says what had returned data when the plan was proposed, and when that wasn't
   const recorded = { ...proposed, proposed_after: { queries: 2, tables: ["IHS_2025.VW_DAILY_MOOD"], more_tables: 0 } };
   const view = show({ ...pending, plan: recorded });
   expect(
-    await screen.findByText(/When it was proposed: 2 queries had already returned data \(or were running\) in this conversation, from IHS_2025.VW_DAILY_MOOD/),
+    await screen.findByText(/When it was proposed: 2 queries in this conversation had returned data or were still running, reading IHS_2025.VW_DAILY_MOOD/),
   ).toBeInTheDocument();
   view.unmount();
   show({ ...pending, state: "approved", plan: { question: "Sleep?" }, frozen: { at: "2026-09-01T12:00:00Z", sha256: "0123456789" } });

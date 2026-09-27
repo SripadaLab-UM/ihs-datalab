@@ -252,5 +252,6 @@ export function proposedAfterText(plan: AnyPlan | undefined): string {
   const notCounted = "Attached files, and files read in the workspace, aren't counted.";
   if (!record.queries) return `No queries had returned data in this conversation. ${notCounted}`;
   const tables = (record.tables.join(", ") || "no tables") + (record.more_tables ? `, and ${record.more_tables} more` : "");
-  return `${record.queries} ${record.queries === 1 ? "query" : "queries"} had already returned data (or were running) in this conversation, from ${tables}. Results seen before a plan aren't prespecified by it. ${notCounted}`;
+  const one = record.queries === 1;
+  return `${record.queries} ${one ? "query" : "queries"} in this conversation had returned data or ${one ? "was" : "were"} still running, reading ${tables}. Results seen before a plan aren't prespecified by it. ${notCounted}`;
 }

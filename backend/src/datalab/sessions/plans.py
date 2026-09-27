@@ -171,7 +171,7 @@ class PlanDesk:
         # The version of a plan the person last sent back, per conversation,
         # and the turn it was sent back in, so the agent's next proposal in
         # that turn can be shown against it. For display only.
-        self._returned: dict[str, tuple[Any, dict[str, Any]]] = {}
+        self._returned: dict[str, tuple[Any, dict[str, Any], str]] = {}
 
     def revision_link(self, conversation_id: str, plan_id: str) -> dict[str, str]:
         """How a revision names the approved plan it revises, or PlanInvalid."""
@@ -269,10 +269,12 @@ class PlanDesk:
                     "of date. The agent will propose it again.",
                 },
             )
-            return Outcome(
+            return self._approved_not_frozen(
+                conversation_id,
+                content,
                 "This plan wasn't frozen: queries ran while it waited for approval, so its "
-                "record of what had already run is out of date. Propose it again, and don't run "
-                "queries while a plan waits."
+                "record of what had already run is out of date. The person approved it as below "
+                "(persons_edits): propose that again, and don't run queries while a plan waits.",
             )
         revises = revision_of(content)
         if revises and revises["plan_id"] in self._store.superseded(conversation_id):
@@ -287,9 +289,12 @@ class PlanDesk:
                     "approved first, so this one wasn't frozen.",
                 },
             )
-            return Outcome(
+            return self._approved_not_frozen(
+                conversation_id,
+                content,
                 f"This revision wasn't frozen: plan {revises['plan_id']} was already revised "
-                "while it waited. Revise the latest plan instead."
+                "while it waited. The person approved it as below (persons_edits): revise the "
+                "latest plan instead, carrying over what still applies.",
             )
         plan = self._store.approve(conversation_id, content)
         self._emit(
@@ -305,13 +310,23 @@ class PlanDesk:
         )
         return plan
 
+    def _approved_not_frozen(
+        self, conversation_id: str, approved: dict[str, Any], note: str
+    ) -> Outcome:
+        """An approved plan that couldn't be frozen: what the person approved goes
+        back to the agent, and the next card is shown against it."""
+        turn = self.current_turn(conversation_id)
+        self._returned[conversation_id] = (turn, approved, "The version you approved")
+        return Outcome(note, approved)
+
     def _plan(self, conversation_id: str, plan_id: str) -> Plan | None:
         return next((p for p in self._store.list(conversation_id) if p.id == plan_id), None)
 
     def _compare_to(self, conversation_id: str, content: dict[str, Any]) -> dict[str, Any] | None:
         """What a proposal is shown against: the plan it revises, or what the
-        person sent back earlier in the same turn (a new question is a new turn)."""
-        turn, returned = self._returned.pop(conversation_id, (None, None))
+        person sent back (or approved, when it couldn't be frozen) earlier in the
+        same turn (a new question is a new turn)."""
+        turn, returned, label = self._returned.pop(conversation_id, (None, None, ""))
         if revises := revision_of(content):
             earlier = self._plan(conversation_id, revises["plan_id"])
             if earlier is not None:
@@ -323,7 +338,7 @@ class PlanDesk:
                     "sha256": earlier.sha256,
                 }
         if returned is not None and turn is not None and turn is self.current_turn(conversation_id):
-            return {"label": "The version you sent back", "plan": returned}
+            return {"label": label, "plan": returned}
         return None
 
     def _not_approved(self, conversation_id: str, proposed: dict[str, Any], value: str) -> Outcome:
@@ -335,7 +350,8 @@ class PlanDesk:
             )
         answer = json.loads(value)
         edits, change_type = answer.get("edits"), answer.get("change_type")
-        self._returned[conversation_id] = (self.current_turn(conversation_id), edits or proposed)
+        turn = self.current_turn(conversation_id)
+        self._returned[conversation_id] = (turn, edits or proposed, "The version you sent back")
         if change_type:
             return Outcome(type_change_note(edits or proposed, change_type), edits, change_type)
         return Outcome(
