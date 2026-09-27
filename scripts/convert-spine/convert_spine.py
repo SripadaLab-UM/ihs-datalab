@@ -8,11 +8,21 @@ review before the first commit to `ihs-knowledge`, plus a review report:
     cd backend && uv run python ../scripts/convert-spine/convert_spine.py \\
         --spine <um-gpt-local-proxy>/spine \\
         --export <metadata export folder> \\
+        --pipelines <ihs-pipelines checkout> \\
         --out <staging folder> --review <REVIEW.md>
 
 It reads the registry as committed at SPINE_COMMIT unless told otherwise
-(`--ref`, `--working-copy`). After the reviewer has reviewed the output, and
-just before the first commit, they name themselves on its reviewed pages:
+(`--ref`, `--working-copy`), and applies the reviewer's decisions in
+`review_decisions.yaml` next to this script (`--no-decisions` leaves them
+out): text fixes to Spine entries, the DOIs behind manuscripts the Spine
+cites by name, the cohorts each paper analysed, code evidence re-pinned to
+`ihs-pipelines` (checked in the `--pipelines` checkout), cohorts the
+reviewer confirmed, and pages the reviewer holds as drafts. Decisions add
+evidence; they never mark a page reviewed, which is still `decide_status`'s
+call. Their answers go into REVIEW.md.
+
+After the reviewer has reviewed the output, and just before the first
+commit, they name themselves on its reviewed pages:
 
     cd backend && uv run python ../scripts/convert-spine/convert_spine.py \\
         --stamp-reviewer <GitHub login> --out <the knowledge base>
@@ -45,6 +55,7 @@ conversion twice gives the same files.
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime
 import itertools
 import re
@@ -208,6 +219,7 @@ class Spine:
     ref: str | None  # the git ref read, or None for the working copy
     repo: str | None  # its name, for code evidence
     code_paths: set[str]  # files in the repo at that commit
+    folder: Path | None = None  # the Spine's folder, in its git repo
 
     def get(self, key: str, entity_id: object) -> Entity | None:
         return self.entities[key].get(str(entity_id)) if entity_id is not None else None
@@ -290,7 +302,7 @@ def read_spine(folder: Path, ref: str | None = None) -> Spine:
                         diff_paths(old_item, item) if old_item else ["the whole entry (added)"]
                     )
                 entities[key][entity.id] = entity
-    return Spine(entities, files, commit, ref, repo, code_paths)
+    return Spine(entities, files, commit, ref, repo, code_paths, folder)
 
 
 def _tables(catalog: Catalog, schema: str) -> list[Any]:
@@ -316,6 +328,268 @@ class Schema:
         if len(parts) < 2 or parts[1] not in tables:
             return False
         return len(parts) == 2 or parts[2] in tables[parts[1]]
+
+
+# The reviewer's decisions ------------------------------------------------------
+
+DECISIONS = Path(__file__).with_name("review_decisions.yaml")
+_FIELD = re.compile(r"([A-Za-z_]\w*)(?:\[(\d+)\])?")
+
+
+def stop(source: Path, message: str) -> SystemExit:
+    return SystemExit(f"{source.name}: {message}")
+
+
+@dataclass(frozen=True)
+class PaperInfo:
+    """A paper the reviewer identified: its DOI, what the Spine calls it, and
+    the cohorts its methods say it analysed."""
+
+    doi: str
+    names: tuple[str, ...]  # what the Spine calls it where it gives no DOI
+    label: str | None
+    title: str
+    venue: str
+    year: int
+    cohorts: frozenset[int]
+    cohorts_from: str
+    verified: tuple[str, ...]
+    summary: str
+    preprint: bool = False
+
+
+@dataclass
+class Decisions:
+    path: Path
+    reviewer: str
+    decided_on: str
+    papers: dict[str, PaperInfo]  # DOI -> paper
+    unpublished: list[dict[str, Any]]
+    repin: dict[str, Any] | None
+    legacy: dict[str, dict[str, Any]]  # script name -> what's known of it
+    removed: dict[str, Any] | None
+    entries: list[dict[str, Any]]
+    pages: list[dict[str, Any]]
+    answers: list[dict[str, Any]]
+    still_open: list[str]
+
+    def alias(self, part: str) -> str | None:
+        """The DOI of the paper a citation names without one."""
+        for paper in self.papers.values():
+            for name in paper.names:
+                if re.match(rf"{re.escape(name)}(?![\w-])", part.strip()):
+                    return paper.doi
+        return None
+
+    def alias_target(self, doi: str) -> bool:
+        """Whether the Spine cites this paper by name somewhere."""
+        paper = self.papers.get(doi)
+        return bool(paper and paper.names)
+
+    def legacy_seen(self, ref: str) -> bool:
+        name = ref.split("#", 1)[0].rsplit("/", 1)[-1]
+        return bool(self.legacy.get(name, {}).get("seen", True))
+
+
+def _need(data: Mapping[str, Any], key: str, kind: type, where: str, source: Path) -> Any:
+    value = data.get(key)
+    if not isinstance(value, kind) or (isinstance(value, bool) and kind is not bool):
+        raise stop(source, f"{where}: `{key}` must be a {kind.__name__}")
+    return value
+
+
+def load_decisions(path: Path) -> Decisions:
+    """Read and check the overlay. Anything malformed stops the run."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        raise stop(path, "not a mapping")
+    known = {
+        "reviewer", "decided_on", "papers", "unpublished", "code_repin", "legacy_scripts",
+        "removed_code_names", "entries", "pages", "answers", "still_open",
+    }  # fmt: skip
+    if extra := sorted(set(data) - known):
+        raise stop(path, f"unknown keys: {', '.join(extra)}")
+    papers: dict[str, PaperInfo] = {}
+    for n, item in enumerate(data.get("papers") or []):
+        where = f"papers[{n}]"
+        doi = str(_need(item, "doi", str, where, path))
+        if not kb._DOI.fullmatch(doi) or doi in papers:
+            raise stop(path, f"{where}: {doi!r} isn't a new DOI")
+        cohorts = _need(item, "cohorts", list, where, path)
+        if not cohorts or not all(isinstance(y, int) and 2000 <= y <= 2100 for y in cohorts):
+            raise stop(path, f"{where}: cohorts must be years")
+        verified = _need(item, "verified", list, where, path)
+        papers[doi] = PaperInfo(
+            doi=doi,
+            names=tuple(str(x) for x in item.get("names") or []),
+            label=item.get("label"),
+            title=str(_need(item, "title", str, where, path)),
+            venue=str(_need(item, "venue", str, where, path)),
+            year=int(_need(item, "year", int, where, path)),
+            cohorts=frozenset(cohorts),
+            cohorts_from=str(_need(item, "cohorts_from", str, where, path)),
+            verified=tuple(str(v) for v in verified),
+            summary=one_line(_need(item, "summary", str, where, path)),
+            preprint=bool(item.get("preprint")),
+        )
+    for n, item in enumerate(data.get("entries") or []):
+        where = f"entries[{n}]"
+        _need(item, "entry", str, where, path)
+        _need(item, "question", int, where, path)
+        _need(item, "source", str, where, path)
+        if item["entry"].split("/", 1)[0] not in LIST_KEYS:
+            raise stop(path, f"{where}: {item['entry']!r} isn't <list key>/<id>")
+        ops = {"replace", "set", "release_hold", "exclude"}
+        if not set(item) & ops or set(item) - ops - {"entry", "question", "source"}:
+            raise stop(path, f"{where}: needs one of {', '.join(sorted(ops))}, and nothing else")
+    for n, item in enumerate(data.get("pages") or []):
+        where = f"pages[{n}]"
+        _need(item, "page", str, where, path)
+        _need(item, "question", int, where, path)
+        allowed = {"page", "question", "source", "cohorts", "evidence", "limitations", "hold"}
+        if extra := sorted(set(item) - allowed):
+            raise stop(
+                path, f"{where}: unknown keys {', '.join(extra)} (a page can't be marked reviewed)"
+            )
+        if ("cohorts" in item or "evidence" in item or "hold" in item) and not item.get("source"):
+            raise stop(path, f"{where}: cohorts, evidence and holds need a `source`")
+    for n, item in enumerate(data.get("answers") or []):
+        _need(item, "question", int, f"answers[{n}]", path)
+        _need(item, "answer", str, f"answers[{n}]", path)
+    for finding in kb.data_findings(path.name, path.read_text(encoding="utf-8")):
+        raise stop(path, f"line {finding.line}: {finding.message} No participant data here.")
+    return Decisions(
+        path=path,
+        reviewer=str(data.get("reviewer") or REVIEWER),
+        decided_on=str(data.get("decided_on") or ""),
+        papers=papers,
+        unpublished=list(data.get("unpublished") or []),
+        repin=data.get("code_repin"),
+        legacy=dict(data.get("legacy_scripts") or {}),
+        removed=data.get("removed_code_names"),
+        entries=list(data.get("entries") or []),
+        pages=list(data.get("pages") or []),
+        answers=list(data.get("answers") or []),
+        still_open=[one_line(x) for x in data.get("still_open") or []],
+    )
+
+
+@dataclass
+class Applied:
+    """What the per-entry decisions did to the Spine."""
+
+    released: set[tuple[str, str]] = field(default_factory=set)  # HOLDS lifted
+    excluded: dict[tuple[str, str], tuple[Entity, str, int]] = field(default_factory=dict)
+    touched: dict[int, set[tuple[str, str]]] = field(default_factory=lambda: defaultdict(set))
+
+
+def _replace(entity: Entity, op: Mapping[str, Any], source: Path) -> None:
+    """Replace `old` with `new` in one text field; `old` must be there once."""
+    match = _FIELD.fullmatch(str(op.get("field")))
+    old, new = op.get("old"), op.get("new")
+    if not match or not isinstance(old, str) or not old or not isinstance(new, str):
+        raise stop(source, f"{entity.label}: a replace needs `field`, `old` and `new`")
+    name, index = match.group(1), match.group(2)
+    container: Any = entity.data
+    key: Any = name
+    if index is None and name not in container:
+        raise stop(source, f"{entity.label}: no {op['field']}")
+    if index is not None:
+        container, key = entity.data.get(name), int(index)
+        if not isinstance(container, list) or key >= len(container):
+            raise stop(source, f"{entity.label}: no {op['field']}")
+    value = container[key]
+    if not isinstance(value, str) or value.count(old) != 1:
+        raise stop(source, f"{entity.label}: {op['field']} doesn't have the text to replace once")
+    value = " ".join(value.replace(old, new).split())
+    if value:
+        container[key] = value
+    else:  # nothing left: the field, or the list item, goes
+        del container[key]
+
+
+def apply_entries(spine: Spine, decisions: Decisions) -> tuple[Spine, Applied]:
+    """The Spine with the reviewer's per-entry decisions applied (a copy)."""
+    spine = copy.deepcopy(spine)
+    applied = Applied()
+    for item in decisions.entries:
+        key, _, entity_id = item["entry"].partition("/")
+        entity = spine.get(key, entity_id)
+        if entity is None:
+            raise stop(decisions.path, f"{item['entry']} isn't in the Spine")
+        question = item["question"]
+        applied.touched[question].add((key, entity_id))
+        if item.get("exclude"):
+            del spine.entities[key][entity_id]
+            applied.excluded[(key, entity_id)] = (entity, one_line(item["exclude"]), question)
+            continue
+        for op in item.get("replace") or []:
+            _replace(entity, op, decisions.path)
+        for name, value in (item.get("set") or {}).items():
+            if name in entity.data:
+                raise stop(decisions.path, f"{entity.label} already has `{name}`")
+            entity.data[name] = value
+        if item.get("release_hold"):
+            if (key, entity_id) not in HOLDS:
+                raise stop(decisions.path, f"{entity.label} has no hold to release")
+            applied.released.add((key, entity_id))
+    return spine, applied
+
+
+@dataclass
+class Pipelines:
+    """The ihs-pipelines checkout that `code` evidence is re-pinned to."""
+
+    repo: str
+    commit: str
+    prefix: str  # where ihsDataR is in it
+    from_prefix: str  # where it was in the Spine's repo
+    paths: set[str]
+
+
+def open_pipelines(folder: Path | None, decisions: Decisions, spine: Spine) -> Pipelines | None:
+    """Check the re-pin: the commit is in the checkout, its tree is the Spine
+    repo's, and the code names said to be removed aren't in it."""
+    repin = decisions.repin
+    if not repin:
+        return None
+    if folder is None:
+        raise SystemExit(
+            f"{decisions.path.name} re-pins code to {repin['repo']}: pass its checkout with "
+            "--pipelines"
+        )
+    commit = str(repin["commit"])
+    prefix, from_prefix = str(repin["prefix"]), str(repin["from_prefix"])
+    found = (_git(folder, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}") or "").strip()
+    if found != commit:
+        raise SystemExit(f"{folder} has no commit {commit}")
+    theirs = (_git(folder, "rev-parse", f"{commit}:{prefix.rstrip('/')}") or "").strip()
+    ours = ""
+    if spine.folder is not None and spine.commit:
+        ours = _git(spine.folder, "rev-parse", f"{spine.commit}:{from_prefix.rstrip('/')}") or ""
+    if not theirs or theirs != ours.strip():
+        raise SystemExit(
+            f"{prefix} at {repin['repo']}@{commit[:7]} isn't the same tree as {from_prefix} at "
+            f"the Spine's commit, so code evidence can't be re-pinned there"
+        )
+    removed = decisions.removed or {}
+    for name in removed.get("names") or []:
+        found_name = _git(folder, "grep", "-q", "-w", "-F", "-e", str(name), commit, "--", prefix)
+        if found_name is not None:
+            raise stop(decisions.path, f"{name} is said to be removed but is in {repin['repo']}")
+    listing = _git(folder, "ls-tree", "-r", "--full-tree", "--name-only", commit) or ""
+    return Pipelines(str(repin["repo"]), commit, prefix, from_prefix, set(listing.splitlines()))
+
+
+def years_text(years: Iterable[int]) -> str:
+    """Years as runs ("2012 to 2015; 2018"), never a long list of numbers."""
+    runs: list[list[int]] = []
+    for y in sorted(set(years)):
+        if runs and y == runs[-1][-1] + 1:
+            runs[-1].append(y)
+        else:
+            runs.append([y])
+    return "; ".join(str(r[0]) if len(r) == 1 else f"{r[0]} to {r[-1]}" for r in runs)
 
 
 # Evidence -------------------------------------------------------------------
@@ -373,15 +647,40 @@ def split_anchor(anchor: str) -> list[str]:
 
 
 class Resolver:
-    def __init__(self, spine: Spine, schema: Schema) -> None:
+    def __init__(
+        self,
+        spine: Spine,
+        schema: Schema,
+        decisions: Decisions | None = None,
+        pipelines: Pipelines | None = None,
+    ) -> None:
         self.spine = spine
         self.schema = schema
+        self.decisions = decisions
+        self.pipelines = pipelines
 
     def code(self, path: str) -> tuple[str, str] | None:
-        spine = self.spine
-        if spine.commit and spine.repo and path in spine.code_paths:
-            return ("code", f"{spine.repo}@{spine.commit} {path}")
-        return None
+        """Code evidence for a path in the Spine's repo: pinned to that repo's
+        commit, or to ihs-pipelines where the reviewer re-pinned it."""
+        spine, pipes = self.spine, self.pipelines
+        if not (spine.commit and spine.repo and path in spine.code_paths):
+            return None
+        if pipes and path.startswith(pipes.from_prefix):
+            target = pipes.prefix + path[len(pipes.from_prefix) :]
+            if target not in pipes.paths:
+                raise SystemExit(f"{target} isn't in {pipes.repo}@{pipes.commit[:7]}")
+            return ("code", f"{pipes.repo}@{pipes.commit} {target}")
+        return ("code", f"{spine.repo}@{spine.commit} {path}")
+
+    def pipeline_code(self, ref: str) -> tuple[str, str]:
+        """Code evidence the reviewer named: a path (with an optional #L line
+        anchor) in ihs-pipelines, which must exist at the pinned commit."""
+        pipes = self.pipelines
+        if pipes is None:
+            raise SystemExit(f"code evidence {ref} needs the decisions' code_repin")
+        if ref.split("#", 1)[0] not in pipes.paths:
+            raise SystemExit(f"{ref} isn't in {pipes.repo}@{pipes.commit[:7]}")
+        return ("code", f"{pipes.repo}@{pipes.commit} {ref}")
 
     def objects(
         self,
@@ -421,6 +720,9 @@ class Resolver:
         for part in split_anchor(clean_text(str(anchor))):
             typed = False
             for doi in _DOI.findall(part):
+                found.typed.add(("paper", doi))
+                typed = True
+            if self.decisions and (doi := self.decisions.alias(part)):
                 found.typed.add(("paper", doi))
                 typed = True
             for script, path in LEGACY_SCRIPTS.items():
@@ -586,6 +888,7 @@ class Page:
     # Where the page's cohorts came from ("spine", "schema", "assumed",
     # "recipe", "inherited"), and the years each gave.
     cohort_basis: dict[str, set[int]] = field(default_factory=dict)
+    cohort_source: str = ""  # where the reviewer's confirmed cohorts come from
 
     @property
     def path(self) -> str:
@@ -691,10 +994,21 @@ def provenance(entity: Entity, cleaner: Cleaner) -> list[str]:
 
 
 class Converter:
-    def __init__(self, spine: Spine, schema: Schema) -> None:
+    def __init__(
+        self,
+        spine: Spine,
+        schema: Schema,
+        decisions: Decisions | None = None,
+        pipelines: Pipelines | None = None,
+        applied: Applied | None = None,
+    ) -> None:
         self.spine = spine
         self.schema = schema
-        self.resolve = Resolver(spine, schema)
+        self.decisions = decisions
+        self.applied = applied or Applied()
+        self.resolve = Resolver(spine, schema, decisions, pipelines)
+        # Which pages each question's decisions touched (for REVIEW.md).
+        self.touched: dict[int, set[str]] = defaultdict(set)
         self.clean = Cleaner()
         self.pages: dict[str, Page] = {}  # ref -> page
         self.home: dict[tuple[str, str], str] = {}  # (key, id) -> page ref
@@ -1097,6 +1411,8 @@ class Converter:
 
     def recipe_section(self, page: Page, recipe: Entity) -> None:
         data = recipe.data
+        path = data.get("implemented_in")
+        code = self.resolve.code(str(path)) if path else None
         page.body += ["", f"## How it's computed (recipe `{recipe.id}`)", ""]
         if data.get("description"):
             page.body += [self.text(recipe, "description", data["description"]), ""]
@@ -1106,7 +1422,7 @@ class Converter:
             ("Sources", ", ".join(f"`{s}`" for s in data.get("sources") or [])),
             ("Inputs", ", ".join(f"`{s}`" for s in data.get("inputs") or [])),
             ("Quality flags", ", ".join(f"`{s}`" for s in data.get("quality_flags") or [])),
-            ("Code", f"`{data['implemented_in']}`" if data.get("implemented_in") else ""),
+            ("Code", f"`{code[1]}`" if code else ""),
         ]
         if "review_required" in data:
             facts.append(("Review required (Spine)", "yes" if data["review_required"] else "no"))
@@ -1272,10 +1588,16 @@ class Converter:
                     for doi in _DOI.findall(part):
                         label = one_line(part.split(doi)[0]) or doi
                         cited[doi].append((label, entity))
+                    if self.decisions and (doi := self.decisions.alias(part)):
+                        paper = self.decisions.papers[doi]
+                        cited[doi].append((paper.label or paper.names[0], entity))
         slugs: set[str] = set()
         for doi in sorted(cited):
             labels = sorted({label for label, _ in cited[doi]})
             label = labels[0]
+            known = self.decisions.papers.get(doi) if self.decisions else None
+            if known and known.label:
+                label = known.label
             slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "paper"
             while slug in slugs or any(p.id.casefold() == slug for p in self.pages.values()):
                 slug += "-paper"
@@ -1292,21 +1614,22 @@ class Converter:
                 assembled=True,
             )
             page.evidence.typed.add(("paper", doi))
-            page.limitations += [
-                "Not a summary of the paper: this lists only what the Spine takes from it. "
-                "Its title, authors, cohorts, and findings aren't recorded here yet.",
-            ]
-            page.body += [
-                f"# {label}",
-                "",
-                f"DOI: [{doi}](https://doi.org/{doi})",
-                "",
-                "The prototype Spine cites this paper for the entries below. A person should "
-                "add the title, authors, the cohorts it used, and a short summary.",
-                "",
-                "## What the Spine takes from it",
-                "",
-            ]
+            if known:
+                self.paper_page(page, known, label)
+            else:
+                page.limitations += [
+                    "Not a summary of the paper: this lists only what the Spine takes from it. "
+                    "Its title, authors, cohorts, and findings aren't recorded here yet.",
+                ]
+                page.body += [
+                    f"# {label}",
+                    "",
+                    f"DOI: [{doi}](https://doi.org/{doi})",
+                    "",
+                    "The prototype Spine cites this paper for the entries below. A person should "
+                    "add the title, authors, the cohorts it used, and a short summary.",
+                ]
+            page.body += ["", "## What the Spine takes from it", ""]
             for entity in entities:
                 ref = self.page_of(entity.key, entity.id)
                 what = one_line(
@@ -1320,6 +1643,130 @@ class Converter:
                     page.related.add(ref)
                     self.pages[ref].related.add(page.ref)
             self.add(page)
+
+    def paper_page(self, page: Page, paper: PaperInfo, label: str) -> None:
+        """A paper page for a paper the reviewer identified: its title, the
+        cohorts it analysed, and a short summary in our own words."""
+        venue = paper.venue.split(" (", 1)[0]
+        page.summary = summary_of(f"{paper.title} ({venue}, {paper.year}).", page.summary)
+        page.cohorts = set(paper.cohorts)
+        page.cohort_basis = {"paper": set(paper.cohorts)}
+        page.limitations += [
+            "The summary is a short description in our own words, not the paper's; the paper "
+            "is authoritative.",
+            f"Cohorts are the ones its methods describe ({paper.cohorts_from}).",
+        ]
+        if paper.preprint:
+            page.limitations.append("A preprint, not peer reviewed.")
+        page.body += [
+            f"# {paper.title}",
+            "",
+            f"- {paper.venue}, {paper.year}. DOI: [{paper.doi}](https://doi.org/{paper.doi})",
+            f"- Cited in the Spine as: {label}.",
+            f"- Cohorts analysed: {years_text(paper.cohorts)} ({paper.cohorts_from}).",
+            "- Checked at: " + ", ".join(f"<{url}>" for url in paper.verified) + ".",
+            "",
+            paper.summary,
+        ]
+        self.touched[3].add(page.ref)
+
+    # The reviewer's decisions, on the pages ---------------------------------------
+
+    def paper_cohorts(self) -> None:
+        """A feature or QC page whose only evidence of method is a paper
+        applies to the cohorts that paper analysed (question 3)."""
+        if not self.decisions:
+            return
+        for page in self.pages.values():
+            if page.folder not in ("features", "qc") or page.assembled:
+                continue
+            if page.evidence.kinds() & {"code", "legacy"}:
+                continue  # the pipeline's cohorts, inferred above
+            dois = sorted(r for k, r in page.evidence.typed if k == "paper")
+            known = [self.decisions.papers[d] for d in dois if d in self.decisions.papers]
+            if not known:
+                continue
+            years = set().union(*(p.cohorts for p in known))
+            # The paper's cohorts replace years guessed only from the default lookup.
+            firm = set().union(*(v for k, v in page.cohort_basis.items() if k != "assumed"), set())
+            guessed = page.cohort_basis.pop("assumed", set()) - firm
+            page.cohorts = (page.cohorts - guessed) | years
+            page.cohort_basis["paper"] = years
+            page.limitations.append(
+                f"Its cohorts are the ones the cited paper{'s' if len(known) > 1 else ''} "
+                f"analysed ({years_text(years)}); whether it holds for other years isn't recorded."
+            )
+            for paper in known:
+                if paper.preprint:
+                    page.limitations.append(
+                        f"{paper.label or paper.doi} ({paper.doi}) is a preprint, "
+                        "not peer reviewed."
+                    )
+            self.touched[3].add(page.ref)
+        for page in self.pages.values():
+            if any(k == "paper" and self.decisions.alias_target(r) for k, r in page.evidence.typed):
+                self.touched[2].add(page.ref)
+
+    def apply_pages(self) -> None:
+        """The reviewer's per-page decisions: evidence, confirmed cohorts,
+        limitations, and holds. None of them can mark a page reviewed."""
+        if not self.decisions:
+            return
+        source = self.decisions.path
+        for item in self.decisions.pages:
+            page = self.pages.get(item["page"])
+            if page is None:
+                raise stop(source, f"there's no page {item['page']}")
+            for evidence in item.get("evidence") or []:
+                [(kind, ref)] = evidence.items()
+                if kind == "code":
+                    page.evidence.typed.add(self.resolve.pipeline_code(str(ref)))
+                elif kind == "paper" and ref in self.decisions.papers:
+                    page.evidence.typed.add(("paper", str(ref)))
+                elif kind == "legacy" and kb._LEGACY_REF.fullmatch(str(ref)):
+                    page.evidence.typed.add(("legacy", str(ref)))
+                else:
+                    raise stop(source, f"{item['page']}: evidence {kind}: {ref} isn't usable")
+            if "cohorts" in item:
+                years = {int(y) for y in item["cohorts"]}
+                page.cohorts = years
+                page.cohort_basis = {"reviewer": years}
+                page.cohort_source = one_line(item["source"])
+            page.limitations += [one_line(x) for x in item.get("limitations") or []]
+            if item.get("hold"):
+                page.holds.append(
+                    f"the reviewer holds it as a draft (question {item['question']}): "
+                    + one_line(item["hold"])
+                )
+            self.touched[item["question"]].add(page.ref)
+
+    def removed_names(self) -> None:
+        """Say so on pages that name prototype code no longer in ihsDataR."""
+        removed = (self.decisions.removed if self.decisions else None) or {}
+        names = [str(n) for n in removed.get("names") or []]
+        for page in self.pages.values():
+            text = "\n".join(page.body)
+            found = [n for n in names if re.search(rf"(?<![\w.]){re.escape(n)}(?![\w])", text)]
+            if found:
+                page.limitations.append(
+                    "Its details name prototype code that is no longer in ihsDataR ("
+                    + ", ".join(found)
+                    + "); the Oracle objects and columns are what generated/schema checks."
+                )
+                self.touched[int(removed.get("question") or 4)].add(page.ref)
+
+    def mark_touched(self) -> None:
+        """Map the per-entry decisions, and re-pinned code, to pages."""
+        for question, keys in self.applied.touched.items():
+            for key in keys:
+                if key in self.home:
+                    self.touched[question].add(self.home[key])
+        pipes = self.resolve.pipelines
+        for page in self.pages.values():
+            if pipes and any(
+                k == "code" and r.startswith(f"{pipes.repo}@") for k, r in page.evidence.typed
+            ):
+                self.touched[4].add(page.ref)
 
     # Statuses -----------------------------------------------------------------
 
@@ -1339,19 +1786,34 @@ class Converter:
                     f"{entity.label} was changed after the Spine's last commit, so no review "
                     "of its current text is on record"
                 )
-            if (entity.key, entity.id) in HOLDS:
-                holds.append(f"{entity.label}: {HOLDS[(entity.key, entity.id)]}")
+            key = (entity.key, entity.id)
+            if key in HOLDS and key not in self.applied.released:
+                holds.append(f"{entity.label}: {HOLDS[key]}")
         kinds = page.evidence.kinds()
         needed = {"code", "legacy", "paper"}
         if page.folder in ("sources", "tables"):
             needed.add("schema")
-        if not kinds & needed and not page.assembled:
-            cited = "; ".join(page.evidence.cited) or "nothing"
-            holds.append(
-                "it has no typed evidence of the kind it needs (the Spine cites only: "
-                + cited
-                + ")"
-            )
+        # A legacy script counts only if someone has seen it (question 5).
+        unseen = sorted(
+            r for k, r in page.evidence.typed
+            if k == "legacy" and self.decisions and not self.decisions.legacy_seen(r)
+        )  # fmt: skip
+        supporting = {k for k, r in page.evidence.typed if not (k == "legacy" and r in unseen)}
+        if not supporting & needed and not page.assembled:
+            if kinds & needed:
+                holds.append(
+                    "its only evidence of how it's computed is "
+                    + ", ".join(f"`{r}`" for r in unseen)
+                    + ", a script nobody has seen in a repo yet (question 5)"
+                )
+                self.touched[5].add(page.ref)
+            else:
+                cited = "; ".join(page.evidence.cited) or "nothing"
+                holds.append(
+                    "it has no typed evidence of the kind it needs (the Spine cites only: "
+                    + cited
+                    + ")"
+                )
         if page.evidence.unresolved:
             holds.append(
                 "it names Oracle objects that aren't in generated/schema: "
@@ -1590,10 +2052,23 @@ class Result:
     # With a commit read: working-copy entries that differ from it, left out.
     excluded: list[tuple[str, list[str]]] = field(default_factory=list)
     reviewer: str = REVIEWER
+    # With the reviewer's decisions: each page's status without them (None
+    # where the page wouldn't exist), and the Spine as read, before them.
+    before: dict[str, str | None] = field(default_factory=dict)
+    original: Spine | None = None
 
 
-def build(spine: Spine, schema: Schema) -> Converter:
-    converter = Converter(spine, schema)
+def build(
+    spine: Spine,
+    schema: Schema,
+    decisions: Decisions | None = None,
+    pipelines: Path | None = None,
+) -> Converter:
+    applied, pipes = None, None
+    if decisions:
+        pipes = open_pipelines(pipelines, decisions, spine)
+        spine, applied = apply_entries(spine, decisions)
+    converter = Converter(spine, schema, decisions, pipes, applied)
     converter.locate_variables()
     converter.tables()
     converter.sources()
@@ -1602,6 +2077,10 @@ def build(spine: Spine, schema: Schema) -> Converter:
     converter.qc()
     converter.qc_cohorts()
     converter.papers()
+    converter.paper_cohorts()
+    converter.apply_pages()
+    converter.removed_names()
+    converter.mark_touched()
     for page in converter.pages.values():
         converter.decide_status(page)
     return converter
@@ -1618,15 +2097,31 @@ def compare(now: Converter, then: Converter) -> list[tuple[str, str | None, str 
     return out
 
 
-def convert(spine_dir: Path, export: Path, out: Path, ref: str | None = None) -> Result:
+def convert(
+    spine_dir: Path,
+    export: Path,
+    out: Path,
+    ref: str | None = None,
+    decisions: Decisions | None = None,
+    pipelines: Path | None = None,
+) -> Result:
     spine = read_spine(spine_dir, ref)
     catalog = Catalog.from_metadata_export(export)
     schema = Schema(catalog)
-    converter = build(spine, schema)
+    converter = build(spine, schema, decisions, pipelines)
+    before: dict[str, str | None] = {}
+    if decisions:
+        baseline = build(spine, schema)
+        before = {p.ref: p.status for p in baseline.pages.values()}
+        for key in converter.applied.excluded:  # where a left-out entry would have been
+            question = converter.applied.excluded[key][2]
+            if key in baseline.home:
+                converter.touched[question].add(baseline.home[key])
     from_commit = []
     changed = any(e.changed for es in spine.entities.values() for e in es.values())
     if ref is None and spine.commit and changed:
-        from_commit = compare(converter, build(read_spine(spine_dir, spine.commit), schema))
+        then = build(read_spine(spine_dir, spine.commit), schema, decisions, pipelines)
+        from_commit = compare(converter, then)
     excluded = left_out(spine, read_spine(spine_dir)) if ref else []
     prepare(out)
     catalog.save(out / "generated" / "schema")
@@ -1648,7 +2143,10 @@ def convert(spine_dir: Path, export: Path, out: Path, ref: str | None = None) ->
     (out / "index.md").write_text(report.index, encoding="utf-8", newline="\n")
     disk, others = kb.read_folder(out)
     report = kb.check(disk, others=others)
-    return Result(converter, report, len(catalog), export, spine_dir, from_commit, excluded)
+    return Result(
+        converter, report, len(catalog), export, spine_dir, from_commit, excluded,
+        before=before, original=spine,
+    )  # fmt: skip
 
 
 def left_out(read: Spine, working: Spine) -> list[tuple[str, list[str]]]:
@@ -1698,6 +2196,8 @@ def stamp(folder: Path, reviewer: str, day: datetime.date) -> tuple[list[str], k
 def review_md(result: Result) -> str:
     conv = result.converter
     spine = conv.spine
+    original = result.original or spine  # before the reviewer left any entry out
+    left = conv.applied.excluded
     pages = sorted(conv.pages.values(), key=lambda p: p.path)
     out = [
         "# Review: the Knowledge Spine converted to the knowledge base",
@@ -1707,6 +2207,7 @@ def review_md(result: Result) -> str:
         "then install (at the end).",
         "",
         *decided(result),
+        *answered(result),
         "## Inputs",
         "",
         f"- Spine: `{result.spine_dir}` (repo `{spine.repo}`, commit `{spine.commit}`), "
@@ -1725,7 +2226,7 @@ def review_md(result: Result) -> str:
     ]
     total = 0
     for key in LIST_KEYS:
-        entities = spine.entities[key].values()
+        entities = original.entities[key].values()
         total += len(entities)
         statuses = defaultdict(int)
         for e in entities:
@@ -1751,11 +2252,12 @@ def review_md(result: Result) -> str:
         "|---|---|",
     ]
     for key in LIST_KEYS:
-        for entity in spine.entities[key].values():
+        for entity in original.entities[key].values():
             ref = conv.home.get((key, entity.id))
-            out.append(
-                f"| {TYPE_NAMES[key]} `{entity.id}` | {f'`{ref}`' if ref else 'not mapped'} |"
-            )
+            where = f"`{ref}`" if ref else "not mapped"
+            if (key, entity.id) in left:
+                where = f"left out by the reviewer (question {left[(key, entity.id)][2]})"
+            out.append(f"| {TYPE_NAMES[key]} `{entity.id}` | {where} |")
     out += ["", "## Status changes", ""]
     out += [
         "The rule: a Spine `validated` entry becomes `reviewed` only if every entry on its "
@@ -1767,15 +2269,27 @@ def review_md(result: Result) -> str:
         "drafts. No page has `reviewed_by` or `reviewed_on` yet (see Decided). How far the "
         "check verifies that evidence, and where cohorts were inferred, are in the next two "
         "sections.",
+        *(
+            [
+                "",
+                'The reviewer\'s decisions (see "Reviewer questions: answered") add evidence, '
+                "cohorts, text fixes and holds before this rule is applied; they never mark a "
+                "page reviewed themselves.",
+            ]
+            if conv.decisions
+            else []
+        ),
         "",
         "Per entry (each Spine entry counted once, by the page it went to):",
         "",
     ]
     moves: dict[str, int] = defaultdict(int)
     for key in LIST_KEYS:
-        for entity in spine.entities[key].values():
+        for entity in original.entities[key].values():
             ref = conv.home.get((key, entity.id))
             status = conv.pages[ref].status if ref else "not mapped"
+            if (key, entity.id) in left:
+                status = "left out by the reviewer"
             moves[f"{entity.status} → {status}"] += 1
     for move in sorted(moves):
         out.append(f"- **{move}**: {moves[move]}")
@@ -1803,8 +2317,8 @@ def review_md(result: Result) -> str:
         if page.status == "reviewed":
             kinds = ", ".join(sorted(page.evidence.kinds()))
             out.append(f"- `{page.ref}` (evidence: {kinds}; cohorts {sorted(page.cohorts)})")
-    out += evidence_section(pages)
-    out += cohort_section(pages)
+    out += evidence_section(pages, conv)
+    out += cohort_section(pages, conv)
     out += ["", "### Draft pages, and why", ""]
     for page in pages:
         if page.status == "draft":
@@ -1895,9 +2409,15 @@ def review_md(result: Result) -> str:
         "stamp at install (step 4) clears those warnings. Empty `cohorts` and `evidence` "
         "warnings are drafts whose years or evidence the Spine doesn't give.",
         "",
-        "## Questions for the reviewer",
-        "",
-        *[f"{n}. {q}" for n, q in enumerate(QUESTIONS, start=1)],
+        *(
+            still_open(conv.decisions)
+            if conv.decisions
+            else [
+                "## Questions for the reviewer",
+                "",
+                *[f"{n}. {q}" for n, q in enumerate(QUESTIONS, start=1)],
+            ]
+        ),
         "",
         "## Installing it (a maintainer, with their own credentials)",
         "",
@@ -1968,11 +2488,110 @@ def decided(result: Result) -> list[str]:
     return out
 
 
+def status_changes(result: Result) -> list[tuple[str, str | None, str | None]]:
+    """Pages whose status the reviewer's decisions changed (ref, before, after;
+    None where the page doesn't exist)."""
+    pages = result.converter.pages
+    out = []
+    for ref in sorted(set(pages) | set(result.before)):
+        before = result.before.get(ref)
+        after = pages[ref].status if ref in pages else None
+        if before != after:
+            out.append((ref, before, after))
+    return out
+
+
+def answered(result: Result) -> list[str]:
+    """Each question, its answer and evidence, and what it changed."""
+    conv = result.converter
+    decisions = conv.decisions
+    if not decisions:
+        return []
+    pages, before = conv.pages, result.before
+    changes = status_changes(result)
+    up = [ref for ref, a, b in changes if a == "draft" and b == "reviewed"]
+    down = [ref for ref, a, b in changes if a == "reviewed" and b == "draft"]
+    new = [(ref, b) for ref, a, b in changes if a is None]
+    out = [
+        "## Reviewer questions: answered",
+        "",
+        f"{decisions.reviewer}'s decisions of {decisions.decided_on}, in "
+        f"`scripts/convert-spine/{decisions.path.name}`. The conversion applies them on top of "
+        "the Spine's commit; each one there cites its source (a file and line, a commit, a URL "
+        "or a DOI), and the conversion stops if one no longer fits the sources. They add "
+        "evidence, cohorts, text fixes and holds; statuses still follow the rule under "
+        '"Status changes", so no decision marks a page reviewed by itself.',
+        "",
+        f"All together: {len(up)} pages went from draft to reviewed, {len(down)} from reviewed "
+        f"to draft, and {len(new)} are new.",
+        "",
+        "- Draft to reviewed: " + (", ".join(f"`{r}`" for r in up) or "none") + ".",
+        "- Reviewed to draft: " + (", ".join(f"`{r}`" for r in down) or "none") + ".",
+        "- New: " + (", ".join(f"`{r}` ({s})" for r, s in new) or "none") + ".",
+        "",
+    ]
+    answers = {a["question"]: a for a in decisions.answers}
+    for n, question in enumerate(QUESTIONS, start=1):
+        answer = answers.get(n)
+        out.append(f"{n}. *{question}*")
+        if answer:
+            out.append(f"   - **Answer.** {one_line(answer['answer'])}")
+            evidence = one_line(answer.get("evidence")) or "see the decisions"
+            out.append(f"   - **Evidence.** {evidence}")
+        else:
+            out.append("   - **Not answered yet.**")
+        touched = sorted(r for r in conv.touched.get(n, set()) if r in pages)
+        moved = [
+            f"`{r}` ({before[r]} to {pages[r].status})"
+            if before.get(r)
+            else f"`{r}` (new, {pages[r].status})"
+            for r in touched
+            if before.get(r) != pages[r].status
+        ]
+        same = [r for r in touched if before.get(r) == pages[r].status]
+        if moved:
+            out.append("   - **Status changes on the pages it touched.** " + ", ".join(moved) + ".")
+        if same:
+            shown = ", ".join(f"`{r}`" for r in same[:10])
+            more = f" and {len(same) - 10} more" if len(same) > 10 else ""
+            out.append(f"   - **Edited, status unchanged.** {shown}{more}.")
+        if not moved and not same:
+            out.append("   - **Pages changed.** None.")
+    out += ["", "### Papers checked", ""]
+    for paper in sorted(decisions.papers.values(), key=lambda p: (p.year, p.doi)):
+        names = f"; the Spine calls it {', '.join(paper.names)}" if paper.names else ""
+        out.append(
+            f"- `{paper.doi}`: {paper.title} ({paper.venue}, {paper.year}){names}. Cohorts: "
+            f"{years_text(paper.cohorts)}. Checked at " + ", ".join(paper.verified) + "."
+        )
+    if decisions.unpublished:
+        out += ["", "Named in the Spine, with no DOI to be found:", ""]
+        for item in decisions.unpublished:
+            out.append(
+                f"- {item.get('name')}: {one_line(item.get('what'))}. "
+                f"Searched: {one_line(item.get('searched'))}."
+            )
+    out.append("")
+    return out
+
+
+def still_open(decisions: Decisions) -> list[str]:
+    return [
+        "## Still open",
+        "",
+        'The questions are answered above ("Reviewer questions: answered"). What still needs '
+        "a person:",
+        "",
+        *[f"- {item}" for item in decisions.still_open],
+    ]
+
+
 def only_legacy(page: Page) -> bool:
     return page.evidence.kinds() - {"schema"} == {"legacy"}
 
 
-def evidence_section(pages: list[Page]) -> list[str]:
+def evidence_section(pages: list[Page], conv: Converter | None = None) -> list[str]:
+    decisions = conv.decisions if conv else None
     reviewed = [p for p in pages if p.status == "reviewed" and p.folder in ("features", "qc")]
     bare = [p for p in reviewed if p.evidence.kinds() == {"legacy"}]
     with_schema = [p for p in reviewed if only_legacy(p) and p not in bare]
@@ -1981,20 +2600,54 @@ def evidence_section(pages: list[Page]) -> list[str]:
         "### How far the check verifies evidence",
         "",
         "The check resolves `schema` evidence against `generated/schema`. For `code`, "
-        "`legacy`, and `paper` it checks only the format (repo@commit path, a path, a DOI). "
-        "The conversion confirmed that each `code` path exists at the pinned commit of the "
-        "prototype repo. It didn't check the `legacy` paths: `reference/2024/` in "
-        "`ihs-pipelines` is where docs/WORKFLOWS.md says the 2024 scripts go, not somewhere "
-        "they were seen. DOIs weren't looked up.",
-        "",
-        "Reviewed pages whose only evidence is an assumed `reference/2024/` path:",
+        "`legacy`, and `paper` it checks only the format (repo@commit path, a path, a DOI).",
         "",
     ]
+    pipes = conv.resolve.pipelines if conv else None
+    if decisions:
+        out += [
+            "What the conversion checked beyond that, with the reviewer's decisions:",
+            "",
+            "- `code`: every path exists at its pinned commit. "
+            + (
+                f"Paths in `ihsDataR` are pinned to `{pipes.repo}@{pipes.commit[:7]}`, whose "
+                f"`{pipes.prefix}` is the same tree as `{pipes.from_prefix}` at the Spine's "
+                "commit (question 4); other prototype code stays pinned to the Spine's repo."
+                if pipes
+                else "They are pinned to the Spine's repo."
+            ),
+            "- `legacy`: the paths are where docs/WORKFLOWS.md says the 2024 scripts go "
+            "(`reference/2024/` in `ihs-pipelines`), which doesn't exist yet (question 5). "
+            + " ".join(
+                f"`{name}`: "
+                + ("seen and the cited parts checked" if info.get("seen") else "not seen")
+                + f" ({one_line(info.get('where'))})."
+                for name, info in sorted(decisions.legacy.items())
+            )
+            + " A script nobody has seen doesn't count as a page's evidence of how something "
+            "is computed.",
+            f"- `paper`: all {len(decisions.papers)} DOIs were resolved at the DOI registry "
+            '(question 2); see the list under "Reviewer questions: answered".',
+            "",
+            "Reviewed pages whose only evidence is a legacy script (a seen one):",
+            "",
+        ]
+    else:
+        out += [
+            "The conversion confirmed that each `code` path exists at the pinned commit of the "
+            "prototype repo. It didn't check the `legacy` paths: `reference/2024/` in "
+            "`ihs-pipelines` is where docs/WORKFLOWS.md says the 2024 scripts go, not somewhere "
+            "they were seen. DOIs weren't looked up.",
+            "",
+            "Reviewed pages whose only evidence is an assumed `reference/2024/` path:",
+            "",
+        ]
     out += [f"- `{p.ref}`" for p in bare] or ["- None."]
     out += [
         "",
         "Reviewed feature and QC pages whose only evidence besides `schema` (which shows the "
-        "tables exist, not how they're used) is an assumed `reference/2024/` path:",
+        "tables exist, not how they're used) is "
+        + ("a legacy script:" if decisions else "an assumed `reference/2024/` path:"),
         "",
     ]
     out += [f"- `{p.ref}`" for p in with_schema] or ["- None."]
@@ -2008,12 +2661,16 @@ BASIS = {
     "nothing says which cohorts",
     "recipe": "its recipe's sources' cohorts in the Spine (because it cites code or legacy)",
     "inherited": "the cohorts of the features it's applied to (because it cites code or legacy)",
+    "paper": "the cohorts the paper it cites analysed, from the paper's methods (question 3)",
+    "reviewer": "confirmed by the reviewer (question 1); the source is on each line",
 }
 
 
 def thin(page: Page) -> list[str]:
     """Why a page's inferred cohorts are weakly supported."""
     basis = page.cohort_basis
+    if "reviewer" in basis:
+        return []
     firm = set().union(*(v for k, v in basis.items() if k != "assumed"))
     out = []
     if basis.get("assumed", set()) - firm:
@@ -2022,7 +2679,7 @@ def thin(page: Page) -> list[str]:
     legacy = [r for k, r in page.evidence.typed if k == "legacy" and "/2024/" in r]
     if legacy and 2024 not in page.cohorts:
         out.append(f"cites a 2024 legacy script but lists only {sorted(page.cohorts)}")
-    if len(page.cohorts) == 1:
+    if len(page.cohorts) == 1 and set(basis) != {"paper"}:
         out.append("a single cohort")
     if set(basis) == {"inherited"}:
         out.append("only from the features it's applied to")
@@ -2031,7 +2688,8 @@ def thin(page: Page) -> list[str]:
     return out
 
 
-def cohort_section(pages: list[Page]) -> list[str]:
+def cohort_section(pages: list[Page], conv: Converter | None = None) -> list[str]:
+    decisions = conv.decisions if conv else None
     out = [
         "",
         "### Where cohorts came from",
@@ -2044,9 +2702,16 @@ def cohort_section(pages: list[Page]) -> list[str]:
     out += [f"- **{k}**: {v}" for k, v in BASIS.items() if k != "spine"]
     out += [
         "",
-        "A paper's method gets no cohorts this way, so paper-only pages have none. Confirm "
-        "the cohorts on every reviewed page (question 1). The reviewed feature and QC "
-        "pages, with where their years came from:",
+        (
+            "A page whose only evidence of method is a paper lists the cohorts that paper "
+            "analysed. The reviewer confirmed the cohorts of the reviewed pages that have code "
+            "or a legacy script (question 1). The reviewed feature and QC pages, with where "
+            "their years came from:"
+            if decisions
+            else "A paper's method gets no cohorts this way, so paper-only pages have none. "
+            "Confirm the cohorts on every reviewed page (question 1). The reviewed feature and "
+            "QC pages, with where their years came from:"
+        ),
         "",
     ]
     for page in pages:
@@ -2055,6 +2720,8 @@ def cohort_section(pages: list[Page]) -> list[str]:
         parts = "; ".join(f"{k} {sorted(v)}" for k, v in sorted(page.cohort_basis.items()))
         weak = thin(page)
         note = f" **Thin:** {'; '.join(weak)}." if weak else ""
+        if page.cohort_source:
+            note += f" Source: {page.cohort_source}."
         out.append(f"- `{page.ref}` {sorted(page.cohorts)}: {parts}.{note}")
     out += [
         "",
@@ -2116,6 +2783,20 @@ def main(argv: list[str] | None = None) -> int:
         "--reviewer", default=REVIEWER, help="who the report says will review and be stamped"
     )
     parser.add_argument(
+        "--decisions",
+        type=Path,
+        default=DECISIONS,
+        help=f"the reviewer's decisions to apply (default {DECISIONS.name} next to this script)",
+    )
+    parser.add_argument(
+        "--no-decisions", action="store_true", help="convert without the reviewer's decisions"
+    )
+    parser.add_argument(
+        "--pipelines",
+        type=Path,
+        help="an ihs-pipelines checkout with the commit the decisions re-pin code to",
+    )
+    parser.add_argument(
         "--stamp-reviewer",
         metavar="LOGIN",
         help="install step, after review: name LOGIN on every reviewed page in --out",
@@ -2139,7 +2820,8 @@ def main(argv: list[str] | None = None) -> int:
     if review.is_relative_to(args.out.resolve()):
         raise SystemExit("--review must be outside --out: the check allows no extra files there")
     ref = None if args.working_copy else args.ref
-    result = convert(args.spine, args.export, args.out, ref)
+    decisions = None if args.no_decisions else load_decisions(args.decisions)
+    result = convert(args.spine, args.export, args.out, ref, decisions, args.pipelines)
     result.reviewer = args.reviewer
     review.write_text(review_md(result), encoding="utf-8", newline="\n")
     report = result.report
@@ -2149,6 +2831,12 @@ def main(argv: list[str] | None = None) -> int:
         f"Wrote {len(pages)} pages ({reviewed} reviewed) and {result.catalog_tables} schema "
         f"files to {args.out}, and {review}."
     )
+    if decisions:
+        changes = status_changes(result)
+        print(
+            f"Decisions from {decisions.path.name}: {len(changes)} page(s) changed status "
+            '(see REVIEW.md, "Reviewer questions: answered").'
+        )
     print(
         f"Check: {len(report.errors)} error(s), {len(report.data)} possible participant-data "
         f"hit(s), {len(report.warnings)} warning(s)."

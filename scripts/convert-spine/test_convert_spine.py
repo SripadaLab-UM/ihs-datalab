@@ -94,6 +94,7 @@ REGISTRY = {
                 "cleaning_rules": ["Keep steps > 0."],
                 "qc_rules": ["steps_positive"],
                 "source_anchor": "AggregateDailyMetrics_2024.R (steps section)",
+                "implemented_in": "r/ihsDataR/R/feature_steps_day.R",
                 "status": "validated",
             }
         ],
@@ -116,6 +117,14 @@ REGISTRY = {
                 "applies_to": ["mood_day"],
                 "condition": "Score >= 10; see IHS_2025.NOSUCHTABLE.",
                 "source_anchor": "Sleep paper 10.1038/s41746-021-00400-z",
+                "status": "validated",
+            },
+            {
+                "id": "watch_filter",
+                "name": "Watch filter",
+                "applies_to": ["steps_day"],
+                "condition": "Keep samples from the watch.",
+                "source_anchor": "ODBC_connect_IHS2024-25.R (Watch)",
                 "status": "validated",
             },
         ],
@@ -300,11 +309,11 @@ def test_never_deletes_other_files(sources, tmp_path):
 def test_review_outside_the_knowledge_base(sources, tmp_path):
     spine, export = sources
     out = tmp_path / "kb"
+    args = ["--spine", str(spine), "--export", str(export), "--out", str(out),
+            "--ref", "HEAD", "--no-decisions"]  # fmt: skip
     with pytest.raises(SystemExit):
-        cs.main(["--spine", str(spine), "--export", str(export), "--out", str(out),
-                 "--review", str(out / "REVIEW.md"), "--ref", "HEAD"])  # fmt: skip
-    code = cs.main(["--spine", str(spine), "--export", str(export), "--out", str(out),
-                    "--review", str(tmp_path / "REVIEW.md"), "--ref", "HEAD"])  # fmt: skip
+        cs.main([*args, "--review", str(out / "REVIEW.md")])
+    code = cs.main([*args, "--review", str(tmp_path / "REVIEW.md")])
     assert code == 0
     assert "## Status changes" in (tmp_path / "REVIEW.md").read_text()
 
@@ -398,3 +407,222 @@ def test_stamps_the_reviewer_at_install(sources, tmp_path):
     assert kb.stamp_review(text, "ataxali", cs.datetime.date(2026, 10, 1)) == text
     with pytest.raises(SystemExit):
         cs.main(["--stamp-reviewer", "not a login", "--out", str(out)])
+
+
+# The reviewer's decisions ---------------------------------------------------
+
+
+@pytest.fixture
+def pipelines(tmp_path: Path) -> tuple[Path, str]:
+    """An ihs-pipelines checkout whose ihsDataR/ is the prototype's r/ihsDataR."""
+    repo = tmp_path / "pipes"
+    (repo / "ihsDataR/R").mkdir(parents=True)
+    (repo / "ihsDataR/R/feature_steps_day.R").write_text("build_steps_day <- function() NULL\n")
+    git(repo, "init", "-q")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "ihsDataR")
+    commit = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    return repo, commit
+
+
+def decisions_yaml(commit: str, **changes: object) -> dict:
+    data: dict = {
+        "reviewer": "ataxali",
+        "decided_on": "2026-09-27",
+        "papers": [
+            {
+                "doi": "10.1234/mood.2026",
+                "names": ["MoodDriver"],
+                "label": "MoodDriver",
+                "title": "A study of mood and wearables",
+                "venue": "medRxiv (preprint)",
+                "year": 2026,
+                "preprint": True,
+                "cohorts": [2018, 2019],
+                "cohorts_from": "Methods",
+                "verified": ["https://doi.org/10.1234/mood.2026"],
+                "summary": "Mood and wearable features.",
+            },
+            {
+                "doi": "10.1038/s41746-021-00400-z",
+                "title": "Sleep variability and depression",
+                "venue": "npj Digital Medicine",
+                "year": 2021,
+                "cohorts": [2017, 2018],
+                "cohorts_from": "Methods",
+                "verified": ["https://doi.org/10.1038/s41746-021-00400-z"],
+                "summary": "Sleep variability.",
+            },
+        ],
+        "code_repin": {
+            "from_prefix": "r/ihsDataR/",
+            "repo": "pipes",
+            "commit": commit,
+            "prefix": "ihsDataR/",
+            "source": "same tree",
+        },
+        "legacy_scripts": {"ODBC_connect_IHS2024-25.R": {"seen": False, "where": "nowhere"}},
+        "removed_code_names": {"question": 4, "source": "test", "names": ["read_fitbit_daily"]},
+        "entries": [
+            {
+                "entry": "raw_variables/fitbit.MODIFIEDDATE",
+                "question": 9,
+                "exclude": "a duplicate",
+                "source": "the registry",
+            },
+            {
+                "entry": "data_sources/fitbit",
+                "question": 7,
+                "replace": [
+                    {"field": "known_limitations[0]", "old": "Daily summaries only", "new": "Days"}
+                ],
+                "release_hold": True,
+                "source": "the catalog",
+            },
+        ],
+        "pages": [
+            {
+                "page": "qc/steps_positive",
+                "question": 1,
+                "cohorts": [2024, 2025],
+                "evidence": [{"code": "ihsDataR/R/feature_steps_day.R#L1"}],
+                "source": "legacy and code",
+            },
+            {
+                "page": "qc/phq9_threshold",
+                "question": 2,
+                "hold": "part of it comes from a draft",
+                "source": "the paper",
+            },
+        ],
+        "answers": [{"question": 1, "answer": "Confirmed.", "evidence": "the scripts"}],
+        "still_open": ["Push the pipelines repo first."],
+    }
+    data.update(changes)
+    return data
+
+
+def load(tmp_path: Path, data: dict) -> cs.Decisions:
+    path = tmp_path / "review_decisions.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    return cs.load_decisions(path)
+
+
+@pytest.fixture
+def held(monkeypatch):
+    monkeypatch.setitem(cs.HOLDS, ("data_sources", "fitbit"), "its limitation is stale")
+
+
+def test_applies_the_decisions(sources, pipelines, tmp_path, held):
+    spine, export = sources
+    repo, commit = pipelines
+    decisions = load(tmp_path, decisions_yaml(commit))
+    out = tmp_path / "kb"
+    result = cs.convert(spine, export, out, "HEAD", decisions, repo)
+    assert result.report.errors == [] and result.report.data == []
+    # A manuscript named in the Spine, given its DOI, is paper evidence, with its cohorts.
+    mood = meta(out, "features/mood_day.md")
+    assert {"paper": "10.1234/mood.2026"} in mood["evidence"]
+    assert mood["cohorts"] == [2018, 2019] and mood["status"] == "reviewed"
+    assert any("preprint" in x for x in mood["limitations"])
+    assert "A study of mood and wearables" in (out / "papers/mooddriver.md").read_text()
+    assert meta(out, "papers/mooddriver.md")["status"] == "draft"
+    # Code is re-pinned to ihs-pipelines.
+    steps = meta(out, "features/steps_day.md")
+    assert {"code": f"pipes@{commit} ihsDataR/R/feature_steps_day.R"} in steps["evidence"]
+    rule = meta(out, "qc/steps_positive.md")
+    assert {"code": f"pipes@{commit} ihsDataR/R/feature_steps_day.R#L1"} in rule["evidence"]
+    assert rule["cohorts"] == [2024, 2025] and rule["status"] == "reviewed"
+    # A legacy script nobody has seen isn't enough.
+    watch = result.converter.pages["qc/watch_filter"]
+    assert watch.status == "draft" and any("question 5" in h for h in watch.holds)
+    # The reviewer's hold, and the paper's cohorts on a page it holds.
+    threshold = result.converter.pages["qc/phq9_threshold"]
+    assert any("holds it as a draft" in h for h in threshold.holds)
+    assert threshold.cohorts == {2017, 2018}
+    # A text fix and a released hold; a removed runner is said to be gone.
+    fitbit = meta(out, "sources/fitbit.md")
+    assert fitbit["status"] == "reviewed"
+    assert "Days." in fitbit["limitations"]
+    assert any("no longer in ihsDataR (read_fitbit_daily)" in x for x in fitbit["limitations"])
+    # The candidate duplicate is left out, so its table page can be reviewed.
+    assert meta(out, "tables/IHS_2025.FITBITDAILYDATA.md")["status"] == "reviewed"
+    review = cs.review_md(result)
+    answered = review.split("## Reviewer questions: answered")[1].split("## Inputs")[0]
+    assert "`features/mood_day`" in answered.split("Draft to reviewed:")[1].split("\n")[0]
+    assert "`qc/watch_filter`" in answered.split("Reviewed to draft:")[1].split("\n")[0]
+    assert "- **Answer.** Confirmed." in answered
+    assert "left out by the reviewer (question 9)" in review
+    assert "## Still open" in review and "## Questions for the reviewer" not in review
+    # Deterministic, and it survives the install stamp.
+    again = cs.convert(spine, export, tmp_path / "kb2", "HEAD", decisions, repo)
+    assert kb.read_folder(out)[0] == kb.read_folder(tmp_path / "kb2")[0]
+    assert cs.review_md(again) == review
+    stamped, report = cs.stamp(out, "ataxali", cs.datetime.date(2026, 10, 1))
+    assert stamped and report.blocking() == []
+
+
+def test_without_the_hold_released(sources, pipelines, tmp_path, held):
+    spine, export = sources
+    repo, commit = pipelines
+    data = decisions_yaml(commit)
+    del data["entries"][1]["release_hold"]
+    out = tmp_path / "kb"
+    cs.convert(spine, export, out, "HEAD", load(tmp_path, data), repo)
+    assert meta(out, "sources/fitbit.md")["status"] == "draft"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        # The text to replace isn't there.
+        lambda d: d["entries"][1]["replace"][0].update(old="not in the Spine"),
+        # There's no hold to release.
+        lambda d: d["entries"][1].update(entry="data_sources/diary"),
+        # No such entry, or page.
+        lambda d: d["entries"][0].update(entry="raw_variables/nope"),
+        lambda d: d["pages"][0].update(page="qc/nope"),
+        # Code evidence that isn't at the pinned commit.
+        lambda d: d["pages"][0].update(evidence=[{"code": "ihsDataR/R/nope.R"}]),
+        # A name said to be removed that is still there.
+        lambda d: d["removed_code_names"].update(names=["build_steps_day"]),
+        # A pinned commit that isn't in the checkout.
+        lambda d: d["code_repin"].update(commit="0" * 40),
+    ],
+)
+def test_stale_decisions_stop_the_run(sources, pipelines, tmp_path, held, change):
+    spine, export = sources
+    repo, commit = pipelines
+    data = decisions_yaml(commit)
+    change(data)
+    with pytest.raises(SystemExit):
+        cs.convert(spine, export, tmp_path / "kb", "HEAD", load(tmp_path, data), repo)
+
+
+def test_decisions_need_the_pipelines_checkout(sources, pipelines, tmp_path, held):
+    spine, export = sources
+    _, commit = pipelines
+    with pytest.raises(SystemExit):
+        cs.convert(spine, export, tmp_path / "kb", "HEAD", load(tmp_path, decisions_yaml(commit)))
+
+
+def test_decisions_cant_mark_reviewed_or_hold_data(pipelines, tmp_path):
+    _, commit = pipelines
+    data = decisions_yaml(commit)
+    data["pages"][0]["status"] = "reviewed"
+    with pytest.raises(SystemExit):
+        load(tmp_path, data)
+    data = decisions_yaml(commit, still_open=["Participant P12345 enrolled on 2025-07-01."])
+    with pytest.raises(SystemExit):
+        load(tmp_path, data)
+
+
+def test_the_real_decisions_load():
+    decisions = cs.load_decisions(cs.DECISIONS)
+    assert decisions.alias("MoodDriver (RHR > 100 bpm excluded)") == "10.64898/2026.03.03.26347299"
+    assert decisions.alias("Social Smartphone Manuscript") is None
+    assert not decisions.legacy_seen("reference/2024/ODBC_connect_IHS2024-25.R")
+    assert decisions.legacy_seen("reference/2024/AggregateDailyMetrics_2024.R#L1-2")
+    assert {a["question"] for a in decisions.answers} == set(range(1, len(cs.QUESTIONS) + 1))
