@@ -400,6 +400,10 @@ class Updater:
         try:
             staged = await asyncio.to_thread(self.download, release, expected)
             try:
+                # Something may have started during the download: never cut it off.
+                busy = self._busy()
+                if busy is not None:
+                    raise UpdateFailed(f"{busy} Nothing was changed.")
                 self._set("stopping", version, "Stopping conversations…")
                 if self._stop_sessions is not None:
                     await self._stop_sessions()
@@ -421,7 +425,7 @@ class Updater:
         )
         await asyncio.to_thread(self.restart, version)
 
-    # The steps, each usable on its own (tests, and `datalab update`) ---------
+    # The steps, each usable on its own (the tests call them one by one) ------
 
     def download(self, release: Release, expected: dict[str, str]) -> Staged:
         """Step 1: the release's files, each checked. Nothing else changes."""

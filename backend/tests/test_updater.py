@@ -233,6 +233,18 @@ async def test_it_waits_while_something_is_working(world):
     assert_nothing_changed(world)
 
 
+async def test_something_started_during_the_download_is_never_cut_off(world):
+    world.check()
+    update = world.updater()
+    await update.start(NEW)
+    world.busy = "A conversation's agent is working."  # while it downloads
+    await update.wait()
+    assert update.progress.state == "failed" and "agent is working" in update.progress.message
+    assert "stop-sessions" not in world.events
+    assert_nothing_changed(world)
+    assert not (world.root / "downloads" / NEW).exists()
+
+
 async def test_it_wont_start_over_an_unfinished_update(world):
     world.check()
     updates.begin(
