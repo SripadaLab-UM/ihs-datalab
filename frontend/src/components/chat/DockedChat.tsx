@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useRef, useState } from "react";
+import clsx from "clsx";
+import { type ReactNode, useId, useRef, useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
 
-import { Chat, ChatHeader, ComposerBox, EmptyState, useEffortChoice } from "./Chat";
+import { Chat, ChatHeader, ComposerBox, type ComposerNote, EmptyState, useEffortChoice } from "./Chat";
 
 /** Something from the tab beside the chat that goes with each message, such as the SQL being edited. */
 export interface ChatContext {
@@ -30,7 +31,8 @@ export function withContext(text: string, context?: ChatContext): string {
  * come back to it; remount with a new `key` to start another). Streaming,
  * approvals and Stop are the Workspace's own, through `Chat`.
  *
- * With `context`, the person can send it along with each message (on by default).
+ * With `context`, the person can choose to send it along with a message: it's
+ * off until they tick it, and they can see exactly what will go.
  */
 export function DockedChat({
   mode,
@@ -52,20 +54,20 @@ export function DockedChat({
   headerActions?: ReactNode;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
-  const [includeContext, setIncludeContext] = useState(true);
+  const [includeContext, setIncludeContext] = useState(false);
   const id = conversationId ?? started?.id;
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(id) });
   // The list may not have caught up with a conversation just started.
   const conversation = conversations.data?.find((c) => c.id === id) ?? (started?.id === id ? started : undefined);
 
-  const attach = Boolean(context?.text.trim()) && includeContext;
-  const prepare = (text: string) => (attach ? withContext(text, context) : text);
-  const note = context?.text.trim() ? (
-    <label className="mb-2 flex cursor-pointer items-center gap-2 px-1 font-sans text-[12.5px] text-muted hover:text-ink">
-      <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} />
-      Send with your message: <span className="text-ink">{context.label}</span>
-    </label>
-  ) : undefined;
+  const hasContext = Boolean(context?.text.trim());
+  // Called as Send is pressed, so the message is what the person saw then.
+  const prepare = (text: string) => (hasContext && includeContext ? withContext(text, context) : text);
+  const note = hasContext
+    ? (sending: boolean) => (
+        <ContextNote context={context!} included={includeContext} onInclude={setIncludeContext} disabled={sending} />
+      )
+    : undefined;
 
   if (id) {
     if (!conversation) {
@@ -87,6 +89,8 @@ export function DockedChat({
         headerActions={headerActions}
         prepareMessage={context ? prepare : undefined}
         composerNote={note}
+        // Just started here: the cursor stays in the message box.
+        autoFocus={started?.id === conversation.id || undefined}
       />
     );
   }
@@ -106,6 +110,68 @@ export function DockedChat({
   );
 }
 
+const PREVIEW_LINES = 3;
+
+/** The choice to send the context, and exactly what would be sent. */
+function ContextNote({
+  context,
+  included,
+  onInclude,
+  disabled,
+}: {
+  context: ChatContext;
+  included: boolean;
+  onInclude: (included: boolean) => void;
+  disabled: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const previewId = useId();
+  const lines = context.text.replace(/\n+$/, "").split("\n");
+  const long = lines.length > PREVIEW_LINES;
+  return (
+    <div className="mb-2 px-1 font-sans text-[12.5px] text-muted">
+      <label className={clsx("flex items-baseline gap-2", disabled ? "cursor-not-allowed" : "cursor-pointer hover:text-ink")}>
+        <input
+          type="checkbox"
+          checked={included}
+          disabled={disabled}
+          onChange={(e) => onInclude(e.target.checked)}
+          aria-describedby={previewId}
+          className="translate-y-[2px]"
+        />
+        <span>
+          Send with your message: <span className="text-ink">{context.label}</span>
+        </span>
+      </label>
+      <pre
+        id={previewId}
+        aria-label={`What would be sent: ${context.label}`}
+        className={clsx(
+          "mt-1.5 overflow-auto rounded-[3px] bg-sunken px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink",
+          expanded ? "max-h-60" : "max-h-24",
+          !included && "opacity-60",
+        )}
+      >
+        {expanded ? lines.join("\n") : lines.slice(0, PREVIEW_LINES).join("\n") + (long ? "\n…" : "")}
+      </pre>
+      <p className="mt-1 flex gap-2 text-[11.5px] text-faint">
+        {lines.length} line{lines.length === 1 ? "" : "s"}
+        {long && (
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            aria-expanded={expanded}
+            aria-controls={previewId}
+            className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
+          >
+            {expanded ? "Show less" : `Show all ${lines.length} lines`}
+          </button>
+        )}
+      </p>
+    </div>
+  );
+}
+
 /** Before the first message: the mode's empty state and a message box that starts the conversation. */
 function NotStarted({
   mode: modeId,
@@ -119,7 +185,7 @@ function NotStarted({
   mode: string;
   model?: string;
   prepare: (text: string) => string;
-  note?: ReactNode;
+  note?: ComposerNote;
   headerStart?: ReactNode;
   headerActions?: ReactNode;
   onStarted: (conversation: Conversation) => void;
@@ -129,18 +195,40 @@ function NotStarted({
   const mode = modes.data?.find((m) => m.id === modeId);
   const [effort, setEffort] = useEffortChoice();
   const queryClient = useQueryClient();
-  // Made by the first try; a send that failed is tried again in the same conversation.
-  const created = useRef<Conversation | null>(null);
+  // The conversation the first try made (or is making): a send that failed is
+  // tried again in it, and a second click while it's being made waits for it.
+  const creating = useRef<Promise<Conversation> | null>(null);
+  // Set at once on Send, before any state update can render: a double click sends once.
+  const inFlight = useRef(false);
   const start = useMutation({
-    mutationFn: async (text: string) => {
-      created.current ??= await api.createConversation(modeId, model);
-      return (await api.send(created.current.id, prepare(text), effort)) ?? created.current;
+    mutationFn: async (message: string) => {
+      creating.current ??= api.createConversation(modeId, model).then(
+        (conversation) => {
+          // In the lists straight away, even if the first message then fails.
+          queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          return conversation;
+        },
+        (error) => {
+          creating.current = null;
+          throw error;
+        },
+      );
+      const conversation = await creating.current;
+      return (await api.send(conversation.id, message, effort)) ?? conversation;
     },
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       onStarted(conversation);
     },
   });
+  const send = (text: string): Promise<unknown> => {
+    if (inFlight.current) return Promise.reject(new Error("Already sending."));
+    inFlight.current = true;
+    // Made now, before anything waits: what's sent is what the person saw as they pressed Send.
+    return start.mutateAsync(prepare(text)).finally(() => {
+      inFlight.current = false;
+    });
+  };
   const unknownMode = modes.isSuccess && !mode;
   // Shown once, over the message box, whether a starter or a typed message failed.
   const error = unknownMode ? `DataLab has no “${modeId}” mode.` : start.error?.message;
@@ -164,19 +252,13 @@ function NotStarted({
             <EmptyState
               mode={mode.id}
               kind={mode.kind}
-              onPick={(text) => start.mutate(text)}
+              onPick={(text) => send(text).catch(() => undefined)}
               starting={start.isPending}
             />
           )}
         </div>
       </div>
-      <ComposerBox
-        running={false}
-        sending={start.isPending || !mode}
-        error={error}
-        onSend={(text) => start.mutateAsync(text)}
-        note={note}
-      />
+      <ComposerBox running={false} sending={start.isPending || !mode} error={error} onSend={send} note={note} />
     </div>
   );
 }

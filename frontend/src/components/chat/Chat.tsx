@@ -25,14 +25,18 @@ export function Chat({
   headerActions,
   prepareMessage,
   composerNote,
+  autoFocus,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
   headerActions?: ReactNode;
-  /** What's sent for what the person typed (or the starter they picked): DockedChat adds its context here. */
+  /** What's sent for what the person typed (or the starter they picked): DockedChat adds its context here.
+   *  It's called when Send is pressed, before anything is sent. */
   prepareMessage?: (text: string) => string;
-  /** A line above the message box, such as what will be sent along with the message. */
-  composerNote?: ReactNode;
+  /** Above the message box, such as what will be sent along with the message. */
+  composerNote?: ComposerNote;
+  /** Put the cursor in the message box when the chat opens. */
+  autoFocus?: boolean;
 }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
@@ -47,7 +51,7 @@ export function Chat({
   const queryClient = useQueryClient();
   // A starter question is sent as it is, so the agent starts at once.
   const start = useMutation({
-    mutationFn: (text: string) => api.send(conversation.id, prepareMessage ? prepareMessage(text) : text, effort),
+    mutationFn: (message: string) => api.send(conversation.id, message, effort),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
 
@@ -131,7 +135,7 @@ export function Chat({
             <EmptyState
               mode={conversation.mode}
               kind={conversation.kind}
-              onPick={(text) => start.mutate(text)}
+              onPick={(text) => start.mutate(prepareMessage ? prepareMessage(text) : text)}
               starting={start.isPending || start.isSuccess || running}
               error={start.error?.message}
             />
@@ -165,6 +169,7 @@ export function Chat({
         effort={effort}
         prepareMessage={prepareMessage}
         note={composerNote}
+        autoFocus={autoFocus}
       />
     </div>
   );
@@ -736,16 +741,18 @@ function Composer({
   effort,
   prepareMessage,
   note,
+  autoFocus,
 }: {
   conversation: Conversation;
   running: boolean;
   effort: Effort;
   prepareMessage?: (text: string) => string;
-  note?: ReactNode;
+  note?: ComposerNote;
+  autoFocus?: boolean;
 }) {
   const queryClient = useQueryClient();
   const send = useMutation({
-    mutationFn: (text: string) => api.send(conversation.id, prepareMessage ? prepareMessage(text) : text, effort),
+    mutationFn: (message: string) => api.send(conversation.id, message, effort),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   const stop = useMutation({
@@ -757,13 +764,18 @@ function Composer({
       running={running}
       sending={send.isPending}
       error={send.error?.message}
-      onSend={(text) => send.mutateAsync(text)}
+      // The message is made as Send is pressed, so what's sent is what was shown then.
+      onSend={(text) => send.mutateAsync(prepareMessage ? prepareMessage(text) : text)}
       onStop={() => stop.mutate()}
       stopping={stop.isPending}
       note={note}
+      autoFocus={autoFocus}
     />
   );
 }
+
+/** What sits over the message box; given whether a message is being sent, to hold still meanwhile. */
+export type ComposerNote = ReactNode | ((sending: boolean) => ReactNode);
 
 /** The message box under a chat. It clears once `onSend` has succeeded. */
 export function ComposerBox({
@@ -774,6 +786,7 @@ export function ComposerBox({
   onStop,
   stopping = false,
   note,
+  autoFocus,
 }: {
   running: boolean;
   sending: boolean;
@@ -781,7 +794,8 @@ export function ComposerBox({
   onSend: (text: string) => Promise<unknown>;
   onStop?: () => void;
   stopping?: boolean;
-  note?: ReactNode;
+  note?: ComposerNote;
+  autoFocus?: boolean;
 }) {
   const [text, setText] = useState("");
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
@@ -802,11 +816,12 @@ export function ComposerBox({
     <footer className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
-        {note}
+        {typeof note === "function" ? note(sending) : note}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
         <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
           <textarea
             ref={box}
+            autoFocus={autoFocus}
             rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}

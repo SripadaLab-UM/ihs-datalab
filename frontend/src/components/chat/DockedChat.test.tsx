@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Conversation } from "@/api/client";
@@ -45,8 +45,10 @@ beforeEach(() => {
   vi.mocked(api.send).mockReset().mockImplementation(async (id) => conversation(id));
 });
 
+let client: QueryClient;
+
 function show(props: Partial<Parameters<typeof DockedChat>[0]> = {}) {
-  const client = new QueryClient();
+  client = new QueryClient();
   const view = render(
     <QueryClientProvider client={client}>
       <DockedChat mode="extraction" {...props} />
@@ -100,15 +102,26 @@ it("tries a failed first send again in the same conversation", async () => {
   expect(api.send).toHaveBeenLastCalledWith("new1", "Which tables hold sleep?", "medium");
 });
 
-it("sends its context with each message, unless the person unticks it", async () => {
+const include = () => screen.getByRole("checkbox", { name: /Send with your message: The query in the SQL editor/ });
+
+/** A send that waits until `finish` is called. */
+function held<T>(value: T) {
+  let finish!: () => void;
+  const promise = new Promise<T>((resolve) => (finish = () => resolve(value)));
+  return { promise, finish };
+}
+
+it("sends its context only once the person ticks it, and then with each message", async () => {
   listed = [conversation("c1", "Sleep tables")];
   show({ conversationId: "c1", context: query });
   expect(await screen.findByRole("button", { name: /Sleep tables/ })).toBeTruthy();
-  const include = screen.getByRole("checkbox", { name: /Send with your message: The query in the SQL editor/ });
-  expect(include).toBeChecked();
+  expect(include()).not.toBeChecked();
+  ask("Hello");
+  await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", "Hello", "medium"));
+  fireEvent.click(include());
   ask("Why is this slow?");
   await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", withContext("Why is this slow?", query), "medium"));
-  fireEvent.click(include);
+  fireEvent.click(include());
   ask("Thanks");
   await waitFor(() => expect(api.send).toHaveBeenLastCalledWith("c1", "Thanks", "medium"));
 });
@@ -117,6 +130,7 @@ it("sends the latest context, and offers none when it's empty", async () => {
   listed = [conversation("c1", "Sleep tables")];
   const update = show({ conversationId: "c1", context: query });
   await screen.findByRole("button", { name: /Sleep tables/ });
+  fireEvent.click(include());
   update({ context: { ...query, text: "SELECT 2 FROM dual" } });
   ask("And now?");
   await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", expect.stringContaining("SELECT 2 FROM dual"), "medium"));
@@ -132,6 +146,70 @@ it("shows an existing conversation as the Workspace does, with nothing added to 
   ask("Why is this slow?");
   await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", "Why is this slow?", "medium"));
   expect(api.createConversation).not.toHaveBeenCalled();
+});
+
+it("shows exactly what would be sent, the first lines and then all of them", async () => {
+  const long = { ...query, text: "SELECT a,\n  b,\n  c,\n  d\nFROM t\n" };
+  show({ context: long });
+  const preview = await screen.findByLabelText("What would be sent: The query in the SQL editor");
+  expect(screen.getByText("5 lines")).toBeTruthy();
+  expect(preview.textContent).toBe("SELECT a,\n  b,\n  c,\n…");
+  fireEvent.click(screen.getByRole("button", { name: "Show all 5 lines" }));
+  expect(preview.textContent).toBe("SELECT a,\n  b,\n  c,\n  d\nFROM t");
+  expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+});
+
+it("sends what was shown as Send was pressed, and holds the choice still while it goes", async () => {
+  const making = held(conversation("new1"));
+  vi.mocked(api.createConversation).mockReturnValueOnce(making.promise);
+  const update = show({ context: query });
+  await screen.findByText(/Data session/);
+  fireEvent.click(include());
+  ask("Why is this slow?");
+  // While the conversation is being made, the box can't be unticked, and a new query isn't what goes.
+  await waitFor(() => expect(include()).toBeDisabled());
+  fireEvent.click(include());
+  update({ context: { ...query, text: "SELECT 2 FROM dual" } });
+  listed = [conversation("new1")];
+  await act(async () => making.finish());
+  await waitFor(() => expect(api.send).toHaveBeenCalledWith("new1", withContext("Why is this slow?", query), "medium"));
+});
+
+it("starts one conversation for a double click", async () => {
+  const making = held(conversation("new1"));
+  vi.mocked(api.createConversation).mockReturnValueOnce(making.promise);
+  show();
+  await screen.findByText(/Data session/);
+  fireEvent.change(screen.getByLabelText("Your question or instruction"), { target: { value: "Which tables?" } });
+  const button = screen.getByRole("button", { name: /Send/ });
+  // Both before the page can render that the first is on its way.
+  act(() => {
+    fireEvent.click(button);
+    fireEvent.click(button);
+  });
+  listed = [conversation("new1")];
+  await act(async () => making.finish());
+  await waitFor(() => expect(api.send).toHaveBeenCalled());
+  expect(api.createConversation).toHaveBeenCalledTimes(1);
+  expect(api.send).toHaveBeenCalledTimes(1);
+});
+
+it("lists a conversation it made even when the first message fails", async () => {
+  vi.mocked(api.send).mockRejectedValueOnce(new Error("U-M GPT didn't answer."));
+  show();
+  await screen.findByText(/Data session/);
+  const refresh = vi.spyOn(client, "invalidateQueries");
+  ask("Which tables hold sleep?");
+  expect(await screen.findByText("U-M GPT didn't answer.")).toBeTruthy();
+  expect(refresh).toHaveBeenCalledWith({ queryKey: ["conversations"] });
+});
+
+it("keeps the cursor in the message box once the conversation starts", async () => {
+  show();
+  await screen.findByText(/Data session/);
+  ask("Which tables hold sleep?");
+  await screen.findByRole("button", { name: /rename/ });
+  expect(document.activeElement).toBe(screen.getByLabelText("Your question or instruction"));
 });
 
 it("says so when its conversation is gone", async () => {
