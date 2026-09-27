@@ -7,7 +7,7 @@
 // rendered as text (and Markdown, for guides), never as HTML.
 
 import type { Approval } from "./ApprovalCard";
-import type { Item } from "./transcript";
+import { finalAnswer, type Item, type Turn } from "./transcript";
 
 export type IconName =
   | "book" | "search" | "table" | "link" | "db" | "code" | "chart" | "shield"
@@ -321,12 +321,29 @@ export function activityRows(items: Item[], running: boolean): Row[] {
   return fold(rows);
 }
 
-/** What the agent is doing right now, for the live card: the running step, or its latest words. */
+/**
+ * The live line: the step that's running, else the model's own short heading
+ * for what it's thinking about. Never a repeat of the narration above it, and
+ * never more specific than the events say.
+ */
 export function nowLine(rows: Row[], reasoning: string): string {
   const last = rows.at(-1);
   if (last?.type === "step" && last.step.tone === "now") return `${last.step.title}…`;
-  const said = [...rows].reverse().find((r) => r.type === "say");
-  const thought = reasoning.trim().split("\n").filter(Boolean).at(-1);
-  if (thought && (!said || rows.at(-1)?.type !== "say")) return thought.replace(/^\*\*|\*\*$/g, "");
-  return said?.type === "say" ? said.text.split("\n")[0] : "Getting started…";
+  const heading = reasoning
+    .split("\n")
+    .reverse()
+    .map((line) => /^\s*\*\*(.+?)\*\*\s*$/.exec(line)?.[1])
+    .find(Boolean);
+  if (heading) return `${heading}…`;
+  return rows.length ? "Thinking about the next step…" : "Getting started…";
+}
+
+/**
+ * The turn's answer, only if it has one: a message marked as the final answer,
+ * or (for a turn that completed) its last message. A stopped or failed turn's
+ * last words are narration, already in its story, not an answer.
+ */
+export function answerOf(turn: Turn): string {
+  const hasFinal = turn.items.some((item) => item.kind === "message" && item.phase === "final_answer");
+  return hasFinal || turn.status === "completed" ? finalAnswer(turn) : "";
 }

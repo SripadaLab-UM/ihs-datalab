@@ -30,17 +30,17 @@ export function Shell() {
           open DataLab again with the link it printed when it started.
         </div>
       )}
-      <header className="flex items-baseline gap-8 border-b border-line px-5 pt-4 pb-3.5">
-        <span className="font-serif text-[21px] leading-none">datalab.</span>
-        <nav className="flex gap-6 overflow-x-auto">
+      <header className="flex items-center gap-8 border-b border-line px-5">
+        <span className="py-3.5 font-serif text-[21px] leading-none">datalab.</span>
+        <nav className="flex gap-1 self-stretch overflow-x-auto">
           {TABS.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
               className={({ isActive }) =>
                 clsx(
-                  "font-sans text-[10.5px] font-semibold tracking-[0.14em] whitespace-nowrap uppercase transition-colors",
-                  isActive ? "text-ink" : "text-faint hover:text-ink",
+                  "flex items-center border-b-2 px-2.5 font-sans text-[13.5px] whitespace-nowrap transition-colors focus-visible:outline-offset-[-3px]",
+                  isActive ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink",
                 )
               }
             >

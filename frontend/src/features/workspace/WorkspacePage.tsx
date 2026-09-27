@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
 import { api, type Mode } from "@/api/client";
@@ -20,41 +20,117 @@ export function WorkspacePage() {
   const [exportingReport, setExportingReport] = useState(false);
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations });
   const current = conversations.data?.find((c) => c.id === conversationId);
+  // In a narrower window the conversation list (below 1024px) and the side
+  // panel (below 1280px) become drawers over the page, so the reading column
+  // keeps its width.
+  const [drawer, setDrawer] = useState<"rail" | "panel" | null>(null);
+  const railOpen = drawer === "rail";
+  const panelOpen = drawer === "panel";
+  const railBox = useRef<HTMLElement>(null);
+  const panelBox = useRef<HTMLElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  // One drawer at a time. Focus goes into it on open and back to its button on close.
+  const openDrawer = (which: "rail" | "panel") => {
+    opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDrawer(which);
+  };
+  const closeDrawer = () => setDrawer(null);
+  useEffect(() => {
+    if (drawer) {
+      const box = drawer === "rail" ? railBox.current : panelBox.current;
+      box?.querySelector<HTMLElement>("a[href], button")?.focus();
+    } else if (opener.current?.isConnected) {
+      opener.current.focus();
+      opener.current = null;
+    }
+  }, [drawer]);
+  useEffect(() => setDrawer(null), [conversationId]);
+  useEffect(() => {
+    if (!railOpen && !panelOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !document.querySelector("[role=dialog]")) closeDrawer();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [railOpen, panelOpen]);
+  const showRail = (
+    <Button
+      variant="ghost"
+      className="-ml-2 px-2 lg:hidden"
+      onClick={() => openDrawer("rail")}
+      aria-label="Show conversations"
+      aria-expanded={railOpen}
+      aria-controls="conversation-list"
+    >
+      <Icon name="menu" size={16} />
+    </Button>
+  );
 
   return (
-    <div className="grid h-full min-h-0 grid-cols-[16rem_1fr_20rem]">
-      <aside className="flex min-h-0 flex-col border-r border-line">
-        <div className="px-5 pt-6 pb-4">
-          <button
-            type="button"
-            onClick={() => setCreating(true)}
-            className="font-serif text-[16px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
-          >
-            Start a new question
-          </button>
+    <div
+      className={clsx(
+        "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)]",
+        conversationId && "xl:grid-cols-[16rem_minmax(0,1fr)_20rem]",
+      )}
+    >
+      {railOpen && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={closeDrawer} />}
+      {panelOpen && <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={closeDrawer} />}
+      <aside
+        id="conversation-list"
+        ref={railBox}
+        aria-label="Conversations"
+        className={clsx(
+          "min-h-0 flex-col border-r border-line bg-rail",
+          railOpen ? "absolute inset-y-0 left-0 z-30 flex w-72 shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:flex",
+        )}
+      >
+        <div className="flex gap-2 px-3 pt-4 pb-2">
+          <Button className="flex-1 justify-start bg-surface" onClick={() => setCreating(true)}>
+            <Icon name="pen" size={14} /> New conversation
+          </Button>
+          {railOpen && (
+            <Button variant="ghost" className="px-2 lg:hidden" onClick={closeDrawer} aria-label="Close the conversation list">
+              <Icon name="close" />
+            </Button>
+          )}
         </div>
         <Panel title="Conversations">
-          <ul className="flex flex-col border-t border-line">
-            {conversations.data?.map((c) => (
-              <li key={c.id} className="border-b border-line">
-                <Link
-                  to={`/workspace/${c.id}`}
-                  aria-current={c.id === conversationId ? "page" : undefined}
-                  className={clsx(
-                    "flex flex-col gap-0.5 py-2.5 font-serif text-[15px] leading-snug",
-                    c.id === conversationId ? "text-ink" : "text-muted hover:text-ink",
-                  )}
-                >
-                  <span className="flex items-baseline gap-2">
-                    <span className="line-clamp-2 flex-1 break-words">{c.title}</span>
-                    {c.busy && <span className="dl-breathe size-[7px] shrink-0 rounded-full bg-ink" title="Working" />}
-                  </span>
-                  <span className={clsx("dl-label", c.kind === "data" ? "!text-data" : "!text-research")}>
-                    {c.kind === "data" ? "data · web blocked" : "research · no database"}
-                  </span>
-                </Link>
-              </li>
-            ))}
+          <ul className="-mx-2 flex flex-col gap-px">
+            {conversations.data?.map((c) => {
+              const here = c.id === conversationId;
+              return (
+                <li key={c.id}>
+                  <Link
+                    to={`/workspace/${c.id}`}
+                    aria-current={here ? "page" : undefined}
+                    className={clsx(
+                      "relative flex items-center gap-2 rounded-[3px] py-2 pr-2 pl-3 font-sans text-[13.5px] leading-snug",
+                      here
+                        ? "bg-surface font-medium text-ink shadow-[inset_0_0_0_1px_var(--color-line)] before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-ink"
+                        : "text-muted hover:bg-surface/70 hover:text-ink",
+                    )}
+                  >
+                    <span
+                      className={clsx("shrink-0", c.kind === "data" ? "text-data" : "text-research")}
+                      title={
+                        c.kind === "data"
+                          ? "Data session: database access, web blocked"
+                          : "Research session: web access, no database connection"
+                      }
+                    >
+                      <Icon name={c.kind === "data" ? "lock" : "globe"} size={13} />
+                    </span>
+                    <span className="sr-only">{c.kind === "data" ? "Data session:" : "Research session:"}</span>
+                    <span className="line-clamp-2 min-w-0 flex-1 break-words">{c.title}</span>
+                    {c.busy && (
+                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted" title="The agent is working">
+                        <span className="dl-breathe size-[6px] rounded-full bg-ink" /> working
+                      </span>
+                    )}
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </Panel>
       </aside>
@@ -65,15 +141,28 @@ export function WorkspacePage() {
             <Chat
               key={current.id}
               conversation={current}
+              headerStart={showRail}
               headerActions={
-                <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
-                  <Icon name="export" size={14} /> Export
-                </Button>
+                <>
+                  <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
+                    <Icon name="export" size={14} /> Export
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className="px-1 text-[13px] xl:hidden"
+                    onClick={() => openDrawer("panel")}
+                    aria-expanded={panelOpen}
+                    aria-controls="conversation-files"
+                  >
+                    <Icon name="folder" size={14} /> Files
+                  </Button>
+                </>
               }
             />
           </OpenFileContext>
         ) : (
-          <div className="mx-auto flex h-full max-w-[40rem] flex-col justify-center gap-5 px-8">
+          <div className="mx-auto flex h-full max-w-[40rem] flex-col justify-center gap-5 px-6 sm:px-8">
+            <div className="lg:hidden">{showRail}</div>
             <p className="dl-label">IHS DataLab</p>
             <p className="font-serif text-[44px] leading-[1.08] tracking-[-0.01em] text-ink text-balance">
               Ask the IHS data a question.
@@ -84,16 +173,33 @@ export function WorkspacePage() {
             </p>
             <div>
               <Button variant="primary" className="mt-2 px-4 py-2" onClick={() => setCreating(true)}>
-                Start a new question
+                <Icon name="pen" size={14} /> New conversation
               </Button>
             </div>
           </div>
         )}
       </main>
 
-      <aside className="min-h-0 border-l border-line">
-        {current && <SidePanel key={current.id} conversation={current} onOpen={setOpen} />}
-      </aside>
+      {conversationId && (
+        <aside
+          id="conversation-files"
+          ref={panelBox}
+          aria-label="Files, inputs, queries and history"
+          className={clsx(
+            "relative min-h-0 border-l border-line bg-rail",
+            panelOpen
+              ? "absolute inset-y-0 right-0 z-30 block w-[min(22rem,100%)] shadow-xl xl:static xl:w-auto xl:shadow-none"
+              : "hidden xl:block",
+          )}
+        >
+          {panelOpen && (
+            <Button variant="ghost" className="absolute top-1.5 right-1.5 z-10 px-2 xl:hidden" onClick={closeDrawer} aria-label="Close the files panel">
+              <Icon name="close" />
+            </Button>
+          )}
+          {current && <SidePanel key={current.id} conversation={current} onOpen={setOpen} />}
+        </aside>
+      )}
 
       {current && exportingReport && (
         <ExportDialog conversation={current} withReport onClose={() => setExportingReport(false)} />

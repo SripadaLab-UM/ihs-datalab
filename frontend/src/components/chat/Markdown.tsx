@@ -1,4 +1,4 @@
-import { lazy, Suspense, use } from "react";
+import { createContext, lazy, Suspense, use } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -7,6 +7,8 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 import { ExternalLink } from "./ExternalLink";
 
 const VegaChart = lazy(() => import("./VegaChart"));
+// Code inside a block (```) stays code, even on one line: only inline code opens files.
+const InBlock = createContext(false);
 
 /**
  * Renders an agent's Markdown. Charts in ```vega-lite blocks are drawn inline.
@@ -22,7 +24,16 @@ export function Markdown({ text }: { text: string }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          pre({ children }) {
+            return (
+              <InBlock value={true}>
+                <pre>{children}</pre>
+              </InBlock>
+            );
+          },
           code({ className, children }) {
+            // A component, so it may read context; `use` works here like a hook.
+            const inBlock = use(InBlock);
             const language = /language-(\S+)/.exec(className ?? "")?.[1];
             const source = String(children).replace(/\n$/, "");
             if (language === "vega-lite") {
@@ -30,6 +41,22 @@ export function Markdown({ text }: { text: string }) {
                 <Suspense fallback={<div className="text-sm text-muted">Drawing chart…</div>}>
                   <VegaChart spec={source} />
                 </Suspense>
+              );
+            }
+            // A workspace path written as code (`/work/outputs/report.html`) opens the file.
+            const path = source.trim();
+            const file =
+              !className && !inBlock && openFile && /^\/[^\s*?]+[^/]$/.test(path) ? workspaceFile(path) : null;
+            if (file && openFile) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => openFile(file)}
+                  title={`Open ${source.trim()}`}
+                  className="rounded-[2px] bg-sunken px-1 font-mono text-[0.74em] text-ink underline decoration-faint underline-offset-2 hover:decoration-ink"
+                >
+                  {source.trim()}
+                </button>
               );
             }
             return <code className={className}>{children}</code>;

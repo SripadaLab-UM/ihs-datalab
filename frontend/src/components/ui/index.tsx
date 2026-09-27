@@ -157,7 +157,7 @@ export function Modal({
     }
   };
   return createPortal(
-    <div className="fixed inset-0 z-20 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
       <div
         ref={box}
         role="dialog"
@@ -205,8 +205,8 @@ export function Tabs<T extends string>({
           aria-selected={tab.id === value}
           onClick={() => onChange(tab.id)}
           className={clsx(
-            "-mb-px border-b py-3 font-sans text-[10.5px] font-semibold tracking-[0.14em] uppercase",
-            tab.id === value ? "border-ink text-ink" : "border-transparent text-faint hover:text-ink",
+            "-mb-px border-b-2 py-2.5 font-sans text-[13px]",
+            tab.id === value ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink",
           )}
         >
           {tab.label}
@@ -247,7 +247,7 @@ export function EmptyNote({ icon, title, children }: { icon: AnyIcon; title: str
       <p className="dl-label flex items-center gap-1.5">
         <Icon name={icon} size={12} /> {title}
       </p>
-      <p className="max-w-[20rem] font-serif text-[15px] leading-relaxed text-muted italic">{children}</p>
+      <p className="max-w-[20rem] font-sans text-[13px] leading-relaxed text-muted">{children}</p>
     </div>
   );
 }

@@ -1,22 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
-import { Button, Chip, Icon, SessionBadge } from "@/components/ui";
+import { Button, Chip, FileGlyph, Icon, SessionBadge } from "@/components/ui";
+import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
-import { activityRows, nowLine } from "./activity";
+import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
-import { buildTranscript, canContinue, finalAnswer, type Item, type ModelStatus, type Turn } from "./transcript";
+import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
 // Events that start or end a turn or its review: DataLab's busy flag changes.
 const TURN_EVENTS = new Set(["user_message", "turn_started", "turn_finished", "review_started", "review_finished", "turn_done"]);
 
 /** The shared chat. Every tab that needs an agent uses this component. */
-export function Chat({ conversation, headerActions }: { conversation: Conversation; headerActions?: ReactNode }) {
+export function Chat({
+  conversation,
+  headerStart,
+  headerActions,
+}: {
+  conversation: Conversation;
+  headerStart?: ReactNode;
+  headerActions?: ReactNode;
+}) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
   const last = turns.at(-1);
@@ -83,7 +92,8 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line px-8 py-3.5">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-8">
+        {headerStart}
         <Title conversation={conversation} />
         <SessionBadge kind={conversation.kind} />
         <span className="font-mono text-[11.5px] text-faint">{conversation.model}</span>
@@ -93,7 +103,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         </div>
       </header>
       <div
-        className="relative min-h-0 flex-1 overflow-y-auto px-8 py-8"
+        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8"
         onScroll={(e) => {
           const el = e.currentTarget;
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
@@ -273,10 +283,10 @@ function TurnView({
   running: boolean;
   last: boolean;
 }) {
-  const answer = finalAnswer(turn);
+  const answer = answerOf(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
-  const story = rows.filter((row) => row.type !== "review");
+  const storyRows = rows.filter((row) => row.type !== "review");
   const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
   const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
   const queryClient = useQueryClient();
@@ -284,39 +294,43 @@ function TurnView({
     mutationFn: () => api.stop(conversationId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
+  const story = (
+    <Story
+      rows={storyRows}
+      renderRow={(row) => {
+        switch (row.type) {
+          case "step":
+            return <StepRow step={row.step} />;
+          case "group":
+            return <GroupRow row={row} />;
+          case "say":
+            return <SayRow text={row.text} />;
+          case "approval":
+            return (
+              <div className="py-2">
+                <ApprovalCard conversationId={conversationId} approval={row.approval} />
+              </div>
+            );
+          case "notice":
+            return (
+              <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
+                <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
+                {row.text}
+              </p>
+            );
+          default:
+            return null;
+        }
+      }}
+    />
+  );
+  // Completed with an answer: the answer leads, the work behind it folds away.
+  // A failed or stopped turn keeps its whole story in view.
+  const finished = Boolean(answer) && turn.status === "completed" && !live;
   return (
     <article className="flex flex-col gap-5">
-      {turn.userText && (
-        <Question text={turn.userText} continues={turn.continues} />
-      )}
-      <Story
-        rows={story}
-        renderRow={(row) => {
-          switch (row.type) {
-            case "step":
-              return <StepRow step={row.step} />;
-            case "group":
-              return <GroupRow row={row} />;
-            case "say":
-              return <SayRow text={row.text} />;
-            case "approval":
-              return (
-                <div className="py-2">
-                  <ApprovalCard conversationId={conversationId} approval={row.approval} />
-                </div>
-              );
-            case "notice":
-              return (
-                <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
-                  <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
-                  {row.text}
-                </p>
-              );
-            default:
-              return null;
-          }
-        }}
-      />
+      {turn.userText && <Question text={turn.userText} continues={turn.continues} />}
+      {!finished && story}
       {live && !answer && (
         <NowCard
           line={
@@ -334,12 +348,118 @@ function TurnView({
       {reviews.slice(-1).map((review) => (
         <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
       ))}
+      {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
+      {finished && <HowItWasMade rows={storyRows}>{story}</HowItWasMade>}
       {last && !running && canContinue(turn) && <ContinueButton conversationId={conversationId} />}
       {turn.status === "interrupted" && (
         <p className="font-serif text-[16px] text-muted italic">Stopped. Anything it saved is in History.</p>
       )}
+      {turn.status === "failed" && (
+        <p className="font-sans text-[14px] text-danger">
+          This turn ended with an error (shown above). Anything it saved is in History.
+        </p>
+      )}
     </article>
   );
+}
+
+/** The output files this turn changed that still exist, to open straight from the answer. */
+function MadeHere({ items, conversationId }: { items: Item[]; conversationId: string }) {
+  const openFile = use(OpenFileContext);
+  const outputs = useQuery({ queryKey: ["files", conversationId], queryFn: () => api.files(conversationId) });
+  const existing = new Set(outputs.data?.map((file) => `/work/outputs/${file.path}`));
+  const paths = [
+    ...new Set(items.flatMap((item) => (item.kind === "files" ? item.paths : [])).filter((p) => existing.has(p))),
+  ];
+  if (paths.length === 0 || !openFile) return null;
+  return (
+    <section>
+      <h3 className="dl-label mb-2">Made in this turn</h3>
+      <ul className="flex flex-wrap gap-2">
+        {paths.map((path) => {
+          const file = workspaceFile(path);
+          if (!file) return null;
+          return (
+            <li key={path}>
+              <button
+                type="button"
+                onClick={() => openFile(file)}
+                title={path}
+                className="inline-flex max-w-[22rem] items-center gap-2 rounded-[3px] border border-line bg-surface px-2.5 py-1.5 font-sans text-[13px] hover:border-ink"
+              >
+                <FileGlyph kind={file.kind} size={20} />
+                <span className="truncate">{path.replace(/^\/work\/outputs\//, "")}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * The work behind a finished answer, folded into one row that says what it
+ * amounted to. Failed steps and the plan are named on the row itself, so
+ * folding never hides them.
+ */
+function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (rows.length === 0) return null;
+  const steps = rows.flatMap((row) => (row.type === "step" ? [row.step] : row.type === "group" ? row.steps : []));
+  const count = (icon: string) => steps.filter((step) => step.icon === icon).length;
+  const files = new Set(
+    steps.flatMap((step) => (step.detail?.kind === "files" ? step.detail.paths : [])),
+  ).size;
+  // Failed steps and error notices are named on the row, so folding never hides them.
+  const errors =
+    steps.filter((step) => step.tone === "error").length +
+    rows.filter((row) => row.type === "notice" && row.tone === "error").length;
+  const plan = rows.find((row) => row.type === "approval" && row.approval.approvalKind === "analysis_plan");
+  const facts = [
+    steps.length > 0 && `${steps.length} step${steps.length === 1 ? "" : "s"}`,
+    count("db") && `${count("db")} quer${count("db") === 1 ? "y" : "ies"}`,
+    count("book") && `${count("book")} lab guide${count("book") === 1 ? "" : "s"} read`,
+    files && `${files} file${files === 1 ? "" : "s"} changed`,
+  ].filter(Boolean) as string[];
+  const planChip =
+    plan?.type !== "approval"
+      ? null
+      : plan.approval.frozen
+        ? { text: "plan approved and frozen", tone: "you" as const }
+        : plan.approval.state === "declined"
+          ? { text: "plan not approved", tone: "attn" as const }
+          : plan.approval.state === "withdrawn"
+            ? { text: "plan withdrawn", tone: "attn" as const }
+            : null;
+  return (
+    <section className="border-y border-line">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
+        <Marker tone="done" open={open} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
+          <span className="flex flex-wrap gap-1.5">
+            {facts.map((fact) => (
+              <Chip key={fact}>{fact}</Chip>
+            ))}
+            {planChip && <Chip tone={planChip.tone}>{planChip.text}</Chip>}
+            {errors > 0 && (
+              <Chip tone="bad">
+                {errors} error{errors === 1 ? "" : "s"} along the way
+              </Chip>
+            )}
+          </span>
+        </span>
+      </button>
+      {open && <div className="pb-4 pl-[19px]">{children}</div>}
+    </section>
+  );
+}
+
+/** The first line of Markdown text, without its markup. */
+function firstLine(text: string): string {
+  const line = text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  return line.replace(/^#+\s*|^[-*]\s+|^\d+\.\s+/, "").replace(/\*\*|`/g, "");
 }
 
 /** The person's question, set large; a long, pasted one reads as text, not as a heading. */
@@ -393,8 +513,10 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 /** The answer, set apart from the work behind it. */
 function AnswerCard({ answer, trace, streaming }: { answer: string; trace: Turn["trace"]; streaming: boolean }) {
   return (
-    <section className="mt-4 border-t border-ink pt-5">
-      <h3 className="dl-label mb-3">{streaming ? "Writing the answer…" : "The answer"}</h3>
+    <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
+      <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
+        {streaming ? "Writing the answer…" : "Answer"}
+      </h3>
       <Markdown text={answer} />
       {trace && !streaming && (
         <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
@@ -456,7 +578,8 @@ function ReviewBox({
     mutationFn: () => api.rerunReview(conversationId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
-  const [open, setOpen] = useState(true);
+  // Collapsed once done: its header says what it is; the checklist is one click away.
+  const [open, setOpen] = useState(false);
   const reviewing = review.status === "running" && running;
   const unfinished = !reviewing && (review.status === "failed" || review.status === "stopped");
   return (
@@ -475,6 +598,10 @@ function ReviewBox({
                   ? "Stopped before it finished."
                   : "Didn't finish (the model service may have been busy). The answer above is unaffected."}
           </span>
+          {!open && review.status === "done" && review.text && (
+            // Its opening line, as written: the review's own words, not a verdict made from them.
+            <span className="mt-1 line-clamp-1 font-sans text-[13px] text-ink">{firstLine(review.text)}</span>
+          )}
         </span>
       </button>
         {reviewing && (
@@ -528,6 +655,14 @@ function Composer({
   suggestion: { text: string } | null;
 }) {
   const [text, setText] = useState("");
+  // The box grows with what's typed (wrapped lines too), up to about eight lines.
+  const box = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
+  }, [text]);
   // A starter prompt the person picked goes into the box, for them to edit and send.
   useEffect(() => {
     // Never over what the person has already typed.
@@ -552,11 +687,14 @@ function Composer({
   };
 
   return (
-    <footer className="px-8 pt-2 pb-6">
+    <footer className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[42rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
-        <div className="flex items-end gap-3 border-b border-line pb-2 focus-within:border-ink">
+        {/* The hint sits under the box, so the box itself asks a plain question. */}
+        <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
           <textarea
+            ref={box}
+            rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -565,15 +703,15 @@ function Composer({
                 submit();
               }
             }}
-            rows={Math.min(8, Math.max(1, text.split("\n").length))}
-            placeholder={running ? "The agent is working…" : "Ask a question… (Shift+Enter for a new line)"}
-            title="Enter sends; Shift+Enter starts a new line"
-            className="min-h-10 flex-1 resize-none bg-transparent py-2 font-serif text-[18px] leading-snug outline-none placeholder:text-faint placeholder:italic"
+            aria-label="Your question or instruction"
+            placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : "Ask a question, or say what to do next"}
+            className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
           />
           <select
             value={effort}
             onChange={(e) => setEffort(e.target.value as Effort)}
-            className="bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
+            aria-label="How hard the agent thinks"
+            className="self-center bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
             title="How hard the agent thinks"
           >
             <option value="low">Quick</option>
@@ -581,7 +719,7 @@ function Composer({
             <option value="high">Thorough</option>
           </select>
           {running ? (
-            <Button variant="danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
+            <Button variant="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
               <Icon name="stop" size={14} /> Stop
             </Button>
           ) : (
@@ -590,6 +728,9 @@ function Composer({
             </Button>
           )}
         </div>
+        <p className="mt-1.5 px-1 font-sans text-[11.5px] text-faint">
+          Enter to send · Shift+Enter for a new line · the agent shows its steps as it works
+        </p>
       </div>
     </footer>
   );
