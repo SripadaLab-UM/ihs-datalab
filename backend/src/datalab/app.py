@@ -41,6 +41,7 @@ from datalab.sessions.inputs import AttachmentStore
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.plans import PlanDesk, PlanStore
 from datalab.sessions.store import ConversationStore
+from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
@@ -79,7 +80,9 @@ def create_app(
     if catalog is None:
         catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
-    data = DataService(database or _LazyOracle(settings), access_log, settings.limits, allowed)
+    data = DataService(
+        database or _LazyOracle(settings), access_log, settings.limits, allowed, catalog
+    )
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
@@ -109,6 +112,8 @@ def create_app(
         timeout=httpx.Timeout(connect=15, read=900, write=60, pool=15)
     )
 
+    titles = TitleWriter(model_http, settings.model_base_url, model_key, settings.allowed_models)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if manage_containers:
@@ -120,6 +125,7 @@ def create_app(
             yield
         reaper.cancel()
         await sessions.close_all()
+        await titles.aclose()  # before the model client and database close
         await model_http.aclose()
         connection.close()
 
@@ -161,6 +167,7 @@ def create_app(
             access_log,
             models=approved_models,
             allowed_models=settings.allowed_models,
+            titles=titles,
         )
     )
     previews = Previews()

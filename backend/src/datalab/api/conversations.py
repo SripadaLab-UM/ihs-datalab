@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from datalab.relay.policy import model_allowed
 from datalab.sessions.approvals import Unshowable
@@ -16,13 +16,15 @@ from datalab.sessions.manager import Busy, SessionManager
 from datalab.sessions.modes import MODES
 from datalab.sessions.plans import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
+from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter
 
 _HEARTBEAT_SECONDS = 15
 
 
 class NewConversation(BaseModel):
     mode: str = "analysis"
-    title: str = Field(default="New conversation", max_length=200)
+    # Normally left out: the title is written from the first question.
+    title: str = Field(default=DEFAULT_TITLE, max_length=200)
     model: str | None = None
 
 
@@ -40,6 +42,17 @@ class ConversationOut(BaseModel):
 
 class ConversationChange(BaseModel):
     rigor_review: bool | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def _one_line(cls, title: str | None) -> str | None:
+        if title is None:
+            return None
+        title = " ".join(title.split())
+        if not title:
+            raise ValueError("a title can't be empty")
+        return title
 
 
 class NewMessage(BaseModel):
@@ -96,8 +109,22 @@ def build_conversations_router(
     *,
     models: Callable[[], Awaitable[list[str]]],
     allowed_models: tuple[str, ...] | None = None,
+    titles: TitleWriter | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["conversations"])
+
+    def name_after_first_question(conversation: Conversation, question: str) -> None:
+        if titles is None or conversation.title != DEFAULT_TITLE:
+            return
+        writer = titles
+
+        async def write() -> None:
+            title = await writer.title(question, model=conversation.model, kind=conversation.kind)
+            # Not if the person renamed it meanwhile, or it was deleted.
+            if store.rename_if(conversation.id, title, current=DEFAULT_TITLE):
+                store.append(conversation.id, "title_changed", {"title": title})
+
+        writer.start(conversation.id, write)
 
     def out(conversation: Conversation) -> ConversationOut:
         return ConversationOut(**conversation.__dict__, busy=sessions.is_busy(conversation.id))
@@ -157,6 +184,10 @@ def build_conversations_router(
         get_or_404(conversation_id)
         if body.rigor_review is not None:
             store.set_rigor_review(conversation_id, body.rigor_review)
+        if body.title is not None:
+            store.rename(conversation_id, body.title)
+            # Other windows showing this conversation pick the new name up.
+            store.append(conversation_id, "title_changed", {"title": body.title})
         return out(get_or_404(conversation_id))
 
     @router.delete("/conversations/{conversation_id}", status_code=204)
@@ -177,6 +208,7 @@ def build_conversations_router(
             await sessions.send(conversation, body.text, body.effort)
         except Busy as error:
             raise HTTPException(409, str(error)) from error
+        name_after_first_question(conversation, body.text)
         return out(conversation)
 
     @router.post("/conversations/{conversation_id}/stop", status_code=202)

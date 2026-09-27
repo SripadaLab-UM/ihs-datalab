@@ -177,6 +177,34 @@ access. It never gains it.
     a second layer (see the PRODUCT to-dos).
 - Each query runs in a `READ ONLY` transaction. Only `SELECT`/`WITH`
   statements are accepted; the SQL is parsed, not pattern-matched.
+- **Functions: Oracle's built-ins only** (`sqlcheck.ORACLE_FUNCTIONS`).
+  - Refused: any other function name, since a function defined in the
+    database, perhaps by a more privileged account, could do more than read.
+    Package calls (`UTL_HTTP.REQUEST`, `DBMS_*`) are refused too.
+  - Also refused, although they are built-ins: the ones that can make the
+    database server fetch URLs or files, or describe the server and its
+    network (XML functions, URI types, `BFILENAME`, `SYS_CONTEXT`, `USERENV`).
+  - Why a built-in's name is safe: an unqualified built-in name always runs
+    the built-in. `tests/test_sqlcheck_oracle.py` tries to take over every
+    allowed name on the synthetic database, both with a same-named function
+    in the session's own schema and with a public synonym. Every one still
+    runs the built-in, and a control name that isn't a built-in is taken
+    over, as expected. A name can't be added without a sample call that this
+    test runs.
+  - Calls are checked by the name as written, not as the parser reads it
+    (it maps some names, such as IFNULL, onto its own functions). A quoted
+    name must match exactly: Oracle treats `"nvl"` as a different object
+    from `NVL`.
+- **Every column must be a real column** of a table in its scope, checked
+  against the catalog. Oracle runs a bare name that isn't a column, such as
+  `ORA_DATABASE_NAME` or `DBMS_UTILITY.PORT_STRING`, as a function call with
+  no arguments. With no catalog, no query runs.
+  - Allowed without a catalog column: Oracle's pseudo-columns (`ROWNUM`,
+    `LEVEL`, `USER`, `SYSDATE`, …). All are reserved words, and the Oracle
+    test checks none of them can be taken over.
+  - Refused because the column check can't follow them: PIVOT and UNPIVOT
+    (use conditional aggregation), and a select-list alias in HAVING (Oracle
+    before 23ai would look for a function of that name).
 - **Guardrails protect the database and the laptop:**
   - an end-to-end deadline that really cancels the query in Oracle;
   - caps on rows and bytes per extraction, which only the user, not the

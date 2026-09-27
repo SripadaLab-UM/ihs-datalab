@@ -59,11 +59,14 @@ export const api = {
   models: () => request<Models>("/api/models"),
   conversations: () => request<Conversation[]>("/api/conversations"),
   conversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
-  createConversation: (mode: string, title: string, model?: string) =>
+  // No title: DataLab writes one from the first question.
+  createConversation: (mode: string, model?: string) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ mode, title, model }),
+      body: JSON.stringify({ mode, model }),
     }),
+  rename: (id: string, title: string) =>
+    request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
   send: (id: string, text: string, effort?: Effort) =>

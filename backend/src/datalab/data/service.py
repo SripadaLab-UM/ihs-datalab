@@ -19,6 +19,7 @@ from typing import Any, Protocol
 
 from datalab.config import QueryLimits
 from datalab.data.access_log import AccessLog
+from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
 from datalab.data.sqlcheck import SqlRejected, check_sql
 
@@ -57,8 +58,12 @@ class DataService:
         access_log: AccessLog,
         limits: QueryLimits,
         allowed_schemas: frozenset[str],
+        catalog: Catalog,
     ) -> None:
         self._database = database
+        # Every column a query names is checked against the catalog: with an
+        # empty one, no query runs.
+        self._catalog = catalog
         self._log = access_log
         self._limits = limits
         self._allowed_schemas = allowed_schemas
@@ -77,7 +82,9 @@ class DataService:
         query_id = _new_query_id()
         binds = dict(binds or {})
         try:
-            checked = check_sql(sql, allowed_schemas=self._allowed_schemas)
+            checked = check_sql(
+                sql, allowed_schemas=self._allowed_schemas, columns=self._catalog.column_index()
+            )
             _check_binds(checked.binds, binds)
         except SqlRejected as rejection:
             self._log.rejected(

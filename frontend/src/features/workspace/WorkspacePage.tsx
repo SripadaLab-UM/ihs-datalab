@@ -122,8 +122,8 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
   const models = useQuery({ queryKey: ["models"], queryFn: api.models, staleTime: 5 * 60_000 });
   const [mode, setMode] = useState("analysis");
-  const [title, setTitle] = useState("");
   const [model, setModel] = useState("");
+  const [choosingModel, setChoosingModel] = useState(false);
   // The default is offered while the list loads, or if U-M can't be asked.
   const choices = !models.data
     ? []
@@ -135,7 +135,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const create = useMutation({
-    mutationFn: () => api.createConversation(mode, title.trim() || "New conversation", model || undefined),
+    mutationFn: () => api.createConversation(mode, model || undefined),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       navigate(`/workspace/${conversation.id}`);
@@ -161,33 +161,35 @@ function NewConversation({ onClose }: { onClose: () => void }) {
             {modes.data?.map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
           </div>
         </div>
-        <label className="block">
-          <span className={label}>Title</span>
-          <input
-            autoFocus
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g. Sleep and mood in 2025 interns"
-            className={field}
-          />
-        </label>
-        <label className="block">
-          <span className={label}>Model</span>
-          <select
-            value={model || (choices.includes(models.data?.default ?? "") ? models.data?.default : choices[0]) || ""}
-            onChange={(e) => setModel(e.target.value)}
-            className={field}
-          >
-            {choices.length === 0 && <option value="">Loading…</option>}
-            {choices.map((m) => (
-              <option key={m} value={m}>
-                {m}
-                {m === models.data?.default ? " (recommended)" : ""}
-              </option>
-            ))}
-          </select>
-          <span className="mt-1 block text-xs text-muted">Only models approved for study data are offered.</span>
-        </label>
+        {/* No title to type: DataLab names the conversation from its first question. */}
+        {choosingModel ? (
+          <label className="block">
+            <span className={label}>Model</span>
+            <select
+              autoFocus
+              value={model || (choices.includes(models.data?.default ?? "") ? models.data?.default : choices[0]) || ""}
+              onChange={(e) => setModel(e.target.value)}
+              className={field}
+            >
+              {choices.length === 0 && <option value="">Loading…</option>}
+              {choices.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                  {m === models.data?.default ? " (recommended)" : ""}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs text-muted">Only models approved for study data are offered.</span>
+          </label>
+        ) : (
+          <p className="text-[13px] text-muted">
+            Model: <span className="font-mono text-[12px] text-ink">{model || (choices.includes(models.data?.default ?? "") ? models.data?.default : choices[0]) || "" || "…"}</span>
+            {models.data && (model || (choices.includes(models.data.default) ? models.data.default : choices[0])) === models.data.default && " (recommended)"}{" "}
+            <button type="button" onClick={() => setChoosingModel(true)} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+              Change
+            </button>
+          </p>
+        )}
         {chosen && (
           <div
             className={clsx(
@@ -198,8 +200,8 @@ function NewConversation({ onClose }: { onClose: () => void }) {
             <Icon name={chosen.kind === "research" ? "globe" : "lock"} size={16} className="mt-px shrink-0" />
             <span>
               {chosen.kind === "research"
-                ? "Research sessions have the internet but no study data. Anything you attach may reach the internet."
-                : "Data sessions can query the study database, read-only, but have no internet."}
+                ? "Research sessions can use the web but have no connection to the study database. Anything you attach may reach the web."
+                : "Data sessions can query the study database, read-only. Websites are blocked; the model runs on U-M's approved GPT service."}
             </span>
           </div>
         )}

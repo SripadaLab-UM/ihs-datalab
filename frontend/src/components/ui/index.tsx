@@ -1,5 +1,6 @@
 import clsx from "clsx";
-import { type ButtonHTMLAttributes, type ReactNode, useEffect } from "react";
+import { type ButtonHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { type AnyIcon, Icon } from "./Icon";
 
@@ -53,12 +54,18 @@ export function Chip({
 /** Which kind of session this is: always visible, so nobody is unsure. */
 export function SessionBadge({ kind }: { kind: "data" | "research" }) {
   return kind === "data" ? (
-    <span className="inline-flex items-center gap-1.5 font-serif text-[14.5px] text-data italic">
-      <Icon name="lock" size={13} /> Data session — reads the database, no internet
+    <span
+      className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-data"
+      title="The agent can query the study database, read-only. It can't reach websites; its model runs on U-M's approved GPT service."
+    >
+      <Icon name="lock" size={13} /> Data session · database access, web blocked
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 font-serif text-[14.5px] text-research italic">
-      <Icon name="globe" size={13} /> Research session — the internet, no study data
+    <span
+      className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-research"
+      title="The agent can use the web. It has no connection to the study database and none of its data folders. Anything you attach may reach the web."
+    >
+      <Icon name="globe" size={13} /> Research session · web access, no database connection
     </span>
   );
 }
@@ -75,7 +82,20 @@ export function Panel({ title, children, actions }: { title: string; children: R
   );
 }
 
-/** A dialog over the page. Closes on Escape or a click outside. */
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
+function focusables(box: HTMLElement): HTMLElement[] {
+  return [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.checkVisibility?.() ?? true);
+}
+
+// Open dialogs, newest last: Escape closes only the top one.
+const openDialogs: object[] = [];
+
+/**
+ * A dialog over the page. Focus moves into it and stays there, the page
+ * behind is inert, and focus goes back where it was on close. Closes on
+ * Escape or a click outside.
+ */
 export function Modal({
   title,
   onClose,
@@ -89,24 +109,72 @@ export function Modal({
   actions?: ReactNode;
   wide?: boolean;
 }) {
+  const titleId = useId();
+  const box = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Where focus was before the dialog, read while rendering: a field inside it
+  // with autoFocus takes focus before any effect runs.
+  const [previous] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
+  // The control that gets focus on open, chosen once: StrictMode's second run
+  // of the effect must not move it (from an autoFocus field to Close).
+  const initial = useRef<HTMLElement | null>(null);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    const root = document.getElementById("root");
+    const me = {};
+    openDialogs.push(me);
+    root?.setAttribute("inert", "");
+    // A field the dialog focused itself (autoFocus); otherwise the first visible control.
+    if (!initial.current && box.current) {
+      const active = document.activeElement;
+      initial.current =
+        active instanceof HTMLElement && box.current.contains(active)
+          ? active
+          : (focusables(box.current)[0] ?? box.current);
+    }
+    initial.current?.focus();
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && openDialogs.at(-1) === me && close.current();
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      openDialogs.splice(openDialogs.indexOf(me), 1);
+      if (openDialogs.length === 0) root?.removeAttribute("inert");
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [previous]);
+  const trapTab = (event: React.KeyboardEvent) => {
+    if (event.key !== "Tab" || !box.current) return;
+    const items = focusables(box.current);
+    if (items.length === 0) return event.preventDefault();
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+  return createPortal(
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
       <div
+        ref={box}
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+        onKeyDown={trapTab}
         className={clsx(
-          "flex max-h-full flex-col rounded-[4px] border border-line bg-surface shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]",
-          wide ? "h-[85vh] w-[min(90vw,72rem)]" : "w-[34rem]",
+          "flex max-h-full flex-col rounded-[4px] border border-line bg-surface shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)] outline-none",
+          wide ? "h-[85vh] w-[min(90vw,72rem)]" : "w-[min(34rem,100%)]",
         )}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center gap-3 border-b border-line px-6 py-4">
-          <h2 className="min-w-0 flex-1 truncate font-serif text-[21px] font-normal">{title}</h2>
+          <h2 id={titleId} className="min-w-0 flex-1 truncate font-serif text-[21px] font-normal">
+            {title}
+          </h2>
           {actions}
           <Button variant="ghost" onClick={onClose} aria-label="Close" className="px-2">
             <Icon name="close" />
@@ -114,7 +182,8 @@ export function Modal({
         </header>
         <div className="min-h-0 flex-1 overflow-auto px-6 py-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

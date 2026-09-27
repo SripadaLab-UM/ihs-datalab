@@ -146,8 +146,9 @@ def test_a_message_runs_a_turn_and_logs_its_events(app):
         )
         events = wait_for(client, cid, "turn_done")
         assert client.get(f"/api/conversations/{cid}").json()["busy"] is False
-    # An Analysis conversation: the rigor review runs after the answer.
-    assert [e["type"] for e in events] == [
+    # An Analysis conversation: the rigor review runs after the answer. (The
+    # title is written alongside, whenever it's ready: see the next test.)
+    assert [e["type"] for e in events if e["type"] != "title_changed"] == [
         "user_message",
         "turn_started",
         "answer_delta",
@@ -163,6 +164,53 @@ def test_a_message_runs_a_turn_and_logs_its_events(app):
     # Review mode has no history, so the question is passed in.
     assert "<question>\nhi\n</question>" in made[0].reviews[0]
     assert made[0].containers.paused == 1  # frozen while the files were saved
+
+
+def test_the_first_question_names_the_conversation(app):
+    """No key in tests, so the title is the question's first words; with one,
+    the model writes it (tests/test_titles.py)."""
+    use_fake_runtime(app)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "extraction"}).json()["id"]
+        assert client.get(f"/api/conversations/{cid}").json()["title"] == "New conversation"
+        client.post(
+            f"/api/conversations/{cid}/messages",
+            json={"text": "Which tables hold PHQ-9 scores? And how do they differ?"},
+        )
+        events = wait_for(client, cid, "title_changed")
+        assert client.get(f"/api/conversations/{cid}").json()["title"] == (
+            "Which tables hold PHQ-9 scores"
+        )
+        wait_for(client, cid, "turn_done")
+        # Later questions don't rename it; the person can.
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "Now for 2026 only"})
+        time.sleep(0.2)  # time enough for a title to be (wrongly) written
+        assert client.get(f"/api/conversations/{cid}").json()["title"] == (
+            "Which tables hold PHQ-9 scores"
+        )
+        renamed = client.patch(f"/api/conversations/{cid}", json={"title": "  PHQ-9   tables "})
+        assert renamed.json()["title"] == "PHQ-9 tables"
+        assert client.patch(f"/api/conversations/{cid}", json={"title": ""}).status_code == 422
+    assert [e["data"]["title"] for e in events if e["type"] == "title_changed"] == [
+        "Which tables hold PHQ-9 scores"
+    ]
+
+
+def test_a_name_chosen_before_the_title_arrives_wins(app):
+    store = app.state.services.conversations
+    conversation = store.create(kind="data", mode="analysis", title="New conversation", model="m")
+    store.rename(conversation.id, "My name")
+    assert not store.rename_if(conversation.id, "Model title", current="New conversation")
+    assert store.get(conversation.id).title == "My name"
+
+
+def test_renaming_tells_other_windows_and_refuses_a_blank_title(app):
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={}).json()["id"]
+        assert client.patch(f"/api/conversations/{cid}", json={"title": "   "}).status_code == 422
+        client.patch(f"/api/conversations/{cid}", json={"title": "Sleep pilot"})
+        events = client.get(f"/api/conversations/{cid}/events").json()
+    assert [e["data"] for e in events if e["type"] == "title_changed"] == [{"title": "Sleep pilot"}]
 
 
 def test_only_one_message_at_a_time(app):

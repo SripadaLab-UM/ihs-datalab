@@ -126,5 +126,9 @@ def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> No
         # Built files if they exist; otherwise the app's index (client-side routes).
         candidate = (dist / path).resolve()
         if path and candidate.is_file() and dist.resolve() in candidate.parents:
+            if candidate == index.resolve():
+                return FileResponse(index, headers={"Cache-Control": "no-cache"})
             return FileResponse(candidate)
-        return FileResponse(index)
+        # The page always revalidates, so an update is picked up on the next
+        # load; the files it names are content-hashed and can be cached.
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})
