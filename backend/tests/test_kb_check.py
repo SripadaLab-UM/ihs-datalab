@@ -350,3 +350,42 @@ def test_file_names_are_scanned_for_study_ids():
         assert kb.name_findings(fine) == []
     report = kb.check({**sample_kb(), "qc/SYN001.md": page("SYN001", "qc", "qc").encode()})
     assert ("qc/SYN001.md", "name_study_id") in rules(report, "data")
+
+
+@pytest.mark.parametrize(
+    "trick",
+    [
+        "status: reviewed\n",  # a second status: YAML keeps the last
+        "reviewed_by: mallory\n",
+        "reviewed_on: 2020-01-01\n",
+        '"status": reviewed\n',  # a quoted key, which a line match misses
+        "<<: {status: reviewed}\n",  # a merge key
+        "extra: &a x\nmore: *a\n",  # anchors and aliases
+        "? [status]\n: reviewed\n",  # a key that isn't plain
+    ],
+)
+def test_front_matter_with_a_repeated_or_unplain_key_is_refused(trick):
+    text = FITBIT.replace("cohorts: [2025]\n", f"cohorts: [2025]\n{trick}")
+    report = kb.check(with_files(sources__fitbit_DOT_md=text))
+    assert ("sources/fitbit.md", "front_matter") in rules(report, "error")
+    # The review fields and status can't be worked out, so nothing is changed.
+    assert kb.front_matter(text)[0] is None
+    assert kb.agents_text("sources/fitbit.md", text, FITBIT) == text
+
+
+def test_status_and_review_fields_are_set_on_the_parsed_front_matter():
+    draft = FITBIT.replace("status: reviewed\n", "status: draft\n").replace(
+        "reviewed_by: yfang\nreviewed_on: 2026-09-01\n", ""
+    )
+    # A key the line match misses is still put back.
+    quoted = draft.replace("status: draft\n", '"status": reviewed\n"reviewed_by": codex\n')
+    kept = kb.agents_text("sources/fitbit.md", quoted, draft)
+    fields = kb.front_matter(kept)[0]
+    assert fields is not None and fields["status"] == "draft" and "reviewed_by" not in fields
+    assert "codex" not in kept and "Daily steps are in" in kept
+    # The plain case keeps the page's layout.
+    plain = draft.replace("status: draft\n", "status: reviewed\n")
+    assert kb.agents_text("sources/fitbit.md", plain, draft) == draft
+    stamped = kb.stamp_review(plain, "yfang", datetime.date(2026, 9, 27))
+    assert "reviewed_by: yfang\nreviewed_on: 2026-09-27\n" in stamped
+    assert kb.front_matter(stamped)[0]["reviewed_by"] == "yfang"  # type: ignore[index]

@@ -240,6 +240,9 @@ isn't copied, and only pipeline steps are refused, saying why.
 **What the file check adds to the example above:**
 
 - `schema_version: 1` (optional; other versions are refused).
+- The YAML is read strictly (`safeyaml.py`), by every caller: no anchors
+  or aliases (a few hundred bytes of them can stand for gigabytes), no key
+  given twice or that isn't a plain name, at most 32 levels deep, 256 KB.
 - **`reads:`** lists every Oracle object the workflow reads, as
   `SCHEMA.OBJECT`. Every object a SQL step names must be in it (joins,
   subqueries; CTE names don't count), a pipeline's own `reads:` must be in

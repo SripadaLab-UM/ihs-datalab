@@ -885,3 +885,22 @@ def test_only_workflow_files_get_the_workflow_check():
         ("workflows/a.yaml", "error", "The workflow check: one"),
         ("workflows/a.yaml", "error", "The workflow check: two"),
     ]
+
+
+def test_an_alias_bomb_in_a_proposal_is_refused_by_its_check_and_save(lab):
+    """The agent writes it under workflows/: opening the proposal and Save &
+    share both read it through parse_yaml, which refuses it at once."""
+    from tests.test_safeyaml import BOMB
+
+    synced(lab)
+    cid = conversation(lab, mode="workflows")
+    before = lab.remote.head()
+    proposal = turn(lab, cid, {"workflows/bomb.yaml": BOMB})
+    assert proposal is not None
+    started = time.monotonic()
+    detail = lab.client.get(f"/api/pipelines/proposals/{proposal.id}").json()
+    assert time.monotonic() - started < 5
+    [error] = [f for f in detail["findings"] if f["rule"] == "workflow"]
+    assert "anchors or aliases" in error["message"]
+    done = accept(lab, proposal)["proposal"]
+    assert done["status"] == "check_failed" and lab.remote.head() == before

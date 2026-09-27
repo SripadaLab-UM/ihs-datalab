@@ -457,3 +457,17 @@ async def test_a_pipeline_name_never_reads_or_names_anything_outside_the_package
         assert str(tmp_path) not in text
         assert "isn't there" not in text  # nothing said about whether it exists
         assert "Pipeline names are lower case letters" in text
+
+
+async def test_check_workflow_refuses_an_alias_bomb_at_once(server, tmp_path):
+    import time
+
+    from tests.test_safeyaml import BOMB
+
+    base_url, services, _ = server
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        started = time.monotonic()
+        found = payload(await session.call_tool("check_workflow", {"text": BOMB}))
+    assert time.monotonic() - started < 5
+    assert found["valid"] is False and found["problems"][0]["line"] == 2
+    assert "anchors or aliases" in found["problems"][0]["message"]

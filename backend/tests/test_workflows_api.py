@@ -142,3 +142,21 @@ def test_destination_keys_in_practice(api):
     assert key["used_by"] == ["weekly_steps.yaml"] and key["name"] == "Practice exports"
     put = client.put("/api/workflows/destinations/practice-folder", json={"destination_id": "x"})
     assert put.status_code == 403
+
+
+def test_an_alias_bomb_is_refused_by_the_list_validate_and_a_run(api):
+    """Every caller reads a workflow file through parse_yaml, which refuses
+    anchors and aliases before anything is built."""
+    from tests.test_safeyaml import BOMB
+
+    client, h = api
+    h.write("bomb.yaml", BOMB)
+    started = time.monotonic()
+    listed = {w["path"]: w for w in client.get("/api/workflows").json()}
+    assert listed["bomb.yaml"]["valid"] is False
+    assert "anchors or aliases" in listed["bomb.yaml"]["problems"][0]["message"]
+    checked = client.post("/api/workflows/validate", json={"text": BOMB}).json()
+    assert checked["valid"] is False and checked["problems"][0]["line"] == 2
+    run = client.post("/api/workflows/runs", json={"path": "bomb.yaml"})
+    assert run.status_code == 422
+    assert time.monotonic() - started < 5

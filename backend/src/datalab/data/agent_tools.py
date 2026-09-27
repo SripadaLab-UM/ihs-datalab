@@ -13,7 +13,6 @@ import json
 from collections.abc import Callable
 from typing import Any
 
-import yaml
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -410,24 +409,11 @@ def _whole(message: str) -> dict[str, Any]:
 
 
 def _draft_problems(text: str) -> list[dict[str, Any]] | None:
-    """Problems found before the full check, or None to go on to it.
-
-    The text comes from the agent, so it's refused before the check reads
-    it when it's too large, or uses YAML anchors and aliases (`&a`, `*a`):
-    a few lines of aliases can stand for a structure far too large to walk.
-    Workflow files don't need them."""
+    """A problem found before the full check reads the text, or None to go
+    on to it. The check's own YAML reading refuses anchors, aliases,
+    repeated keys and deep nesting (workflows/model.py: parse_yaml)."""
     if len(text.encode()) > MAX_WORKFLOW_BYTES:
-        message = f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB."
-        return [{"where": "", "line": None, "message": message}]
-    try:
-        for event in yaml.parse(text, Loader=yaml.SafeLoader):
-            anchored = getattr(event, "anchor", None) is not None
-            if anchored or isinstance(event, yaml.AliasEvent):
-                line = event.start_mark.line + 1 if event.start_mark else None
-                message = "Don't use YAML anchors or aliases (& and *): write each value out."
-                return [{"where": f"line {line}", "line": line, "message": message}]
-    except yaml.YAMLError:
-        return None  # the full check says where the YAML is broken
+        return [_whole(f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB.")]
     return None
 
 

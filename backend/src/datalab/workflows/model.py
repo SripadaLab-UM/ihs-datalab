@@ -33,6 +33,7 @@ from pydantic import (
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
+from datalab import safeyaml
 from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.exports import effective_name, safe_name
 from datalab.sessions.titles import normalize_title, scrub_title
@@ -293,12 +294,20 @@ PipelineLookup = Callable[[str], Pipeline | None]
 
 
 def parse_yaml(text: str) -> Any:
+    """A workflow or pipeline file's data. Every caller comes through here
+    (the runner, validate, Save as workflow, Save & share, check_workflow),
+    and the text may be an agent's: anchors, aliases, repeated keys, deep
+    nesting and large files are refused before anything is built
+    (safeyaml.py)."""
     if len(text.encode()) > MAX_FILE_BYTES:
         raise WorkflowInvalid(
             [Problem("", f"The file is larger than {MAX_FILE_BYTES // 1024} KB.")]
         )
     try:
-        return _dates_as_text(yaml.safe_load(text))
+        return _dates_as_text(safeyaml.load(text, max_bytes=MAX_FILE_BYTES))
+    except safeyaml.YamlRefused as refused:
+        where = f"line {refused.line}" if refused.line else ""
+        raise WorkflowInvalid([Problem(where, refused.message)]) from None
     except yaml.YAMLError as error:
         mark = getattr(error, "problem_mark", None)
         where = f"line {mark.line + 1}" if mark is not None else ""

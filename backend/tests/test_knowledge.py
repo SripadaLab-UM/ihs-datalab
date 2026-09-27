@@ -808,6 +808,32 @@ def test_only_a_person_changes_a_pages_status(lab):
     assert "status: reviewed" in shared and "reviewed_by: yfang" in shared
 
 
+def test_a_second_status_or_review_line_cant_slip_through_save_and_share(lab):
+    """YAML keeps the last of two equal keys, so a second `status: reviewed`
+    (or `reviewed_by`, `reviewed_on`) line would win over the one DataLab put
+    back. Such front matter is refused by the check, which Save & share runs."""
+    synced(lab)
+    before = lab.remote.head()
+    tricks = {
+        "qc/midnight-sleep.md": (MIDNIGHT, "status: reviewed\n"),  # a draft, promoted
+        "sources/fitbit.md": (FITBIT, "reviewed_by: mallory\n"),  # a reviewed page
+    }
+    tricks["sources/fitbit.md#on"] = (FITBIT, "reviewed_on: 2020-01-01\n")
+    for key, (original, trick) in tricks.items():
+        path = key.split("#")[0]
+        cid = conversation(lab, "knowledge")
+        text = original.replace("---\n\n#", f"{trick}---\n\n#", 1)
+        assert text != original and text.count(trick.split(":")[0] + ":") == 2
+        proposal = turn(lab, cid, {path: text})
+        assert proposal is not None, key
+        detail = lab.client.get(f"/api/knowledge/proposals/{proposal.id}").json()
+        errors = [f for f in detail["findings"] if f["rule"] == "front_matter"]
+        assert errors and "given twice" in errors[0]["message"], (key, detail["findings"])
+        done = accept(lab, proposal)["proposal"]
+        assert done["status"] == "check_failed", (key, done)
+        assert lab.remote.head() == before
+
+
 def test_a_deleted_conversations_base_is_pruned(lab):
     synced(lab)
     cid = conversation(lab)

@@ -251,7 +251,12 @@ computer. It runs in DataLab before every save, again after a rebase if
 someone else's change landed in between, and in GitHub Actions after every
 push. There it uses the same published check.
 
-- Front matter is valid, and ids are unique and match file names.
+- Front matter is valid, and ids are unique and match file names. It's
+  read strictly (`safeyaml.py`): a key given twice, a key that isn't a
+  plain name (`<<`, a list or map), anchors and aliases, and deep nesting
+  are errors, so a second `status:` line can't win over the one DataLab
+  keeps. DataLab keeps an agent's `status` and review fields on the parsed
+  front matter.
 - `related` and `evidence` links resolve.
 - Tables and columns that pages mention exist in `generated/schema`. After a
   schema refresh, this is what flags pages affected by schema drift.

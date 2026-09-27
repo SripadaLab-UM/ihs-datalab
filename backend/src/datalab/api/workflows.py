@@ -37,6 +37,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from datalab import safeyaml
 from datalab.api.pipelines import PipelineFindingOut
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, check_owner
@@ -785,8 +786,8 @@ def _repo_path(name: str) -> str:
 def _findings(text: str) -> list[PipelineFindingOut]:
     """The Save & share data check's findings on a draft (named as it would be saved)."""
     try:
-        raw = yaml.safe_load(text)
-    except yaml.YAMLError:
+        raw = safeyaml.load(text, max_bytes=MAX_FILE_BYTES)
+    except (yaml.YAMLError, safeyaml.YamlRefused):
         raw = None
     name = raw.get("name") if isinstance(raw, dict) else None
     path = _repo_path(name if isinstance(name, str) and _KEY.fullmatch(name) else "draft")

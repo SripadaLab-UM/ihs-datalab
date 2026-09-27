@@ -618,3 +618,17 @@ def test_someone_saving_the_same_name_meanwhile(lab, shared, same):
     else:
         assert done["state"] == "conflict" and "choose another name" in done["message"]
     assert lab.remote.head() == head
+
+
+def test_save_as_workflow_refuses_an_alias_bomb(api):
+    from tests.test_safeyaml import BOMB
+
+    client, h = api
+    started = time.monotonic()
+    saved = client.post("/api/workflows/saves", json={"text": BOMB})
+    checked = client.post("/api/workflows/drafts/check", json={"text": BOMB})
+    assert time.monotonic() - started < 5
+    assert saved.status_code == 422
+    assert "anchors or aliases" in str(saved.json()["detail"]["problems"])
+    assert checked.status_code == 200 and checked.json()["valid"] is False
+    assert not (h.folder / "bomb.yaml").exists()
