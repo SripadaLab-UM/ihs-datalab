@@ -63,11 +63,13 @@ it("opens the side panel's drawer on a narrower window to show a query asked for
   expect(panel).not.toHaveClass("hidden");
   expect(screen.getByRole("button", { name: "Close the files panel" })).toBeInTheDocument();
   expect(screen.getByRole("tab", { name: "Queries", selected: true })).toBeInTheDocument();
+  // Focused first, then outlined on the next render (the outline is state set just after the
+  // focus): wait for both, or a slow run sees the focus before the outline.
   const entry = await waitFor(() => {
     const found = document.getElementById("query-q_0001");
-    if (!found || document.activeElement !== found) throw new Error("not yet");
+    if (!found || document.activeElement !== found) throw new Error("not focused yet");
+    expect(found).toHaveClass("border-ink");
     return found;
   });
   expect(panel).toContainElement(entry);
-  expect(entry).toHaveClass("border-ink");
 });

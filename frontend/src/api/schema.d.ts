@@ -1220,6 +1220,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/drafts/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Draft
+         * @description A draft's text checked again, as Save will check it.
+         */
+        post: operations["check_draft_api_workflows_drafts_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflows/saves": {
         parameters: {
             query?: never;
@@ -2024,6 +2044,23 @@ export interface components {
             /** Text */
             text: string;
         };
+        /** DraftCheckIn */
+        DraftCheckIn: {
+            /** Text */
+            text: string;
+        };
+        /**
+         * DraftCheckOut
+         * @description A draft's text, checked again after an edit: the file check and the data check.
+         */
+        DraftCheckOut: {
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
         /** DraftIn */
         DraftIn: {
             /** Name */
@@ -2053,6 +2090,8 @@ export interface components {
             /** Notes */
             notes: string[];
             target: components["schemas"]["SaveTargetOut"];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
         };
         /** DraftQueryIn */
         DraftQueryIn: {
@@ -3658,7 +3697,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "saving" | "saved" | "check_failed" | "tests_failed" | "conflict" | "failed";
+            state: "saving" | "saved" | "already_there" | "check_failed" | "tests_failed" | "conflict" | "failed";
             /** Shared */
             shared: boolean;
             /** Path */
@@ -5810,6 +5849,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_draft_api_workflows_drafts_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftCheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftCheckOut"];
                 };
             };
             /** @description Validation Error */

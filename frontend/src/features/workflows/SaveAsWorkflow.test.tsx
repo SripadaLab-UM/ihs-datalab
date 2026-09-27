@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { EditorView } from "@codemirror/view";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -13,7 +14,7 @@ vi.mock("@/api/workflows", () => ({
   workflowsApi: {
     destinations: vi.fn(),
     draft: vi.fn(),
-    validateText: vi.fn(),
+    checkDraft: vi.fn(),
     save: vi.fn(),
     saveStatus: vi.fn(),
   },
@@ -33,7 +34,12 @@ const draft = (extra: Partial<WorkflowDraft> = {}): WorkflowDraft => ({
   valid: true,
   problems: [],
   notes: [],
-  target: { kind: "local", folder: "/data/workflows-local", message: "Practice DataLab keeps workflows on this computer." },
+  target: {
+    kind: "local",
+    folder: "/data/workflows-local",
+    message: "Practice DataLab keeps workflows on this computer, in /data/workflows-local. It isn't shared with the lab.",
+  },
+  findings: [],
   ...extra,
 });
 
@@ -50,7 +56,7 @@ const record = (id: string, sql: string, status = "succeeded", at = "2026-09-27T
 beforeEach(() => {
   vi.mocked(workflowsApi.destinations).mockReset().mockResolvedValue([]);
   vi.mocked(workflowsApi.draft).mockReset().mockResolvedValue(draft());
-  vi.mocked(workflowsApi.validateText).mockReset();
+  vi.mocked(workflowsApi.checkDraft).mockReset();
   vi.mocked(workflowsApi.save).mockReset().mockResolvedValue(saved());
   vi.mocked(workflowsApi.saveStatus).mockReset();
   vi.mocked(api.dataAccessed).mockReset().mockResolvedValue([]);
@@ -85,7 +91,8 @@ it("drafts from the Playground's query and its binds, and saves it locally, sayi
     destination: "practice-folder",
     queries: [{ sql: PLAYGROUND.kind === "playground" ? PLAYGROUND.sql : "", binds: { d: "2025-04-01" } }],
   });
-  expect(screen.getByText(/Not shared\. Practice DataLab keeps workflows/)).toBeInTheDocument();
+  // Said once.
+  expect(screen.getByText(/Practice DataLab keeps workflows/).textContent?.match(/shared/g)).toHaveLength(1);
   expect(workflowsApi.save).not.toHaveBeenCalled(); // drafting saves nothing
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByText("Saved.")).toBeInTheDocument();
@@ -118,14 +125,97 @@ it("won't save a draft with problems, and lists them with where they are", async
   expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
 });
 
+const FINDING = {
+  id: "f1", path: "workflows/steps_by_device.yaml", rule: "study_id", severity: "data" as const,
+  message: "This looks like a participant or study ID.", line: 12, text: "AND STUDY_PARTICIPANT_ID <> 'SYN-0042'",
+}; // prettier-ignore
+
+async function editor() {
+  const content = await screen.findByRole("textbox", { name: "The drafted workflow file" });
+  return EditorView.findFromDOM(content)!;
+}
+
+it("checks the file again after an edit, and won't save it until it passes", async () => {
+  vi.mocked(workflowsApi.checkDraft).mockResolvedValue({
+    valid: false,
+    problems: [{ path: "steps[1].qc.small_cells.min", message: "At least 11: counts from 1 to 10 are small.", line: 4, column: 3 }],
+    findings: [],
+  });
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "Draft the workflow" }));
+  const view = await editor();
+  const save = screen.getByRole("button", { name: "Save" });
+  expect(save).toBeEnabled();
+  view.dispatch({ changes: { from: view.state.doc.length, insert: "# lowered\n" } });
+  await waitFor(() => expect(save).toBeDisabled()); // while it's checked again, too
+  expect(await screen.findByText("At least 11: counts from 1 to 10 are small.")).toBeInTheDocument();
+  expect(workflowsApi.checkDraft).toHaveBeenCalledWith(`${TEXT}# lowered\n`);
+  expect(save).toBeDisabled();
+});
+
+it("asks for each possible-data finding, and one edited away stops blocking", async () => {
+  vi.mocked(workflowsApi.draft).mockResolvedValue(draft({ findings: [FINDING] }));
+  vi.mocked(workflowsApi.checkDraft).mockResolvedValue({ valid: true, problems: [], findings: [] });
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "Draft the workflow" }));
+  expect(await screen.findByText(FINDING.text)).toBeInTheDocument();
+  const save = screen.getByRole("button", { name: "Save" });
+  expect(save).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: /isn't participant data/ }));
+  expect(save).toBeEnabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: /isn't participant data/ }));
+  const view = await editor();
+  view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "name: steps_by_device\n" } });
+  await waitFor(() => expect(screen.queryByText(FINDING.text)).not.toBeInTheDocument());
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.click(save);
+  await screen.findByText("Saved.");
+  expect(vi.mocked(workflowsApi.save).mock.calls[0][0]).toMatchObject({ text: "name: steps_by_device\n" });
+});
+
+it("doesn't throw away an edited or saving review on Escape", async () => {
+  const onClose = show();
+  fireEvent.click(screen.getByRole("button", { name: "Draft the workflow" }));
+  const view = await editor();
+  vi.mocked(workflowsApi.checkDraft).mockResolvedValue({ valid: true, problems: [], findings: [] });
+  view.dispatch({ changes: { from: 0, insert: "# mine\n" } });
+  await waitFor(() => expect(workflowsApi.checkDraft).toHaveBeenCalled());
+  const ask = vi.spyOn(window, "confirm").mockReturnValue(false);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(ask).toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+  // While a Save & share goes, Escape does nothing at all.
+  vi.mocked(workflowsApi.save).mockResolvedValue(saved({ id: "ws_1", state: "saving", shared: true }));
+  vi.mocked(workflowsApi.saveStatus).mockReturnValue(new Promise(() => {}));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await screen.findByRole("status");
+  ask.mockReset().mockReturnValue(true);
+  fireEvent.keyDown(window, { key: "Escape" });
+  expect(ask).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+  ask.mockRestore();
+});
+
+it("says so when someone else saved the same file meanwhile, rather than that it was shared", async () => {
+  vi.mocked(workflowsApi.draft).mockResolvedValue(draft({ target: { kind: "share", folder: null, message: "Shared." } }));
+  vi.mocked(workflowsApi.save).mockResolvedValue(
+    saved({ id: "ws_1", state: "already_there", shared: true, path: "workflows/steps_by_device.yaml",
+      message: "workflows/steps_by_device.yaml was already in the pipelines repo. Nothing new was shared." }),
+  ); // prettier-ignore
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "Draft the workflow" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Save & share" }));
+  expect(await screen.findByText(/Nothing new was shared/)).toBeInTheDocument();
+  expect(screen.queryByText(/Saved and shared/)).not.toBeInTheDocument();
+  expect(within(screen.getByRole("dialog")).getByRole("link", { name: /Open theirs/ })).toBeInTheDocument();
+});
+
 it("shares through Save & share, and waits for each possible-data finding to be confirmed", async () => {
   vi.mocked(workflowsApi.draft).mockResolvedValue(
     draft({ target: { kind: "share", folder: null, message: "Save & share checks it, runs the tests and pushes it." } }),
   );
-  const finding = {
-    id: "f1", path: "workflows/steps_by_device.yaml", rule: "study_id", severity: "data" as const,
-    message: "This looks like a participant or study ID.", line: 12, text: "AND STUDY_PARTICIPANT_ID <> 'SYN-0042'",
-  }; // prettier-ignore
+  const finding = FINDING;
   vi.mocked(workflowsApi.save)
     .mockResolvedValueOnce(saved({ id: "ws_1", state: "saving", shared: true, path: "workflows/steps_by_device.yaml" }))
     .mockResolvedValueOnce(saved({ id: "ws_2", state: "saving", shared: true, path: "workflows/steps_by_device.yaml" }));

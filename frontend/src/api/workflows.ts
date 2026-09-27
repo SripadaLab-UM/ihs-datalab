@@ -21,7 +21,8 @@ export type WorkflowDraftIn = Schemas["DraftIn"];
 export type SaveTarget = Schemas["SaveTargetOut"];
 export type WorkflowSave = Schemas["WorkflowSaveOut"];
 export type WorkflowSaveIn = Schemas["SaveIn"];
-export type WorkflowValidation = Schemas["ValidateOut"];
+export type WorkflowDraftCheck = Schemas["DraftCheckOut"];
+export type WorkflowFinding = Schemas["PipelineFindingOut"];
 
 const post = (body?: unknown): RequestInit => ({
   method: "POST",
@@ -53,8 +54,8 @@ export const workflowsApi = {
   /** A workflow file drafted from SQL and its binds (the Playground's, or a conversation's logged
    *  queries), checked. Nothing is saved. A 422 says why the SQL can't be drafted. */
   draft: (body: WorkflowDraftIn) => request<WorkflowDraft>("/api/workflows/drafts", post(body)),
-  /** A draft's text, checked again after an edit. */
-  validateText: (text: string) => request<WorkflowValidation>("/api/workflows/validate", post({ text })),
+  /** A draft's text, checked again after an edit: the file check's problems and the data check's findings. */
+  checkDraft: (text: string) => request<WorkflowDraftCheck>("/api/workflows/drafts/check", post({ text })),
   /** Save a new workflow file the person reviewed: written locally, or started as a Save & share
    *  (`state: "saving"`, followed with `saveStatus`). A 422 has `problems`; a 409 says why not. */
   save: (body: WorkflowSaveIn) => request<WorkflowSave>("/api/workflows/saves", post(body)),
