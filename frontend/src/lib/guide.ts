@@ -196,7 +196,9 @@ const bodyText = (markdown: string) =>
 function snippet(text: string, words: string[]): string {
   const lower = text.toLowerCase();
   const at = Math.min(...words.map((w) => lower.indexOf(w)).filter((i) => i >= 0), text.length);
-  const start = at >= text.length ? 0 : Math.max(0, at - 60);
+  let start = at >= text.length ? 0 : Math.max(0, at - 60);
+  // From the start of a word.
+  if (start > 0) start = text.indexOf(" ", start) + 1 || start;
   const cut = text.slice(start, start + 170);
   return `${start > 0 ? "…" : ""}${cut}${start + 170 < text.length ? "…" : ""}`;
 }

@@ -82,13 +82,18 @@ export function useTour(): TourControl {
  */
 export function TourProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // Kept here, so leaving the page for Help and coming back keeps the step.
+  const [index, setIndex] = useState(0);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const { pathname } = useLocation();
   const practice = health.data?.profile === "practice";
   useEffect(() => {
     if (practice && pathname.startsWith("/workspace") && !tourSeen()) setOpen(true);
   }, [practice, pathname]);
-  const start = useCallback(() => setOpen(true), []);
+  const start = useCallback(() => {
+    setIndex(0);
+    setOpen(true);
+  }, []);
   const close = useCallback(() => {
     markTourSeen();
     setOpen(false);
@@ -96,7 +101,8 @@ export function TourProvider({ children }: { children: ReactNode }) {
   return (
     <TourContext value={{ open, start }}>
       {children}
-      {open && <TourCard onClose={close} />}
+      {/* Out of the way while Help is read; it's back on leaving Help. */}
+      {open && !pathname.startsWith("/help") && <TourCard index={index} onStep={setIndex} onClose={close} />}
     </TourContext>
   );
 }
@@ -109,10 +115,17 @@ function findAnchor(stepId: string): HTMLElement | null {
   return null;
 }
 
-/** One step at a time, beside the page (not over it): you can try each step as you read it. */
-export function TourCard({ onClose }: { onClose: () => void }) {
+/** One step at a time, in a corner over the conversation list: you can try each step as you read it. */
+export function TourCard({
+  index,
+  onStep: setIndex,
+  onClose,
+}: {
+  index: number;
+  onStep: (index: number) => void;
+  onClose: () => void;
+}) {
   const steps = useMemo(tourSteps, []);
-  const [index, setIndex] = useState(0);
   const step = steps[index];
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -123,13 +136,27 @@ export function TourCard({ onClose }: { onClose: () => void }) {
     heading.current?.focus();
   }, [index]);
 
-  // The place on screen this step is about, outlined while it's shown.
+  // The place on screen this step is about, outlined while it's shown. The
+  // page changes as the person follows along (a conversation opens, an answer
+  // arrives), so it's looked for again every moment; it's scrolled to only
+  // when the step changes.
   useEffect(() => {
     if (!step) return;
-    const anchor = findAnchor(step.id);
-    anchor?.setAttribute("data-tour-on", "");
-    anchor?.scrollIntoView?.({ block: "nearest" });
-    return () => anchor?.removeAttribute("data-tour-on");
+    let shown: HTMLElement | null = null;
+    const mark = (scroll: boolean) => {
+      const anchor = findAnchor(step.id);
+      if (anchor === shown) return;
+      shown?.removeAttribute("data-tour-on");
+      anchor?.setAttribute("data-tour-on", "");
+      if (scroll) anchor?.scrollIntoView?.({ block: "nearest" });
+      shown = anchor;
+    };
+    mark(true);
+    const again = window.setInterval(() => mark(false), 700);
+    return () => {
+      window.clearInterval(again);
+      shown?.removeAttribute("data-tour-on");
+    };
   }, [step]);
 
   if (!step) return null;
@@ -144,7 +171,7 @@ export function TourCard({ onClose }: { onClose: () => void }) {
           onClose();
         }
       }}
-      className="dl-in fixed right-4 bottom-4 z-40 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-3 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-5 pt-4 pb-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]"
+      className="dl-in fixed bottom-4 left-4 z-40 flex w-[min(18rem,calc(100vw-2rem))] flex-col gap-3 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-5 pt-4 pb-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]"
     >
       <p className="dl-label">
         Tour · {index + 1} of {steps.length}
