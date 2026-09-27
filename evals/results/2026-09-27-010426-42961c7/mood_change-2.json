@@ -1,0 +1,105 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": true,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Yes. Confirmatory analysis under the frozen plan found that the recorded daily mood score decreased during internship:\n\n- Pre-internship mean: 6.65\n- Intern-year mean: 5.95\n- Within-person change: \u22120.69 points on the 1\u201310 scale\n- 95% CI: \u22120.74 to \u22120.65\n- 149 paired participants; 26,360 entries across 25,139 participant-days\n\nResults were nearly identical after requiring \u22657 days per period, comparing June versus July only, and using local rather than UTC dates.\n\nThe database does not document the scale anchors. Therefore, we can confidently conclude that scores decreased; interpreting this as worse mood requires confirming that higher scores represent better mood. This observational analysis also cannot attribute the change causally to internship.\n\n[Full report](/work/outputs/daily_mood_2025_full_report.html)  \n[Analysis source](/work/outputs/daily_mood_2025_full_analysis.py)  \n[Exact SQL, binds, and provenance](/work/outputs/daily_mood_2025_full_queries.sql)  \n[Aggregate results](/work/outputs/daily_mood_2025_full_results.csv)\n\nEleven queries were attempted: ten successful profile, validation, pilot, full-analysis, dictionary, and sensitivity queries returning 0\u2013299 aggregate rows; one coverage query failed and was replaced with a corrected 3-row query. All statements and result paths are documented in the SQL file.",
+  "finished": true,
+  "seconds": 251.14113402366638,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_334c49054e9d3234",
+      "plan": {
+        "question": "In the 2025 IHS cohort, did participants\u2019 recorded daily mood differ between the pre-internship period and the intern year, and what was the magnitude of the within-person change?",
+        "estimand": "Primary: the mean across participants of each participant\u2019s change in mean daily mood (intern year minus pre-internship), so participants are weighted equally. Report the change in mood-scale points with a 95% confidence interval, and a standardized paired effect size. Unit of observation is a daily mood entry; unit of inference is the participant. Include only participants with at least one valid mood entry in both periods. Also report observations, participants, and contributors with estimable within-person change.",
+        "exposure": "Period indicator based on MOOD_STARTDATE in IHS_2025.VW_DAILY_MOOD: pre-internship versus intern year. Planned boundaries are before 2025-07-01 and 2025-07-01 through 2026-06-30 inclusive, subject to confirming the observed coverage and the cohort\u2019s internship boundary.",
+        "outcome": "Daily mood score from IHS_2025.VW_DAILY_MOOD.MOOD_SCORE. Before analysis, verify its populated values, numeric convertibility, range, and direction; do not interpret higher/lower scores until the coding is supported.",
+        "covariates": "None for the primary paired within-person comparison; each participant serves as their own control. Calendar time and observation frequency will be described, not adjusted away. A day-level mixed-effects sensitivity analysis with participant random intercept may be used only if supported by the data and will be labeled as sensitivity.",
+        "cohort": "IHS_2025 records with nonmissing participant identifier, usable MOOD_STARTDATE, and valid numeric MOOD_SCORE. Pre-internship: all available observations before 2025-07-01; intern year: 2025-07-01 to 2026-06-30 inclusive. Primary paired cohort requires at least one valid day in each period. Report sample flow and coverage by period.",
+        "decisions": "Check duplicates, multiple entries per participant-day, impossible dates/scores, missingness, date range, and score coding. If multiple valid entries occur on a day, average within participant-day before period means. Primary analysis uses all available valid days and equal participant weighting. Sensitivities: require at least 7 observed days per period and compare balanced 30-day windows immediately before/after 2025-07-01 if coverage permits. Use participant-level bootstrap or paired t confidence interval as appropriate; also report a nonparametric interval if changes are strongly skewed. No causal interpretation. First run a reproducible pilot on a bounded date subset that preserves paired structure, report preliminary checks/results, then ask before scaling to the full period."
+      }
+    }
+  ],
+  "follow_up": "Yes, go ahead as you recommend and finish the full analysis, then give me the final answer to my original question.",
+  "queries": [
+    "SELECT\n  COUNT(*) AS ROW_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS PARTICIPANT_COUNT,\n  MIN(MOOD_STARTDATE) AS MIN_MOOD_STARTDATE,\n  MAX(MOOD_STARTDATE) AS MAX_MOOD_STARTDATE,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS MISSING_PARTICIPANT_ID,\n  SUM(CASE WHEN MOOD_STARTDATE IS NULL THEN 1 ELSE 0 END) AS MISSING_STARTDATE,\n  SUM(CASE WHEN MOOD_SCORE IS NULL THEN 1 ELSE 0 END) AS MISSING_MOOD_SCORE,\n  SUM(CASE WHEN MOOD_SCORE IS NOT NULL AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 0 THEN 1 ELSE 0 END) AS NONNUMERIC_MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD",
+    "SELECT\n  COUNT(*) AS ROW_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS PARTICIPANT_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(MOOD_STARTDATE, 'YYYY-MM-DD')) AS PARTICIPANT_DAY_COUNT,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS MISSING_PARTICIPANT_ID,\n  SUM(CASE WHEN MOOD_STARTDATE IS NULL THEN 1 ELSE 0 END) AS MISSING_STARTDATE,\n  SUM(CASE WHEN MOOD_SCORE IS NULL THEN 1 ELSE 0 END) AS MISSING_MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE MOOD_STARTDATE >= TO_TIMESTAMP_TZ(:start_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n  AND MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')",
+    "SELECT\n  TRIM(MOOD_SCORE) AS MOOD_SCORE_VALUE,\n  COUNT(*) AS ROW_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS PARTICIPANT_COUNT\nFROM IHS_2025.VW_DAILY_MOOD\nGROUP BY TRIM(MOOD_SCORE)\nORDER BY MOOD_SCORE_VALUE",
+    "WITH PILOT AS (\n  SELECT PARTICIPANTIDENTIFIER,\n    TO_CHAR(MOOD_STARTDATE AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS MOOD_DAY_UTC,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS MOOD_SCORE_NUM\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE MOOD_STARTDATE >= TO_TIMESTAMP_TZ(:start_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 1\n), PARTICIPANT_DAYS AS (\n  SELECT PARTICIPANTIDENTIFIER, MOOD_DAY_UTC,\n    COUNT(*) AS ENTRIES_ON_DAY,\n    COUNT(DISTINCT MOOD_SCORE_NUM) AS DISTINCT_SCORES_ON_DAY,\n    MIN(MOOD_SCORE_NUM) AS MIN_SCORE_ON_DAY,\n    MAX(MOOD_SCORE_NUM) AS MAX_SCORE_ON_DAY\n  FROM PILOT\n  GROUP BY PARTICIPANTIDENTIFIER, MOOD_DAY_UTC\n)\nSELECT COUNT(*) AS PARTICIPANT_DAY_COUNT,\n  SUM(CASE WHEN ENTRIES_ON_DAY > 1 THEN 1 ELSE 0 END) AS DAYS_WITH_MULTIPLE_ENTRIES,\n  SUM(CASE WHEN DISTINCT_SCORES_ON_DAY > 1 THEN 1 ELSE 0 END) AS DAYS_WITH_CONFLICTING_SCORES,\n  MAX(ENTRIES_ON_DAY) AS MAX_ENTRIES_ON_DAY,\n  MIN(MIN_SCORE_ON_DAY) AS MIN_SCORE,\n  MAX(MAX_SCORE_ON_DAY) AS MAX_SCORE\nFROM PARTICIPANT_DAYS",
+    "WITH VALID_ROWS AS (\n  SELECT PARTICIPANTIDENTIFIER,\n    TO_CHAR(MOOD_STARTDATE AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS MOOD_DAY_UTC,\n    CASE WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:boundary_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'pre' ELSE 'intern' END AS PERIOD,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS MOOD_SCORE_NUM\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE MOOD_STARTDATE >= TO_TIMESTAMP_TZ(:start_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 1\n    AND TO_NUMBER(TRIM(MOOD_SCORE)) BETWEEN 1 AND 10\n), PARTICIPANT_DAY AS (\n  SELECT PARTICIPANTIDENTIFIER, MOOD_DAY_UTC, PERIOD,\n    COUNT(*) AS ENTRY_COUNT,\n    AVG(MOOD_SCORE_NUM) AS DAY_MEAN_MOOD\n  FROM VALID_ROWS\n  GROUP BY PARTICIPANTIDENTIFIER, MOOD_DAY_UTC, PERIOD\n)\nSELECT PARTICIPANTIDENTIFIER, PERIOD,\n  COUNT(*) AS OBSERVED_DAYS,\n  SUM(ENTRY_COUNT) AS RAW_ENTRIES,\n  AVG(DAY_MEAN_MOOD) AS MEAN_DAILY_MOOD,\n  MIN(DAY_MEAN_MOOD) AS MIN_DAILY_MOOD,\n  MAX(DAY_MEAN_MOOD) AS MAX_DAILY_MOOD\nFROM PARTICIPANT_DAY\nGROUP BY PARTICIPANTIDENTIFIER, PERIOD\nORDER BY PARTICIPANTIDENTIFIER, PERIOD",
+    "WITH VALID_ROWS AS (\n  SELECT PARTICIPANTIDENTIFIER,\n    TO_CHAR(MOOD_STARTDATE AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS MOOD_DAY_UTC,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS MOOD_SCORE_NUM\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_STARTDATE IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 1\n    AND TO_NUMBER(TRIM(MOOD_SCORE)) BETWEEN 1 AND 10\n), PARTICIPANT_DAYS AS (\n  SELECT PARTICIPANTIDENTIFIER, MOOD_DAY_UTC,\n    COUNT(*) AS ENTRIES_ON_DAY,\n    COUNT(DISTINCT MOOD_SCORE_NUM) AS DISTINCT_SCORES_ON_DAY,\n    MIN(MOOD_SCORE_NUM) AS MIN_SCORE_ON_DAY,\n    MAX(MOOD_SCORE_NUM) AS MAX_SCORE_ON_DAY\n  FROM VALID_ROWS\n  GROUP BY PARTICIPANTIDENTIFIER, MOOD_DAY_UTC\n)\nSELECT COUNT(*) AS PARTICIPANT_DAY_COUNT,\n  SUM(ENTRIES_ON_DAY) AS VALID_RAW_ENTRIES,\n  SUM(CASE WHEN ENTRIES_ON_DAY > 1 THEN 1 ELSE 0 END) AS DAYS_WITH_MULTIPLE_ENTRIES,\n  SUM(CASE WHEN DISTINCT_SCORES_ON_DAY > 1 THEN 1 ELSE 0 END) AS DAYS_WITH_CONFLICTING_SCORES,\n  MAX(ENTRIES_ON_DAY) AS MAX_ENTRIES_ON_DAY,\n  MIN(MIN_SCORE_ON_DAY) AS MIN_SCORE,\n  MAX(MAX_SCORE_ON_DAY) AS MAX_SCORE\nFROM PARTICIPANT_DAYS",
+    "WITH VALID_ROWS AS (\n  SELECT PARTICIPANTIDENTIFIER,\n    TO_CHAR(MOOD_STARTDATE AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS MOOD_DAY_UTC,\n    CASE WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:boundary_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'pre' ELSE 'intern' END AS PERIOD,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS MOOD_SCORE_NUM\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_STARTDATE IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 1\n    AND TO_NUMBER(TRIM(MOOD_SCORE)) BETWEEN 1 AND 10\n), PARTICIPANT_DAY AS (\n  SELECT PARTICIPANTIDENTIFIER, MOOD_DAY_UTC, PERIOD,\n    COUNT(*) AS ENTRY_COUNT,\n    AVG(MOOD_SCORE_NUM) AS DAY_MEAN_MOOD\n  FROM VALID_ROWS\n  GROUP BY PARTICIPANTIDENTIFIER, MOOD_DAY_UTC, PERIOD\n)\nSELECT PARTICIPANTIDENTIFIER, PERIOD,\n  COUNT(*) AS OBSERVED_DAYS,\n  SUM(ENTRY_COUNT) AS RAW_ENTRIES,\n  AVG(DAY_MEAN_MOOD) AS MEAN_DAILY_MOOD,\n  MIN(DAY_MEAN_MOOD) AS MIN_DAILY_MOOD,\n  MAX(DAY_MEAN_MOOD) AS MAX_DAILY_MOOD\nFROM PARTICIPANT_DAY\nGROUP BY PARTICIPANTIDENTIFIER, PERIOD\nORDER BY PARTICIPANTIDENTIFIER, PERIOD",
+    "SELECT SURVEYNAME, SURVEYVERSION, STEPIDENTIFIER, RESULTIDENTIFIER, SUBSTR(QUESTIONTEXT, 1, 1000) AS QUESTIONTEXT, ANSWERFORMAT, SUBSTR(ANSWERCHOICES, 1, 2000) AS ANSWERCHOICES\nFROM IHS_2025.STG_SURVEYDICTIONARY\nWHERE LOWER(SURVEYNAME) LIKE :mood_term\n   OR LOWER(STEPIDENTIFIER) LIKE :mood_term\n   OR LOWER(RESULTIDENTIFIER) LIKE :mood_term\n   OR LOWER(QUESTIONTEXT) LIKE :mood_term\nORDER BY SURVEYNAME, SURVEYVERSION, STEPIDENTIFIER, RESULTIDENTIFIER",
+    "SELECT\n  CASE\n    WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:boundary_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'pre'\n    WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'intern'\n    ELSE 'after_intern_year'\n  END AS PERIOD,\n  COUNT(*) AS ROW_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS PARTICIPANT_COUNT,\n  MIN(MOOD_STARTDATE) AS MIN_MOOD_STARTDATE,\n  MAX(MOOD_STARTDATE) AS MAX_MOOD_STARTDATE\nFROM IHS_2025.VW_DAILY_MOOD\nGROUP BY CASE\n    WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:boundary_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'pre'\n    WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'intern'\n    ELSE 'after_intern_year'\n  END\nORDER BY PERIOD",
+    "WITH LABELED AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    MOOD_STARTDATE,\n    CASE\n      WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:boundary_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'pre'\n      WHEN MOOD_STARTDATE < TO_TIMESTAMP_TZ(:end_ts, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') THEN 'intern'\n      ELSE 'after_intern_year'\n    END AS PERIOD\n  FROM IHS_2025.VW_DAILY_MOOD\n)\nSELECT PERIOD,\n  COUNT(*) AS ROW_COUNT,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS PARTICIPANT_COUNT,\n  MIN(MOOD_STARTDATE) AS MIN_MOOD_STARTDATE,\n  MAX(MOOD_STARTDATE) AS MAX_MOOD_STARTDATE\nFROM LABELED\nGROUP BY PERIOD\nORDER BY PERIOD",
+    "WITH VALID_ROWS AS (\n  SELECT PARTICIPANTIDENTIFIER,\n    TO_CHAR(MOOD_STARTDATE, 'YYYY-MM-DD') AS MOOD_DAY_LOCAL,\n    CASE WHEN TO_CHAR(MOOD_STARTDATE, 'YYYY-MM-DD') < :boundary_day THEN 'pre' ELSE 'intern' END AS PERIOD,\n    TO_NUMBER(TRIM(MOOD_SCORE)) AS MOOD_SCORE_NUM\n  FROM IHS_2025.VW_DAILY_MOOD\n  WHERE TO_CHAR(MOOD_STARTDATE, 'YYYY-MM-DD') <= :end_day\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n    AND MOOD_STARTDATE IS NOT NULL\n    AND MOOD_SCORE IS NOT NULL\n    AND VALIDATE_CONVERSION(TRIM(MOOD_SCORE) AS NUMBER) = 1\n    AND TO_NUMBER(TRIM(MOOD_SCORE)) BETWEEN 1 AND 10\n), PARTICIPANT_DAY AS (\n  SELECT PARTICIPANTIDENTIFIER, MOOD_DAY_LOCAL, PERIOD,\n    COUNT(*) AS ENTRY_COUNT,\n    AVG(MOOD_SCORE_NUM) AS DAY_MEAN_MOOD\n  FROM VALID_ROWS\n  GROUP BY PARTICIPANTIDENTIFIER, MOOD_DAY_LOCAL, PERIOD\n)\nSELECT PARTICIPANTIDENTIFIER, PERIOD,\n  COUNT(*) AS OBSERVED_DAYS,\n  SUM(ENTRY_COUNT) AS RAW_ENTRIES,\n  AVG(DAY_MEAN_MOOD) AS MEAN_DAILY_MOOD\nFROM PARTICIPANT_DAY\nGROUP BY PARTICIPANTIDENTIFIER, PERIOD\nORDER BY PARTICIPANTIDENTIFIER, PERIOD"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 368510,
+        "inputTokens": 356776,
+        "cachedInputTokens": 118451,
+        "cacheWriteInputTokens": 238283,
+        "outputTokens": 11734,
+        "reasoningOutputTokens": 2445
+      },
+      "last": {
+        "totalTokens": 36730,
+        "inputTokens": 35895,
+        "cachedInputTokens": 28570,
+        "cacheWriteInputTokens": 7322,
+        "outputTokens": 835,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    },
+    {
+      "total": {
+        "totalTokens": 880769,
+        "inputTokens": 856862,
+        "cachedInputTokens": 426328,
+        "cacheWriteInputTokens": 430459,
+        "outputTokens": 23907,
+        "reasoningOutputTokens": 5872
+      },
+      "last": {
+        "totalTokens": 54474,
+        "inputTokens": 53709,
+        "cachedInputTokens": 38179,
+        "cacheWriteInputTokens": 15527,
+        "outputTokens": 765,
+        "reasoningOutputTokens": 451
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_ead280e04856cd2b",
+  "attempt": 2
+}

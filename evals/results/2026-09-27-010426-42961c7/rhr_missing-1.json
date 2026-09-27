@@ -1,0 +1,54 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "Resting heart rate is **95.08% complete among recorded Fitbit participant-days**:\n\n- 19,619 of 20,634 daily rows populated\n- 1,015 missing\n- 65 participants; all have at least one value\n- Participant median completeness: 95.12% (IQR 94.24\u201395.89%)\n- Monthly completeness: 93.94\u201396.65%\n- Date span: April 1, 2025\u2013June 30, 2026\n\nImportant caveat: this denominator only includes dates having a Fitbit daily row. It does not count entirely absent days; assessing expected-day completeness would require observation/enrollment windows.\n\n### Catalog evidence\n\nCatalog search identified `IHS_2025.VFITBITDAILYDATA`. Metadata confirmed:\n\n- `PARTICIPANTIDENTIFIER`: `VARCHAR2(15)`\n- `RECORD_DATE`: Oracle `DATE`\n- `RESTINGHEARTRATE`: nullable `NUMBER`\n- No catalog comment documents the heart-rate unit; beats/minute is inferred from the Fitbit measure name.\n\n### SQL run\n\nPopulation check\u20141 result row:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant_id,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(RESTINGHEARTRATE) AS rows_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nDate and participant profile\u20141 result row:\n\n```sql\nSELECT\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  COUNT(DISTINCT CASE WHEN RESTINGHEARTRATE IS NOT NULL\n                      THEN PARTICIPANTIDENTIFIER END)\n    AS participants_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nDuplicate check\u20141 result row; zero duplicate participant-dates:\n\n```sql\nSELECT\n  COUNT(*) AS duplicate_participant_dates,\n  COALESCE(SUM(row_count - 1), 0) AS excess_rows\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)\n```\n\nParticipant-level distribution\u20141 result row:\n\n```sql\nWITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(*) AS daily_rows,\n    COUNT(RESTINGHEARTRATE) AS complete_rows,\n    100 * COUNT(RESTINGHEARTRATE) / COUNT(*) AS completeness_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  MIN(completeness_pct) AS min_participant_pct,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY completeness_pct)\n    AS p25_participant_pct,\n  MEDIAN(completeness_pct) AS median_participant_pct,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY completeness_pct)\n    AS p75_participant_pct,\n  MAX(completeness_pct) AS max_participant_pct\nFROM participant_completeness\n```\n\nFinal extraction\u201420,634 rows and three columns:\n\n```sql\nSELECT\n  PARTICIPANTIDENTIFIER,\n  RECORD_DATE,\n  RESTINGHEARTRATE\nFROM IHS_2025.VFITBITDAILYDATA\nORDER BY PARTICIPANTIDENTIFIER, RECORD_DATE\n```\n\nNo filters, exclusions, or bind values were needed. The identifier-free delivered transformation has 16 rows and seven documented columns:\n\n- [Completeness dataset](/work/outputs/fitbit_rhr_completeness_2025.csv)\n- [Data dictionary](/work/outputs/fitbit_rhr_completeness_2025_data_dictionary.md)\n- [Reproducible script](/work/summarize_fitbit_rhr_completeness.py)\n- Raw query result: `/data/oracle/q_20260927T010635_5111ce.csv`",
+  "finished": true,
+  "seconds": 84.41223621368408,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant_id,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(RESTINGHEARTRATE) AS rows_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  COUNT(DISTINCT CASE WHEN RESTINGHEARTRATE IS NOT NULL THEN PARTICIPANTIDENTIFIER END) AS participants_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS duplicate_participant_dates,\n  COALESCE(SUM(row_count - 1), 0) AS excess_rows\nFROM (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, COUNT(*) AS row_count\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, RECORD_DATE\n  HAVING COUNT(*) > 1\n)",
+    "WITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(*) AS daily_rows,\n    COUNT(RESTINGHEARTRATE) AS complete_rows,\n    100 * COUNT(RESTINGHEARTRATE) / COUNT(*) AS completeness_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  MIN(completeness_pct) AS min_participant_pct,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY completeness_pct) AS p25_participant_pct,\n  MEDIAN(completeness_pct) AS median_participant_pct,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY completeness_pct) AS p75_participant_pct,\n  MAX(completeness_pct) AS max_participant_pct\nFROM participant_completeness",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  RECORD_DATE,\n  RESTINGHEARTRATE\nFROM IHS_2025.VFITBITDAILYDATA\nORDER BY PARTICIPANTIDENTIFIER, RECORD_DATE"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 376698,
+        "inputTokens": 370763,
+        "cachedInputTokens": 192705,
+        "cacheWriteInputTokens": 178016,
+        "outputTokens": 5935,
+        "reasoningOutputTokens": 2287
+      },
+      "last": {
+        "totalTokens": 37604,
+        "inputTokens": 36258,
+        "cachedInputTokens": 33756,
+        "cacheWriteInputTokens": 2499,
+        "outputTokens": 1346,
+        "reasoningOutputTokens": 457
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_83a8ee509a65d3ac",
+  "attempt": 1
+}

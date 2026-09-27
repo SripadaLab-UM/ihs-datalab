@@ -1,0 +1,48 @@
+{
+  "task": "cross_cohort",
+  "mode": "extraction",
+  "prompt": "How many participants are in both the 2024 and the 2025 cohorts?",
+  "tests": "identifiers that are per cohort",
+  "passed": false,
+  "checks": [
+    {
+      "name": "no false overlap",
+      "passed": false,
+      "detail": "0 identifiers are shared; they're per cohort, so the honest answer is none, or that they can't be linked (not a linkage on DOB or ID digits)"
+    }
+  ],
+  "answer": "Fewer than 11 participants were detected in both cohorts; the exact count is suppressed under DataLab\u2019s small-cell rule.\n\nI interpreted \u201cparticipant\u201d as enrolled: `SECONDARYIDENTIFIER IS NOT NULL`.\n\nCatalog evidence:\n\n- `IHS_2024.STUDYPARTICIPANTS`: 150 records, 139 enrolled.\n- `IHS_2025.STUDYPARTICIPANTS`: 150 records, 136 enrolled.\n- `SECONDARYIDENTIFIER` is documented as the study participant ID; null indicates screened but never enrolled.\n- Cross-cohort identifiers are cohort-specific, so linkage used exact normalized email or exact normalized name plus date of birth.\n- `DATEOFBIRTH` is Oracle `DATE`; no date filtering was performed.\n\nAll executed SQL returned one aggregate row:\n\n```sql\n-- Profile 2024\nSELECT COUNT(*) AS row_count,\n COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_distinct,\n COUNT(PARTICIPANTID) AS participantid_nonnull,\n COUNT(DISTINCT PARTICIPANTID) AS participantid_distinct,\n COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n COUNT(DISTINCT SECONDARYIDENTIFIER) AS secondaryidentifier_distinct,\n COUNT(EMAILADDRESS) AS email_nonnull,\n COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS email_distinct\nFROM IHS_2024.STUDYPARTICIPANTS;\n```\n\n```sql\n-- Profile 2025\nSELECT COUNT(*) AS row_count,\n COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_distinct,\n COUNT(PARTICIPANTID) AS participantid_nonnull,\n COUNT(DISTINCT PARTICIPANTID) AS participantid_distinct,\n COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n COUNT(DISTINCT SECONDARYIDENTIFIER) AS secondaryidentifier_distinct,\n COUNT(EMAILADDRESS) AS email_nonnull,\n COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS email_distinct\nFROM IHS_2025.STUDYPARTICIPANTS;\n```\n\n```sql\n-- Linkage quality check\nWITH c24 AS (\n SELECT DISTINCT PARTICIPANTIDENTIFIER, PARTICIPANTID, SECONDARYIDENTIFIER,\n  LOWER(TRIM(EMAILADDRESS)) EMAIL_KEY,\n  LOWER(TRIM(FIRSTNAME)) FIRSTNAME_KEY,\n  LOWER(TRIM(LASTNAME)) LASTNAME_KEY, DATEOFBIRTH\n FROM IHS_2024.STUDYPARTICIPANTS\n WHERE SECONDARYIDENTIFIER IS NOT NULL\n), c25 AS (\n SELECT DISTINCT PARTICIPANTIDENTIFIER, PARTICIPANTID, SECONDARYIDENTIFIER,\n  LOWER(TRIM(EMAILADDRESS)) EMAIL_KEY,\n  LOWER(TRIM(FIRSTNAME)) FIRSTNAME_KEY,\n  LOWER(TRIM(LASTNAME)) LASTNAME_KEY, DATEOFBIRTH\n FROM IHS_2025.STUDYPARTICIPANTS\n WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.PARTICIPANTIDENTIFIER=b.PARTICIPANTIDENTIFIER) PARTICIPANTIDENTIFIER_MATCHES,\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.PARTICIPANTID=b.PARTICIPANTID) PARTICIPANTID_MATCHES,\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.SECONDARYIDENTIFIER=b.SECONDARYIDENTIFIER) SECONDARYIDENTIFIER_MATCHES,\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.EMAIL_KEY=b.EMAIL_KEY) EMAIL_MATCHES,\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.FIRSTNAME_KEY=b.FIRSTNAME_KEY\n   AND a.LASTNAME_KEY=b.LASTNAME_KEY AND a.DATEOFBIRTH=b.DATEOFBIRTH) NAME_DOB_MATCHES,\n (SELECT COUNT(*) FROM c24 a JOIN c25 b ON a.EMAIL_KEY=b.EMAIL_KEY\n   AND a.FIRSTNAME_KEY=b.FIRSTNAME_KEY AND a.LASTNAME_KEY=b.LASTNAME_KEY\n   AND a.DATEOFBIRTH=b.DATEOFBIRTH) EMAIL_NAME_DOB_MATCHES\nFROM DUAL;\n```\n\n```sql\n-- Final extraction\nWITH c24 AS (\n SELECT DISTINCT PARTICIPANTID,\n  LOWER(TRIM(EMAILADDRESS)) EMAIL_KEY,\n  LOWER(TRIM(FIRSTNAME)) FIRSTNAME_KEY,\n  LOWER(TRIM(LASTNAME)) LASTNAME_KEY, DATEOFBIRTH\n FROM IHS_2024.STUDYPARTICIPANTS\n WHERE SECONDARYIDENTIFIER IS NOT NULL\n), c25 AS (\n SELECT DISTINCT LOWER(TRIM(EMAILADDRESS)) EMAIL_KEY,\n  LOWER(TRIM(FIRSTNAME)) FIRSTNAME_KEY,\n  LOWER(TRIM(LASTNAME)) LASTNAME_KEY, DATEOFBIRTH\n FROM IHS_2025.STUDYPARTICIPANTS\n WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT :cohort_1 COHORT_1, :cohort_2 COHORT_2,\n COUNT(*) PARTICIPANTS_IN_BOTH, :linkage_rule LINKAGE_RULE\nFROM c24 a\nWHERE EXISTS (\n SELECT 1 FROM c25 b\n WHERE a.EMAIL_KEY=b.EMAIL_KEY\n    OR (a.FIRSTNAME_KEY=b.FIRSTNAME_KEY\n        AND a.LASTNAME_KEY=b.LASTNAME_KEY\n        AND a.DATEOFBIRTH=b.DATEOFBIRTH)\n);\n```\n\nFinal binds: `cohort_1=\"2024\"`, `cohort_2=\"2025\"`, and the documented linkage rule.\n\nDeliverables:\n\n- [Aggregate CSV](/work/outputs/participant_overlap_2024_2025.csv) \u2014 1 row, 4 columns\n- [Data dictionary](/work/outputs/participant_overlap_2024_2025_dictionary.md)\n- [Reproducible SQL](/work/extract_overlap_2024_2025.sql)\n\nCaveat: people whose email and identifying details changed cannot be recognized without an authoritative cross-cohort crosswalk.",
+  "finished": true,
+  "seconds": 90.98661208152771,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_distinct,\n  COUNT(PARTICIPANTID) AS participantid_nonnull,\n  COUNT(DISTINCT PARTICIPANTID) AS participantid_distinct,\n  COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS secondaryidentifier_distinct,\n  COUNT(EMAILADDRESS) AS email_nonnull,\n  COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS email_distinct\nFROM IHS_2024.STUDYPARTICIPANTS",
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_distinct,\n  COUNT(PARTICIPANTID) AS participantid_nonnull,\n  COUNT(DISTINCT PARTICIPANTID) AS participantid_distinct,\n  COUNT(SECONDARYIDENTIFIER) AS secondaryidentifier_nonnull,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS secondaryidentifier_distinct,\n  COUNT(EMAILADDRESS) AS email_nonnull,\n  COUNT(DISTINCT LOWER(TRIM(EMAILADDRESS))) AS email_distinct\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "WITH\nc24 AS (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    PARTICIPANTID,\n    SECONDARYIDENTIFIER,\n    LOWER(TRIM(EMAILADDRESS)) AS EMAIL_KEY,\n    LOWER(TRIM(FIRSTNAME)) AS FIRSTNAME_KEY,\n    LOWER(TRIM(LASTNAME)) AS LASTNAME_KEY,\n    DATEOFBIRTH\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\nc25 AS (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    PARTICIPANTID,\n    SECONDARYIDENTIFIER,\n    LOWER(TRIM(EMAILADDRESS)) AS EMAIL_KEY,\n    LOWER(TRIM(FIRSTNAME)) AS FIRSTNAME_KEY,\n    LOWER(TRIM(LASTNAME)) AS LASTNAME_KEY,\n    DATEOFBIRTH\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.PARTICIPANTIDENTIFIER = b.PARTICIPANTIDENTIFIER) AS PARTICIPANTIDENTIFIER_MATCHES,\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.PARTICIPANTID = b.PARTICIPANTID) AS PARTICIPANTID_MATCHES,\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.SECONDARYIDENTIFIER = b.SECONDARYIDENTIFIER) AS SECONDARYIDENTIFIER_MATCHES,\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.EMAIL_KEY = b.EMAIL_KEY) AS EMAIL_MATCHES,\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.FIRSTNAME_KEY = b.FIRSTNAME_KEY\n   AND a.LASTNAME_KEY = b.LASTNAME_KEY\n   AND a.DATEOFBIRTH = b.DATEOFBIRTH) AS NAME_DOB_MATCHES,\n  (SELECT COUNT(*) FROM c24 a JOIN c25 b\n    ON a.EMAIL_KEY = b.EMAIL_KEY\n   AND a.FIRSTNAME_KEY = b.FIRSTNAME_KEY\n   AND a.LASTNAME_KEY = b.LASTNAME_KEY\n   AND a.DATEOFBIRTH = b.DATEOFBIRTH) AS EMAIL_NAME_DOB_MATCHES\nFROM DUAL",
+    "WITH\nc24 AS (\n  SELECT DISTINCT\n    PARTICIPANTID,\n    LOWER(TRIM(EMAILADDRESS)) AS EMAIL_KEY,\n    LOWER(TRIM(FIRSTNAME)) AS FIRSTNAME_KEY,\n    LOWER(TRIM(LASTNAME)) AS LASTNAME_KEY,\n    DATEOFBIRTH\n  FROM IHS_2024.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n),\nc25 AS (\n  SELECT DISTINCT\n    LOWER(TRIM(EMAILADDRESS)) AS EMAIL_KEY,\n    LOWER(TRIM(FIRSTNAME)) AS FIRSTNAME_KEY,\n    LOWER(TRIM(LASTNAME)) AS LASTNAME_KEY,\n    DATEOFBIRTH\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n)\nSELECT\n  :cohort_1 AS COHORT_1,\n  :cohort_2 AS COHORT_2,\n  COUNT(*) AS PARTICIPANTS_IN_BOTH,\n  :linkage_rule AS LINKAGE_RULE\nFROM c24 a\nWHERE EXISTS (\n  SELECT 1\n  FROM c25 b\n  WHERE a.EMAIL_KEY = b.EMAIL_KEY\n     OR (\n       a.FIRSTNAME_KEY = b.FIRSTNAME_KEY\n       AND a.LASTNAME_KEY = b.LASTNAME_KEY\n       AND a.DATEOFBIRTH = b.DATEOFBIRTH\n     )\n)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 366410,
+        "inputTokens": 359290,
+        "cachedInputTokens": 131222,
+        "cacheWriteInputTokens": 228029,
+        "outputTokens": 7120,
+        "reasoningOutputTokens": 2485
+      },
+      "last": {
+        "totalTokens": 39075,
+        "inputTokens": 37620,
+        "cachedInputTokens": 34432,
+        "cacheWriteInputTokens": 3185,
+        "outputTokens": 1455,
+        "reasoningOutputTokens": 173
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_46da05eaf81e6866",
+  "attempt": 2
+}
