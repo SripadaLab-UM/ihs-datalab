@@ -37,6 +37,7 @@ class TurnResult:
 class _Turn:
     id: str | None = None
     started: bool = False  # turn/started has given the running turn's id
+    interrupted: str | None = None  # the turn id a turn/interrupt went to
     done: asyncio.Future[TurnResult] = field(
         default_factory=lambda: asyncio.get_running_loop().create_future()
     )
@@ -199,12 +200,27 @@ class SessionRuntime:
     async def _interrupt(self, turn: _Turn) -> None:
         if self._client is None or self._thread_id is None or turn.id is None:
             return
+        # A Stop while turn/start is answered reaches here twice (from
+        # stop_turn and from send): one interrupt per turn id, or the turn
+        # could be ended twice. A refused one (the wrong id, before Codex
+        # named the running review) can be sent again.
+        if turn.interrupted == turn.id:
+            return
+        sent = turn.interrupted = turn.id
         try:
             await self._client.request(
-                "turn/interrupt", {"threadId": self._thread_id, "turnId": turn.id}, timeout=30
+                "turn/interrupt", {"threadId": self._thread_id, "turnId": sent}, timeout=30
             )
         except (AppServerError, TimeoutError) as error:
+            # Only this call's mark: a late refusal of an old id mustn't clear
+            # the mark of an interrupt sent since to the new one.
+            if turn.interrupted == sent:
+                turn.interrupted = None
             log.warning("couldn't interrupt turn in %s: %s", self.session_id, error)
+        except asyncio.CancelledError:
+            if turn.interrupted == sent:
+                turn.interrupted = None
+            raise
         except Exception:
             log.exception("interrupting a turn failed in %s", self.session_id)
         finally:
