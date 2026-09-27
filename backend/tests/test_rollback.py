@@ -13,6 +13,7 @@ from datalab.db.backups import list_backups, take_backup
 from datalab.db.rollback import RollbackRefused
 from datalab.trial import refuse_if_running as REAL_REFUSE_IF_RUNNING
 from tests.test_backups import (
+    ALL,
     FIRST,
     add_conversation,
     open_database,
@@ -277,3 +278,45 @@ def schema_of(path):
         return db.backups.applied_migrations(connection)
     finally:
         connection.close()
+
+
+def test_playground_and_run_queries_keep_their_owners_through_a_rollback(tmp_path, monkeypatch):
+    from datalab.data.access_log import AccessLog
+
+    path = tmp_path / "datalab.sqlite"
+    names = [m.name for m in ALL]
+    before_origin = use_migrations(monkeypatch, names.index("0006_query_origin.sql"))
+    connection = open_database(path, version="0.1.0")
+    add_conversation(connection, "c1", "Sleep and mood", "2026-09-01T10:00:00")
+    connection.close()
+
+    # The upgrade to the layout with `origin`, then Playground and run queries.
+    use_migrations(monkeypatch, None)
+    connection = open_database(path, version="0.2.0")
+    connection.row_factory = sqlite3.Row  # as db.connect sets it
+    log = AccessLog(connection, tmp_path / "logs" / "audit.jsonl")
+    for owner, origin in (("pg_1", "playground"), ("run_1", "run")):
+        log.started(
+            query_id=f"q-{owner}",
+            session_id=owner,
+            sql="SELECT 1 FROM dual",
+            binds={},
+            tables=[],
+            origin=origin,
+        )
+        log.finished(f"q-{owner}", status="succeeded", row_count=1)
+    connection.close()
+
+    # Back to the layout without `origin`: the queries are kept, their origin isn't.
+    plan = rollback.plan(path, before_origin)
+    assert plan.loses_data and [loss.table for loss in plan.losses] == ["queries"]
+    rollback.restore(path, plan.backup, app_version="0.1.0")
+
+    # Upgrading again puts each query back under its owner.
+    connection = open_database(path, version="0.2.0")
+    connection.row_factory = sqlite3.Row  # as db.connect sets it
+    log = AccessLog(connection, tmp_path / "logs" / "audit.jsonl")
+    assert [q.id for q in log.for_origin("playground", "pg_1")] == ["q-pg_1"]
+    assert [q.id for q in log.for_origin("run", "run_1")] == ["q-run_1"]
+    assert [q.id for q in log.for_origin("conversation", "c1")] == ["q-c1"]
+    connection.close()

@@ -130,7 +130,11 @@ newest backup this version can read.
   rollback doesn't happen. Only values in columns the older layout lacks stay
   behind, in the "restore" backup, and they are listed as dropped.
 - It backs up the database it replaces (reason "restore"), so a rollback can
-  itself be undone.
+  itself be undone. These backups are kept indefinitely; the Storage view
+  (still to come) will show them and let the person delete them.
+- Upgrading again after a rollback puts each query back under its owner: a
+  migration that adds a column the rollback couldn't keep derives it again
+  where it can (0006 reads a query's origin from its owner id).
 - It holds the data folder's lock (`.lock`, see `datalock.py`) from before it
   works out what to restore until it's done, so it refuses while DataLab is
   running and nothing can be recorded in between. `datalab backup` takes the
