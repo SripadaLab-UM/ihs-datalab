@@ -5,7 +5,7 @@ from __future__ import annotations
 import tomllib
 
 from datalab.sessions import codex_config, modes
-from datalab.sessions.modes import MODES
+from datalab.sessions.modes import CATALOG_TOOLS, MODES
 from datalab.workflows.model import load_workflow
 
 
@@ -72,15 +72,19 @@ def test_workflow_authorings_instructions():
     assert "never paste results" in text
 
 
-def test_knowledge_writing_has_the_catalog_only():
+def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     mode = MODES["knowledge"]
-    assert (mode.kind, mode.queries) == ("data", False)
+    assert (mode.kind, mode.queries, mode.attachments) == ("data", False, False)
+    assert mode.tools == CATALOG_TOOLS
     server = config("knowledge")["mcp_servers"]["ihs-data"]
-    assert server["disabled_tools"] == ["query", "propose_plan"]
+    assert server["disabled_tools"] == [
+        "query", "check_workflow", "propose_plan", "ask_research_helper"
+    ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
-    # Every other mode keeps its tools.
+    # Every other mode keeps its tools and attachments.
     for other in set(MODES) - {"knowledge"}:
-        assert MODES[other].queries and MODES[other].tools_off == ()
+        assert MODES[other].tools is None and MODES[other].tools_off == ()
+        assert MODES[other].queries and MODES[other].attachments
 
 
 def test_knowledge_writings_instructions():
@@ -89,7 +93,8 @@ def test_knowledge_writings_instructions():
     assert "never write or\n  change `reviewed_by` or `reviewed_on`" in text
     assert "Never change a page's `status`" in text
     assert "proposed knowledge edits" in text and "You never save anything" in text
-    assert "can't query the database in this mode" in text
+    assert "can't query the\n  database in this mode" in text
+    assert "Files can't be attached here" in text
     assert "write the draft to /work/outputs/ instead" in text  # no knowledge base here
     assert "No participant-level data" in text
     for tool in ("search_catalog", "describe_table", "join_paths", "find_concept"):

@@ -61,7 +61,7 @@ from datalab.workflows.model import (
     Problem,
     Workflow,
     WorkflowInvalid,
-    problem_position,
+    problem_positions,
     step_inputs,
     step_kind,
     step_outputs,
@@ -769,8 +769,9 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 
 def _problems_out(problems: list[Problem], text: str | None = None) -> list[ProblemOut]:
     out = []
+    positions = problem_positions(text, [p.path for p in problems]) if text is not None else {}
     for p in problems:
-        where = problem_position(text, p.path) if text is not None else None
+        where = positions.get(p.path)
         line, column = where or (None, None)
         out.append(ProblemOut(path=p.path, message=p.message, line=line, column=column))
     return out

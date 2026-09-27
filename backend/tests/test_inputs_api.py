@@ -82,6 +82,32 @@ def test_practice_attaches_only_samples(settings, catalog, monkeypatch):
         assert manager._containers_for(cid, "data")._extra_mounts() == []
 
 
+def test_nothing_can_be_attached_in_knowledge_writing(settings, catalog):
+    """Metadata only: the API refuses, and nothing already stored is mounted."""
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "knowledge"}).json()["id"]
+        refused = client.post(
+            f"/api/conversations/{cid}/inputs", json={"source": "sample", "sample": "r_helpers"}
+        )
+        assert refused.status_code == 403
+        assert "can't be attached in Knowledge writing mode" in refused.json()["detail"]
+        assert client.get(f"/api/conversations/{cid}/inputs").json() == []
+        # Even one put in the store some other way is never mounted.
+        services = app.state.services
+        manager = services.sessions
+        other = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(
+            f"/api/conversations/{other}/inputs", json={"source": "sample", "sample": "r_helpers"}
+        )
+        assert manager._input_mounts(other)
+        [stored] = manager._attachments.list(other)
+        manager._attachments._db.execute(
+            "UPDATE attachments SET conversation_id = ? WHERE id = ?", (cid, stored.id)
+        )
+        assert manager._attachments.list(cid) and manager._input_mounts(cid) == []
+
+
 def test_real_profile_uses_the_picker_and_refuses_private_places(
     real_settings, catalog, monkeypatch, tmp_path
 ):

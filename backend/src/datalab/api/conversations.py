@@ -120,6 +120,8 @@ class ModeOut(BaseModel):
     tab_only: bool = False
     # Whether the agent can run queries (False: the catalog tools only).
     queries: bool = True
+    # Whether files and folders can be attached.
+    attachments: bool = True
 
 
 class PlanSectionOut(BaseModel):
@@ -206,6 +208,7 @@ def build_conversations_router(
                 starters=list(m.starters),
                 tab_only=m.tab_only,
                 queries=m.queries,
+                attachments=m.attachments,
             )
             for m in MODES.values()
         ]

@@ -59,7 +59,7 @@ class SessionRuntime:
         tool_timeout_seconds: int,
         emit: Emit,
         approvals: Approvals | None = None,
-        queries: bool = True,
+        tools: frozenset[str] | None = None,
         tools_off: tuple[str, ...] = (),
     ) -> None:
         self.session_id = session_id
@@ -70,7 +70,7 @@ class SessionRuntime:
         self._model = model
         self._instructions = developer_instructions
         self._tool_timeout = tool_timeout_seconds
-        self._queries = queries
+        self._tools = tools
         self._tools_off = tools_off
         self._emit = emit
         self._client: AppServerClient | None = None
@@ -285,7 +285,7 @@ class SessionRuntime:
                 session_id=self.session_id,
                 kind=self.kind,
                 results_dir=self.paths.oracle_results,
-                queries=self._queries,
+                tools=self._tools,
             )
         )
         self.paths.create()

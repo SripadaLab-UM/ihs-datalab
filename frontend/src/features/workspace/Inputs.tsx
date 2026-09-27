@@ -9,6 +9,8 @@ import { kindOf } from "@/lib/files";
 export function Inputs({ conversation, practice }: { conversation: Conversation; practice: boolean }) {
   const queryClient = useQueryClient();
   const inputs = useQuery({ queryKey: ["inputs", conversation.id], queryFn: () => api.inputs(conversation.id) });
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const mode = modes.data?.find((m) => m.id === conversation.mode);
   const [refused, setRefused] = useState<{ path: string; reason: string }[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["inputs", conversation.id] });
@@ -32,6 +34,16 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
   });
   const detach = useMutation({ mutationFn: (id: string) => api.detach(conversation.id, id), onSuccess: refresh });
   const blocked = conversation.busy || attach.isPending;
+
+  if (mode && !mode.attachments) {
+    // Knowledge writing: the catalog and the knowledge base only (DataLab refuses to attach, too).
+    return (
+      <EmptyNote icon="attach" title="Nothing can be attached here">
+        {mode.label} works with the database catalog and the knowledge base only, so files can't be attached. Send
+        the page with your message, or attach files in another mode.
+      </EmptyNote>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">

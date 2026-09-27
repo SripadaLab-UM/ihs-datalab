@@ -18,7 +18,7 @@ vi.mock("@/api/client", () => ({
 vi.mock("@/components/chat/DockedChat", () => ({ DockedChat: () => <div>chat</div> }));
 
 const mode = (id: string, label: string, extra: Partial<Mode> = {}): Mode => ({
-  id, label, kind: "data", description: `${label} work.`, starters: ["?"], tab_only: false, queries: true, ...extra,
+  id, label, kind: "data", description: `${label} work.`, starters: ["?"], tab_only: false, queries: true, attachments: true, ...extra,
 }); // prettier-ignore
 
 beforeEach(() => {

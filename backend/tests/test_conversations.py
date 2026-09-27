@@ -353,6 +353,8 @@ def test_modes_come_with_descriptions_and_starters(app):
 
 def test_a_conversations_mode_sets_its_sessions_data_access(app):
     """The manager gives each session its mode's instructions and data access."""
+    from datalab.sessions.modes import CATALOG_TOOLS, DATA_TOOLS
+
     with TestClient(app) as client:
         made = {
             mode: client.post("/api/conversations", json={"mode": mode}).json()
@@ -363,8 +365,9 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
         store = app.state.services.conversations
         knowledge = sessions._runtime(store.get(made["knowledge"]["id"]))
         workflows = sessions._runtime(store.get(made["workflows"]["id"]))
-    assert (knowledge._queries, knowledge._tools_off) == (False, ("query", "propose_plan"))
-    assert (workflows._queries, workflows._tools_off) == (True, ())
+    assert knowledge._tools == CATALOG_TOOLS
+    assert set(knowledge._tools_off) == set(DATA_TOOLS) - CATALOG_TOOLS
+    assert (workflows._tools, workflows._tools_off) == (None, ())
     assert "Knowledge writing mode" in knowledge._instructions
     assert "Workflow authoring mode" in workflows._instructions
 

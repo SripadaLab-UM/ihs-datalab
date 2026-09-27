@@ -37,12 +37,14 @@ async def mcp_session(base_url: str, token: str, elicitation_callback=None):
             yield session
 
 
-def data_token(services, tmp_path: Path, kind: str = "data", queries: bool = True) -> str:
+def data_token(
+    services, tmp_path: Path, kind: str = "data", tools: frozenset[str] | None = None
+) -> str:
     access = SessionAccess(
         session_id="sess1",
         kind=kind,  # type: ignore[arg-type]
         results_dir=tmp_path / "oracle",
-        queries=queries,
+        tools=tools,
     )
     return services.tokens.issue(access)
 
@@ -127,20 +129,48 @@ async def test_rejected_sql_is_a_tool_error(server, tmp_path):
     assert database.calls == []
 
 
-async def test_a_metadata_only_session_cant_query(server, tmp_path):
-    """Knowledge writing: the catalog tools work, `query` is refused before
-    anything reaches the database or the access log."""
+async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(server, tmp_path):
+    """Knowledge writing: the catalog tools work; every other tool is refused
+    by DataLab, before anything reaches the database, the access log, the
+    plan desk or the research helper."""
+    from datalab.sessions.modes import CATALOG_TOOLS, DATA_TOOLS, MODES
+
     base_url, services, database = server
-    token = data_token(services, tmp_path, queries=False)
+    token = data_token(services, tmp_path, tools=MODES["knowledge"].tools)
+    calls = {
+        "query": {"sql": "SELECT STUDY_PARTICIPANT_ID FROM IHS_2025.VFITBITDAILYDATA"},
+        "check_workflow": {"text": "name: x\n"},
+        "ask_research_helper": {"question": "What is a mixed model?"},
+        "propose_plan": {
+            "analysis_type": "describe_compare",
+            "question_and_purpose": "q",
+            "data_and_scope": "d",
+            "checks_and_limitations": "c",
+            "deliverables": "r",
+        },
+    }
+    assert set(calls) == set(DATA_TOOLS) - CATALOG_TOOLS
     async with mcp_session(base_url, token) as session:
         hits = payload(await session.call_tool("search_catalog", {"query": "mood"}))
-        refused = await session.call_tool(
-            "query", {"sql": "SELECT STUDY_PARTICIPANT_ID FROM IHS_2025.VFITBITDAILYDATA"}
+        described = payload(
+            await session.call_tool("describe_table", {"table": "IHS_2025.VFITBITDAILYDATA"})
         )
-    assert hits[0]["table"] == "IHS_2025.VW_DAILY_MOOD"
-    assert refused.is_error and "catalog tools only" in refused.content[0].text
+        refused = {name: await session.call_tool(name, args) for name, args in calls.items()}
+    assert hits[0]["table"] == "IHS_2025.VW_DAILY_MOOD" and described["columns"]
+    for name, result in refused.items():
+        assert result.is_error, name
+        assert f"{name} isn't available in this mode" in result.content[0].text
     assert database.calls == []
     assert services.access_log.for_session("sess1") == []
+
+
+async def test_the_modes_tool_list_names_every_tool(server, tmp_path):
+    from datalab.sessions.modes import DATA_TOOLS
+
+    base_url, services, _ = server
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        tools = {t.name for t in (await session.list_tools()).tools}
+    assert tools == set(DATA_TOOLS)
 
 
 async def test_check_workflow_runs_datalabs_own_check(server, tmp_path):
@@ -339,3 +369,91 @@ async def test_an_approved_plan_carries_datalabs_record_of_what_ran_before_it(se
         "tables": ["IHS_2025.VW_DAILY_MOOD"],
         "more_tables": 0,
     }
+
+
+async def test_a_large_file_with_thousands_of_problems_is_checked_quickly(server, tmp_path):
+    """8,000 steps naming a missing pipeline: 8,001 problems. At most 50 are
+    reported, their lines found from one read of the file, off the event loop.
+    (8,002 with the note on the missing pipeline.yaml, given once.)"""
+    import time
+
+    base_url, services, _ = server
+    steps = "".join(f"  - id: s{i}\n    pipeline: p\n" for i in range(8000))
+    big = "name: t\nreads: []\nsteps:\n" + steps
+    assert 200_000 < len(big.encode()) < 256 * 1024
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        started = time.monotonic()
+        found = payload(await session.call_tool("check_workflow", {"text": big}))
+        took = time.monotonic() - started
+        # The server answered other calls meanwhile, and still does.
+        hits = payload(await session.call_tool("search_catalog", {"query": "mood"}))
+    assert took < 15, took
+    assert found["valid"] is False and len(found["problems"]) == 51
+    assert found["problems"][0]["line"] == 5  # steps[0].pipeline
+    assert found["problems"][-1]["message"].startswith(
+        "And 7952 more problems"
+    )  # 8,001 and the pipeline's own
+    assert hits
+
+
+async def test_a_slow_check_times_out_and_keeps_its_slot_until_it_ends(monkeypatch):
+    import asyncio
+    import threading
+
+    from datalab.data import agent_tools
+
+    monkeypatch.setattr(agent_tools, "CHECK_SECONDS", 0.2)
+    release = threading.Event()
+    slots = asyncio.Semaphore(1)
+
+    def slow(text: str) -> None:
+        release.wait(5)
+
+    first = await agent_tools._checked_in_thread(slow, "name: x\n", slots)
+    assert "took over" in first[0]["message"]
+    # Still running: the next check waits for the slot, and says so.
+    second = await agent_tools._checked_in_thread(slow, "name: x\n", slots)
+    assert "busy checking" in second[0]["message"]
+    release.set()
+    for _ in range(50):
+        if not slots.locked():
+            break
+        await asyncio.sleep(0.05)
+    assert not slots.locked()
+    assert await agent_tools._checked_in_thread(lambda _t: None, "name: x\n", slots) == []
+
+
+async def test_a_pipeline_name_never_reads_or_names_anything_outside_the_package(server, tmp_path):
+    """The agent names the pipeline. A path in its place must not make the host
+    read a pipeline.yaml elsewhere (and report its keys), nor say where
+    anything is, nor whether it exists."""
+    base_url, services, _ = server
+    outside = tmp_path / "outside" / "evil"
+    outside.mkdir(parents=True)
+    (outside / "pipeline.yaml").write_text("secret_key_name: 1\nanother_secret: 2\n")
+    package = services.settings.data_dir / "workflows-local" / "ihsDataR"
+    (package / "inst" / "pipelines").mkdir(parents=True)
+    names = [
+        str(outside),
+        "x/../../../../../../" + str(outside).lstrip("/"),
+        str(tmp_path / "outside" / "nope"),
+        "weekly'.",
+    ]
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        results = [
+            payload(
+                await session.call_tool(
+                    "check_workflow",
+                    {"text": f"name: t\nreads: []\nsteps:\n  - id: p\n    pipeline: {name!r}\n"},
+                )
+            )
+            for name in names
+        ]
+    for name, result in zip(names, results, strict=True):
+        assert result["valid"] is False
+        # Only the agent's own name comes back, as it wrote it.
+        text = json.dumps(result).replace(json.dumps(repr(name))[1:-1], "NAME")
+        assert "secret_key_name" not in text and "another_secret" not in text
+        assert str(tmp_path) not in text
+        assert "isn't there" not in text  # nothing said about whether it exists
+        assert "Pipeline names are lower case letters" in text

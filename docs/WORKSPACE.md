@@ -29,7 +29,7 @@ Two more modes open only from the tab that docks them, not from **New**
 | Mode | Session | Docked in | The agent's priorities |
 |---|---|---|---|
 | **Workflow authoring** | 🔒 Data | Workflows tab | Draft or change workflow files in its copy of the pipelines repo (`/work/pipelines/workflows/`), following [WORKFLOWS.md](WORKFLOWS.md): declared `reads:`, QC with `small_cells` on every delivered CSV, destination keys. It checks each draft with `check_workflow`, DataLab's own workflow check. Its changes become a Pipelines proposal, which a person reviews, tests, and saves there; the agent never saves. The database tools as in Data extraction, read-only. |
-| **Knowledge writing** | 🔒 Data | Knowledge tab | Write or tidy a page or lab skill in `/work/kb`, in the layout and page format of [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), as proposed-edit cards. Never sets `reviewed_by`, `reviewed_on`, or a page's status. The catalog tools only (metadata): its `query` tool is refused, and Codex doesn't list it. |
+| **Knowledge writing** | 🔒 Data | Knowledge tab | Write or tidy a page or lab skill in `/work/kb`, in the layout and page format of [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), as proposed-edit cards. Never sets `reviewed_by`, `reviewed_on`, or a page's status. The catalog tools only (metadata): its session token allows just `search_catalog`, `describe_table`, `join_paths` and `find_concept`, DataLab refuses every other data tool, and Codex doesn't list them. Nothing can be attached (a file could hold study data); the page open in the tab can go with a message. |
 
 ## How the agent is instructed
 

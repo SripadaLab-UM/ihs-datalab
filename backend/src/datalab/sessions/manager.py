@@ -562,6 +562,10 @@ class SessionManager:
     def _input_mounts(self, conversation_id: str) -> list[str]:
         """Mounts for the attachments that still pass every check, right now."""
         assert self._attachments is not None
+        conversation = self._store.get(conversation_id)
+        mode = modes.MODES.get(conversation.mode) if conversation else None
+        if mode is None or not mode.attachments:
+            return []  # Knowledge writing: metadata only (the API refuses to attach, too)
         protected = [self._settings.data_dir, *(default_data_dir(p) for p in ("real", "practice"))]
         mountable = []
         for attachment in self._attachments.list(conversation_id):
@@ -675,7 +679,7 @@ class SessionManager:
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
-                queries=mode.queries,
+                tools=mode.tools,
                 tools_off=mode.tools_off,
             )
             self._runtimes[conversation.id] = runtime

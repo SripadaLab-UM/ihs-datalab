@@ -2496,6 +2496,11 @@ export interface components {
              * @default true
              */
             queries: boolean;
+            /**
+             * Attachments
+             * @default true
+             */
+            attachments: boolean;
         };
         /** ModelKeyIn */
         ModelKeyIn: {

@@ -24,18 +24,42 @@ class Mode:
     instructions: str
     # Suggested first messages, shown in an empty conversation.
     starters: tuple[str, ...] = ()
-    # Whether the `query` tool runs SQL for it (data sessions). Without it
-    # the agent has the catalog tools only: metadata, never rows. DataLab's
-    # data tools refuse `query` (agent_tools.py), and Codex doesn't list it.
-    queries: bool = True
+    # The ihs-data tools it may use (data sessions), or None for all of them.
+    # The session's token carries the list, and DataLab's data tools refuse
+    # any other (agent_tools.py); Codex doesn't list the others either.
+    tools: frozenset[str] | None = None
+    # Whether files and folders can be attached to it.
+    attachments: bool = True
     # Only for the tab that docks it; not offered in the Workspace's New
     # conversation dialog.
     tab_only: bool = False
 
     @property
+    def queries(self) -> bool:
+        """Whether its `query` tool runs SQL (without it: metadata only)."""
+        return self.tools is None or "query" in self.tools
+
+    @property
     def tools_off(self) -> tuple[str, ...]:
         """The ihs-data tools Codex doesn't list in this mode."""
-        return () if self.queries else ("query", "propose_plan")
+        if self.tools is None:
+            return ()
+        return tuple(t for t in DATA_TOOLS if t not in self.tools)
+
+
+# Every ihs-data tool (data/agent_tools.py; a test keeps the two the same).
+DATA_TOOLS = (
+    "search_catalog",
+    "describe_table",
+    "join_paths",
+    "find_concept",
+    "query",
+    "check_workflow",
+    "propose_plan",
+    "ask_research_helper",
+)
+# The catalog tools: metadata only, never rows.
+CATALOG_TOOLS = frozenset({"search_catalog", "describe_table", "join_paths", "find_concept"})
 
 
 ANALYSIS = """\
@@ -355,9 +379,11 @@ skill for the layout and the page format.
   tables of values, no small counts.
 - You have the catalog tools (search_catalog, describe_table, join_paths,
   find_concept) to check the tables and columns a page cites. They are
-  metadata only. You can't query the database in this mode: when a page
-  needs a verified query or a number, write the SQL and say it needs
-  checking in a Data extraction conversation.
+  metadata only, and the only data tools you have. You can't query the
+  database in this mode: when a page needs a verified query or a number,
+  write the SQL and say it needs checking in a Data extraction
+  conversation. Files can't be attached here either; the person can send
+  the page open in the Knowledge tab with a message.
 
 Final answers list the files changed, what changed in each and why, the
 evidence behind new claims, and anything a reviewer should check.
@@ -422,7 +448,10 @@ MODES = {
                 "Draft a table page for IHS_2025.VFITBITDAILYDATA from the catalog.",
                 "Tidy the page I'm looking at: check its evidence and limitations.",
             ),
-            queries=False,
+            # Metadata only: the catalog, and no attached files, which could
+            # hold study data. The page open in the tab can be sent along.
+            tools=CATALOG_TOOLS,
+            attachments=False,
             tab_only=True,
         ),
         Mode(

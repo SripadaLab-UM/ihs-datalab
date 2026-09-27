@@ -258,11 +258,12 @@ class WorkflowRunner:
         self, problems: list[Problem], text: str, folder: WorkflowFolder
     ) -> list[Problem]:
         out = []
+        explained: set[str] = set()
         for problem in problems:
             out.append(problem)
-            if problem.message.startswith("There's no pipeline "):
-                name = problem.message.removeprefix("There's no pipeline ").strip("'.")
-                for why in folder.pipeline_problems(name):
+            if problem.pipeline is not None and problem.pipeline not in explained:
+                explained.add(problem.pipeline)  # once per pipeline, however many steps
+                for why in folder.pipeline_problems(problem.pipeline):
                     out.append(Problem(problem.path, f"pipeline.yaml: {why}"))
         return out
 

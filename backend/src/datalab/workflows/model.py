@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -62,6 +62,9 @@ ORACLE_INPUT = "oracle"
 class Problem:
     path: str  # where in the file: "steps[1].inputs.raw", or "" for the whole file
     message: str
+    # The pipeline a "there's no pipeline" problem is about, as the file names
+    # it, so its own problems can be looked up (never parsed from `message`).
+    pipeline: str | None = field(default=None, compare=False)
 
     def __str__(self) -> str:
         return f"{self.path}: {self.message}" if self.path else self.message
@@ -315,16 +318,35 @@ def problem_position(text: str, path: str) -> tuple[int, int] | None:
     Keys can hold dots (`deliver.without_small_cells.clean.stats`), so at each
     mapping the longest key that the rest of the path starts with is taken.
     """
-    if not path:
-        return None
-    if found := _LINE_PATH.fullmatch(path):
-        return int(found.group(1)), 1
-    if len(text.encode()) > MAX_FILE_BYTES:
-        return None
-    try:
-        node = yaml.compose(text, Loader=yaml.SafeLoader)
-    except yaml.YAMLError:
-        return None
+    return problem_positions(text, [path]).get(path)
+
+
+def problem_positions(text: str, paths: list[str]) -> dict[str, tuple[int, int] | None]:
+    """`problem_position` for several paths, reading the file once."""
+    out: dict[str, tuple[int, int] | None] = {}
+    root: yaml.Node | None = None
+    composed = False
+    for path in paths:
+        if path in out:
+            continue
+        if not path:
+            out[path] = None
+            continue
+        if found := _LINE_PATH.fullmatch(path):
+            out[path] = (int(found.group(1)), 1)
+            continue
+        if not composed:
+            composed = True
+            if len(text.encode()) <= MAX_FILE_BYTES:
+                try:
+                    root = yaml.compose(text, Loader=yaml.SafeLoader)
+                except yaml.YAMLError:
+                    root = None
+        out[path] = _position(root, path) if root is not None else None
+    return out
+
+
+def _position(node: yaml.Node | None, path: str) -> tuple[int, int] | None:
     at: yaml.Node | None = None
     rest = path
     while rest and node is not None:
@@ -566,7 +588,13 @@ def check_workflow(
         if isinstance(step, PipelineStep):
             found = pipelines(step.pipeline) if pipelines else None
             if found is None:
-                problem(f"{where}.pipeline", f"There's no pipeline {step.pipeline!r}.")
+                problems.append(
+                    Problem(
+                        f"{where}.pipeline",
+                        f"There's no pipeline {step.pipeline!r}.",
+                        pipeline=step.pipeline,
+                    )
+                )
             else:
                 pipeline_reads[step.id] = {r.object for r in found.spec.reads}
                 for name in found.spec.parameters:

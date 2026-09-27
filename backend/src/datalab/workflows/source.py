@@ -48,6 +48,8 @@ from datalab.workflows.model import (
 )
 
 PACKAGE = "ihsDataR"
+# A pipeline's name: its folder in inst/pipelines/ (as a workflow step names it).
+PIPELINE_NAME = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _GIT = [
     "git",
     "-c", "core.fsmonitor=false",
@@ -254,7 +256,7 @@ class WorkflowFolder:
 
     def pipeline(self, name: str) -> Pipeline | None:
         """A pipeline from the package, or None if there's none by that name."""
-        if self._package_problem is not None or not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", name):
+        if self._package_problem is not None or not PIPELINE_NAME.fullmatch(name):
             return None
         folder = self.package_dir / "inst" / "pipelines" / name
         spec_file, script_file = folder / "pipeline.yaml", folder / "run.R"
@@ -270,19 +272,31 @@ class WorkflowFolder:
         return Pipeline(name=name, spec=spec, script=script)
 
     def pipeline_problems(self, name: str) -> list[str]:
-        """Why a pipeline can't be loaded, for the workflow check's message."""
+        """Why a pipeline can't be loaded, for the workflow check's message.
+
+        The name comes from the workflow file, which may be the agent's
+        (check_workflow), so it's checked before it goes into a path, and
+        only paths relative to the folder are ever named: never where the
+        folder is on this computer, and nothing about files outside it."""
         if self._package_problem is not None:
             return [self._package_problem]
-        folder = self.package_dir / "inst" / "pipelines" / name
-        spec_file = folder / "pipeline.yaml"
-        if not _plain_file(spec_file):
-            return [f"{spec_file.relative_to(self.root).as_posix()} isn't there."]
+        if not PIPELINE_NAME.fullmatch(name):
+            return ["Pipeline names are lower case letters, digits and _ (at most 48)."]
+        shown = f"{PACKAGE}/inst/pipelines/{name}/pipeline.yaml"
+        spec_file = self.package_dir / "inst" / "pipelines" / name / "pipeline.yaml"
         try:
+            inside = spec_file.resolve().is_relative_to(self.root.resolve())
+            if not inside or not _plain_file(spec_file):
+                return [f"{shown} isn't there."]
             load_pipeline_file(_read_limited(spec_file, MAX_FILE_BYTES).decode("utf-8"))
         except WorkflowInvalid as error:
             return [str(p) for p in error.problems]
-        except (UnicodeDecodeError, SourceError) as error:
-            return [str(error)]
+        except UnicodeDecodeError:
+            return [f"{shown} isn't UTF-8 text."]
+        except SourceError:
+            return [f"{shown} is larger than {MAX_FILE_BYTES // 1024} KB."]
+        except (OSError, RuntimeError, ValueError):
+            return [f"{shown} can't be read."]
         return []
 
     def package(self) -> PackageTree:

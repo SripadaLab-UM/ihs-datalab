@@ -129,16 +129,21 @@ async def test_the_lab_skills_in_the_knowledge_base_copy_are_a_skill_root(tmp_pa
 
 
 async def test_a_modes_data_access_reaches_its_token_and_codex_config(tmp_path):
-    """Knowledge writing: the session's token can't query, and Codex doesn't list the tool."""
+    """Knowledge writing: its token allows only its tools; Codex doesn't list the rest."""
     tokens = SessionTokens()
     containers = FakeContainers(tmp_path / "log.jsonl")
     runtime, _ = make(
-        tmp_path, containers, tokens, queries=False, tools_off=("query", "propose_plan")
+        tmp_path,
+        containers,
+        tokens,
+        tools=frozenset({"search_catalog"}),
+        tools_off=("query", "propose_plan"),
     )
     runtime.begin_turn()
     await runtime.send("hi")
     access = tokens.resolve(containers.tokens[-1])
-    assert access is not None and access.queries is False
+    assert access is not None and access.tools == {"search_catalog"}
+    assert access.allows("search_catalog") and not access.allows("query")
     assert 'disabled_tools = ["query", "propose_plan"]' in runtime.paths.codex_config.read_text()
     await runtime.close()
     # By default, a data session queries, and every tool is listed.
@@ -148,7 +153,7 @@ async def test_a_modes_data_access_reaches_its_token_and_codex_config(tmp_path):
     runtime.begin_turn()
     await runtime.send("hi")
     access = tokens.resolve(containers.tokens[-1])
-    assert access is not None and access.queries is True
+    assert access is not None and access.tools is None and access.allows("query")
     assert "disabled_tools" not in runtime.paths.codex_config.read_text()
     await runtime.close()
 
