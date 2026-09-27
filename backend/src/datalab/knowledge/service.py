@@ -129,6 +129,8 @@ class Knowledge:
             settings.data_dir / "repos" / name,
             remote or f"https://github.com/{repos.knowledge}.git",
             before_network=self._fresh_token,
+            # Only tests give another remote (a local bare repo).
+            allow_local=remote is not None,
         )
         self.store = ProposalStore(database)
         self._conversations = conversations

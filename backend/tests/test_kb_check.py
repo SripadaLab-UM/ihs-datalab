@@ -8,6 +8,7 @@ import pytest
 
 from datalab.cli import main
 from datalab.knowledge import check as kb
+from datalab.repos.git import name_problem
 from tests.kb_fixtures import FITBIT, page, sample_kb
 
 
@@ -280,3 +281,72 @@ def test_the_github_workflow_template_runs_datalabs_published_check():
     assert "datalab kb-check . --format github" in command
     checkout = job["steps"][0]
     assert checkout["with"]["persist-credentials"] is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".gitattributes",
+        ".gitmodules",
+        "skills/x/.gitattributes",
+        "qc/.gitignore",
+        ".GIT/config",
+        ".g\u200dit/config",
+        "GIT~1/config",
+        "qc/x.md.",
+        "qc/x.md ",
+        " qc/x.md",
+        "qc/CON.md",
+        "qc/nul",
+        "qc/a:b.md",
+        "qc/a|b.md",
+        "qc/caf\u00e9.md",
+    ],
+)
+def test_names_git_or_a_disk_would_treat_specially_are_refused(path):
+    assert name_problem(path)
+    report = kb.check({**sample_kb(), path: page("x", "qc", "qc").encode()})
+    assert (path, "name") in rules(report, "error")
+    assert kb.proposal_problem(path)
+
+
+def test_the_repos_own_git_files_at_the_top_are_fine():
+    assert name_problem(".gitignore") is None
+    assert name_problem(".github/workflows/kb-check.yml") is None
+    assert kb.check({**sample_kb(), ".gitignore": b"*.tmp\n"}).errors == []
+
+
+def test_skill_folders_hold_only_text_and_scripts_and_cant_take_app_skill_names():
+    skill = "---\nname: {0}\ndescription: Use it.\n---\n"
+    files = {
+        **sample_kb(),
+        "skills/sleep-qc/SKILL.md": skill.format("sleep-qc").encode(),
+        "skills/sleep-qc/scripts/check.R": b"x <- 1\n",
+        "skills/sleep-qc/tool.sh": b"echo\n",
+        "skills/kb-extra/SKILL.md": skill.format("kb-extra").encode(),
+        "skills/sql-extraction/SKILL.md": skill.format("sql-extraction").encode(),
+        "skills/skill-creator/SKILL.md": skill.format("skill-creator").encode(),
+    }
+    report = kb.check(files)
+    errors = rules(report, "error")
+    assert ("skills/sleep-qc/tool.sh", "layout") in errors
+    assert ("skills/sleep-qc/scripts/check.R", "layout") not in errors
+    for name in ("kb-extra", "sql-extraction", "skill-creator"):
+        assert (f"skills/{name}/SKILL.md", "skill_reserved") in errors
+
+
+def test_the_reserved_names_are_the_images_app_skills():
+    from pathlib import Path
+
+    skills = Path(__file__).resolve().parents[2] / "images" / "agent" / "skills"
+    assert {p.name for p in skills.iterdir() if p.is_dir()} == kb.APP_SKILLS
+
+
+def test_file_names_are_scanned_for_study_ids():
+    [hit] = kb.name_findings("qc/SYN001-notes.md")
+    assert (hit.rule, hit.severity) == ("name_study_id", "data")
+    assert kb.name_findings("qc/sleep-48213377.md")
+    for fine in ("tables/IHS_2025.VFITBITDAILYDATA.md", "qc/midnight-sleep.md", "papers/phq9.md"):
+        assert kb.name_findings(fine) == []
+    report = kb.check({**sample_kb(), "qc/SYN001.md": page("SYN001", "qc", "qc").encode()})
+    assert ("qc/SYN001.md", "name_study_id") in rules(report, "data")

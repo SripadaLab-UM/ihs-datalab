@@ -1,10 +1,19 @@
 """Git, run by DataLab on the host, and the lab repos' clones in `<data_dir>/repos/`.
 
-Every git command gets the same fixed configuration on its command line
-(`-c`), whatever the person's own git config says:
+Git reads no configuration but the clone's own (`.git/config`, which only
+DataLab writes): the person's global and the system config are switched off
+(`GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM`), so no filter, merge or diff
+driver, URL rewrite, rerere, or submodule setting from them can apply. And
+`.git/info/attributes`, which outranks any `.gitattributes` in the repo,
+turns every filter, diff and merge driver and every text conversion off, so
+a `.gitattributes` in the knowledge base can't select one either.
+
+On top of that, every command gets the same fixed configuration on its
+command line (`-c`):
 
 - no hooks, no fsmonitor, no signing, no line-ending conversion, links
-  checked out as plain files, and only the https and local transports;
+  checked out as plain files, names that Mac or Windows would read as `.git`
+  refused, and only the https transport (the local one only in tests);
 - for commands that talk to GitHub, DataLab's credential helper and no
   other (credential_helper.py). Nothing is ever written to a git config
   file, and the token is never on a command line or in the environment;
@@ -46,17 +55,29 @@ _CONFIG = (
     "core.safecrlf=false",
     "core.symlinks=false",
     "core.quotePath=false",
+    "core.protectHFS=true",
+    "core.protectNTFS=true",
     "commit.gpgSign=false",
     "tag.gpgSign=false",
+    "push.gpgSign=false",
+    "rerere.enabled=false",
+    "rebase.updateRefs=false",
+    "submodule.recurse=false",
     "protocol.allow=never",
     "protocol.https.allow=always",
-    "protocol.file.allow=always",
     "credential.interactive=false",
     "rebase.autoStash=false",
     "merge.conflictStyle=merge",
     "advice.detachedHead=false",
     "init.defaultBranch=main",
+    # Without the system config, Git for Windows would otherwise look for a
+    # CA bundle; use Windows' own certificate store instead.
+    *(("http.sslBackend=schannel",) if sys.platform == "win32" else ()),
 )
+# Outranks every .gitattributes in the repo: no filters (smudge/clean, LFS),
+# no external diff or merge drivers (`merge` set means git's own text
+# merge), no end-of-line or encoding conversion, no $Id$ expansion.
+ATTRIBUTES = "* -filter -diff merge -text -eol -ident -working-tree-encoding\n"
 # Environment variables git would read that no command of ours should
 # inherit, besides every GIT_* one.
 _DROPPED_ENV = ("SSH_ASKPASS", "DATALAB_MODEL_API_KEY", "DATALAB_ORACLE_PASSWORD")
@@ -89,6 +110,9 @@ def git_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
         if not k.upper().startswith("GIT_") and k.upper() not in _DROPPED_ENV
     }
     env.update(
+        # Only the clone's own config: never the person's or the system's.
+        GIT_CONFIG_GLOBAL=os.devnull,
+        GIT_CONFIG_NOSYSTEM="1",
         GIT_TERMINAL_PROMPT="0",
         GCM_INTERACTIVE="never",
         GIT_EDITOR="true",
@@ -125,9 +149,11 @@ class TreeEntry:
 class RebaseResult:
     # done: rebased (possibly with the given resolutions); empty: nothing of
     # ours was left once rebased; conflict: stopped, nothing changed.
-    state: Literal["done", "empty", "conflict"]
+    # failed: git stopped for another reason; nothing changed.
+    state: Literal["done", "empty", "conflict", "failed"]
     commit: str | None = None
     conflicts: list[str] = field(default_factory=list)
+    message: str = ""
 
 
 @dataclass(frozen=True)
@@ -137,15 +163,47 @@ class PushResult:
     message: str = ""
 
 
-def safe_path(path: str) -> bool:
-    """A relative path git and every disk can take as it is: no `..`, no
-    absolute or drive paths, no control characters or backslashes."""
-    if not path or path.startswith("/") or "\\" in path or ":" in path:
-        return False
-    if any(ord(c) < 32 or c == "\x7f" for c in path):
-        return False
+_WINDOWS_RESERVED = {
+    "con", "prn", "aux", "nul",
+    *(f"com{n}" for n in range(1, 10)), *(f"lpt{n}" for n in range(1, 10)),
+}  # fmt: skip
+_WINDOWS_CHARACTERS = set('<>:"|?*\\')
+# Git's own files, which a repo may hold but DataLab never writes: they'd
+# change how every clone of the lab repo behaves.
+_TOP_LEVEL_GIT_NAMES = (".gitignore", ".github")
+
+
+def name_problem(path: str) -> str | None:
+    """Why a path can't go into a lab repo, or None if it can: it must be a
+    plain relative path every disk and git take as it is."""
+    if not path or path.startswith("/"):
+        return "it isn't a relative path"
+    if any(ord(c) < 32 or ord(c) == 127 for c in path):
+        return "its name has control characters"
+    if any(ord(c) > 126 for c in path):
+        # Also what hides `.git` from a check (a zero-width joiner, say).
+        return "its name has characters other than plain ASCII"
+    if any(c in _WINDOWS_CHARACTERS for c in path):
+        return "its name has a character Windows can't use (< > : \" | ? * \\)"
     parts = path.split("/")
-    return all(p not in ("", ".", "..") and p.lower() != ".git" for p in parts)
+    for number, part in enumerate(parts):
+        if part in ("", ".", ".."):
+            return "it has an empty, . or .. part"
+        if part.endswith((".", " ")) or part.startswith(" "):
+            return "a name in it starts with a space or ends with a dot or a space"
+        if re.search(r"~\d", part):
+            return "a name in it looks like a Windows short name (such as GIT~1)"
+        if part.split(".")[0].lower() in _WINDOWS_RESERVED:
+            return "a name in it is one Windows reserves (such as CON or NUL)"
+        top_level = number == 0 and part in _TOP_LEVEL_GIT_NAMES
+        if part.lower().startswith(".git") and not top_level:
+            return "names starting with .git are git's own control files"
+    return None
+
+
+def safe_path(path: str) -> bool:
+    """A relative path git and every disk can take as it is (see name_problem)."""
+    return name_problem(path) is None
 
 
 class Clone:
@@ -160,9 +218,12 @@ class Clone:
         # makes sure the GitHub token is fresh there (it may raise).
         before_network: Callable[[], object] = lambda: None,
         python: str | None = None,
+        # Tests only: a remote that's a folder on this computer.
+        allow_local: bool = False,
     ) -> None:
         self.path = path
         self.remote = remote
+        self._allow_local = allow_local
         self._before_network = before_network
         self._helper = helper_args(python)
         # Held for anything that reads and then changes the clone.
@@ -182,7 +243,8 @@ class Clone:
     ) -> subprocess.CompletedProcess[bytes]:
         if network:
             self._before_network()
-        options = [part for setting in _CONFIG for part in ("-c", setting)]
+        config = (*_CONFIG, *(("protocol.file.allow=always",) if self._allow_local else ()))
+        options = [part for setting in config for part in ("-c", setting)]
         command = ["git", *options, *(self._helper if network else []), *args]
         try:
             done = subprocess.run(
@@ -216,12 +278,25 @@ class Clone:
             if not self.exists():
                 self._clone()
             else:
+                self.protect()
                 self.fetch(timeout=timeout)
                 self.git("merge", "--ff-only", "-q", REMOTE_REF)
             head = self.remote_head()
             if head is None:
                 raise GitError(f"The repo has no {BRANCH} branch.")
             return head
+
+    def protect(self, git_dir: Path | None = None) -> None:
+        """Write `.git/info/attributes` (see ATTRIBUTES), shared by worktrees."""
+        info = (git_dir or self.path / ".git") / "info"
+        info.mkdir(parents=True, exist_ok=True)
+        target = info / "attributes"
+        if not target.is_symlink() and target.exists() and target.read_text() == ATTRIBUTES:
+            return
+        fresh = info / "attributes.tmp"
+        fresh.unlink(missing_ok=True)
+        fresh.write_text(ATTRIBUTES)
+        fresh.replace(target)
 
     def fetch(self, *, timeout: float | None = None) -> None:
         with self.lock:
@@ -233,16 +308,20 @@ class Clone:
     def fast_forward(self) -> None:
         """Bring the checkout's `main` up to the last fetched GitHub `main`."""
         with self.lock:
+            self.protect()
             self.git("merge", "--ff-only", "-q", REMOTE_REF)
 
     def _clone(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         staging = self.path.parent / f".{self.path.name}.cloning-{secrets.token_hex(4)}"
         try:
+            # No checkout until the attributes are in place.
             self.git(
-                "clone", "--branch", BRANCH, "--single-branch", "--no-tags", "-q",
-                "--", self.remote, str(staging), cwd=self.path.parent, network=True,
+                "clone", "--no-checkout", "--branch", BRANCH, "--single-branch", "--no-tags",
+                "-q", "--", self.remote, str(staging), cwd=self.path.parent, network=True,
             )  # fmt: skip
+            self.protect(staging / ".git")
+            self.git("reset", "-q", "--hard", "HEAD", cwd=staging)
             staging.rename(self.path)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -391,6 +470,7 @@ class Clone:
         every conflicting file; otherwise nothing changes and the conflicting
         files are reported."""
         with self.lock:
+            self.protect()
             place = self.path.parent / f".{self.path.name}-worktrees"
             shutil.rmtree(place, ignore_errors=True)  # left over from a crash
             self.git("worktree", "prune")
@@ -425,11 +505,14 @@ class Clone:
             done = self.git("rebase", "--continue", cwd=tree, env=who, check=False)
             if done.returncode != 0:
                 left = self._conflicts(tree)
+                # Nothing staged means the resolution made the change a no-op.
+                staged = self.git("diff", "--cached", "--quiet", cwd=tree, check=False)
                 self.git("rebase", "--abort", cwd=tree, check=False)
                 if left:
                     return RebaseResult("conflict", conflicts=left)
-                # The resolution made the change a no-op: nothing to save.
-                return RebaseResult("empty", commit=onto)
+                if staged.returncode == 0:
+                    return RebaseResult("empty", commit=onto)
+                return RebaseResult("failed", message=_message("rebase", done.stderr))
         head = self.text("rev-parse", "HEAD", cwd=tree)
         onto_commit = self.text("rev-parse", f"{onto}^{{commit}}")
         return RebaseResult("empty" if head == onto_commit else "done", commit=head)

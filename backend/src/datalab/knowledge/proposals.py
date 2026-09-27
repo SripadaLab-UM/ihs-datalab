@@ -44,8 +44,10 @@ MAX_DIFF_TOTAL = 256 * 1024
 
 
 def copied(path: str) -> bool:
-    """Whether a path of the repo goes into each conversation's copy."""
-    return not path.startswith(".github/")
+    """Whether a path of the repo goes into each conversation's copy: not the
+    repo's automation, and not a lab skill named like one of DataLab's or
+    Codex's own (it could stand in for it)."""
+    return not path.startswith(".github/") and not kb.reserved_skill(path)
 
 
 @dataclass(frozen=True)

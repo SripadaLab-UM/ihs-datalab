@@ -11,7 +11,15 @@ from pathlib import Path
 import pytest
 
 from datalab.repos import credential_helper
-from datalab.repos.git import Clone, GitError, Identity, git_env, helper_args, safe_path
+from datalab.repos.git import (
+    ATTRIBUTES,
+    Clone,
+    GitError,
+    Identity,
+    git_env,
+    helper_args,
+    safe_path,
+)
 from tests.kb_fixtures import Remote, sample_kb
 
 ME = Identity("Yu Fang", "42+yfang@users.noreply.github.com")
@@ -25,7 +33,7 @@ def remote(tmp_path):
 
 @pytest.fixture
 def clone(tmp_path, remote):
-    return Clone(tmp_path / "data" / "repos" / "ihs-knowledge", remote.url)
+    return Clone(tmp_path / "data" / "repos" / "ihs-knowledge", remote.url, allow_local=True)
 
 
 def test_clone_then_sync_follows_githubs_main(clone, remote):
@@ -45,7 +53,7 @@ def test_clone_then_sync_follows_githubs_main(clone, remote):
 
 
 def test_a_failed_clone_leaves_nothing_behind(tmp_path):
-    clone = Clone(tmp_path / "repos" / "kb", str(tmp_path / "missing.git"))
+    clone = Clone(tmp_path / "repos" / "kb", str(tmp_path / "missing.git"), allow_local=True)
     with pytest.raises(GitError):
         clone.sync()
     assert list((tmp_path / "repos").iterdir()) == []
@@ -204,18 +212,104 @@ def test_git_gets_the_token_from_datalabs_helper_and_no_other(tmp_path):
         "PYTHONPATH": os.pathsep.join([str(tmp_path), str(BACKEND / "src")]),
         "PYTHON_KEYRING_BACKEND": "fake_keyring.FileKeyring",
         "FAKE_KEYRING_FILE": str(keys),
-        # Never this computer's own keychain helper (Apple's git has one in
-        # its system config), even in the unprotected run at the end.
-        "GIT_CONFIG_NOSYSTEM": "1",
     }
+    # DataLab's git reads neither the person's nor the system's config.
+    assert env["GIT_CONFIG_GLOBAL"] == os.devnull and env["GIT_CONFIG_NOSYSTEM"] == "1"
     command = ["git", *helper_args(sys.executable), "credential"]
     asked = b"protocol=https\nhost=github.com\n\n"
     filled = subprocess.run(
         [*command, "fill"], input=asked, env=env, capture_output=True, check=True
     ).stdout.decode()
     assert "username=x-access-token" in filled and "password=ghu_from_keychain" in filled
-    subprocess.run([*command, "approve"], input=filled.encode(), env=env, check=True)
+    # And even with a config git does read that names another helper (here
+    # the person's own, forced in), the empty value first switches it off.
+    forced = {**env, "GIT_CONFIG_GLOBAL": str(home / ".gitconfig")}
+    subprocess.run([*command, "approve"], input=filled.encode(), env=forced, check=True)
     assert not stored.exists()
-    # Without our options, the person's own helper would have kept it.
-    subprocess.run(["git", "credential", "approve"], input=filled.encode(), env=env, check=True)
+    # Without our options, that helper would have kept it.
+    subprocess.run(["git", "credential", "approve"], input=filled.encode(), env=forced, check=True)
     assert "ghu_from_keychain" in stored.read_text()
+
+
+def test_no_driver_from_any_config_or_gitattributes_ever_runs(tmp_path, monkeypatch):
+    """A `.gitattributes` in the repo selects filter, merge and diff drivers,
+    and LFS; the person's config defines them (and rewrites URLs, and turns
+    on rerere). None of it runs, and sync still works."""
+    ran = tmp_path / "ran"
+    home = tmp_path / "home"
+    home.mkdir()
+    driver = f"sh -c 'echo $0 >> {ran}; cat'"
+    remote = Remote(tmp_path / "gh")
+    (home / ".gitconfig").write_text(
+        f'[filter "evil"]\n\tsmudge = {driver} smudge\n\tclean = {driver} clean\n'
+        "\trequired = true\n"
+        '[filter "lfs"]\n\tsmudge = git-lfs-not-installed smudge %f\n\trequired = true\n'
+        f'[merge "evil"]\n\tdriver = {driver} merge\n'
+        f'[diff "evil"]\n\ttextconv = {driver} textconv\n'
+        f'[url "{tmp_path}/nowhere/"]\n\tinsteadOf = {remote.url}\n'
+        "[rerere]\n\tenabled = true\n"
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    remote.write(
+        {".gitattributes": b"* filter=evil merge=evil diff=evil\n*.md filter=lfs\n"},
+        "Hostile attributes",
+    )
+    clone = Clone(tmp_path / "repos" / "ihs-knowledge", remote.url, allow_local=True)
+    base = clone.sync()
+    assert (clone.path / ".git" / "info" / "attributes").read_text() == ATTRIBUTES
+    # Even a driver in the clone's own config (which only DataLab writes) is off.
+    with (clone.path / ".git" / "config").open("a") as config:
+        config.write(f'[filter "evil"]\n\tsmudge = {driver} smudge\n')
+    ours = clone.commit_files(base, {"qc/midnight-sleep.md": b"ours\n"}, "Ours\n", ME)
+    remote.write({"qc/midnight-sleep.md": b"theirs\n", "qc/new.md": b"x\n"}, "Theirs")
+    assert clone.sync() == remote.head()
+    upstream = remote.head() or ""
+    assert clone.rebase(ours, onto=upstream, old_base=base, committer=ME).state == "conflict"
+    resolved = clone.rebase(
+        ours,
+        onto=upstream,
+        old_base=base,
+        committer=ME,
+        resolutions={"qc/midnight-sleep.md": b"both\n"},
+    )
+    assert resolved.state == "done" and resolved.commit
+    clone.changed_paths(base, resolved.commit)
+    copy = tmp_path / "copy"
+    copy.mkdir()
+    clone.copy_tree(resolved.commit, copy, skip=lambda p: False)
+    assert (copy / "qc" / "midnight-sleep.md").read_bytes() == b"both\n"
+    assert not ran.exists()
+    assert not (clone.path / ".git" / "rr-cache").exists()
+
+
+def test_the_local_transport_is_only_for_tests(tmp_path, remote):
+    clone = Clone(tmp_path / "repos" / "kb", remote.url)
+    with pytest.raises(GitError, match="transport 'file' not allowed"):
+        clone.sync()
+
+
+def test_a_rebase_that_stops_with_changes_staged_is_a_failure_not_empty(clone, remote, monkeypatch):
+    base = clone.sync()
+    ours = clone.commit_files(base, {"qc/midnight-sleep.md": b"ours\n"}, "Ours\n", ME)
+    upstream = remote.write({"qc/midnight-sleep.md": b"theirs\n"}, "Theirs")
+    clone.fetch()
+    real = clone.git
+
+    def git(*args, **kwargs):
+        if args[:2] == ("rebase", "--continue"):
+            return subprocess.CompletedProcess(args, 1, b"", b"error: could not commit")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(clone, "git", git)
+    done = clone.rebase(
+        ours, onto=upstream, old_base=base, committer=ME,
+        resolutions={"qc/midnight-sleep.md": b"both\n"},
+    )  # fmt: skip
+    assert done.state == "failed" and "could not commit" in done.message
+    # And when the resolution leaves nothing staged, it's empty.
+    same = clone.rebase(
+        ours, onto=upstream, old_base=base, committer=ME,
+        resolutions={"qc/midnight-sleep.md": b"theirs\n"},
+    )  # fmt: skip
+    assert same.state == "empty"

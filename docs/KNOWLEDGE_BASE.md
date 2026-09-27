@@ -161,9 +161,13 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   refresh token (about six months) is replaced by GitHub on every use, so
   both new tokens are saved before either is used. When the refresh token
   runs out, the person signs in again. The practice profile never signs in.
-- **Git** runs in DataLab's process with a fixed configuration on every
-  command (no hooks, no signing, no line-ending conversion, links as plain
-  files). Git gets the token from DataLab's credential helper, named on the
+- **Git** runs in DataLab's process and reads only the clone's own config,
+  never the person's global or the system's, so no filter, merge or diff
+  driver, URL rewrite, or rerere from them applies. `.git/info/attributes`
+  turns off every driver and conversion a `.gitattributes` in the repo could
+  select (LFS included). Every command also gets a fixed configuration (no
+  hooks, no signing, links as plain files, `.git` look-alikes refused, only
+  https). Git gets the token from DataLab's credential helper, named on the
   command line of the commands that reach GitHub, after an empty value that
   switches off the person's own helpers; nothing is written to any git
   config. The app can't read team membership, so missing access is a 404
@@ -175,7 +179,14 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
 - **Proposals.** After each turn the copy in the turn's checkpoint is
   compared with the conversation's base. Paths outside the layout,
   `index.md`, `generated/`, links, binaries, and files over 256 KB are
-  refused, with the reason, instead of proposed. Changes to `reviewed_by`
+  refused, with the reason, instead of proposed. So are names git or a disk
+  treats specially: anything starting with `.git` (but the top-level
+  `.gitignore`), non-ASCII names, Windows short names (`GIT~1`) and reserved
+  names, and trailing dots or spaces. Lab skills hold only text and scripts
+  (`.md .txt .R .py .sql .yml .yaml .json`), and can't take the name of an
+  app skill, a Codex system skill, or any `kb-*` name: Codex 0.157.1 lists
+  same-named skills side by side, the lab's first, so one could stand in for
+  DataLab's own. Such a skill is also left out of the copy. Changes to `reviewed_by`
   and `reviewed_on` are dropped (and flagged); status changes are flagged.
   The proposal is a `kb_proposal` event in the conversation's log, with the
   diff (capped at 64 KB a file and 256 KB in all; the full diff is in the
@@ -211,8 +222,11 @@ push. There it uses the same published check.
 - Tables and columns that pages mention exist in `generated/schema`. After a
   schema refresh, this is what flags pages affected by schema drift.
 - Participant-data heuristics catch things that look like study IDs, dates
-  next to IDs, long numeric lists, or pasted tables. A hit **blocks the
-  save** until a person confirms it's a false positive.
+  next to IDs, long numeric lists, or pasted tables, in file names as well
+  as contents. A hit **blocks the save** until a person confirms it's a
+  false positive. It's best effort: it doesn't catch names, phone numbers
+  written with dashes, an ID written as "Participant 1234", or a small
+  table. The person's review is the control.
 - Status changes, and edits to `reviewed_by` or `reviewed_on` that didn't
   come from DataLab's save flow, are flagged.
 - It regenerates `index.md`.

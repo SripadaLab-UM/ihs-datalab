@@ -14,10 +14,14 @@ It checks a knowledge base given as its files (`path -> bytes`):
 - tables and columns pages mention exist in `generated/schema`, which is
   metadata only (catalog.py's format, nothing else);
 - lab skills: `skills/<name>/SKILL.md` with a name and a description;
-- participant-data heuristics: things that look like study IDs, dates next
-  to IDs, long numeric lists, pasted tables of values, and email addresses.
-  A hit is a "data" finding: it blocks a save until a person confirms it's a
-  false positive. The scan is an aid; the person's review is the control.
+- participant-data heuristics, on file names (which also end up in the
+  commit message and index.md) as well as contents: things that look like
+  study IDs, dates next to IDs, long numeric lists, pasted tables of values,
+  and email addresses. A hit is a "data" finding: it blocks a save until a
+  person confirms it's a false positive. The scan is best effort, an aid to
+  the person's review, which is the control: it doesn't catch names, phone
+  numbers written with dashes, an ID written as "Participant 1234", or a
+  small table.
 
 It also writes `index.md`, one line per page, from the pages' front matter.
 """
@@ -37,6 +41,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+
+from datalab.repos.git import name_problem
 
 Severity = Literal["error", "data", "warning"]
 
@@ -73,6 +79,21 @@ REVIEW_FIELDS = ("reviewed_by", "reviewed_on")
 _SCHEMA_KEYS = {"schema", "name", "type", "comment", "columns", "primary_key"}
 _COLUMN_KEYS = {"name", "type", "nullable", "comment"}
 _SKILL_KEYS = {"name", "description", "metadata", "license", "allowed-tools"}
+
+# Skill names the lab's skills can't take. Codex (0.157.1) lists a lab skill
+# and an app skill of the same name side by side, the lab's first, so one
+# could stand in for DataLab's own: the image's app skills
+# (images/agent/skills), Codex's own system skills, and any kb-* name.
+APP_SKILLS = frozenset({
+    "academic-figures", "data-analysis", "reproducible-report", "research-helper",
+    "sql-extraction", "statistical-review", "kb-use", "kb-propose", "kb-maintain",
+})  # fmt: skip
+CODEX_SKILLS = frozenset({
+    "imagegen", "openai-docs", "plugin-creator", "review-agent", "skill-creator",
+    "skill-installer",
+})  # fmt: skip
+# The files a lab skill may hold besides SKILL.md: text and scripts.
+SKILL_EXTENSIONS = (".md", ".txt", ".r", ".py", ".sql", ".yml", ".yaml", ".json")
 
 MAX_TEXT_BYTES = 256 * 1024
 MAX_SCHEMA_BYTES = 1024 * 1024
@@ -148,8 +169,20 @@ class Report:
 Place = Literal["top", "page", "skill", "skill_file", "schema", "generated", "github"]
 
 
+def reserved_skill(path: str) -> bool:
+    """Whether `path` is in a lab skill folder named like one of DataLab's or Codex's."""
+    parts = path.split("/")
+    if len(parts) < 2 or parts[0] != "skills":
+        return False
+    name = parts[1].lower()
+    return name in APP_SKILLS or name in CODEX_SKILLS or name.startswith("kb-")
+
+
 def place(path: str) -> Place | None:
-    """What a path is in the knowledge base's layout, or None if it has no place."""
+    """What a path is in the knowledge base's layout, or None if it has no place
+    (including every name git or a disk would treat specially)."""
+    if name_problem(path):
+        return None
     parts = path.split("/")
     if len(parts) == 1:
         return "top" if path in TOP_FILES else None
@@ -159,7 +192,9 @@ def place(path: str) -> Place | None:
     if top == "skills" and len(parts) >= 3 and _SKILL_NAME.fullmatch(parts[1]):
         if len(parts) == 3 and parts[2] == "SKILL.md":
             return "skill"
-        return "skill_file" if len(parts) <= 4 else None
+        if len(parts) <= 4 and parts[-1].lower().endswith(SKILL_EXTENSIONS):
+            return "skill_file"
+        return None
     if top == "generated":
         if path in ("generated/drift.md", "generated/README.md"):
             return "generated"
@@ -173,6 +208,11 @@ def place(path: str) -> Place | None:
 
 def proposal_problem(path: str) -> str | None:
     """Why an agent's edit to `path` can't be proposed, or None if it can."""
+    problem = name_problem(path)
+    if problem:
+        return problem
+    if reserved_skill(path):
+        return "that skill name is DataLab's or Codex's own"
     where = place(path)
     if where is None:
         return "it isn't part of the knowledge base's layout (see AGENTS.md)"
@@ -317,10 +357,19 @@ def check(
         where = place(path)
         if where is None:
             if wanted(path):
+                problem = name_problem(path)
                 findings.append(
-                    _error(path, "layout", "This file has no place in the knowledge base's layout.")
+                    _error(path, "name", f"It can't be in the repo: {problem}.")
+                    if problem
+                    else _error(
+                        path, "layout", "This file has no place in the knowledge base's layout."
+                    )
                 )
             continue
+        if reserved_skill(path) and wanted(path):
+            findings.append(
+                _error(path, "skill_reserved", "That skill name is DataLab's or Codex's own.")
+            )
         text = as_text(content)
         if text is None:
             if wanted(path):
@@ -352,6 +401,9 @@ def check(
         scanned = place(path) in ("top", "page", "skill", "skill_file", "generated")
         if wanted(path) and scanned and path != "index.md":
             findings.extend(data_findings(path, text))
+    for path in files:
+        if wanted(path):
+            findings.extend(name_findings(path))
 
     index = render_index(pages, texts)
     if only is None and texts.get("index.md") != index:
@@ -656,6 +708,18 @@ def data_findings(path: str, text: str) -> list[Finding]:
             found.append(_data(path, "numeric_list", "A long list of numbers.", number, line))
     found += _pasted_tables(path, lines)
     return found
+
+
+def name_findings(path: str) -> list[Finding]:
+    """A file name that looks like it holds a study ID (or a date with one)."""
+    cleaned = _NOT_DATA.sub(" ", path)
+    tokens = [t for t in re.split(r"[/.\-\s]+", cleaned) if t]
+    ids = [t for t in tokens if _LONG_NUMBER.fullmatch(t)]
+    ids += [t for t in tokens if (m := _ID_LIKE.fullmatch(t)) and _looks_like_id(m)]
+    if not ids:
+        return []
+    message = "The file's name looks like it has a study ID in it."
+    return [Finding(path, "name_study_id", "data", message, None, subject=path)]
 
 
 def _looks_like_id(match: re.Match[str]) -> bool:

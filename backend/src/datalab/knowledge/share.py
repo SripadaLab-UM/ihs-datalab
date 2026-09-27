@@ -150,6 +150,9 @@ def _save(clone: Clone, share: Share) -> SaveResult:
                 upstream=upstream,
                 conflicts=rebased.conflicts,
             )
+        if rebased.state == "failed":
+            # Nothing was shared; the proposal and its edits are kept.
+            return SaveResult("failed", rebased.message or "The rebase failed.", upstream=upstream)
         if rebased.state == "empty" or rebased.commit is None:
             return SaveResult(
                 "nothing to save",
