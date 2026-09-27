@@ -313,7 +313,9 @@ async def test_a_plan_records_what_had_returned_data_when_it_was_proposed(desk, 
     frozen = await desk.propose("c1", proposed, answering(desk))
     # Part of what was approved and hashed, and of what the review reads.
     assert frozen.content["proposed_after"] == record
-    assert "2 queries had already returned data" in as_text(frozen)
+    assert "2 queries in this conversation had returned data or were still running" in as_text(
+        frozen
+    )
     assert "aren't prespecified" in as_text(frozen)
 
 
@@ -369,12 +371,16 @@ async def test_a_plan_isnt_frozen_if_queries_ran_while_it_waited(desk, store):
     record = desk.planning_record("c1")
     proposed = clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})
 
+    edited = {**proposed, "rationale": "Edited by the person."}
+
     async def codex(approval_id):
         ran.append(Query("succeeded", ["IHS_2025.VW_DAILY_MOOD"]))  # a query in parallel
-        desk._approvals.answer("c1", approval_id, True)
+        desk._approvals.answer("c1", approval_id, True, plan=edited)
 
     outcome = await desk.propose("c1", proposed, codex)
     assert isinstance(outcome, Outcome) and "wasn't frozen" in outcome.note
+    # What the person approved isn't lost: it goes back to the agent.
+    assert outcome.suggested == clean_plan(edited)
     assert store.list("c1") == []
     kind, data = desk.events[-1]
     assert kind == "plan_not_frozen" and "1 more query ran while the plan waited" in data["reason"]
@@ -382,8 +388,14 @@ async def test_a_plan_isnt_frozen_if_queries_ran_while_it_waited(desk, store):
     again = clean_plan(
         {**plan("association", ASSOCIATION), "proposed_after": desk.planning_record("c1")}
     )
-    frozen = await desk.propose("c1", again, answering(desk))
+    cards: list[dict] = []
+    frozen = await desk.propose("c1", again, answering(desk, cards=cards))
     assert isinstance(frozen, Plan) and frozen.content["proposed_after"]["queries"] == 1
+    # And the new card was shown against the version the person approved.
+    assert cards[0]["compare_to"] == {
+        "label": "The version you approved",
+        "plan": clean_plan(edited),
+    }
 
 
 def test_removing_the_record_on_approval_is_refused():
