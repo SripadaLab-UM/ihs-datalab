@@ -31,7 +31,7 @@ from datalab.sessions.hooks import TurnInfo
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
-from tests.kb_fixtures import FITBIT, MIDNIGHT, Remote, page
+from tests.kb_fixtures import FITBIT, MIDNIGHT, Remote, git, page
 
 TOKEN = "ghu_test_access_token_0123456789"
 REFRESH = "ghr_test_refresh_token_0123456789"
@@ -46,6 +46,7 @@ class Lab:
     remote: Remote
     client: TestClient
     github: dict
+    settings: Settings
 
 
 @pytest.fixture
@@ -85,7 +86,7 @@ def lab(tmp_path, github_keychain):
     app = FastAPI()
     app.include_router(router)
     with TestClient(app) as client:
-        yield Lab(router.knowledge, manager, store, remote, client, github)  # type: ignore[attr-defined]
+        yield Lab(router.knowledge, manager, store, remote, client, github, settings)  # type: ignore[attr-defined]
     connection.close()
 
 
@@ -125,9 +126,19 @@ def events(lab: Lab, cid: str, kind: str = "kb_proposal") -> list[dict]:
     return [e.data for e in lab.store.events_of_types_after(cid, 0, (kind,))]
 
 
+def as_seen(lab: Lab, proposal: Proposal, confirmed: list[str] | None = None) -> dict:
+    """Save & share's request, for the proposal as the person sees it now."""
+    detail = lab.client.get(f"/api/knowledge/proposals/{proposal.id}").json()
+    return {
+        "confirmed": confirmed or [],
+        "seen": {f["path"]: f["after_sha256"] for f in detail["files"]},
+        "findings": [f["id"] for f in detail["findings"]],
+    }
+
+
 def accept(lab: Lab, proposal: Proposal, confirmed: list[str] | None = None) -> dict:
     response = lab.client.post(
-        f"/api/knowledge/proposals/{proposal.id}/accept", json={"confirmed": confirmed or []}
+        f"/api/knowledge/proposals/{proposal.id}/accept", json=as_seen(lab, proposal, confirmed)
     )
     assert response.status_code == 200, response.text
     return response.json()
@@ -285,7 +296,9 @@ def test_a_proposal_is_announced_once_replaced_when_it_changes_and_withdrawn_if_
     again = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE, "qc/other.md": page("other", "qc", "qc")})
     assert again is not None and again.fingerprint == second.fingerprint
     # Acting on a replaced proposal is refused.
-    response = lab.client.post(f"/api/knowledge/proposals/{first.id}/accept", json={})
+    response = lab.client.post(
+        f"/api/knowledge/proposals/{first.id}/accept", json=as_seen(lab, first)
+    )
     assert response.status_code == 409
 
 
@@ -495,7 +508,9 @@ def test_saving_needs_someone_signed_in(lab):
     proposal = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE})
     assert proposal is not None
     lab.client.post("/api/knowledge/sign-out")
-    response = lab.client.post(f"/api/knowledge/proposals/{proposal.id}/accept", json={})
+    response = lab.client.post(
+        f"/api/knowledge/proposals/{proposal.id}/accept", json=as_seen(lab, proposal)
+    )
     assert response.status_code == 403
     assert lab.knowledge.get(proposal.id).status == "open"
 
@@ -835,6 +850,12 @@ def test_history_is_the_latest_commits_of_main_as_synced(lab):
     assert newest["commit"] == lab.remote.head() and newest["author"] == "Someone Else"
     assert (newest["paths"], newest["changed"]) == (["qc/wear.md"], 1)
     assert "else@example.com" not in str(commits)  # no addresses
+    # Only what the tab lists: not the automation, or the catalog's files.
+    first = commits[-1]["paths"]
+    assert "sources/fitbit.md" in first and first == [
+        p for p in first if not p.startswith((".github/", "generated/schema/"))
+    ]
+    assert commits[-1]["changed"] == len(first)
     one = lab.client.get("/api/knowledge/history", params={"limit": 1}).json()
     assert len(one) == 1
     for bad in (0, 101):
@@ -872,3 +893,125 @@ def test_reading_needs_the_knowledge_base_set_up(settings, tmp_path):
             response = client.get(path)
             assert response.status_code == 409 and "Practice" in response.json()["detail"]
     connection.close()
+
+
+def test_a_link_in_the_tree_is_never_listed_or_read(lab):
+    (lab.remote.other / "sources" / "link.md").symlink_to("../../../settings.toml")
+    git("add", "-A", cwd=lab.remote.other)
+    git("commit", "-q", "-m", "A link", cwd=lab.remote.other)
+    git("push", "-q", "origin", "HEAD:main", cwd=lab.remote.other)
+    synced(lab)
+    paths = [p["path"] for p in lab.client.get("/api/knowledge/pages").json()["pages"]]
+    assert "sources/fitbit.md" in paths and "sources/link.md" not in paths
+    assert lab.client.get("/api/knowledge/pages/sources/link.md").status_code == 404
+
+
+def test_front_matter_with_date_keys_reads_as_text(lab):
+    dated = FITBIT.replace(
+        "cohorts: [2025]", "cohorts: [2025]\nchanges:\n  2026-09-01: first draft"
+    )
+    lab.remote.write({"sources/fitbit.md": dated.encode()}, "Dated keys")
+    synced(lab)
+    response = lab.client.get("/api/knowledge/pages/sources/fitbit.md")
+    assert response.status_code == 200
+    assert response.json()["front_matter"]["changes"] == {"2026-09-01": "first draft"}
+
+
+# What's saved is what the person saw ----------------------------------------
+
+
+def test_save_and_share_refuses_what_the_person_didnt_see(lab):
+    synced(lab)
+    cid = conversation(lab)
+    proposal = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE})
+    assert proposal is not None
+    before = lab.remote.head()
+    seen = as_seen(lab, proposal)
+    url = f"/api/knowledge/proposals/{proposal.id}/accept"
+    # Another window changes the text meanwhile.
+    lab.client.put(
+        f"/api/knowledge/proposals/{proposal.id}/edits",
+        json={"files": {"qc/wear-time.md": NEW_PAGE + "\nMore.\n"}},
+    )
+    response = lab.client.post(url, json=seen)
+    assert response.status_code == 409 and "changed since you looked" in response.json()["detail"]
+    for wrong in ({}, {"qc/wear-time.md": None}, {**seen["seen"], "qc/other.md": None}):
+        assert lab.client.post(url, json={**seen, "seen": wrong}).status_code == 409
+    # Findings the person wasn't shown.
+    fresh = as_seen(lab, proposal)
+    response = lab.client.post(url, json={**fresh, "findings": ["not-a-finding"]})
+    assert response.status_code == 409 and "findings changed" in response.json()["detail"]
+    assert lab.client.post(url, json={"confirmed": []}).status_code == 422  # it must say
+    assert lab.remote.head() == before and lab.knowledge.get(proposal.id).status == "open"
+    assert accept(lab, proposal)["proposal"]["status"] == "saved"
+    assert "More." in lab.remote.show("qc/wear-time.md")
+
+
+def test_findings_the_person_was_shown_are_what_they_confirm(lab):
+    synced(lab)
+    cid = conversation(lab)
+    leaky = page("wear-time", "qc", "qc", body="For example, SYN001 wore it 9 hours.")
+    proposal = turn(lab, cid, {"qc/wear-time.md": leaky})
+    assert proposal is not None
+    shown = as_seen(lab, proposal)
+    [hit] = shown["findings"]
+    # The person never saw the hit: refused, not just blocked.
+    response = lab.client.post(
+        f"/api/knowledge/proposals/{proposal.id}/accept", json={**shown, "findings": []}
+    )
+    assert response.status_code == 409
+    assert accept(lab, proposal, [hit])["proposal"]["status"] == "saved"
+
+
+def test_a_conflict_is_resolved_only_by_text_written_against_githubs_version(lab):
+    synced(lab)
+    cid = conversation(lab)
+    ours = MIDNIGHT.replace("Naps aren't covered.", "Naps under 3 hours aren't covered.")
+    proposal = turn(lab, cid, {"qc/midnight-sleep.md": ours})
+    assert proposal is not None
+    edits = f"/api/knowledge/proposals/{proposal.id}/edits"
+    # The person's edit before anything conflicted.
+    lab.client.put(edits, json={"files": {"qc/midnight-sleep.md": ours + "\nMine.\n"}})
+    theirs = MIDNIGHT.replace("Naps aren't covered.", "Naps are covered separately.")
+    lab.remote.write({"qc/midnight-sleep.md": theirs.encode()}, "Theirs")
+    [file] = accept(lab, proposal)["files"]
+    assert file["conflict"] and file["edited"] and not file["resolved"]
+    assert file["theirs_state"] == "text" and "separately" in file["theirs"]
+    [file] = lab.client.put(edits, json={"files": {"qc/midnight-sleep.md": theirs}}).json()["files"]
+    assert file["resolved"]
+
+
+def test_githubs_version_of_a_conflict_may_be_gone_or_not_text(lab):
+    synced(lab)
+    one, two = conversation(lab), conversation(lab)
+    edited = turn(lab, one, {"sources/fitbit.md": FITBIT.replace("from 2021 on", "from 2020 on")})
+    ours = MIDNIGHT.replace("Naps aren't covered.", "Naps under 3 hours aren't covered.")
+    other = turn(lab, two, {"qc/midnight-sleep.md": ours})
+    assert edited is not None and other is not None
+    lab.remote.write({"sources/fitbit.md": None}, "Remove the Fitbit page")
+    [file] = accept(lab, edited)["files"]
+    assert (file["conflict"], file["theirs"], file["theirs_state"]) == (True, None, "deleted")
+    lab.remote.write({"qc/midnight-sleep.md": b"\xff\xfe not text \x00"}, "Not text")
+    [file] = accept(lab, other)["files"]
+    assert (file["conflict"], file["theirs"], file["theirs_state"]) == (True, None, "not text")
+
+
+def test_a_save_cut_off_by_a_restart_can_be_tried_again(lab):
+    synced(lab)
+    cid = conversation(lab)
+    proposal = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE})
+    assert proposal is not None
+    lab.knowledge.store.update(proposal, status="saving")
+    # DataLab starts again.
+    connection = lab.knowledge.store._db
+    manager = SessionManager(lab.settings, lab.store, SessionTokens())
+    Knowledge(
+        lab.settings, connection, lab.store, manager, auth=lab.knowledge.auth, remote=lab.remote.url
+    )
+    assert lab.knowledge.get(proposal.id).status == "failed"
+    [update] = events(lab, cid, "kb_proposal_updated")
+    assert (update["status"], update["message"]) == (
+        "failed",
+        "DataLab stopped while saving. Try again.",
+    )
+    assert accept(lab, proposal)["proposal"]["status"] == "saved"

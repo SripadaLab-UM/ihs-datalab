@@ -1412,6 +1412,12 @@ export interface components {
              * @default []
              */
             confirmed: string[];
+            /** Seen */
+            seen: {
+                [key: string]: string | null;
+            };
+            /** Findings */
+            findings: string[];
         };
         /** AccountOut */
         AccountOut: {
@@ -1850,6 +1856,8 @@ export interface components {
             left_out: boolean;
             /** Diff */
             diff: string;
+            /** After Sha256 */
+            after_sha256?: string | null;
             /**
              * Conflict
              * @default false
@@ -1857,6 +1865,13 @@ export interface components {
             conflict: boolean;
             /** Theirs */
             theirs?: string | null;
+            /** Theirs State */
+            theirs_state?: ("text" | "deleted" | "not text") | null;
+            /**
+             * Resolved
+             * @default false
+             */
+            resolved: boolean;
         };
         /** FileOut */
         FileOut: {

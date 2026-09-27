@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import datetime
 import hashlib
-import json
 import logging
 import os
 import threading
@@ -95,6 +94,30 @@ class NotActionable(RuntimeError):
 # catalog files) or the repo's automation.
 _BROWSABLE = ("top", "page", "skill", "skill_file", "generated")
 MAX_HISTORY = 100
+
+
+def _browsable_path(path: str) -> bool:
+    return kb.place(path) in _BROWSABLE and copied(path)
+
+
+def _json_safe(value: Any) -> Any:
+    """YAML's values as plain JSON: dates (as keys too) become text, and so does
+    anything else JSON has no word for."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(v) for v in value]
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    return str(value)
+
+
+def text_digest(text: str | None) -> str | None:
+    """What Save & share would commit for a file, as the person saw it: the
+    sha256 of its text (None: deleted)."""
+    return hashlib.sha256(text.encode()).hexdigest() if text is not None else None
 
 
 @dataclass(frozen=True)
@@ -186,7 +209,8 @@ class Knowledge:
         self._locks_lock = threading.Lock()
         self._sha256: dict[str, str] = {}  # blob id -> sha256 of its content
         if self.unavailable is None:
-            self.store.end_interrupted_saves()
+            for interrupted in self.store.end_interrupted_saves():
+                self._announce_quietly(interrupted)
             self._prune_quietly()
             sessions.register_workspace_seed(SEED, self._seed, into="kb")
             sessions.register_after_turn(self._after_turn)
@@ -310,8 +334,7 @@ class Knowledge:
             place=kb.place(path) or "",
             head=head,
             text=text,
-            # Plain JSON values (YAML's dates become text).
-            front_matter=json.loads(json.dumps(fields, default=str)) if fields else None,
+            front_matter=_json_safe(fields) if fields else None,
             body=body,
         )
 
@@ -334,7 +357,8 @@ class Knowledge:
             fields = header.split("\x1f")
             if len(fields) != 4:
                 continue
-            paths = [p for p in names.lstrip("\n").split("\0") if p]
+            # Only what the tab lists: not the automation, or the catalog's files.
+            paths = [p for p in names.lstrip("\n").split("\0") if p and _browsable_path(p)]
             commit, author, date, subject = fields
             commits.append(CommitEntry(commit, author, date, subject, paths[:20], len(paths)))
         return commits
@@ -343,10 +367,7 @@ class Knowledge:
         return {
             path: entry
             for path, entry in entries.items()
-            if entry.regular
-            and kb.place(path) in _BROWSABLE
-            and copied(path)
-            and entry.size <= kb.size_limit(path)
+            if entry.regular and _browsable_path(path) and entry.size <= kb.size_limit(path)
         }
 
     def prune_bases(self) -> int:
@@ -630,8 +651,16 @@ class Knowledge:
                     edits["files"][path] = text
             return self.store.update(proposal, edits=edits)
 
-    def accept(self, proposal_id: str, confirmed: list[str]) -> Proposal:
-        """Save & share the proposal as the signed-in person."""
+    def accept(
+        self,
+        proposal_id: str,
+        confirmed: list[str],
+        seen: dict[str, str | None],
+        findings_seen: list[str],
+    ) -> Proposal:
+        """Save & share the proposal as the signed-in person, only if it's what
+        they saw: `seen` is each file's text as they saw it (text_digest), and
+        `findings_seen` the ids of the check's findings they were shown."""
         proposal = self.get(proposal_id)
         with self._lock(proposal.conversation_id):
             proposal = self._actionable(proposal_id)
@@ -641,6 +670,16 @@ class Knowledge:
             if account is None:
                 raise SignInNeeded("Sign in to GitHub to share changes.")
             views = self.files(proposal)
+            if seen != {v.change.path: text_digest(v.after) for v in views}:
+                raise NotActionable(
+                    "This proposal changed since you looked at it (in another window?). "
+                    "Nothing was saved: check it again, then save."
+                )
+            if set(findings_seen) != {f.id for f in self.preview(proposal).findings}:
+                raise NotActionable(
+                    "The check's findings changed since you looked at them. "
+                    "Nothing was saved: check them again, then save."
+                )
             files = self._shared_files(views)
             if not files:
                 raise NotActionable("There's nothing in this proposal to save.")
@@ -759,6 +798,12 @@ class Knowledge:
                 "commit": proposal.commit,
             },
         )
+
+    def _announce_quietly(self, proposal: Proposal) -> None:
+        try:
+            self._announce(proposal)
+        except Exception:  # its conversation was deleted meanwhile
+            log.warning("couldn't announce %s in its conversation", proposal.id)
 
     def _lock(self, conversation_id: str) -> threading.Lock:
         with self._locks_lock:

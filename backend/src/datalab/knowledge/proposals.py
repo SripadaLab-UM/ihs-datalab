@@ -333,18 +333,24 @@ class ProposalStore:
             )
         return proposal
 
-    def end_interrupted_saves(self) -> None:
-        """A save cut off by DataLab stopping didn't finish: say so. (If its
-        push had landed, trying again finds nothing left to save.)"""
+    def end_interrupted_saves(self) -> list[Proposal]:
+        """A save cut off by DataLab stopping didn't finish: say so, so it can
+        be tried again. (If its push had landed, trying again finds nothing
+        left to save.) The proposals it ended."""
         result = json.dumps(
             {"state": "failed", "message": "DataLab stopped while saving. Try again."}
         )
         with self._lock:
+            ids = [
+                row[0]
+                for row in self._db.execute("SELECT id FROM kb_proposals WHERE status = 'saving'")
+            ]
             self._db.execute(
                 "UPDATE kb_proposals SET status = 'failed', result_json = ?, updated_at = ? "
                 "WHERE status = 'saving'",
                 (result, _now()),
             )
+        return [p for p in (self.get(i) for i in ids) if p is not None]
 
     # Each conversation's base ---------------------------------------------
 

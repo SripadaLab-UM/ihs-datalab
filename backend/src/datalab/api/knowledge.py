@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from datalab.config import Settings
+from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Proposal, unified_diff
 from datalab.knowledge.service import (
     MAX_HISTORY,
@@ -39,6 +40,7 @@ from datalab.knowledge.service import (
     NotActionable,
     NotAvailable,
     NotFound,
+    text_digest,
 )
 from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignIn, SignInNeeded
 from datalab.sessions.manager import SessionManager
@@ -157,9 +159,16 @@ class FileDetail(FileSummary):
     edited: bool
     left_out: bool
     diff: str
-    # For a file that conflicted: the text on GitHub's main now.
+    # What Save & share would commit for it, as a digest: sent back with
+    # accept, so what's saved is what the person saw.
+    after_sha256: str | None = None
+    # For a file that conflicted: the text on GitHub's main now ("deleted" if
+    # GitHub no longer has it, "not text" if it isn't UTF-8 text), and whether
+    # the person has written what it should say against that version.
     conflict: bool = False
     theirs: str | None = None
+    theirs_state: Literal["text", "deleted", "not text"] | None = None
+    resolved: bool = False
 
 
 class ProposalDetail(BaseModel):
@@ -180,6 +189,10 @@ class AcceptIn(BaseModel):
     # Ids of data findings the person has checked and confirmed aren't
     # participant data.
     confirmed: list[str] = []
+    # What the person saw: each file's after_sha256, and the ids of the
+    # check's findings. Save & share refuses if either has changed since.
+    seen: dict[str, str | None]
+    findings: list[str]
 
 
 class KbEntryOut(BaseModel):
@@ -307,7 +320,12 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
 
     @router.post("/proposals/{proposal_id}/accept")
     async def accept(proposal_id: str, body: AcceptIn) -> ProposalDetail:
-        return await run(lambda: _detail(knowledge, knowledge.accept(proposal_id, body.confirmed)))
+        return await run(
+            lambda: _detail(
+                knowledge,
+                knowledge.accept(proposal_id, body.confirmed, body.seen, body.findings),
+            )
+        )
 
     @router.post("/proposals/{proposal_id}/reject")
     async def reject(proposal_id: str) -> ProposalDetail:
@@ -368,14 +386,19 @@ def _detail(knowledge: Knowledge, proposal: Proposal) -> ProposalDetail:
     views = knowledge.files(proposal)
     conflicts = set(proposal.result.get("conflicts") or [])
     upstream = proposal.result.get("upstream")
+    resolutions = proposal.edits.get("resolutions") or {}
+    resolved_against = proposal.edits.get("resolved_against")
     files = []
     for view in views:
         path = view.change.path
-        theirs = None
+        theirs, theirs_state = None, None
         if path in conflicts and upstream:
             with knowledge.clone.lock:
                 content = knowledge.clone.show(upstream, path)
-            theirs = content.decode("utf-8", "replace") if content is not None else None
+            theirs = kb.as_text(content) if content is not None else None
+            theirs_state = (
+                "deleted" if content is None else "text" if theirs is not None else "not text"
+            )
         files.append(
             FileDetail(
                 path=path,
@@ -387,8 +410,14 @@ def _detail(knowledge: Knowledge, proposal: Proposal) -> ProposalDetail:
                 edited=view.edited,
                 left_out=view.left_out,
                 diff=unified_diff(path, view.before, view.after),
+                after_sha256=text_digest(view.after),
                 conflict=path in conflicts,
                 theirs=theirs,
+                theirs_state=theirs_state,
+                # Written against the version of main it conflicted with.
+                resolved=path in resolutions
+                and upstream is not None
+                and resolved_against == upstream,
             )
         )
     report = knowledge.preview(proposal) if views else None
