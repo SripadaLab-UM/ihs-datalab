@@ -123,32 +123,58 @@ def trace_sources(
     max_numbers: int | None = None,
 ) -> list[SourcedClaim]:
     """Each number in `answer` (the first `max_numbers`), with the pieces of
-    `evidence` it appears in (at most `limit`, in the evidence's order). The
-    same match as `trace`: it says where a number appears, not that it was
-    computed there.
+    `evidence` it appears in (at most `limit`, the first in the evidence's
+    order). The same match as `trace`: it says where a number appears, not
+    that it was computed there.
 
     Bounded: each piece of evidence is read once into one sorted list of
     (value, source), and each number is looked up in it, so the cost grows
-    with the evidence and the numbers, not with their product.
+    with the evidence and the numbers, not with their product. A number
+    whose window holds more than _MAX_HITS entries (0 or 1, say) is found
+    instead by going through the sources in order, and stops at `limit`:
+    such a number is in most of them, so that stops early.
     """
     tokens = numbers_in_answer(answer)[:max_numbers]
     index: dict[Source, int] = {}
+    per_source: list[list[Decimal]] = []  # each source's sorted values, by index
     pairs: set[tuple[Decimal, int]] = set()
     for source, text in evidence:
         at = index.setdefault(source, len(index))
-        pairs.update((value, at) for value in _evidence_values([text]))
+        values = _evidence_values([text])
+        if at == len(per_source):
+            per_source.append(values)
+        else:  # the same source again: its values together
+            per_source[at] = sorted(set(per_source[at]) | set(values))
+        pairs.update((value, at) for value in values)
     ordered = sorted(pairs)
     values = [value for value, _ in ordered]
     by_index = list(index)
     claims = []
     for token in tokens:
-        found: set[int] = set()
-        for low, high in _windows(token):
-            start = bisect.bisect_left(values, low)
-            end = min(bisect.bisect_right(values, high), start + _MAX_HITS)
-            found.update(at for _, at in ordered[start:end])
-        claims.append(SourcedClaim(token, tuple(by_index[at] for at in sorted(found)[:limit])))
+        windows = _windows(token)
+        spans = [
+            (bisect.bisect_left(values, low), bisect.bisect_right(values, high))
+            for low, high in windows
+        ]
+        if sum(end - start for start, end in spans) <= _MAX_HITS:
+            found = sorted({at for start, end in spans for _, at in ordered[start:end]})[:limit]
+        else:
+            found = []
+            for at, known in enumerate(per_source):
+                if _in_windows(known, windows):
+                    found.append(at)
+                    if len(found) == limit:
+                        break
+        claims.append(SourcedClaim(token, tuple(by_index[at] for at in found)))
     return claims
+
+
+def _in_windows(known: list[Decimal], windows: list[tuple[Decimal, Decimal]]) -> bool:
+    for low, high in windows:
+        start = bisect.bisect_left(known, low)
+        if start < len(known) and known[start] <= high:
+            return True
+    return False
 
 
 # Clock times and dates in output (timestamps, `ls` listings) aren't findings.
@@ -171,12 +197,8 @@ def _evidence_values(evidence: list[str]) -> list[Decimal]:
 def _matches(token: str, known: list[Decimal]) -> bool:
     if _value(token) is None:
         return True
-    for low, high in _windows(token):
-        # Anything within the tolerance, found by binary search in the sorted values.
-        start = bisect.bisect_left(known, low)
-        if start < len(known) and known[start] <= high:
-            return True
-    return False
+    # Anything within the tolerance, found by binary search in the sorted values.
+    return _in_windows(known, _windows(token))
 
 
 def _windows(token: str) -> list[tuple[Decimal, Decimal]]:

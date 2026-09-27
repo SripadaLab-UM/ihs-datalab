@@ -89,6 +89,15 @@ def test_a_number_lists_at_most_a_few_places():
     assert [s.ref for s in claim.sources] == ["c0", "c1", "c2"]
 
 
+def test_the_first_places_in_evidence_order_are_kept_even_in_a_crowded_window():
+    # From the review of PR #7: a query first, holding 100.4, then more commands
+    # holding 99.6 than a window is searched through. "100" matches both.
+    evidence = [(Source("query", "q_first"), "100.4")]
+    evidence += [(Source("command", f"c{i}"), "99.6") for i in range(12_000)]
+    [claim] = trace_sources("It was 100.", evidence, limit=3)
+    assert [s.ref for s in claim.sources] == ["q_first", "c0", "c1"]
+
+
 def test_an_answers_provenance_is_capped(monkeypatch):
     monkeypatch.setattr(provenance, "MAX_NUMBERS", 2)
     event = answer_provenance("Values 11.5, 12.5, and 13.5.", [(COMMAND, "11.5 12.5")], [])
@@ -180,7 +189,7 @@ def workspace(tmp_path):
 def chain_of(path, checkpoints, turns, queries=(), *, loads=None):
     """file_chain on real checkpoints, as the router calls it. `loads` records
     which checkpoints' files were read."""
-    versions = [Version(c.number, c.turn, c.label) for c in checkpoints.list()]
+    versions = [Version(c.number, c.turn, c.label, c.review) for c in checkpoints.list()]
 
     def entries(number):
         if loads is not None:
@@ -532,3 +541,51 @@ def test_no_data_leaves_through_the_event_or_the_chain(app, settings):
     assert data is not None and data["numbers"] and data["files"]
     assert CANARY not in json.dumps(data)
     assert '"found":true' in body and CANARY not in body
+
+
+def test_a_review_checkpoint_is_known_by_its_flag(workspace):
+    work, checkpoints = workspace
+    (work / "outputs" / "fig1.png").write_bytes(b"the turn's")
+    checkpoints.take("After turn 1", turn=1)
+    (work / "outputs" / "fig1.png").write_bytes(b"the review's")
+    taken = checkpoints.take("Saved", turn=1, review=True)  # whatever its label says
+    assert checkpoints.get(taken.number).review is True
+    turns = turns_from_events(
+        [
+            event("user_message"),
+            event("command_started", id="c1", command="python plot.py"),
+            event("review_started"),
+            event("command_started", id="r1", command="python fix.py"),
+            event("review_finished", status="completed"),
+        ]
+    )
+    chain = chain_of("outputs/fig1.png", checkpoints, turns)
+    assert chain["in_review"] and not chain["turn_not_saved"]
+    assert [c["id"] for c in chain["commands"]] == ["r1"]
+
+
+def test_when_the_turns_own_checkpoint_wasnt_saved_both_sets_of_commands_count(workspace):
+    work, checkpoints = workspace
+    (work / "outputs" / "fig1.png").write_bytes(b"made in the turn or its review")
+    checkpoints.take("After turn 1's review", turn=1, review=True)  # the only one saved
+    turns = turns_from_events(
+        [
+            event("user_message"),
+            event("command_started", id="c1", command="python plot.py"),
+            event("review_started"),
+            event("command_started", id="r1", command="python fix.py"),
+            event("review_finished", status="completed"),
+        ]
+    )
+    chain = chain_of("outputs/fig1.png", checkpoints, turns)
+    assert chain["in_review"] and chain["turn_not_saved"]
+    assert [c["id"] for c in chain["commands"]] == ["c1", "r1"]
+    assert "the turn's own checkpoint wasn't saved" in chain["summary"]
+    assert "one of the 2 commands then" in chain["summary"]
+
+
+def test_an_older_checkpoint_without_the_flag_is_known_by_its_label(workspace):
+    from datalab.sessions.provenance import Version
+
+    assert Version(2, 1, "After turn 1's review").after_review
+    assert not Version(1, 1, "After turn 1").after_review

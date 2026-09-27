@@ -1611,6 +1611,11 @@ export interface components {
              */
             in_review: boolean;
             /**
+             * Turn Not Saved
+             * @default false
+             */
+            turn_not_saved: boolean;
+            /**
              * Commands
              * @default []
              */

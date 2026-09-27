@@ -76,6 +76,8 @@ class FileProvenanceOut(BaseModel):
     checkpoint: int | None = None
     turn: int | None = None
     in_review: bool = False  # first saved after the turn's rigor review, not the turn
+    # ...and the turn's own checkpoint wasn't saved, so the turn's commands are listed too.
+    turn_not_saved: bool = False
     commands: list[ChainCommandOut] = []
     more_commands: int = 0
     edited_directly: bool = False
@@ -115,7 +117,7 @@ def build_provenance_router(services: ProvenanceServices) -> APIRouter:
             raise HTTPException(404, "No such file.") from error
         checkpoints = sessions.checkpoints(conversation_id)
         # The summaries are small; a checkpoint's files are read only when needed.
-        versions = [Version(c.number, c.turn, c.label) for c in checkpoints.list()]
+        versions = [Version(c.number, c.turn, c.label, c.review) for c in checkpoints.list()]
         loaded: dict[int, dict[str, Any]] = {}
 
         def entries(number: int) -> dict[str, Any]:

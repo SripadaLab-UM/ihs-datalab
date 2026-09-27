@@ -263,7 +263,9 @@ class SessionManager:
             checkpoint = None
             if runtime.ran_commands():
                 label = f"After turn {turn}'s review"
-                checkpoint = await self._checkpoint(conversation_id, runtime, turn, label)
+                checkpoint = await self._checkpoint(
+                    conversation_id, runtime, turn, label, review=True
+                )
             info = TurnInfo(turn, "completed", began.seq, checkpoint, review_only=True)
             await self._run_after_turn(conversation_id, info)
         finally:
@@ -583,7 +585,13 @@ class SessionManager:
         return "".join(f"[DataLab: {note}]\n" for note in notes if note) + ("\n" if notes else "")
 
     async def _checkpoint(
-        self, conversation_id: str, runtime: SessionRuntime, turn: int, label: str = ""
+        self,
+        conversation_id: str,
+        runtime: SessionRuntime,
+        turn: int,
+        label: str = "",
+        *,
+        review: bool = False,
     ) -> int | None:
         """Checkpoint /work after a turn, with the container frozen meanwhile.
         Its number, or None if it couldn't be saved."""
@@ -603,7 +611,9 @@ class SessionManager:
         try:
             await containers.pause()
             take = asyncio.ensure_future(
-                asyncio.to_thread(checkpoints.take, label or f"After turn {turn}", turn=turn)
+                asyncio.to_thread(
+                    checkpoints.take, label or f"After turn {turn}", turn=turn, review=review
+                )
             )
             try:
                 checkpoint = await asyncio.shield(take)
@@ -733,7 +743,9 @@ class SessionManager:
             if runtime.ran_commands():
                 # The review ran commands, which could have changed files.
                 label = f"After turn {turn}'s review"
-                checkpoint = await self._checkpoint(conversation_id, runtime, turn, label)
+                checkpoint = await self._checkpoint(
+                    conversation_id, runtime, turn, label, review=True
+                )
         return checkpoint
 
     async def _run_after_turn(self, conversation_id: str, info: TurnInfo) -> None:

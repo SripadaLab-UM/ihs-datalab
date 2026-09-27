@@ -28,7 +28,11 @@ export function HowWasThisMade({
           {provenance.commands.length > 0 && (
             <>
               <h4 className="dl-label mt-3">
-                {provenance.in_review ? `Commands in turn ${provenance.turn}'s rigor review` : `Commands in turn ${provenance.turn}`}
+                {provenance.turn_not_saved
+                  ? `Commands in turn ${provenance.turn} and its rigor review`
+                  : provenance.in_review
+                    ? `Commands in turn ${provenance.turn}'s rigor review`
+                    : `Commands in turn ${provenance.turn}`}
               </h4>
               <ul className="mt-1 flex flex-col gap-1.5">
                 {provenance.commands.map((command) => (

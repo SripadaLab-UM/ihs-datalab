@@ -52,6 +52,8 @@ class Checkpoint:
     files: int
     bytes: int
     skipped: list[Skipped] = field(default_factory=list)
+    # Taken after a turn's rigor review (which can change files), not the turn itself.
+    review: bool = False
 
 
 @dataclass(frozen=True)
@@ -103,7 +105,7 @@ class Checkpoints:
 
     # Taking ------------------------------------------------------------------
 
-    def take(self, label: str, *, turn: int | None = None) -> Checkpoint:
+    def take(self, label: str, *, turn: int | None = None, review: bool = False) -> Checkpoint:
         """Record the workspace as it is now. Nothing may run in the container."""
         self._manifests.mkdir(parents=True, exist_ok=True)
         self._objects.mkdir(parents=True, exist_ok=True)
@@ -169,6 +171,7 @@ class Checkpoints:
             files=len(files),
             bytes=total,
             skipped=skipped,
+            review=review,
         )
         # Contents first, then the summary: a checkpoint exists once its summary does.
         _write_json(self._contents_path(number), {"entries": files, "dirs": dirs, "links": links})
