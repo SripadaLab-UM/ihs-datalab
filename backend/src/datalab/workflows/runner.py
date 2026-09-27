@@ -326,9 +326,14 @@ class WorkflowRunner:
         the package in its folder, which is all it reads from then on: a Sync
         or Save & share meanwhile can't change what it runs (source.py)."""
         run_id = new_run_id()
-        folder = await asyncio.to_thread(
-            self.folder.snapshot, self.runs_dir / run_id / "source", workflow=path
-        )
+        try:
+            folder = await asyncio.to_thread(
+                self.folder.snapshot, self.runs_dir / run_id / "source", workflow=path
+            )
+        except BaseException:
+            # A file that's missing, too large or not text: no run, and no folder.
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
+            raise
         return run_id, folder
 
     async def replay_check(self, run_id: str) -> ReplayCheck:

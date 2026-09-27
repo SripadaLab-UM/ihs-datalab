@@ -330,14 +330,17 @@ def tree_sha256(root: Path) -> str:
 
 
 def _copy_package(source: Path, dest: Path) -> str | None:
-    """Copy the package's folder, within the limits `package()` holds it to
-    (links are copied as links, and `package()` then refuses them). Why it
-    couldn't be, or None."""
+    """Copy the package's folder as `package()` sees it, within its limits:
+    dot-files and dot-folders left out (as its checksum and the runner's build
+    copy leave them), links copied as links (`package()` then refuses them).
+    Why it couldn't be, or None."""
     count = total = 0
     for folder, dirs, files in os.walk(source, followlinks=False):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         target = dest / Path(folder).relative_to(source)
         target.mkdir(parents=True, exist_ok=True)
-        for name in [*files, *(d for d in dirs if (Path(folder) / d).is_symlink())]:
+        names = [f for f in files if not f.startswith(".")]
+        for name in [*names, *(d for d in dirs if (Path(folder) / d).is_symlink())]:
             path = Path(folder) / name
             if path.is_symlink():
                 os.symlink(os.readlink(path), target / name)

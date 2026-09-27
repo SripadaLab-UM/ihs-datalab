@@ -508,3 +508,35 @@ def test_a_package_too_large_to_copy_is_refused_only_where_its_needed(tmp_path, 
     assert (tmp_path / "run2" / "ihsDataR" / "R" / "link.R").is_symlink()
     with pytest.raises(SourceError, match="isn't a plain file"):
         copy.package()
+
+
+@pytest.mark.parametrize("problem", ["missing", "not text", "too large"])
+async def test_a_workflow_file_that_cant_be_read_leaves_no_run_folder(tmp_path, problem):
+    from datalab.workflows.model import MAX_FILE_BYTES
+    from datalab.workflows.source import SourceError
+
+    h = harness(tmp_path)
+    if problem == "not text":
+        (h.folder / "bad.yaml").write_bytes(b"name: \xff\xfe\n")
+    elif problem == "too large":
+        h.write("bad.yaml", "# " + "x" * MAX_FILE_BYTES + "\n")
+    with pytest.raises(SourceError):
+        await h.runner.start("bad.yaml")
+    assert not h.runner.runs_dir.exists() or list(h.runner.runs_dir.iterdir()) == []
+
+
+def test_a_packages_dot_files_are_neither_copied_nor_counted(tmp_path, monkeypatch):
+    from datalab.workflows import source
+    from datalab.workflows.source import WorkflowFolder
+
+    package = tmp_path / "folder" / "ihsDataR"
+    (package / ".git").mkdir(parents=True)
+    (package / ".git" / "pack").write_bytes(b"x" * 1000)
+    (package / ".Rhistory").write_bytes(b"x" * 1000)
+    (package / "DESCRIPTION").write_text("Package: ihsDataR\n")
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 200)
+    copy = WorkflowFolder(tmp_path / "folder").snapshot(tmp_path / "run")
+    assert sorted(p.name for p in (tmp_path / "run" / "ihsDataR").iterdir()) == ["DESCRIPTION"]
+    assert copy.package().name == "ihsDataR"
+    live = WorkflowFolder(tmp_path / "folder").package()
+    assert copy.package().tree_sha256 == live.tree_sha256
