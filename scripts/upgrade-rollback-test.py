@@ -6,17 +6,20 @@
    database, and some synthetic conversations and queries go in it.
 2. This commit's code opens it: the database must be backed up to
    `backups/<version>/` first, then migrated, with every row kept.
-3. Something new is recorded, then the previous release rolls back with
-   `datalab rollback`. That release predates the command, so it's played by
-   this commit's code with only the previous release's migrations (as the next
-   release will roll back to this one). The rollback must refuse without
-   --yes, then put back exactly the database from step 1.
+3. A conversation and a query are recorded, then the previous release rolls
+   back with `datalab rollback`. Releases before milestone 7 don't have the
+   command, and rolling back to them isn't supported, so the previous release
+   is played by this commit's code with only its migrations (as the next
+   release will roll back to this one). The rollback must refuse while
+   DataLab is running and without --yes, then put back exactly the database
+   from step 1, plus the new query: the Data accessed log is never rolled back.
 4. The previous release's real code must open the rolled-back database, and
    this commit's code must upgrade it again.
 
 The previous release is the newest v* tag before this commit, or a pinned
 commit if there isn't one or it has the same migrations as this commit. The
-test also checks that no released migration was changed or removed.
+test also checks, against every v* tag, that no released migration was
+changed or removed.
 Synthetic data only; everything happens in a temporary folder.
 """
 
@@ -28,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -68,7 +72,8 @@ def run(ref: str, scratch: Path) -> None:
     print(f"Upgrading from {ref} ({git('rev-parse', '--short', ref + '^{commit}').strip()})")
     old_names = migration_names(ref)
     new_names = migration_names("HEAD")
-    check_migrations_only_go_forward(ref, old_names, new_names)
+    for released in released_refs(ref):
+        check_migrations_only_go_forward(released, new_names)
     if old_names == new_names:
         sys.exit(f"{ref} has the same migrations as this commit, so there's nothing to test.")
 
@@ -95,15 +100,30 @@ def run(ref: str, scratch: Path) -> None:
     expect(snapshot(data / "backups" / backup["folder"] / "datalab.sqlite") == before, "…exactly")
     expect(snapshot(database, like=before) == before, "every row survived the upgrade")
 
-    step("Something new is recorded, then the previous release rolls back")
+    step("A conversation and a query are recorded, then the previous release rolls back")
     connection = sqlite3.connect(database, isolation_level=None)
     connection.execute(
         "INSERT INTO conversations (id, kind, mode, title, model, created_at, updated_at) "
         "VALUES ('c-new', 'data', 'explore', 'Recorded after the update', 'gpt-5.5', "
         "'2026-09-27T12:00:00', '2026-09-27T12:00:00')"
     )
+    connection.execute(
+        "INSERT INTO queries (id, session_id, started_at, status, sql_text) VALUES "
+        "('q-new', 'c-new', '2026-09-27T12:01:00', 'succeeded', 'SELECT 1 FROM dual')"
+    )
     connection.close()
+    # What the rollback must keep: every query, in the previous release's columns.
+    expected = {**before, "queries": snapshot(database, like=before)["queries"]}
     previous = previous_release_with_rollback(ref, old_names, scratch / "previous")
+    with socket.socket() as running:  # DataLab is "running" on its port
+        running.bind(("127.0.0.1", PORT))
+        running.listen()
+        busy = datalab(previous, data, "rollback", "--yes")
+    expect(
+        busy.returncode != 0 and "already running" in busy.stdout + busy.stderr,
+        "while DataLab is running, rollback refuses",
+    )
+    expect(schema(database) == new_names, "…and changes nothing")
     refused = datalab(previous, data, "rollback")
     expect(
         refused.returncode == 1 and "Nothing was changed" in refused.stdout,
@@ -117,27 +137,35 @@ def run(ref: str, scratch: Path) -> None:
         "with --yes, rollback restores the backup",
     )
     expect(schema(database) == old_names, "the database has the previous release's layout again")
-    expect(snapshot(database) == before, "…and exactly the rows it had before the update")
+    expect(snapshot(database) == expected, "…the rows it had before the update, and every query")
     kept = [m for m in manifests(data) if m["reason"] == "restore"]
     expect(len(kept) == 1 and kept[0]["migrations"] == new_names, "what it replaced was kept")
 
     step("The previous release opens it, and this commit upgrades it again")
     python(old_src, f"from datalab import db; db.connect(Path({str(database)!r})).close()")
-    expect(snapshot(database) == before, "the previous release opens it unchanged")
+    expect(snapshot(database) == expected, "the previous release opens it unchanged")
     python(None, f"from datalab import db; db.connect(Path({str(database)!r})).close()")
     expect(schema(database) == new_names, "upgrading again works")
-    expect(snapshot(database, like=before) == before, "…with every row kept")
+    expect(snapshot(database, like=before) == expected, "…with every row kept")
 
 
-def check_migrations_only_go_forward(ref: str, old: list[str], new: list[str]) -> None:
+def released_refs(ref: str) -> list[str]:
+    """Every v* tag with migrations, and the release being upgraded from."""
+    tags = git("tag", "--list", "v*").split()
+    with_migrations = [t for t in tags if git("ls-tree", f"{t}:{MIGRATIONS}", check=False)]
+    return sorted({*with_migrations, ref})
+
+
+def check_migrations_only_go_forward(ref: str, new: list[str]) -> None:
+    old = migration_names(ref)
     missing = [m for m in old if m not in new]
-    expect(not missing, f"no released migration was removed or renamed (missing: {missing})")
+    expect(not missing, f"{ref}: no released migration was removed or renamed ({missing})")
     changed = [
         m
         for m in old
         if git("show", f"{ref}:{MIGRATIONS}/{m}") != git("show", f"HEAD:{MIGRATIONS}/{m}")
     ]
-    expect(not changed, f"no released migration was changed (changed: {changed})")
+    expect(not changed, f"{ref}: no released migration was changed ({changed})")
 
 
 def fill(database: Path) -> None:
