@@ -79,23 +79,7 @@ def build_exports_router(
     protected = [settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
 
     def destination_folder(destination_id: str) -> Path:
-        if practice:
-            if destination_id != PRACTICE_DESTINATION:
-                raise HTTPException(404, "No such export folder.")
-            practice_folder.mkdir(parents=True, exist_ok=True)
-            return practice_folder
-        destination = destinations.get(destination_id)
-        if destination is None:
-            raise HTTPException(404, "No such export folder.")
-        folder = Path(destination.path)
-        # Checked again now: the folder may have been replaced by a link since.
-        if os.path.realpath(folder) != str(folder):
-            raise HTTPException(422, "That export folder now points somewhere else. Add it again.")
-        try:
-            check_attachable(folder, protected=protected)
-        except NotAttachable as error:
-            raise HTTPException(422, f"DataLab can't export there any more: {error}") from error
-        return folder
+        return export_folder(settings, destinations, destination_id)
 
     @router.get("/export-destinations")
     def list_destinations() -> list[DestinationOut]:
@@ -209,6 +193,33 @@ def build_exports_router(
         return ExportOut(folder=str(result.folder), files=result.files)
 
     return router
+
+
+def export_folder(settings: Settings, destinations: DestinationStore, destination_id: str) -> Path:
+    """The folder an export goes to, checked again now. Raises HTTPException.
+
+    Also used by the SQL Playground's exports, so every export goes through
+    the same checks.
+    """
+    if settings.profile == "practice":
+        if destination_id != PRACTICE_DESTINATION:
+            raise HTTPException(404, "No such export folder.")
+        folder = settings.data_dir / "practice-exports"
+        folder.mkdir(parents=True, exist_ok=True)
+        return folder
+    destination = destinations.get(destination_id)
+    if destination is None:
+        raise HTTPException(404, "No such export folder.")
+    folder = Path(destination.path)
+    # Checked again now: the folder may have been replaced by a link since.
+    if os.path.realpath(folder) != str(folder):
+        raise HTTPException(422, "That export folder now points somewhere else. Add it again.")
+    protected = [settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
+    try:
+        check_attachable(folder, protected=protected)
+    except NotAttachable as error:
+        raise HTTPException(422, f"DataLab can't export there any more: {error}") from error
+    return folder
 
 
 def _sources(

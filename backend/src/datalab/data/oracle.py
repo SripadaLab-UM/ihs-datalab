@@ -61,6 +61,9 @@ class ExtractResult:
     row_count: int
     bytes_written: int
     elapsed_seconds: float
+    # Oracle's type for each column, such as NUMBER or VARCHAR2(64), as the
+    # database described the result. Empty when it wasn't given.
+    column_types: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -143,10 +146,12 @@ class OracleDatabase:
                 cursor.arraysize = _FETCH_BATCH
                 cursor.prefetchrows = _FETCH_BATCH + 1
                 cursor.execute(sql, dict(binds))
-                columns = [str(d[0]) for d in cursor.description or []]
+                description = cursor.description or []
+                columns = [str(d[0]) for d in description]
                 result = self._write_rows(
                     cursor, columns, partial, max_rows, max_bytes, preview_rows
                 )
+                result.column_types = [_type_label(d) for d in description]
             partial.replace(out_path)
             result.elapsed_seconds = time.monotonic() - started
             return result
@@ -261,6 +266,32 @@ def _close_quietly(connection: oracledb.Connection) -> None:
         connection.rollback()
     with contextlib.suppress(oracledb.Error):
         connection.close()
+
+
+# python-oracledb's type names that differ from Oracle's own.
+_TYPE_NAMES = {
+    "VARCHAR": "VARCHAR2",
+    "NVARCHAR": "NVARCHAR2",
+    "TIMESTAMP_TZ": "TIMESTAMP WITH TIME ZONE",
+    "TIMESTAMP_LTZ": "TIMESTAMP WITH LOCAL TIME ZONE",
+    "INTERVAL_DS": "INTERVAL DAY TO SECOND",
+    "INTERVAL_YM": "INTERVAL YEAR TO MONTH",
+}
+
+
+def _type_label(column: Any) -> str:
+    """A result column's type as Oracle names it: NUMBER(10,2), VARCHAR2(64), DATE."""
+    name = getattr(column.type_code, "name", str(column.type_code)).removeprefix("DB_TYPE_")
+    name = _TYPE_NAMES.get(name, name.replace("_", " "))
+    if name in ("VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "RAW") and column.internal_size:
+        return f"{name}({column.internal_size})"
+    if name == "NUMBER" and column.precision:
+        return (
+            f"NUMBER({column.precision},{column.scale})"
+            if column.scale
+            else (f"NUMBER({column.precision})")
+        )
+    return name
 
 
 def _oracle_message(error: oracledb.Error) -> str:

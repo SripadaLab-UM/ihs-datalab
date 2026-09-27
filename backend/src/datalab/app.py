@@ -198,9 +198,10 @@ def create_app(
     app.include_router(build_files_router(conversations, sessions, previews))
     app.include_router(build_preview_router(previews))
     app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
+    destinations = DestinationStore(connection)
     app.include_router(
         build_exports_router(
-            settings, conversations, DestinationStore(connection), sessions, attachments, access_log
+            settings, conversations, destinations, sessions, attachments, access_log
         )
     )
     canaries = Canaries()
@@ -212,7 +213,9 @@ def create_app(
     # The areas still being built. Each gets what it needs here, once, and
     # otherwise changes only its own module (and registers any session hooks
     # or mounts from there).
-    app.include_router(build_sql_router(SqlServices(settings, data, catalog, access_log)))
+    app.include_router(
+        build_sql_router(SqlServices(settings, data, catalog, access_log, destinations))
+    )
     app.include_router(
         build_knowledge_router(KnowledgeServices(settings, connection, conversations, sessions))
     )

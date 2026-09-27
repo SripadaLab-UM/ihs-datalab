@@ -502,6 +502,187 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sql/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check
+         * @description The SQL check's verdict, for the editor. Nothing is run or logged.
+         */
+        post: operations["check_api_sql_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Run
+         * @description Start a query. It runs in the background; follow it with GET /runs/{id}.
+         */
+        post: operations["start_run_api_sql_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description A run's state. With `wait`, answers when it finishes or after that many seconds.
+         */
+        get: operations["get_run_api_sql_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Run
+         * @description Stop a query: it's cancelled in the database, and no result is kept.
+         */
+        post: operations["stop_run_api_sql_runs__run_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/results/{query_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Result
+         * @description A page of a result. Only its first `preview_rows` rows can be shown;
+         *     the whole result is in its file, and can be exported.
+         */
+        get: operations["result_api_sql_results__query_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * History
+         * @description This Playground's own queries, newest first.
+         */
+        get: operations["history_api_sql_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse
+         * @description Every cohort's tables and columns, with their comments. Metadata only.
+         */
+        get: operations["browse_api_sql_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/catalog/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description Tables whose names, columns or comments match, best first.
+         */
+        get: operations["search_api_sql_catalog_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sql/results/{query_id}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Export
+         * @description Export a result's file to an export folder, with a manifest saying what it is.
+         */
+        post: operations["export_api_sql_results__query_id__export_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/status": {
         parameters: {
             query?: never;
@@ -657,6 +838,50 @@ export interface components {
             /** Available */
             available: boolean;
         };
+        /** CatalogCohort */
+        CatalogCohort: {
+            /** Schema Name */
+            schema_name: string;
+            /** Tables */
+            tables: components["schemas"]["CatalogTable"][];
+        };
+        /** CatalogColumn */
+        CatalogColumn: {
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Nullable */
+            nullable: boolean;
+            /** Comment */
+            comment: string;
+        };
+        /** CatalogHit */
+        CatalogHit: {
+            /** Schema Name */
+            schema_name: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Comment */
+            comment: string;
+            /** Matching Columns */
+            matching_columns: string[];
+        };
+        /** CatalogTable */
+        CatalogTable: {
+            /** Name */
+            name: string;
+            /** Type */
+            type: string;
+            /** Comment */
+            comment: string;
+            /** Primary Key */
+            primary_key: string[];
+            /** Columns */
+            columns: components["schemas"]["CatalogColumn"][];
+        };
         /** ChainCommandOut */
         ChainCommandOut: {
             /** Id */
@@ -708,6 +933,19 @@ export interface components {
             /** Names File */
             names_file: boolean;
         };
+        /** CheckOut */
+        CheckOut: {
+            /** Ok */
+            ok: boolean;
+            /** Errors */
+            errors: components["schemas"]["DiagnosticOut"][];
+            /** Warnings */
+            warnings: components["schemas"]["DiagnosticOut"][];
+            /** Tables */
+            tables: string[];
+            /** Binds */
+            binds: string[];
+        };
         /** CheckResultOut */
         CheckResultOut: {
             /** Id */
@@ -742,6 +980,13 @@ export interface components {
             bytes: number;
             /** Skipped */
             skipped: components["schemas"]["SkippedOut"][];
+        };
+        /** ColumnOut */
+        ColumnOut: {
+            /** Name */
+            name: string;
+            /** Type */
+            type: string | null;
         };
         /** ConversationChange */
         ConversationChange: {
@@ -785,6 +1030,17 @@ export interface components {
             /** Available */
             available: boolean;
         };
+        /** DiagnosticOut */
+        DiagnosticOut: {
+            /** Message */
+            message: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "warning";
+            position: components["schemas"]["PositionOut"] | null;
+        };
         /** EventOut */
         EventOut: {
             /** Seq */
@@ -797,6 +1053,11 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        /** ExportIn */
+        ExportIn: {
+            /** Destination Id */
+            destination_id: string;
         };
         /** ExportOut */
         ExportOut: {
@@ -883,6 +1144,33 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HistoryItem */
+        HistoryItem: {
+            /** Query Id */
+            query_id: string;
+            /** Status */
+            status: string;
+            /** Sql */
+            sql: string;
+            /** Binds */
+            binds: {
+                [key: string]: unknown;
+            };
+            /** Tables */
+            tables: string[];
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Elapsed Ms */
+            elapsed_ms: number | null;
+            /** Message */
+            message: string | null;
+            /** Has Result */
+            has_result: boolean;
         };
         /** KnowledgeStatus */
         KnowledgeStatus: {
@@ -1034,6 +1322,20 @@ export interface components {
             /** Checks */
             checks: string;
         };
+        /**
+         * PositionOut
+         * @description 1-based; the end is just after the last character.
+         */
+        PositionOut: {
+            /** Line */
+            line: number;
+            /** Column */
+            column: number;
+            /** End Line */
+            end_line: number;
+            /** End Column */
+            end_column: number;
+        };
         /** PreviewOut */
         PreviewOut: {
             /** Url */
@@ -1090,6 +1392,63 @@ export interface components {
             /** Not Restored */
             not_restored: string[];
         };
+        /** ResultPageOut */
+        ResultPageOut: {
+            /** Query Id */
+            query_id: string;
+            /** Columns */
+            columns: components["schemas"]["ColumnOut"][];
+            /** Row Count */
+            row_count: number | null;
+            /** Offset */
+            offset: number;
+            /** Rows */
+            rows: string[][];
+            /** Preview Limit */
+            preview_limit: number;
+            /** Has More */
+            has_more: boolean;
+        };
+        /** RunIn */
+        RunIn: {
+            /** Sql */
+            sql: string;
+            /** Binds */
+            binds?: {
+                [key: string]: string | number | null;
+            };
+        };
+        /** RunOut */
+        RunOut: {
+            /** Id */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "succeeded" | "failed" | "rejected" | "stopped";
+            /** Sql */
+            sql: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Message */
+            message: string | null;
+            diagnostic: components["schemas"]["DiagnosticOut"] | null;
+            /** Query Id */
+            query_id: string | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Bytes Written */
+            bytes_written: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds: number | null;
+            /** Columns */
+            columns: components["schemas"]["ColumnOut"][];
+            /** Warnings */
+            warnings: string[];
+        };
         /** SafetyReportOut */
         SafetyReportOut: {
             /** Started At */
@@ -1117,10 +1476,25 @@ export interface components {
             /** Size */
             size: number | null;
         };
+        /** SqlIn */
+        SqlIn: {
+            /** Sql */
+            sql: string;
+        };
         /** SqlStatus */
         SqlStatus: {
             /** Available */
             available: boolean;
+            /** Database Configured */
+            database_configured: boolean;
+            /** Playground Id */
+            playground_id: string;
+            /** Preview Rows */
+            preview_rows: number;
+            /** Max Rows */
+            max_rows: number;
+            /** Max Bytes */
+            max_bytes: number;
         };
         /** ValidationError */
         ValidationError: {
@@ -2061,6 +2435,289 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SqlStatus"];
+                };
+            };
+        };
+    };
+    check_api_sql_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SqlIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_run_api_sql_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_sql_runs__run_id__get: {
+        parameters: {
+            query?: {
+                wait?: number;
+            };
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_run_api_sql_runs__run_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    result_api_sql_results__query_id__get: {
+        parameters: {
+            query?: {
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                query_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_sql_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_api_sql_catalog_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogCohort"][];
+                };
+            };
+        };
+    };
+    search_api_sql_catalog_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                schemas?: string[] | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogHit"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    export_api_sql_results__query_id__export_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                query_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExportIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

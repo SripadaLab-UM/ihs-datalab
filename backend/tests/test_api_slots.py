@@ -16,7 +16,7 @@ def client(settings, catalog):
         yield client
 
 
-@pytest.mark.parametrize("area", ["sql", "workflows", "pipelines", "settings"])
+@pytest.mark.parametrize("area", ["workflows", "pipelines", "settings"])
 def test_areas_not_built_yet_say_so(client, area):
     client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
     assert client.get(f"/api/{area}/status").json() == {"available": False}

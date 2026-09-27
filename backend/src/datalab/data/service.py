@@ -12,7 +12,7 @@ import contextlib
 import secrets
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -49,6 +49,8 @@ class QueryOutcome:
     result_path: Path
     tables: list[str]
     warnings: list[str]
+    # Oracle's type for each column, when the database gave them.
+    column_types: list[str] = field(default_factory=list)
 
 
 class DataService:
@@ -156,6 +158,7 @@ class DataService:
             result_path=out_path,
             tables=tables,
             warnings=list(checked.warnings),
+            column_types=list(result.column_types),
         )
 
 
