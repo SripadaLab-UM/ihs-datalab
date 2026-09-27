@@ -109,6 +109,7 @@ class WorkflowFolder:
         fallback: Path | None = None,
         commit: str | None = None,
         ids: dict[str, tuple[str, str]] | None = None,
+        package_problem: str | None = None,
     ) -> None:
         self._root = root
         # The pipelines clone (root is its checkout), and the folder read
@@ -118,6 +119,9 @@ class WorkflowFolder:
         # A snapshot: every file is as in `commit`, or has the ids in `ids`.
         self._commit = commit
         self._ids = ids
+        # A snapshot whose package couldn't be copied, and why: only a run's
+        # pipeline steps need it, and they say so.
+        self._package_problem = package_problem
 
     @property
     def root(self) -> Path:
@@ -135,9 +139,10 @@ class WorkflowFolder:
             )
         return None
 
-    def snapshot(self, dest: Path) -> WorkflowFolder:
-        """The workflow files and the package as they are now, copied into
-        `dest` (a new folder), for a run to read instead of this one."""
+    def snapshot(self, dest: Path, *, workflow: str | None = None) -> WorkflowFolder:
+        """The workflow files (only `workflow`, if given) and the package as
+        they are now, copied into `dest` (a new folder), for a run to read
+        instead of this one."""
         dest.mkdir(parents=True)
         clone = self._clone
         if clone is not None and self.root == self._root:
@@ -148,19 +153,26 @@ class WorkflowFolder:
                 clone.copy_tree(head, dest, skip=lambda path: not path.startswith(_RUN_PATHS))
             return WorkflowFolder(dest, commit=head)
         ids: dict[str, tuple[str, str]] = {}
-        for relative in self.paths():
-            data = _read_limited(self.root / relative, MAX_FILE_BYTES)
+        for relative in [workflow] if workflow is not None else self.paths():
+            if workflow is not None:
+                self.read(relative)  # the checks a workflow file gets (inside, .yaml, size)
+            try:
+                data = _read_limited(self._inside(relative), MAX_FILE_BYTES)
+            except SourceError:
+                if workflow is not None:
+                    raise
+                continue  # one file too large or gone never blocks the others
             blob, commit = self._git_ids(self.root / relative, data)
             if blob is not None and commit is not None:
                 ids[relative] = (blob, commit)
             target = dest / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
+        problem = None
         package = self.package_dir
         if package.is_dir() and not package.is_symlink():
-            # Links are copied as links; package() then refuses them, as here.
-            shutil.copytree(package, dest / PACKAGE, symlinks=True)
-        return WorkflowFolder(dest, ids=ids)
+            problem = _copy_package(package, dest / PACKAGE)
+        return WorkflowFolder(dest, ids=ids, package_problem=problem)
 
     @property
     def workflows_dir(self) -> Path:
@@ -208,7 +220,7 @@ class WorkflowFolder:
 
     def pipeline(self, name: str) -> Pipeline | None:
         """A pipeline from the package, or None if there's none by that name."""
-        if not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", name):
+        if self._package_problem is not None or not re.fullmatch(r"[a-z][a-z0-9_]{0,47}", name):
             return None
         folder = self.package_dir / "inst" / "pipelines" / name
         spec_file, script_file = folder / "pipeline.yaml", folder / "run.R"
@@ -225,6 +237,8 @@ class WorkflowFolder:
 
     def pipeline_problems(self, name: str) -> list[str]:
         """Why a pipeline can't be loaded, for the workflow check's message."""
+        if self._package_problem is not None:
+            return [self._package_problem]
         folder = self.package_dir / "inst" / "pipelines" / name
         spec_file = folder / "pipeline.yaml"
         if not _plain_file(spec_file):
@@ -239,6 +253,8 @@ class WorkflowFolder:
 
     def package(self) -> PackageTree:
         """The package's source tree and its checksum, for building and pinning."""
+        if self._package_problem is not None:
+            raise SourceError(self._package_problem)
         root = self.package_dir
         if not root.is_dir() or root.is_symlink():
             raise SourceError(f"There's no {PACKAGE} package in the workflows folder.")
@@ -311,6 +327,31 @@ def tree_sha256(root: Path) -> str:
             relative = path.relative_to(root).as_posix()
             digest.update(relative.encode() + b"\0" + hashlib.sha256(data).digest())
     return digest.hexdigest()
+
+
+def _copy_package(source: Path, dest: Path) -> str | None:
+    """Copy the package's folder, within the limits `package()` holds it to
+    (links are copied as links, and `package()` then refuses them). Why it
+    couldn't be, or None."""
+    count = total = 0
+    for folder, dirs, files in os.walk(source, followlinks=False):
+        target = dest / Path(folder).relative_to(source)
+        target.mkdir(parents=True, exist_ok=True)
+        for name in [*files, *(d for d in dirs if (Path(folder) / d).is_symlink())]:
+            path = Path(folder) / name
+            if path.is_symlink():
+                os.symlink(os.readlink(path), target / name)
+                continue
+            count += 1
+            total += path.stat().st_size
+            if count > _MAX_PACKAGE_FILES or total > _MAX_PACKAGE_BYTES:
+                shutil.rmtree(dest, ignore_errors=True)
+                return (
+                    f"The {PACKAGE} package is too large to run here "
+                    f"(over {_MAX_PACKAGE_FILES} files or {_MAX_PACKAGE_BYTES // 1024**2} MB)."
+                )
+            shutil.copyfile(path, target / name, follow_symlinks=False)
+    return None
 
 
 def _plain_file(path: Path) -> bool:

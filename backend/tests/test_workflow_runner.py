@@ -450,3 +450,61 @@ async def test_replay_checks_the_kept_text_against_its_blob(tmp_path):
     )
     check = await h.runner.replay_check(first["id"])
     assert any("blob" in reason for reason in check.blocking)
+
+
+# A run's own copy of its files ---------------------------------------------------
+
+
+async def test_a_run_that_fails_to_start_leaves_no_copy_of_its_files(tmp_path, monkeypatch):
+    h = harness(tmp_path)
+
+    def refuse(plan, pipelines):
+        raise RuntimeError("the database is locked")
+
+    monkeypatch.setattr(h.runner, "_record_new_run", refuse)
+    with pytest.raises(RuntimeError):
+        await h.runner.start("weekly_steps.yaml")
+    assert not h.runner.runs_dir.exists() or list(h.runner.runs_dir.iterdir()) == []
+
+
+async def test_one_oversized_workflow_file_blocks_only_its_own_runs(tmp_path):
+    from datalab.workflows.model import MAX_FILE_BYTES
+    from datalab.workflows.source import SourceError
+
+    h = harness(tmp_path)
+    h.write("huge.yaml", "# " + "x" * MAX_FILE_BYTES + "\n")
+    run = await h.run("weekly_steps.yaml")
+    assert run["status"] == "succeeded", [(s["step_id"], s["message"]) for s in run["steps"]]
+    # Its copy holds its own file only.
+    assert [p.name for p in (h.run_dir(run) / "source").iterdir()] == ["weekly_steps.yaml"]
+    with pytest.raises(SourceError, match="larger than"):
+        await h.runner.start("huge.yaml")
+
+
+def test_a_package_too_large_to_copy_is_refused_only_where_its_needed(tmp_path, monkeypatch):
+    from datalab.workflows import source
+    from datalab.workflows.source import SourceError, WorkflowFolder
+
+    root = tmp_path / "folder"
+    (root / "ihsDataR" / "R").mkdir(parents=True)
+    (root / "ihsDataR" / "DESCRIPTION").write_text("Package: ihsDataR\n")
+    (root / "ihsDataR" / "R" / "big.R").write_text("x <- 1\n" * 100)
+    (root / "w.yaml").write_text("name: w\n")
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 200)
+    copy = WorkflowFolder(root).snapshot(tmp_path / "run", workflow="w.yaml")
+    assert not (tmp_path / "run" / "ihsDataR").exists()
+    assert copy.read("w.yaml").text == "name: w\n"  # the workflow file is there
+    with pytest.raises(SourceError, match="too large to run here"):
+        copy.package()
+    assert copy.pipeline("weekly") is None
+    assert copy.pipeline_problems("weekly") == [
+        "The ihsDataR package is too large to run here (over 5000 files or 0 MB)."
+    ]
+    # Within the limits, it's copied (links as links).
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 50 * 1024**2)
+    (root / "ihsDataR" / "R" / "link.R").symlink_to("big.R")
+    copy = WorkflowFolder(root).snapshot(tmp_path / "run2")
+    assert (tmp_path / "run2" / "ihsDataR" / "R" / "big.R").read_text() == "x <- 1\n" * 100
+    assert (tmp_path / "run2" / "ihsDataR" / "R" / "link.R").is_symlink()
+    with pytest.raises(SourceError, match="isn't a plain file"):
+        copy.package()
