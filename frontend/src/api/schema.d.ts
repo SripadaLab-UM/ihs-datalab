@@ -786,6 +786,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/knowledge/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Pages */
+        get: operations["pages_api_knowledge_pages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/pages/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Page */
+        get: operations["page_api_knowledge_pages__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** History */
+        get: operations["history_api_knowledge_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/proposals": {
         parameters: {
             query?: never;
@@ -1949,6 +2000,62 @@ export interface components {
             message: string | null;
             /** Has Result */
             has_result: boolean;
+        };
+        /** KbCommitOut */
+        KbCommitOut: {
+            /** Commit */
+            commit: string;
+            /** Author */
+            author: string;
+            /** Date */
+            date: string;
+            /** Subject */
+            subject: string;
+            /** Paths */
+            paths: string[];
+            /** Changed */
+            changed: number;
+        };
+        /** KbEntryOut */
+        KbEntryOut: {
+            /** Path */
+            path: string;
+            /** Place */
+            place: string;
+            /** Size */
+            size: number;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /** Status */
+            status: string | null;
+            /** Kind */
+            kind: string | null;
+        };
+        /** KbPageOut */
+        KbPageOut: {
+            /** Path */
+            path: string;
+            /** Place */
+            place: string;
+            /** Head */
+            head: string;
+            /** Text */
+            text: string;
+            /** Front Matter */
+            front_matter: {
+                [key: string]: unknown;
+            } | null;
+            /** Body */
+            body: string;
+        };
+        /** KbPagesOut */
+        KbPagesOut: {
+            /** Head */
+            head: string | null;
+            /** Pages */
+            pages: components["schemas"]["KbEntryOut"][];
         };
         /** KnowledgeStatus */
         KnowledgeStatus: {
@@ -4259,6 +4366,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    pages_api_knowledge_pages_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KbPagesOut"];
+                };
+            };
+        };
+    };
+    page_api_knowledge_pages__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KbPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    history_api_knowledge_history_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KbCommitOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

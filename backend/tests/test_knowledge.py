@@ -24,7 +24,7 @@ from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.config import RepoSettings, Settings
 from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import MAX_DIFF_TOTAL, Proposal
-from datalab.knowledge.service import UNAVAILABLE_NOTE, Knowledge
+from datalab.knowledge.service import UNAVAILABLE_NOTE, Knowledge, NotFound
 from datalab.repos.github import Account, GitHubAuth, Tokens, TokenStore
 from datalab.sessions.checkpoints import Checkpoints
 from datalab.sessions.hooks import TurnInfo
@@ -750,3 +750,125 @@ def test_a_deleted_conversations_base_is_pruned(lab):
     assert exists.returncode != 0  # the commit only it kept is gone
     assert clone.resolve(f"refs/datalab/kb-bases/{keep}") is not None
     assert lab.knowledge.prune_bases() == 0
+
+
+# Reading it (the Knowledge tab) ---------------------------------------------
+
+SKILL = (
+    "---\nname: steps-check\ndescription: Check daily steps against wear time.\n---\n\n# Steps\n"
+)
+
+
+def test_the_tab_lists_the_synced_pages_and_skills_only(lab):
+    assert lab.client.get("/api/knowledge/pages").json() == {"head": None, "pages": []}
+    lab.remote.write(
+        {
+            "skills/steps-check/SKILL.md": SKILL.encode(),
+            "skills/steps-check/check.R": b"stopifnot(TRUE)\n",
+            "skills/kb-use/SKILL.md": b"---\nname: kb-use\ndescription: x\n---\n",
+            "notes/stray.md": b"# Not in the layout\n",
+        },
+        "Add a skill",
+    )
+    synced(lab)
+    listed = lab.client.get("/api/knowledge/pages").json()
+    assert listed["head"] == lab.remote.head()
+    by_path = {p["path"]: p for p in listed["pages"]}
+    assert sorted(by_path) == [
+        "AGENTS.md", "index.md", "qc/midnight-sleep.md", "skills/steps-check/SKILL.md",
+        "skills/steps-check/check.R", "sources/fitbit.md",
+    ]  # fmt: skip
+    fitbit = by_path["sources/fitbit.md"]
+    assert (fitbit["place"], fitbit["title"], fitbit["status"], fitbit["kind"]) == (
+        "page", "fitbit", "reviewed", "source",
+    )  # fmt: skip
+    assert fitbit["summary"].startswith("Fitbit trackers")
+    skill = by_path["skills/steps-check/SKILL.md"]
+    assert (skill["place"], skill["title"], skill["status"]) == ("skill", "steps-check", None)
+    assert skill["summary"] == "Check daily steps against wear time."
+    assert by_path["AGENTS.md"]["title"] == "AGENTS.md"
+
+
+def test_a_page_is_read_from_the_synced_commit_with_its_front_matter(lab):
+    synced(lab)
+    page_ = lab.client.get("/api/knowledge/pages/sources/fitbit.md").json()
+    assert page_["text"] == FITBIT and page_["head"] == lab.remote.head()
+    assert page_["front_matter"]["reviewed_on"] == "2026-09-01"  # YAML's date, as text
+    assert page_["front_matter"]["evidence"] == [
+        {"schema": "IHS_2025.VFITBITDAILYDATA.TRACKERSTEPS"}
+    ]
+    assert page_["body"].lstrip().startswith("# Fitbit")
+    agents = lab.client.get("/api/knowledge/pages/AGENTS.md").json()
+    assert agents["front_matter"] is None and agents["body"] == agents["text"]
+    # Only what's synced: someone else's newer page isn't there until the next sync.
+    lab.remote.write({"qc/new.md": page("new", "qc", "qc").encode()}, "Someone else")
+    assert lab.client.get("/api/knowledge/pages/qc/new.md").status_code == 404
+    # Nothing outside the layout, the automation, the catalog files, or the disk.
+    for path in (
+        ".github/workflows/kb-check.yml",
+        "generated/schema/IHS_2025/VFITBITDAILYDATA.yml",
+        "%2E%2E/%2E%2E/settings.toml",
+        "sources/%2E%2E/AGENTS.md",
+        ".git/config",
+        "sources/missing.md",
+    ):
+        assert lab.client.get(f"/api/knowledge/pages/{path}").status_code == 404, path
+    for path in ("../../settings.toml", "sources/../AGENTS.md", "/etc/passwd"):
+        with pytest.raises(NotFound):
+            lab.knowledge.page(path)
+
+
+def test_the_working_tree_is_never_read(lab):
+    synced(lab)
+    (lab.knowledge.clone.path / "sources" / "fitbit.md").write_text("changed on disk\n")
+    assert lab.client.get("/api/knowledge/pages/sources/fitbit.md").json()["text"] == FITBIT
+
+
+def test_history_is_the_latest_commits_of_main_as_synced(lab):
+    assert lab.client.get("/api/knowledge/history").json() == []
+    synced(lab)
+    lab.remote.write({"qc/wear.md": NEW_PAGE.encode()}, "Add the wear-time rule")
+    synced(lab)
+    commits = lab.client.get("/api/knowledge/history").json()
+    assert [c["subject"] for c in commits] == ["Add the wear-time rule", "Start the knowledge base"]
+    newest = commits[0]
+    assert newest["commit"] == lab.remote.head() and newest["author"] == "Someone Else"
+    assert (newest["paths"], newest["changed"]) == (["qc/wear.md"], 1)
+    assert "else@example.com" not in str(commits)  # no addresses
+    one = lab.client.get("/api/knowledge/history", params={"limit": 1}).json()
+    assert len(one) == 1
+    for bad in (0, 101):
+        assert lab.client.get("/api/knowledge/history", params={"limit": bad}).status_code == 422
+
+
+def test_a_signed_out_status_says_when_the_sign_in_ran_out(lab):
+    synced(lab)
+    tokens = TokenStore().load()
+    assert tokens is not None
+    TokenStore().save(Tokens(TOKEN, time.time() - 60, REFRESH, time.time() - 60, tokens.account))
+    status = lab.client.get("/api/knowledge/status").json()
+    assert status["repo"] == "signed out" and "run out" in status["message"]
+    assert lab.client.get("/api/knowledge/sign-in").json()["message"] == status["message"]
+    lab.client.post("/api/knowledge/sign-out")
+    assert (
+        lab.client.get("/api/knowledge/status").json()["message"] == "Sign in to GitHub to use it."
+    )
+
+
+def test_reading_needs_the_knowledge_base_set_up(settings, tmp_path):
+    connection = db.connect(tmp_path / "db.sqlite")
+    store = ConversationStore(connection)
+    manager = SessionManager(settings, store, SessionTokens())
+    app = FastAPI()
+    app.include_router(
+        build_knowledge_router(KnowledgeServices(settings, connection, store, manager))
+    )
+    with TestClient(app) as client:
+        for path in (
+            "/api/knowledge/pages",
+            "/api/knowledge/pages/AGENTS.md",
+            "/api/knowledge/history",
+        ):
+            response = client.get(path)
+            assert response.status_code == 409 and "Practice" in response.json()["detail"]
+    connection.close()

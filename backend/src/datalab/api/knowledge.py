@@ -13,6 +13,10 @@ docs/KNOWLEDGE_BASE.md, "How edits happen", and knowledge/service.py.
   and `POST /sign-out`. After signing in, `POST /sync` downloads the repo.
 - Proposals: list and get; `PUT …/edits` for the person's own text;
   `POST …/accept` (Save & share) and `POST …/reject`.
+- Reading (the Knowledge tab): `GET /pages` lists the pages, lab skills, and
+  top files of GitHub's main as last synced, `GET /pages/{path}` reads one,
+  and `GET /history` gives its latest commits. Read-only, from the clone's
+  objects, and only paths in the knowledge base's layout.
 """
 
 from __future__ import annotations
@@ -24,12 +28,18 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from datalab.config import Settings
 from datalab.knowledge.proposals import Proposal, unified_diff
-from datalab.knowledge.service import Knowledge, NotActionable, NotAvailable, NotFound
+from datalab.knowledge.service import (
+    MAX_HISTORY,
+    Knowledge,
+    NotActionable,
+    NotAvailable,
+    NotFound,
+)
 from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignIn, SignInNeeded
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -172,6 +182,41 @@ class AcceptIn(BaseModel):
     confirmed: list[str] = []
 
 
+class KbEntryOut(BaseModel):
+    path: str
+    # top, page, skill, skill_file, or generated.
+    place: str
+    size: int
+    title: str
+    summary: str
+    status: str | None
+    kind: str | None
+
+
+class KbPagesOut(BaseModel):
+    # The commit they're from: GitHub's main as last synced (None before the first sync).
+    head: str | None
+    pages: list[KbEntryOut]
+
+
+class KbPageOut(BaseModel):
+    path: str
+    place: str
+    head: str
+    text: str
+    front_matter: dict[str, Any] | None
+    body: str
+
+
+class KbCommitOut(BaseModel):
+    commit: str
+    author: str
+    date: str
+    subject: str
+    paths: list[str]
+    changed: int
+
+
 def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
     knowledge = Knowledge(
@@ -231,6 +276,19 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     @router.post("/sign-out")
     async def sign_out() -> SignInOut:
         return _sign_in(await run(lambda: auth().sign_out()))
+
+    @router.get("/pages")
+    async def pages() -> KbPagesOut:
+        head, found = await run(knowledge.pages)
+        return KbPagesOut(head=head, pages=[KbEntryOut(**vars(e)) for e in found])
+
+    @router.get("/pages/{path:path}")
+    async def page(path: str) -> KbPageOut:
+        return KbPageOut(**vars(await run(lambda: knowledge.page(path))))
+
+    @router.get("/history")
+    async def history(limit: int = Query(20, ge=1, le=MAX_HISTORY)) -> list[KbCommitOut]:
+        return [KbCommitOut(**vars(c)) for c in await run(lambda: knowledge.history(limit))]
 
     @router.get("/proposals")
     async def proposals(conversation_id: str | None = None) -> list[ProposalOut]:

@@ -25,7 +25,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 import httpx
 import keyring
@@ -44,6 +44,8 @@ _REFRESH_MARGIN = 10 * 60
 _TIMEOUT = httpx.Timeout(15)
 # What GitHub says when a refresh token can never work again.
 _REFUSED_REFRESH = ("bad_refresh_token", "invalid_grant")
+# Said until the person signs in again (or out), so they know why.
+RAN_OUT = "The GitHub sign-in has run out. Sign in again."
 _UNSAVED = (
     "DataLab couldn't save your GitHub sign-in to the keychain, and keeps trying. "
     "Until it can, syncing and sharing wait; if DataLab stops first, sign in again."
@@ -204,6 +206,8 @@ class GitHubAuth:
             if tokens is not None and not self._refresh_expired(tokens):
                 message = _UNSAVED if self._unsaved is not None else None
                 return SignIn("signed in", account=tokens.account, message=message)
+            if tokens is not None:
+                return self._ended or SignIn("signed out", message=RAN_OUT)
             return self._ended or SignIn("signed out")
 
     def start(self) -> SignIn:
@@ -317,8 +321,7 @@ class GitHubAuth:
             if not tokens.refresh_token or refresh_ran_out:
                 if expires > now:
                     return tokens.access_token  # good for a few minutes more
-                self._forget()
-                raise SignInNeeded("The GitHub sign-in has run out. Sign in again.")
+                self._ran_out()
             raw = self._post(
                 f"{GITHUB}/login/oauth/access_token",
                 {
@@ -331,8 +334,7 @@ class GitHubAuth:
                 if raw.get("error") in _REFUSED_REFRESH:
                     # Expired, revoked, or already used: it can't be tried again.
                     log.warning("GitHub refused the refresh token: %s", raw.get("error"))
-                    self._forget()
-                    raise SignInNeeded("The GitHub sign-in has run out. Sign in again.")
+                    self._ran_out()
                 # Anything else may pass: keep the sign-in, try again later.
                 raise GitHubUnavailable(_github_error(raw, "GitHub didn't refresh the sign-in."))
             fresh = replace(self._tokens_from(raw, now), account=tokens.account)
@@ -404,6 +406,11 @@ class GitHubAuth:
     def _forget(self) -> None:
         self._unsaved = None
         self._store.clear()
+
+    def _ran_out(self) -> NoReturn:
+        self._forget()
+        self._ended = SignIn("signed out", message=RAN_OUT)
+        raise SignInNeeded(RAN_OUT)
 
     def _tokens_from(self, raw: dict[str, Any], now: float) -> Tokens:
         def at(key: str) -> float | None:
