@@ -309,3 +309,44 @@ def test_a_long_turn_is_capped(workspace, monkeypatch):
     )
     assert (len(chain["commands"]), chain["more_commands"]) == (3, 7)
     assert (len(chain["queries"]), chain["more_queries"]) == (2, 3)
+
+
+def test_after_a_turn_its_answer_gets_a_provenance_event(settings, workspace):
+    from datalab import db
+    from datalab.sessions.provenance import record_turn
+    from datalab.sessions.store import ConversationStore
+
+    store = ConversationStore(db.connect(settings.database_file))
+    cid = store.create(kind="data", mode="analysis", title="t", model="m").id
+    work, checkpoints = workspace
+    (work / "outputs" / "by_month.csv").write_text("month,hours\n2025-07,7.21\n")
+    checkpoints.take("After turn 1", turn=1)
+    since = store.append(cid, "user_message", {"text": "Sleep by month?"}).seq
+    store.append(
+        cid,
+        "answer",
+        {
+            "id": "m1",
+            "phase": "final_answer",
+            "text": "Mean sleep was 7.2 h in 81 interns; see outputs/by_month.csv.",
+        },
+    )
+    # The rigor review's own answer isn't the turn's.
+    store.append(cid, "review_started", {})
+    store.append(cid, "answer", {"id": "r1", "phase": "final_answer", "text": "Review: 99 issues."})
+    data = record_turn(
+        store, cid, since - 1, [(QUERY, '{"query_id": "q_0001", "n": 81}')], checkpoints
+    )
+    assert data is not None and data["answer"] == "m1"
+    by_text = {n["text"]: n["sources"] for n in data["numbers"]}
+    assert by_text == {
+        "7.2": [{"kind": "file", "ref": "outputs/by_month.csv"}],
+        "81": [{"kind": "query", "ref": "q_0001"}],
+    }
+    assert data["files"] == ["outputs/by_month.csv"]
+    [event] = [e for e in store.all_events_after(cid, 0) if e.type == "provenance"]
+    assert event.data == data
+    # An answer with nothing to trace adds nothing.
+    quiet = store.append(cid, "user_message", {"text": "Thanks"}).seq
+    store.append(cid, "answer", {"id": "m2", "phase": "final_answer", "text": "You're welcome."})
+    assert record_turn(store, cid, quiet - 1, [], checkpoints) is None

@@ -102,6 +102,48 @@ def output_evidence(entries: dict[str, Any], read: Any) -> list[tuple[Source, st
     return evidence
 
 
+def turn_answer(events: list[Any]) -> Any | None:
+    """A turn's final answer: its last answer before any rigor review started."""
+    review = next((i for i, e in enumerate(events) if e.type == "review_started"), len(events))
+    answers = [e for e in events[:review] if e.type == "answer" and e.data.get("text")]
+    final = [e for e in answers if e.data.get("phase") == "final_answer"] or answers
+    return final[-1] if final else None
+
+
+def record_turn(
+    store: Any,
+    conversation_id: str,
+    since: int,
+    sources: list[tuple[Source, str]],
+    checkpoints: Any,
+) -> dict[str, Any] | None:
+    """After a turn: append the `provenance` event for its answer, if the answer
+    states any numbers or names any output files. `sources` is what the turn
+    produced (runtime.turn_sources); the latest checkpoint adds the output
+    data files. Returns the event's data, or None if there was nothing to say."""
+    answer = turn_answer(store.all_events_after(conversation_id, since))
+    if answer is None:
+        return None
+    latest = checkpoints.latest()
+    entries = checkpoints.entries(latest.number) if latest is not None else {}
+
+    def read(entry: Any, limit: int) -> bytes:
+        with os.fdopen(checkpoints.open_object(entry), "rb") as source:
+            return source.read(limit)
+
+    outputs = [path for path in entries if path.startswith("outputs/")]
+    data = answer_provenance(
+        str(answer.data["text"]),
+        sources + output_evidence(entries, read),
+        outputs,
+        answer_id=answer.data.get("id"),
+    )
+    if not data["numbers"] and not data["files"]:
+        return None
+    store.append(conversation_id, "provenance", data)
+    return data
+
+
 # --- The turns, from the event log -------------------------------------------
 
 
