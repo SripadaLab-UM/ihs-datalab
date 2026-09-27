@@ -22,6 +22,8 @@ export interface Approval {
   planId?: string;
   /** A later revision replaced this plan. */
   supersededBy?: { planId: string; at: string };
+  /** Approved, but not frozen (another revision of the same plan was frozen first). */
+  notFrozen?: string;
   /** Sent back: the type of analysis the person asked for instead. */
   changeTypeLabel?: string;
   state: "pending" | "approved" | "declined" | "withdrawn";

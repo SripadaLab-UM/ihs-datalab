@@ -96,6 +96,9 @@ async def test_two_revisions_of_one_plan_cant_both_be_frozen(desk, store):
     assert isinstance(frozen, Plan)
     assert isinstance(late, Outcome) and "already revised" in late.note
     assert len(store.list("c1")) == 2
+    # The chat is told, so the late one's card doesn't wait to be frozen.
+    kind, data = desk.events[-1]
+    assert kind == "plan_not_frozen" and "wasn't frozen" in data["reason"]
 
 
 @pytest.mark.parametrize(
@@ -163,3 +166,19 @@ def test_a_draft_sent_back_may_be_unfinished_but_an_approval_may_not():
     # A type that doesn't exist, or is the same, isn't a request; a bare no is "".
     assert plan_answer(proposed, False, None, "causal") == ""
     assert plan_answer(proposed, False, proposed, "association") == ""
+
+
+async def test_the_review_sees_every_version_and_the_latest_ones_checks(desk, store):
+    assert store.for_review("c1") == ([], [])
+    first = await approved_plan(desk)
+    second = await desk.propose(
+        "c1",
+        revision(desk, first, repeated_observations="Random intercept per intern."),
+        answering(desk),
+    )
+    texts, checks = store.for_review("c1")
+    assert f"superseded by {second.id}" in texts[0] and "superseded" not in texts[1]
+    assert checks[0].startswith("Estimation:") and checks[1].startswith("Repeated observations:")
+    # A version-1 plan approved last has no type, so no extra checks.
+    store.approve("c1", {"question": "Sleep?"})
+    assert store.for_review("c1")[1] == []

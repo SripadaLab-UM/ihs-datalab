@@ -26,6 +26,7 @@ from typing import Any
 from datalab.sessions.plan_schema import (
     TYPES_BY_ID,
     PlanInvalid,
+    review_checks,
     revision_of,
     sections_of,
     type_change_note,
@@ -67,13 +68,19 @@ def as_text(plan: Plan, superseded_by: Plan | None = None) -> str:
     if revises := revision_of(plan.content):
         lines.append(
             f"- Revises: {revises['plan_id']} (sha256 {revises['sha256'][:12]}). "
-            f"Why: {plan.content.get('revision_reason', '')}"
+            f"Why: {_indented(str(plan.content.get('revision_reason', '')))}"
         )
     if kind := type_label(plan.content):
         rationale = plan.content.get("rationale")
-        lines.append(f"- Type: {kind}" + (f" ({rationale})" if rationale else ""))
-    lines.extend(f"- {label}: {text}" for label, text in sections_of(plan.content))
+        lines.append(f"- Type: {kind}" + (f" ({_indented(rationale)})" if rationale else ""))
+    lines.extend(f"- {label}: {_indented(text)}" for label, text in sections_of(plan.content))
     return "\n".join(lines)
+
+
+def _indented(text: str) -> str:
+    # Every line after a section's first is indented, so no text in a section
+    # can pass for the start of another ("- Method and adjustment: ...").
+    return text.replace("\n", "\n  ")
 
 
 class PlanStore:
@@ -112,6 +119,14 @@ class PlanStore:
             if revises := revision_of(plan.content):
                 replaced[revises["plan_id"]] = plan
         return replaced
+
+    def for_review(self, conversation_id: str) -> tuple[list[str], list[str]]:
+        """The approved plans as the rigor review is shown them, and the extra
+        checks for the latest one's type and add-on sections."""
+        plans = self.list(conversation_id)
+        replaced = self.superseded(conversation_id)
+        checks = review_checks(plans[-1].content) if plans else []
+        return [as_text(p, replaced.get(p.id)) for p in plans], checks
 
     def current(self, conversation_id: str) -> list[Plan]:
         """The approved plans no revision has replaced."""
@@ -168,6 +183,16 @@ class PlanDesk:
         revises = revision_of(approved_content)
         if revises and revises["plan_id"] in self._store.superseded(conversation_id):
             # Another revision of the same plan was approved while this one waited.
+            # The card says so, rather than waiting to be frozen.
+            self._emit(
+                conversation_id,
+                "plan_not_frozen",
+                {
+                    "approval": pending.id,
+                    "reason": "Another revision of the same plan was "
+                    "approved first, so this one wasn't frozen.",
+                },
+            )
             return Outcome(
                 f"This revision wasn't frozen: plan {revises['plan_id']} was already revised "
                 "while it waited. Revise the latest plan instead."

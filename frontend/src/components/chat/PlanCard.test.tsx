@@ -64,12 +64,13 @@ beforeEach(() => {
 
 it("approves exactly the plan as the person edited it, their own sections included", async () => {
   show(pending);
+  fireEvent.change(await screen.findByDisplayValue("Fitbit only."), { target: { value: "Fitbit and Garmin." } });
   expect(screen.getByText("Describe or compare")).toBeInTheDocument();
-  fireEvent.change(screen.getByDisplayValue("Fitbit only."), { target: { value: "Fitbit and Garmin." } });
   // Optional sections can be added, and removed again; required ones can't be removed.
-  const add = await screen.findByRole("combobox");
-  fireEvent.change(add, { target: { value: "missing_data" } });
-  expect(screen.getByText("Missing data")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Add a section"), { target: { value: "missing_data" } });
+  expect(screen.queryByLabelText("Missing data")).toBeNull(); // choosing isn't adding
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+  expect(screen.getByLabelText("Missing data")).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Remove Missing data" }));
   expect(screen.queryByRole("button", { name: "Remove Measures and summaries" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
@@ -82,8 +83,7 @@ it("approves exactly the plan as the person edited it, their own sections includ
 it("can't be approved with a required section empty, and shows the server's reason for a refusal", async () => {
   vi.mocked(api.answerApproval).mockRejectedValue(new ApiError(422, "The plan's Devices says only 'N/A'."));
   show(pending);
-  await screen.findByRole("combobox"); // the schema has loaded
-  const measures = screen.getByDisplayValue("Sleep minutes.");
+  const measures = await screen.findByDisplayValue("Sleep minutes."); // the schema has loaded
   fireEvent.change(measures, { target: { value: " " } });
   expect(screen.getByRole("button", { name: "Approve plan" })).toBeDisabled();
   expect(screen.getByText(/Still to write: Measures and summaries/)).toBeInTheDocument();
@@ -125,10 +125,10 @@ const comparedWithApproved = { label: "The approved plan it revises", plan: prop
 it("shows a revision against the plan it revises, and needs its reason", async () => {
   show({ ...pending, plan: revision, compareTo: comparedWithApproved });
   expect(screen.getByText("Revised analysis plan")).toBeInTheDocument();
+  await screen.findByLabelText("Add a section"); // the schema has loaded
   expect(screen.getByText("Changes from the approved plan it revises")).toBeInTheDocument();
   expect(screen.getByText("Fitbit only.")).toBeInTheDocument(); // what it was
   expect(screen.getByText("5 other sections unchanged.")).toBeInTheDocument();
-  await screen.findByRole("combobox"); // the schema has loaded
   const reason = screen.getByDisplayValue("Garmin data became available.");
   fireEvent.change(reason, { target: { value: "" } });
   expect(screen.getByRole("button", { name: "Approve revision" })).toBeDisabled();
@@ -146,7 +146,7 @@ it("sends a plan back for another type of analysis, with the person's edits", as
     types: [...schema.types, { id: "prediction", label: "Prediction", summary: "Predict an outcome.", required: [], optional: [], checks: "" }],
   });
   show(pending);
-  fireEvent.change(screen.getByDisplayValue("Sleep minutes."), { target: { value: "Sleep minutes, weeks 1 to 4." } });
+  fireEvent.change(await screen.findByDisplayValue("Sleep minutes."), { target: { value: "Sleep minutes, weeks 1 to 4." } });
   fireEvent.click(await screen.findByRole("button", { name: "A different kind of analysis?" }));
   fireEvent.change(screen.getByDisplayValue("Choose a type…"), { target: { value: "prediction" } });
   expect(screen.getByText("Predict an outcome.")).toBeInTheDocument();
@@ -175,4 +175,68 @@ it("lets a frozen revision show what changed", () => {
   expect(screen.getByText("Changes from the approved plan it revises")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Show the frozen plan" }));
   expect(screen.getByText("Why it changed")).toBeInTheDocument();
+});
+
+it("sends the person's edits back with Not yet, without approving", async () => {
+  show(pending);
+  fireEvent.change(await screen.findByDisplayValue("A table."), { target: { value: "A table and a figure." } });
+  fireEvent.click(screen.getByRole("button", { name: "Not yet" }));
+  await waitFor(() => expect(api.answerApproval).toHaveBeenCalled());
+  const [, , approve, , sent] = vi.mocked(api.answerApproval).mock.calls[0];
+  expect(approve).toBe(false);
+  expect((sent as PlanV2).sections.find((s) => s.kind === "deliverables")?.content).toBe("A table and a figure.");
+});
+
+it("isn't editable or approvable until it knows which sections are required", async () => {
+  let arrive: (value: PlanSchema) => void = () => {};
+  vi.mocked(api.planSchema).mockReturnValue(new Promise((resolve) => (arrive = resolve)));
+  show(pending);
+  expect(screen.getByText("Loading the plan's sections…")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Not yet" })).toBeEnabled();
+  arrive(schema);
+  expect(await screen.findByRole("button", { name: "Approve plan" })).toBeEnabled();
+  expect(screen.queryByRole("button", { name: "Remove Question and purpose" })).toBeNull();
+});
+
+it("says so when the sections can't be loaded, and can still be declined", async () => {
+  vi.mocked(api.planSchema).mockRejectedValue(new Error("offline"));
+  show(pending);
+  expect(await screen.findByText(/couldn't be loaded, so it can't be edited or approved here/)).toBeInTheDocument();
+  expect(screen.getByText("Fitbit only.")).toBeInTheDocument(); // shown, not editable
+  expect(screen.queryByRole("button", { name: "Approve plan" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Not yet" }));
+  await waitFor(() => expect(vi.mocked(api.answerApproval).mock.calls[0][2]).toBe(false));
+});
+
+it("shows each section's guidance and how much of its limit it uses", async () => {
+  show(pending);
+  const measures = await screen.findByLabelText("Measures and summaries");
+  expect(measures).toHaveAccessibleDescription("Each measure, with its table and column.");
+  expect(screen.getByText("14 / 2000")).toBeInTheDocument(); // "Sleep minutes."
+  expect(screen.getByText(/The whole plan: .* of 12,000 characters/)).toBeInTheDocument();
+});
+
+it("locks what was sent, then says it's being frozen rather than showing the unedited plan", async () => {
+  let finish: () => void = () => {};
+  vi.mocked(api.answerApproval).mockReturnValue(new Promise((resolve) => (finish = () => resolve(undefined))));
+  const view = show(pending);
+  fireEvent.change(await screen.findByDisplayValue("A table."), { target: { value: "A table and a figure." } });
+  fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
+  await waitFor(() => expect(screen.getByDisplayValue("A table and a figure.")).toBeDisabled());
+  finish();
+  // The chat has the answer, but not yet the frozen plan.
+  view.rerender(
+    <QueryClientProvider client={new QueryClient()}>
+      <PlanCard conversationId="c1" approval={{ ...pending, state: "approved" }} />
+    </QueryClientProvider>,
+  );
+  expect(screen.getByText("Approved. Freezing it…")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Show the plan/ })).toBeNull();
+});
+
+it("says when an approved revision couldn't be frozen", () => {
+  show({ ...pending, plan: revision, state: "approved", notFrozen: "Another revision of the same plan was approved first, so this one wasn't frozen." });
+  expect(screen.getByText(/Approved, but not frozen: Another revision/)).toBeInTheDocument();
 });

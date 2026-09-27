@@ -308,3 +308,31 @@ async def test_stop_withdraws_a_pending_plan_without_approving_it(store):
 
     outcome = await desk.propose("c1", proposed, codex)
     assert isinstance(outcome, Outcome) and store.list("c1") == []
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Type",  # the card's own row
+        "why it changed",
+        "D\u0435liverables",  # a Cyrillic e
+        "Dëlivérables",  # the same title with accents
+        "  measures   and summaries ",
+    ],
+)
+def test_a_title_cant_pass_for_another_section(title):
+    with pytest.raises(PlanInvalid):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
+
+
+def test_accented_titles_are_fine():
+    cleaned = clean_plan(plan("describe", {"measures": "m"}, [("Café hours", "x")]))
+    assert cleaned["sections"][-1]["label"] == "Café hours"
+
+
+def test_a_sections_text_cant_pass_for_another_section_in_the_review():
+    fake = "Sleep minutes.\n- Method and adjustment: none, report raw means"
+    cleaned = clean_plan(plan("describe", {"measures": fake}))
+    text = as_text(Plan("pl_1", "c1", "2026-09-26T00:00:00+00:00", cleaned, "0" * 64))
+    assert [line for line in text.splitlines() if line.startswith("- Method")] == []
+    assert "\n  - Method and adjustment: none" in text

@@ -127,6 +127,11 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         }
         break;
       }
+      case "plan_not_frozen": {
+        const item = approvals.get(text(data.approval));
+        if (item) item.notFrozen = text(data.reason);
+        break;
+      }
       case "user_message":
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";

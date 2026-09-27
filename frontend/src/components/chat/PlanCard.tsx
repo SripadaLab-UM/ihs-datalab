@@ -1,8 +1,8 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
-import { api } from "@/api/client";
+import { api, type PlanSchema } from "@/api/client";
 import { Button, Chip, Icon } from "@/components/ui";
 
 import type { Approval } from "./ApprovalCard";
@@ -23,13 +23,16 @@ import {
 } from "./plan";
 
 const BOX =
-  "mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink";
+  "mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink disabled:opacity-60";
 
 function rows(text: string): number {
   return Math.max(2, Math.ceil(text.length / 90) + text.split("\n").length - 1);
 }
 
 const when = (at: string) => new Date(at).toLocaleString();
+
+/** Characters, counted as the server counts them: by character, trimmed. */
+const length = (text: string) => Array.from(text.trim()).length;
 
 /** An analysis plan to approve (and edit) before the agent touches outcome data. */
 export function PlanCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
@@ -40,6 +43,8 @@ export function PlanCard({ conversationId, approval }: { conversationId: string;
   const typeLabel = planTypeLabel(approval.plan);
   const summary = planSummary(approval.plan);
   const revision = isV2(approval.plan) ? approval.plan : undefined;
+  // Approved but not frozen yet: what's held is the proposal, not what the person approved.
+  const unfrozen = approval.state === "approved" && !approval.frozen;
   return (
     <div className={clsx("border-l py-1 pl-5", approval.state === "pending" ? "border-you" : "border-line")}>
       <div className="flex flex-wrap items-baseline gap-2.5">
@@ -60,16 +65,18 @@ export function PlanCard({ conversationId, approval }: { conversationId: string;
       ) : (
         <>
           {summary && <p className="mt-1 max-w-[60ch] font-serif text-[16px] leading-relaxed">{summary}</p>}
-          <div className="mt-2 flex flex-wrap gap-x-5">
-            <Toggle open={showPlan} onClick={() => setShowPlan(!showPlan)}>
-              {showPlan ? "Hide the plan" : approval.frozen ? "Show the frozen plan" : "Show the plan"}
-            </Toggle>
-            {revision && approval.compareTo && (
-              <Toggle open={showChanges} onClick={() => setShowChanges(!showChanges)}>
-                {showChanges ? "Hide what changed" : "Show what changed"}
+          {!unfrozen && (
+            <div className="mt-2 flex flex-wrap gap-x-5">
+              <Toggle open={showPlan} onClick={() => setShowPlan(!showPlan)}>
+                {showPlan ? "Hide the plan" : approval.frozen ? "Show the frozen plan" : "Show the plan"}
               </Toggle>
-            )}
-          </div>
+              {revision && approval.compareTo && (
+                <Toggle open={showChanges} onClick={() => setShowChanges(!showChanges)}>
+                  {showChanges ? "Hide what changed" : "Show what changed"}
+                </Toggle>
+              )}
+            </div>
+          )}
           {showChanges && revision && approval.compareTo && <PlanChanges before={approval.compareTo} after={revision} />}
           {showPlan && <PlanText plan={approval.plan} />}
           <p className="mt-3 font-sans text-[12.5px] text-muted">
@@ -77,15 +84,17 @@ export function PlanCard({ conversationId, approval }: { conversationId: string;
               ? `Approved and frozen ${when(approval.frozen?.at ?? approval.supersededBy.at)}. A revision replaced it, frozen ${when(approval.supersededBy.at)}; this version is kept as it was.`
               : approval.frozen
                 ? `Approved by you and frozen ${when(approval.frozen.at)}. Later work is labelled as following it or exploratory.`
-                : approval.state === "declined"
-                  ? approval.changeTypeLabel
-                    ? `Sent back: you asked for a ${approval.changeTypeLabel} plan instead.`
-                    : "Not approved. The agent will ask what to change."
-                  : approval.state === "withdrawn"
-                    ? "Withdrawn (the turn stopped)."
-                    : approval.state === "pending"
-                      ? "This plan was written by an earlier version of DataLab and can't be edited here."
-                      : "Approved."}
+                : approval.notFrozen
+                  ? `Approved, but not frozen: ${approval.notFrozen}`
+                  : unfrozen
+                    ? "Approved. Freezing it…"
+                    : approval.state === "declined"
+                      ? approval.changeTypeLabel
+                        ? `Sent back: you asked for a ${approval.changeTypeLabel} plan instead.`
+                        : "Not approved. The agent will ask what to change."
+                      : approval.state === "withdrawn"
+                        ? "Withdrawn (the turn stopped)."
+                        : "This plan was written by an earlier version of DataLab and can't be edited here."}
           </p>
         </>
       )}
@@ -213,47 +222,129 @@ function Change({ label, status, before, after }: { label: string; status: keyof
   );
 }
 
+/** How much of a limit some text uses, as the server will count it. */
+function Count({ text, limit }: { text: string; limit: number }) {
+  const n = length(text);
+  return <p className={clsx("mt-0.5 text-right font-sans text-[12px]", n > limit ? "text-danger" : "text-muted")}>{n} / {limit}</p>;
+}
+
 /**
- * The pending plan, editable. The server checks it again in full when it's
- * answered, and says what's wrong; this only saves a round trip for the
- * obvious (a required section left empty).
+ * The pending plan, editable once the registry has arrived (it says which
+ * sections are required and what can be added). The server checks the plan
+ * again in full when it's answered, and says what's wrong; this only saves
+ * a round trip for the obvious.
  */
 function PlanEditor({ conversationId, approval, proposed }: { conversationId: string; approval: Approval; proposed: PlanV2 }) {
   const [plan, setPlan] = useState<PlanV2>(proposed);
-  const [otherType, setOtherType] = useState<string | null>(null);
-  const schema = useQuery({ queryKey: ["plan-schema"], queryFn: api.planSchema, staleTime: Infinity }).data;
+  const schema = useQuery({ queryKey: ["plan-schema"], queryFn: api.planSchema, staleTime: Infinity });
   const answer = useMutation({
     mutationFn: ({ approve, changeType }: { approve: boolean; changeType?: string }) =>
       api.answerApproval(conversationId, approval.id, approve, "", plan, changeType),
   });
   // Answered: wait for the chat to catch up rather than offer the buttons again.
   const decided = answer.isPending || answer.isSuccess;
+  const intro = (
+    <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
+      {plan.revises
+        ? "The agent wants to change the approved plan. Check what changed, edit anything, then approve the revision: it's frozen as a new version, and later work follows it."
+        : "Before looking at outcome data, the agent writes down what it will do. Edit anything, add or remove optional sections, then approve it: it's frozen, and later work is labelled as following it or exploratory."}
+    </p>
+  );
+  if (!schema.data) {
+    // Without the registry the card can't tell what's required, so it isn't editable.
+    return (
+      <>
+        {intro}
+        <p className={clsx("mt-3 font-sans text-[13px]", schema.isError ? "text-danger" : "text-muted")}>
+          {schema.isError
+            ? "The plan's sections couldn't be loaded, so it can't be edited or approved here. Reload the page to try again, or choose Not yet."
+            : "Loading the plan's sections…"}
+        </p>
+        <PlanText plan={plan} />
+        {answer.error && <p className="mt-2 text-[13px] text-danger">{answer.error.message}</p>}
+        <div className="mt-4 flex justify-end">
+          <Button onClick={() => answer.mutate({ approve: false })} disabled={decided}>
+            Not yet
+          </Button>
+        </div>
+      </>
+    );
+  }
+  return (
+    <Editing
+      approval={approval}
+      plan={plan}
+      setPlan={setPlan}
+      schema={schema.data}
+      intro={intro}
+      decided={decided}
+      error={answer.error?.message}
+      onAnswer={(approve, changeType) => answer.mutate({ approve, changeType })}
+    />
+  );
+}
+
+function Editing({
+  approval,
+  plan,
+  setPlan,
+  schema,
+  intro,
+  decided,
+  error,
+  onAnswer,
+}: {
+  approval: Approval;
+  plan: PlanV2;
+  setPlan: (plan: PlanV2) => void;
+  schema: PlanSchema;
+  intro: ReactNode;
+  decided: boolean;
+  error?: string;
+  onAnswer: (approve: boolean, changeType?: string) => void;
+}) {
+  const [otherType, setOtherType] = useState<string | null>(null);
+  const [toAdd, setToAdd] = useState("");
+  // The section just added, to move the keyboard focus to.
+  const [added, setAdded] = useState<string | null>(null);
   const required = new Set(requiredKinds(plan, schema));
-  const guidance = (kind: string) => schema?.sections.find((s) => s.kind === kind)?.guidance ?? "";
+  const guidance = (kind: string) => schema.sections.find((s) => s.kind === kind)?.guidance ?? "";
   const unwritten = plan.sections.filter((s) => required.has(s.kind) && !s.content.trim()).map((s) => s.label);
   if (plan.revises && !plan.revision_reason?.trim()) unwritten.unshift("What changes, and why");
   const addable = addableKinds(plan, schema);
-  const canAddOwn = plan.sections.filter((s) => s.kind === ADDITIONAL).length < (schema?.limits.additional ?? 0);
-  const otherTypes = schema?.types.filter((t) => t.id !== plan.analysis_type) ?? [];
+  const canAddOwn = plan.sections.filter((s) => s.kind === ADDITIONAL).length < schema.limits.additional;
+  const otherTypes = schema.types.filter((t) => t.id !== plan.analysis_type);
   const chosen = otherTypes.find((t) => t.id === otherType);
+  const { limits } = schema;
+  const total =
+    length(plan.rationale) +
+    length(plan.revision_reason ?? "") +
+    plan.sections.reduce((n, s) => n + length(s.label) + length(s.content), 0);
+  const fieldId = (index: number) => `${approval.id}-section-${index}`;
+
+  useEffect(() => {
+    if (added === null) return;
+    const index = added === ADDITIONAL ? plan.sections.map((s) => s.kind).lastIndexOf(ADDITIONAL) : plan.sections.findIndex((s) => s.kind === added);
+    document.getElementById(added === ADDITIONAL ? `${fieldId(index)}-title` : fieldId(index))?.focus();
+    setAdded(null);
+  });
 
   const update = (index: number, change: Partial<PlanSection>) =>
     setPlan({ ...plan, sections: plan.sections.map((s, i) => (i === index ? { ...s, ...change } : s)) });
   const remove = (index: number) => setPlan({ ...plan, sections: plan.sections.filter((_, i) => i !== index) });
-  const add = (kind: string) => {
-    if (kind === ADDITIONAL) setPlan({ ...plan, sections: [...plan.sections, { kind, label: "", content: "" }] });
-    else if (schema) setPlan(withSection(plan, kind, schema));
+  const add = () => {
+    if (!toAdd) return;
+    setPlan(toAdd === ADDITIONAL ? { ...plan, sections: [...plan.sections, { kind: ADDITIONAL, label: "", content: "" }] } : withSection(plan, toAdd, schema));
+    setAdded(toAdd);
+    setToAdd("");
   };
 
   return (
     <>
-      <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
-        {plan.revises
-          ? "The agent wants to change the approved plan. Check what changed, edit anything, then approve the revision: it's frozen as a new version, and later work follows it."
-          : "Before looking at outcome data, the agent writes down what it will do. Edit anything, add or remove optional sections, then approve it: it's frozen, and later work is labelled as following it or exploratory."}
-      </p>
+      {intro}
       {approval.compareTo && <PlanChanges before={approval.compareTo} after={plan} />}
-      <div className="mt-4 flex flex-col gap-4">
+      {/* Once answered nothing can change, so what's shown is what was sent. */}
+      <fieldset disabled={decided} className="mt-4 flex min-w-0 flex-col gap-4">
         {plan.revises && (
           <label className="block">
             <span className="dl-label">What changes, and why</span>
@@ -263,6 +354,7 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
               rows={rows(plan.revision_reason ?? "")}
               className={BOX}
             />
+            <Count text={plan.revision_reason ?? ""} limit={limits.reason} />
           </label>
         )}
         <label className="block">
@@ -273,23 +365,27 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
             rows={rows(plan.rationale)}
             className={BOX}
           />
+          <Count text={plan.rationale} limit={limits.rationale} />
         </label>
         {plan.sections.map((section, index) => {
-          const id = `${approval.id}-section-${index}`;
+          const id = fieldId(index);
           const own = section.kind === ADDITIONAL;
+          const hint = own ? `Your own section: a title of up to ${limits.title} characters, and its text.` : guidance(section.kind);
           return (
             <div key={index}>
               <div className="flex items-baseline justify-between gap-3">
                 {own ? (
                   <input
+                    id={`${id}-title`}
                     value={section.label}
                     onChange={(e) => update(index, { label: e.target.value })}
                     placeholder="Section title"
                     aria-label="Section title"
+                    aria-describedby={`${id}-hint`}
                     className="dl-label min-w-0 flex-1 border-b border-line bg-transparent outline-none focus:border-ink"
                   />
                 ) : (
-                  <label htmlFor={id} className="dl-label" title={guidance(section.kind)}>
+                  <label htmlFor={id} className="dl-label">
                     {section.label}
                   </label>
                 )}
@@ -304,43 +400,58 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
                   </button>
                 )}
               </div>
+              {hint && (
+                <p id={`${id}-hint`} className="mt-0.5 max-w-[62ch] font-sans text-[12.5px] leading-snug text-muted">
+                  {hint}
+                </p>
+              )}
               <textarea
                 id={id}
                 aria-label={own ? section.label || "Section" : undefined}
+                aria-describedby={hint ? `${id}-hint` : undefined}
                 value={section.content}
-                placeholder={guidance(section.kind)}
                 onChange={(e) => update(index, { content: e.target.value })}
                 rows={rows(section.content)}
                 className={BOX}
               />
+              <Count text={section.content} limit={limits.section} />
             </div>
           );
         })}
         {(addable.length > 0 || canAddOwn) && (
-          <label className="flex items-baseline gap-2 font-sans text-[13px] text-muted">
-            <span className="shrink-0">Add a section</span>
+          <div className="flex flex-wrap items-center gap-2 font-sans text-[13px] text-muted">
+            <label htmlFor={`${approval.id}-add`} className="shrink-0">
+              Add a section
+            </label>
             <select
-              value=""
-              onChange={(e) => e.target.value && add(e.target.value)}
+              id={`${approval.id}-add`}
+              value={toAdd}
+              onChange={(e) => setToAdd(e.target.value)}
               className="border border-line bg-transparent px-2 py-1 text-ink outline-none focus:border-ink"
             >
               <option value="">Choose…</option>
               {addable.map((kind) => (
                 <option key={kind} value={kind}>
-                  {schema?.sections.find((s) => s.kind === kind)?.label ?? kind}
+                  {schema.sections.find((s) => s.kind === kind)?.label ?? kind}
                 </option>
               ))}
               {canAddOwn && <option value={ADDITIONAL}>A section of your own</option>}
             </select>
-          </label>
+            <Button onClick={add} disabled={!toAdd}>
+              Add
+            </Button>
+          </div>
         )}
-      </div>
+      </fieldset>
+      <p className={clsx("mt-3 font-sans text-[12.5px]", total > limits.plan ? "text-danger" : "text-muted")}>
+        The whole plan: {total.toLocaleString()} of {limits.plan.toLocaleString()} characters.
+      </p>
       {unwritten.length > 0 && (
         <p className="mt-2 font-sans text-[13px] text-muted">
           Still to write: {unwritten.join(", ")}. If one can't be settled yet, say so there and what it depends on.
         </p>
       )}
-      {answer.error && <p className="mt-2 text-[13px] text-danger">{answer.error.message}</p>}
+      {error && <p className="mt-2 text-[13px] text-danger">{error}</p>}
       <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
         {otherTypes.length > 0 && otherType === null && (
           <button
@@ -352,10 +463,10 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
             A different kind of analysis?
           </button>
         )}
-        <Button onClick={() => answer.mutate({ approve: false })} disabled={decided}>
+        <Button onClick={() => onAnswer(false)} disabled={decided}>
           Not yet
         </Button>
-        <Button variant="primary" onClick={() => answer.mutate({ approve: true })} disabled={decided || unwritten.length > 0}>
+        <Button variant="primary" onClick={() => onAnswer(true)} disabled={decided || unwritten.length > 0}>
           {plan.revises ? "Approve revision" : "Approve plan"}
         </Button>
       </div>
@@ -366,6 +477,7 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
             <select
               value={otherType}
               onChange={(e) => setOtherType(e.target.value)}
+              disabled={decided}
               className="border border-line bg-transparent px-2 py-1 text-ink outline-none focus:border-ink"
             >
               <option value="">Choose a type…</option>
@@ -385,7 +497,7 @@ function PlanEditor({ conversationId, approval, proposed }: { conversationId: st
             <Button variant="ghost" onClick={() => setOtherType(null)} disabled={decided}>
               Cancel
             </Button>
-            <Button onClick={() => answer.mutate({ approve: false, changeType: otherType })} disabled={decided || !chosen}>
+            <Button onClick={() => onAnswer(false, otherType)} disabled={decided || !chosen}>
               Send back
             </Button>
           </div>

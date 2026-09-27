@@ -30,8 +30,8 @@ from datalab.sessions.inputs import (
     practice_samples,
     recheck,
 )
-from datalab.sessions.plan_schema import TYPES_BY_ID, review_checks
-from datalab.sessions.plans import PlanStore, as_text
+from datalab.sessions.plan_schema import TYPES_BY_ID
+from datalab.sessions.plans import PlanStore
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.store import Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens
@@ -667,13 +667,12 @@ class SessionManager:
             for e in events
             if e.type == "tool_call" and e.data.get("tool") == "query"
         ]
-        plans = self.plans.list(conversation_id) if self.plans else []
-        replaced = self.plans.superseded(conversation_id) if self.plans else {}
+        plans, checks = self.plans.for_review(conversation_id) if self.plans else ([], [])
         context = rigor.instructions(
             answer=str(answer.data.get("text", "")) if answer else "",
             question=question,
-            plans=[as_text(p, replaced.get(p.id)) for p in plans],
-            checks=review_checks(plans[-1].content) if plans else [],
+            plans=plans,
+            checks=checks,
             queries=[q for q in queries if q],
         )
         self._store.append(conversation_id, "review_started", {})

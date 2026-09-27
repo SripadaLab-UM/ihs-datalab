@@ -23,6 +23,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
@@ -285,6 +286,15 @@ _TOP_FIELDS = {
     "revision_reason",
 }
 _SECTION_FIELDS = {"kind", "label", "content"}
+# Row titles the card, the export, and the review's text use for a plan's own
+# parts, so no section of the agent's or person's can take them.
+RESERVED_TITLES = (
+    "Type",
+    "Revises",
+    "Why this kind of analysis",
+    "Why it changed",
+    "What changes, and why",
+)
 _PLAN_ID = re.compile(r"pl_[0-9a-f]{12}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 # Content that says nothing: a required section needs a reason instead.
@@ -494,17 +504,28 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
         raise PlanInvalid("An additional section needs a title.")
     if "\n" in title or len(title) > MAX_TITLE:
         raise PlanInvalid(f"A section title must be one line of at most {MAX_TITLE} characters.")
-    taken = {s.label.casefold() for s in SECTIONS.values()} | {
-        s["label"].casefold() for s in earlier
-    }
-    if title.casefold() in taken:
-        raise PlanInvalid(f"The plan already has a section called {title!r}.")
+    if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in title):
+        # Look-alike letters from other scripts could pass for a real section's title.
+        raise PlanInvalid(
+            f"The section title {title!r} has letters from outside the Latin alphabet. "
+            "Write it in plain Latin letters (accents are fine)."
+        )
+    taken = {_title_key(t) for t in (*(s.label for s in SECTIONS.values()), *RESERVED_TITLES)}
+    taken |= {_title_key(s["label"]) for s in earlier}
+    if _title_key(title) in taken:
+        raise PlanInvalid(f"The plan already has a section called {title!r}, or one like it.")
     if len(earlier) >= MAX_ADDITIONAL:
         raise PlanInvalid(f"A plan can have at most {MAX_ADDITIONAL} additional sections.")
     body = _content(content, title)
     if not body:
         raise PlanInvalid(f"The section {title!r} is empty. Write it, or remove it.")
     return {"kind": ADDITIONAL, "label": title, "content": body}
+
+
+def _title_key(title: str) -> str:
+    """A title as it reads: accents dropped, case folded, spacing squeezed."""
+    bare = "".join(c for c in unicodedata.normalize("NFKD", title) if not unicodedata.combining(c))
+    return " ".join(bare.casefold().split())
 
 
 def _content(value: Any, label: str) -> str:
@@ -609,7 +630,9 @@ def tool_description() -> str:
         lines.append(f"  Checks and limitations must address: {t.checks}")
     lines += [
         "",
-        "Add-on sections for any type, in `sections` too. Add one only when it applies:",
+        "Add-on sections for any type, in `sections` too. Add one only when this question "
+        "raises that issue; most plans need none, one, or two, and each is a commitment the "
+        "person has to review:",
         *(line(k) for k in _MODULE_KINDS),
         "",
         f"additional_sections: up to {MAX_ADDITIONAL}, each a title and content, for what the "

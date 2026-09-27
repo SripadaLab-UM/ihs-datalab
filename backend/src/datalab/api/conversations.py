@@ -26,6 +26,7 @@ from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
 
 _HEARTBEAT_SECONDS = 15
+MAX_PLAN_BODY = 100_000
 
 
 def _one_line_title(title: str | None) -> str | None:
@@ -80,6 +81,14 @@ class ApprovalAnswer(BaseModel):
     plan: dict[str, Any] | None = None
     # Or, declining a plan: the type of analysis the person wants instead.
     change_type: str | None = Field(default=None, max_length=40)
+
+    @field_validator("plan")
+    @classmethod
+    def _plan_size(cls, plan: dict[str, Any] | None) -> dict[str, Any] | None:
+        # Far more than any valid plan; the full check comes after.
+        if plan is not None and len(json.dumps(plan)) > MAX_PLAN_BODY:
+            raise ValueError("the plan is too large")
+        return plan
 
 
 class EventOut(BaseModel):

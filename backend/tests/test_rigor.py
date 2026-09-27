@@ -15,23 +15,32 @@ def test_material_is_capped():
     assert len(text) < 20000 + 8000 + 30 * 2100 + 5000
 
 
+def lines(n: int) -> str:
+    """Text of n characters that's all short lines: the most a plan's text form grows."""
+    return ("y\n" * n)[: n - 1] + "y"
+
+
 def largest_plans():
     """The longest valid plan of each version, as the review is given them."""
-    from datalab.sessions import plan_schema
+    from datalab.sessions import plan_schema as ps
     from datalab.sessions.plans import Plan, as_text
 
-    v1 = dict.fromkeys(plan_schema.V1_LABELS, "x" * plan_schema.MAX_SECTION)
-    kinds = plan_schema.allowed_kinds(plan_schema.TYPES_BY_ID["association"])
-    labels = sum(len(plan_schema.SECTIONS[k].label) for k in kinds)
-    room = plan_schema.MAX_PLAN - plan_schema.MAX_RATIONALE - labels
-    v2 = plan_schema.clean_plan(
+    v1 = dict.fromkeys(ps.V1_LABELS, lines(ps.MAX_SECTION))
+    kinds = ps.allowed_kinds(ps.TYPES_BY_ID["association"])
+    titles = [f"{i}" * ps.MAX_TITLE for i in range(ps.MAX_ADDITIONAL)]
+    labels = sum(len(ps.SECTIONS[k].label) for k in kinds) + sum(map(len, titles))
+    room = ps.MAX_PLAN - ps.MAX_RATIONALE - ps.MAX_REASON - labels
+    each = room // (len(kinds) + len(titles))
+    v2 = ps.clean_plan(
         {
             "schema_version": 2,
             "analysis_type": "association",
-            "rationale": "r" * plan_schema.MAX_RATIONALE,
+            "rationale": lines(ps.MAX_RATIONALE),
+            "revises": {"plan_id": "pl_" + "a" * 12, "sha256": "b" * 64},
+            "revision_reason": lines(ps.MAX_REASON),
             "sections": [
-                {"kind": k, "content": "y" * (room // len(kinds) - (i == 0))}
-                for i, k in enumerate(kinds)
+                *({"kind": k, "content": lines(each)} for k in kinds),
+                *({"kind": "additional", "label": t, "content": lines(each)} for t in titles),
             ],
         }
     )
@@ -40,9 +49,9 @@ def largest_plans():
 
 def test_a_whole_plan_of_the_largest_valid_size_is_shown():
     for text in largest_plans():
-        assert len(text) > 8000  # longer than the review used to be shown
+        assert len(text) > 16000  # longer than the review used to be shown
         body = instructions(answer="a", plans=[text])
-        assert text in body and "The plan continues" not in body
+        assert text in body and "continues" not in body
 
 
 def test_the_plans_type_adds_its_checks_before_the_material():
@@ -53,6 +62,11 @@ def test_the_plans_type_adds_its_checks_before_the_material():
 
 
 def test_a_plan_too_long_to_show_says_so_and_older_plans_are_counted():
-    body = instructions(answer="a", plans=["old"] * 4 + ["p" * 20000])
-    assert "The plan continues: 4000 more characters" in body
+    from datalab.sessions.rigor import MAX_PLAN_TEXT
+
+    body = instructions(answer="a", plans=["old"] * 4 + ["p" * (MAX_PLAN_TEXT + 4000)])
     assert "has 5 approved plans; only the latest 3" in body
+    # DataLab's note is outside the plan's fence, so it can't be mistaken for the plan.
+    fenced, after = body.rsplit("</approved_plan>", 1)
+    assert "continues" not in fenced
+    assert after.lstrip().startswith("The plan above continues: 4000 more characters")
