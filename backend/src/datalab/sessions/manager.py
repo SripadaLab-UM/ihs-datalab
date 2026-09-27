@@ -71,7 +71,7 @@ _ACTIVITY = frozenset(
 # export is shown in the turn it follows, or the one it was made during.)
 _OWN_TURN_EVENTS = frozenset({"files_restored", "input_attached", "input_removed"})
 # What starts work that ends with turn_done: a question, or a review run again.
-_TURN_STARTS = frozenset({"user_message", "review_started", "turn_started"})
+_TURN_STARTS = frozenset({"user_message", "review_started"})
 # Model trouble that picking up again won't fix.
 _NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
 
