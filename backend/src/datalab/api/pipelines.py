@@ -8,8 +8,7 @@ Pipelines tab lists. See pipelines/service.py.
 
 - The repo: `GET /status`, `POST /sync`, and `GET /files` and
   `GET /files/{path}` to browse GitHub's `main` as last synced. Signing in
-  to GitHub is the Knowledge routes' (`/api/knowledge/sign-in`): there's one
-  sign-in for both repos.
+  to GitHub is `/api/github` (api/github.py): one sign-in for both repos.
 - Proposals: list and get; `POST …/tests` runs the package's tests on one
   in the background; `POST …/accept` (Save & share, also in the background:
   it runs the tests first if they haven't passed) and `POST …/reject`. The
@@ -70,7 +69,7 @@ class PipelineAccountOut(BaseModel):
 
 class PipelinesStatus(BaseModel):
     available: bool
-    repo: RepoState = "not configured"
+    repo: RepoState
     name: str | None = None
     signed_in: bool = False
     account: PipelineAccountOut | None = None

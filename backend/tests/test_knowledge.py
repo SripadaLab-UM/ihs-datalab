@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from datalab import db
+from datalab.api.github import GitHubServices, build_github_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.config import RepoSettings, Settings
 from datalab.knowledge import check as kb
@@ -85,6 +86,7 @@ def lab(tmp_path, github_keychain):
     )
     app = FastAPI()
     app.include_router(router)
+    app.include_router(build_github_router(GitHubServices(settings, auth)))
     with TestClient(app) as client:
         yield Lab(router.knowledge, manager, store, remote, client, github, settings)  # type: ignore[attr-defined]
     connection.close()
@@ -182,7 +184,7 @@ def test_status_says_where_the_clone_is(lab):
     lab.knowledge.clone.fetch()
     assert lab.client.get("/api/knowledge/status").json()["behind"] == 1
     synced(lab)
-    lab.client.post("/api/knowledge/sign-out")
+    lab.client.post("/api/github/sign-out")
     assert lab.client.get("/api/knowledge/status").json()["repo"] == "signed out"
 
 
@@ -195,12 +197,12 @@ def test_missing_access_says_whom_to_ask(lab, tmp_path):
 
 
 def test_sign_in_routes(lab):
-    lab.client.post("/api/knowledge/sign-out")
-    started = lab.client.post("/api/knowledge/sign-in").json()
+    lab.client.post("/api/github/sign-out")
+    started = lab.client.post("/api/github/sign-in").json()
     assert (started["state"], started["user_code"]) == ("waiting", "WXYZ-0000")
-    assert lab.client.post("/api/knowledge/sign-in/poll").json()["state"] == "waiting"
-    assert lab.client.post("/api/knowledge/sign-in/cancel").json()["state"] == "signed out"
-    assert lab.client.get("/api/knowledge/sign-in").json()["state"] == "signed out"
+    assert lab.client.post("/api/github/sign-in/poll").json()["state"] == "waiting"
+    assert lab.client.post("/api/github/sign-in/cancel").json()["state"] == "signed out"
+    assert lab.client.get("/api/github/sign-in").json()["state"] == "signed out"
 
 
 # Proposals ------------------------------------------------------------------
@@ -507,7 +509,7 @@ def test_saving_needs_someone_signed_in(lab):
     cid = conversation(lab)
     proposal = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE})
     assert proposal is not None
-    lab.client.post("/api/knowledge/sign-out")
+    lab.client.post("/api/github/sign-out")
     response = lab.client.post(
         f"/api/knowledge/proposals/{proposal.id}/accept", json=as_seen(lab, proposal)
     )
@@ -869,8 +871,8 @@ def test_a_signed_out_status_says_when_the_sign_in_ran_out(lab):
     TokenStore().save(Tokens(TOKEN, time.time() - 60, REFRESH, time.time() - 60, tokens.account))
     status = lab.client.get("/api/knowledge/status").json()
     assert status["repo"] == "signed out" and "run out" in status["message"]
-    assert lab.client.get("/api/knowledge/sign-in").json()["message"] == status["message"]
-    lab.client.post("/api/knowledge/sign-out")
+    assert lab.client.get("/api/github/sign-in").json()["message"] == status["message"]
+    lab.client.post("/api/github/sign-out")
     assert (
         lab.client.get("/api/knowledge/status").json()["message"] == "Sign in to GitHub to use it."
     )

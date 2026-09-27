@@ -683,6 +683,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_github_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sign In State */
+        get: operations["sign_in_state_api_github_sign_in_get"];
+        put?: never;
+        /** Start Sign In */
+        post: operations["start_sign_in_api_github_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Sign In */
+        post: operations["poll_sign_in_api_github_sign_in_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Sign In */
+        post: operations["cancel_sign_in_api_github_sign_in_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Out */
+        post: operations["sign_out_api_github_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/status": {
         parameters: {
             query?: never;
@@ -711,75 +797,6 @@ export interface paths {
         put?: never;
         /** Sync */
         post: operations["sync_api_knowledge_sync_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sign In State */
-        get: operations["sign_in_state_api_knowledge_sign_in_get"];
-        put?: never;
-        /** Start Sign In */
-        post: operations["start_sign_in_api_knowledge_sign_in_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in/poll": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Poll Sign In */
-        post: operations["poll_sign_in_api_knowledge_sign_in_poll_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Sign In */
-        post: operations["cancel_sign_in_api_knowledge_sign_in_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sign Out */
-        post: operations["sign_out_api_knowledge_sign_out_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2137,6 +2154,60 @@ export interface components {
             /** Line */
             line?: number | null;
         };
+        /** GitHubAccountOut */
+        GitHubAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** GitHubRepoOut */
+        GitHubRepoOut: {
+            /**
+             * Area
+             * @enum {string}
+             */
+            area: "knowledge" | "pipelines";
+            /** Name */
+            name: string;
+        };
+        /** GitHubSignInOut */
+        GitHubSignInOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri */
+            verification_uri?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /** Message */
+            message?: string | null;
+        };
+        /** GitHubStatusOut */
+        GitHubStatusOut: {
+            /** Available */
+            available: boolean;
+            /** Message */
+            message?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /**
+             * Repos
+             * @default []
+             */
+            repos: components["schemas"]["GitHubRepoOut"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2683,7 +2754,6 @@ export interface components {
             available: boolean;
             /**
              * Repo
-             * @default not configured
              * @enum {string}
              */
             repo: "not configured" | "signed out" | "no access" | "not cloned" | "in sync" | "behind" | "diverged" | "sync failed";
@@ -3115,25 +3185,6 @@ export interface components {
         SettingsStatus: {
             /** Available */
             available: boolean;
-        };
-        /** SignInOut */
-        SignInOut: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
-            /** User Code */
-            user_code?: string | null;
-            /** Verification Uri */
-            verification_uri?: string | null;
-            /** Expires At */
-            expires_at?: string | null;
-            /** Interval */
-            interval?: number | null;
-            account?: components["schemas"]["AccountOut"] | null;
-            /** Message */
-            message?: string | null;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -4705,6 +4756,126 @@ export interface operations {
             };
         };
     };
+    status_api_github_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubStatusOut"];
+                };
+            };
+        };
+    };
+    sign_in_state_api_github_sign_in_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    start_sign_in_api_github_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    poll_sign_in_api_github_sign_in_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    cancel_sign_in_api_github_sign_in_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    sign_out_api_github_sign_out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
     status_api_knowledge_status_get: {
         parameters: {
             query?: never;
@@ -4741,106 +4912,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeStatus"];
-                };
-            };
-        };
-    };
-    sign_in_state_api_knowledge_sign_in_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    start_sign_in_api_knowledge_sign_in_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    poll_sign_in_api_knowledge_sign_in_poll_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    cancel_sign_in_api_knowledge_sign_in_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    sign_out_api_knowledge_sign_out_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
                 };
             };
         };

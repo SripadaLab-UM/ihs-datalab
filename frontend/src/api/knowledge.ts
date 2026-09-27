@@ -6,7 +6,6 @@ import type { components } from "./schema";
 type Schemas = components["schemas"];
 export type KnowledgeStatus = Schemas["KnowledgeStatus"];
 export type RepoState = KnowledgeStatus["repo"];
-export type SignIn = Schemas["SignInOut"];
 export type Proposal = Schemas["ProposalOut"];
 export type ProposalState = Proposal["status"];
 export type ProposalDetail = Schemas["ProposalDetail"];
@@ -27,14 +26,7 @@ export const knowledgeApi = {
   /** Download GitHub's main (a clone the first time). */
   sync: () => request<KnowledgeStatus>("/api/knowledge/sync", post()),
 
-  /** Where signing in to GitHub is, without asking GitHub. */
-  signIn: () => request<SignIn>("/api/knowledge/sign-in"),
-  /** Start GitHub's device flow: the code to enter at github.com/login/device. */
-  startSignIn: () => request<SignIn>("/api/knowledge/sign-in", post()),
-  /** Ask whether the code was entered; call it every `interval` seconds. */
-  pollSignIn: () => request<SignIn>("/api/knowledge/sign-in/poll", post()),
-  cancelSignIn: () => request<SignIn>("/api/knowledge/sign-in/cancel", post()),
-  signOut: () => request<SignIn>("/api/knowledge/sign-out", post()),
+  // Signing in to GitHub is github.ts: one sign-in for both lab repos.
 
   proposals: (conversationId?: string) =>
     request<Proposal[]>(`/api/knowledge/proposals${conversationId ? `?conversation_id=${id(conversationId)}` : ""}`),

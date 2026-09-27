@@ -19,6 +19,7 @@ from datalab import __version__, datalock, db, updates
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
+from datalab.api.github import GitHubServices, build_github_router
 from datalab.api.inputs import build_inputs_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
@@ -226,6 +227,7 @@ def create_app(
     # One GitHub sign-in for both lab repos: only one object may refresh its
     # tokens, since each refresh replaces the refresh token.
     github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
         build_knowledge_router(
             KnowledgeServices(settings, connection, conversations, sessions, auth=github)
