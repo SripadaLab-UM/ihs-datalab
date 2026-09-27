@@ -3,12 +3,13 @@ import clsx from "clsx";
 import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
-import { Button, Chip, FileGlyph, Icon, SessionBadge } from "@/components/ui";
+import { Button, Chip, FileGlyph, Icon, InfoTip, SessionBadge } from "@/components/ui";
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
+import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
@@ -286,23 +287,23 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   return (
-    <label
-      className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink"
-      title="After each answer that did some work, the agent's work is reviewed against a checklist: traced claims, the plan, causal language, sample sizes, uncertainty, privacy. It roughly doubles the time and cost of each answer."
-    >
-      <input
-        type="checkbox"
-        className="peer sr-only"
-        checked={conversation.rigor_review}
-        onChange={() => toggle.mutate()}
-        disabled={toggle.isPending}
-      />
-      <span
-        aria-hidden="true"
-        className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
-      />
-      Rigor review
-    </label>
+    <span className="flex items-center gap-1">
+      <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
+        <input
+          type="checkbox"
+          className="peer sr-only"
+          checked={conversation.rigor_review}
+          onChange={() => toggle.mutate()}
+          disabled={toggle.isPending}
+        />
+        <span
+          aria-hidden="true"
+          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+        />
+        Rigor review
+      </label>
+      <InfoTip term="rigor-review" align="end" />
+    </span>
   );
 }
 
@@ -333,7 +334,10 @@ export function EmptyState({
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
         {(data
           ? [
-              ["db", "Queries the IHS database, read-only"],
+              // Knowledge writing has the catalog tools only.
+              mode?.queries === false
+                ? ["db", "Reads the database catalog (tables and columns), never rows"]
+                : ["db", "Queries the IHS database, read-only"],
               ["eye", "Shows you everything it reads and runs"],
               ["lock", "Websites blocked; the model is U-M's approved GPT service"],
             ]
@@ -387,7 +391,9 @@ function TurnView({
   const answer = answerOf(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
-  const storyRows = rows.filter((row) => row.type !== "review");
+  const storyRows = rows.filter((row) => row.type !== "review" && row.type !== "proposal");
+  // Proposed knowledge edits wait for the person: never folded away with the story.
+  const proposals = rows.flatMap((row) => (row.type === "proposal" ? [row.proposal] : []));
   const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
   const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
   const queryClient = useQueryClient();
@@ -448,6 +454,9 @@ function TurnView({
       {/* Only the latest review: one run again replaces one that didn't finish. */}
       {reviews.slice(-1).map((review) => (
         <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
+      ))}
+      {proposals.map((proposal) => (
+        <ProposalCard key={proposal.id} proposal={proposal} />
       ))}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && <HowItWasMade rows={storyRows}>{story}</HowItWasMade>}
@@ -525,7 +534,7 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
   const planChip = planStatus(rows.flatMap((row) => (row.type === "approval" ? [row.approval] : [])));
   return (
     <section className="border-y border-line">
-      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
+      <button type="button" data-tour="how-made" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
         <Marker tone="done" open={open} />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
           <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
@@ -625,7 +634,7 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
     };
   }, [turn, streaming, openFile, openQuery]);
   return (
-    <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
+    <section data-tour="answer" className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
@@ -647,18 +656,18 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
 
 /** Which numbers in the answer came from something the turn produced. */
 function TraceChip({ trace }: { trace: NonNullable<Turn["trace"]> }) {
-  const how =
-    "DataLab looks for each number in this turn's query results, command output, and data files. A match only means the number appears there, not that it's right.";
   if (trace.untraced.length === 0) {
     return (
-      <Chip title={how}>
-        {trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs
-      </Chip>
+      <>
+        <Chip>{trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs</Chip>
+        <InfoTip term="trace-and-provenance" />
+      </>
     );
   }
   return (
     <>
-      <Chip tone="attn" title={how}>
+      <InfoTip term="trace-and-provenance" />
+      <Chip tone="attn">
         {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not matched to this turn's outputs
       </Chip>
       {trace.untraced.slice(0, 8).map((n) => (
@@ -841,7 +850,7 @@ export function ComposerBox({
   };
 
   return (
-    <footer className="px-4 pt-2 pb-6 sm:px-8">
+    <footer data-tour="composer" className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
         {typeof note === "function" ? note(sending) : note}

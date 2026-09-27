@@ -1,6 +1,12 @@
+import { fileURLToPath } from "node:url";
+
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
+import { searchForWorkspaceRoot } from "vite";
 import { defineConfig } from "vitest/config";
+
+// This file's folder (frontend/), wherever Vite is started from.
+const here = fileURLToPath(new URL(".", import.meta.url));
 
 // In development the UI runs on Vite and the API on DataLab. Cookies are
 // per host, not per port, so signing in through DataLab works for both.
@@ -12,6 +18,8 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5173,
+    // The user guide (docs/guide) is bundled from outside the frontend folder.
+    fs: { allow: [searchForWorkspaceRoot(here), fileURLToPath(new URL("../docs/guide", import.meta.url))] },
     proxy: { "/api": backend, "/sign-in": backend },
   },
   test: {

@@ -37,5 +37,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Run DataLab's knowledge-base check
         run: >-
-          uvx --from "git+https://github.com/SripadaLab-UM/ihs_datalab@${DATALAB_REF}#subdirectory=backend"
+          uvx --from "git+https://github.com/SripadaLab-UM/ihs-datalab@${DATALAB_REF}#subdirectory=backend"
           datalab kb-check . --format github --allow-data-hits

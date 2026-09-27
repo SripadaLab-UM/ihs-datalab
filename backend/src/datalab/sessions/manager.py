@@ -145,12 +145,20 @@ class SessionManager:
         runtime = self._runtimes.get(conversation_id)
         return runtime.turn_sources() if runtime is not None else []
 
-    def register_workspace_seed(self, name: str, seed: WorkspaceSeed, *, into: str) -> None:
+    def register_workspace_seed(
+        self,
+        name: str,
+        seed: WorkspaceSeed,
+        *,
+        into: str,
+        modes: Sequence[str] | None = None,
+    ) -> None:
         """Before each new conversation's first turn, run `seed(conversation,
-        staging)` and move what it wrote to `/work/<into>`, once (seeds.py)."""
+        staging)` and move what it wrote to `/work/<into>`, once (seeds.py);
+        only in conversations of `modes`, if given."""
         if any(s.name == name or s.into == into for s in self._seeds):
             raise ValueError(f"A workspace seed for {name!r} or /work/{into} already exists.")
-        self._seeds.append(Seed(name, seed, into))
+        self._seeds.append(Seed(name, seed, into, tuple(modes) if modes is not None else None))
 
     def workspace_base(self, conversation_id: str, name: str) -> str | None:
         """What the seed `name` returned for this conversation, if it's in place."""
@@ -178,6 +186,12 @@ class SessionManager:
     def checkpoints(self, conversation_id: str) -> Checkpoints:
         paths = self.paths(conversation_id)
         return Checkpoints(paths.checkpoints, paths.work)
+
+    def any_busy(self) -> bool:
+        """Whether any conversation's agent is working, starting, or restoring."""
+        if self._restoring or self._starting:
+            return True
+        return any(not task.done() for task in self._turns.values())
 
     def is_busy(self, conversation_id: str) -> bool:
         if conversation_id in self._restoring or conversation_id in self._starting:
@@ -554,6 +568,10 @@ class SessionManager:
     def _input_mounts(self, conversation_id: str) -> list[str]:
         """Mounts for the attachments that still pass every check, right now."""
         assert self._attachments is not None
+        conversation = self._store.get(conversation_id)
+        mode = modes.MODES.get(conversation.mode) if conversation else None
+        if mode is None or not mode.attachments:
+            return []  # Knowledge writing: metadata only (the API refuses to attach, too)
         protected = [self._settings.data_dir, *(default_data_dir(p) for p in ("real", "practice"))]
         mountable = []
         for attachment in self._attachments.list(conversation_id):
@@ -655,6 +673,7 @@ class SessionManager:
             async def emit(kind: str, data: dict[str, Any]) -> None:
                 self._store.append(conversation.id, kind, data)
 
+            mode = modes.MODES[conversation.mode]
             runtime = SessionRuntime(
                 conversation.id,
                 conversation.kind,
@@ -666,6 +685,8 @@ class SessionManager:
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
+                tools=mode.tools,
+                tools_off=mode.tools_off,
             )
             self._runtimes[conversation.id] = runtime
         return runtime

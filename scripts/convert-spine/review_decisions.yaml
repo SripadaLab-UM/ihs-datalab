@@ -1,0 +1,478 @@
+# The reviewer's decisions on the Spine conversion (REVIEW.md, "Questions for
+# the reviewer"), applied by convert_spine.py on top of the Spine at
+# SPINE_COMMIT. Every item says where its evidence is: a file and line, a
+# commit, a URL or a DOI. The converter checks what it can (the text it
+# replaces is there, the code paths exist at the pinned commit, the names said
+# to be gone are gone) and stops if anything here no longer fits the sources.
+#
+# Rules: an overlay item can add evidence, cohorts, limitations or text fixes,
+# and can hold a page as a draft; it can't mark a page reviewed. A page is
+# reviewed only when its evidence meets the rules in docs/KNOWLEDGE_BASE.md.
+# No participant data here: no counts from live queries, no values.
+
+reviewer: ataxali
+decided_on: 2026-09-27
+
+# Questions 2 and 3: the papers the Spine cites, by DOI or by name, and the
+# cohorts each analysed (a cohort is the year its interns started internship,
+# as the papers use it: "the 2012-2013 academic year (the 2012 cohort)").
+# Every DOI was resolved at the DOI registry's handle API
+# (https://doi.org/api/handles/<doi>, responseCode 1) on 2026-09-27; cohorts
+# are from each paper's methods, in the PDFs in srijan-knowledge-graph/papers/.
+papers:
+  - doi: 10.64898/2026.03.03.26347299
+    names: [MoodDriver]
+    label: MoodDriver
+    title: Personalized Insights Derived from Wearable Device Data and Large Language Models to Improve Well-Being
+    venue: medRxiv (preprint, not peer reviewed)
+    year: 2026
+    preprint: true
+    cohorts: [2018, 2019, 2020, 2021, 2022, 2023]
+    cohorts_from: 'Methods, "Participants": interns starting internship in 2018-2023, all with Fitbit devices'
+    verified: [https://doi.org/10.64898/2026.03.03.26347299, https://pubmed.ncbi.nlm.nih.gov/41822700/]
+    summary: >-
+      Individual-level correlations between six Fitbit features (active minutes,
+      steps, resting heart rate, bedtime, wake time, sleep duration) and daily
+      mood, and MoodDriver, a system that turns them into personalized feedback
+      written by a language model. Its methods give the outlier thresholds,
+      regular-sleep window, active-minutes harmonization and data-sufficiency
+      rules the Spine cites.
+  - doi: 10.1038/s41598-021-94459-z
+    title: Genomic heterogeneity affects the response to Daylight Saving Time
+    venue: Scientific Reports
+    year: 2021
+    cohorts: [2018]
+    cohorts_from: Methods, "Participants" (interns entering residency in 2018; genotyped 2018-cohort subjects)
+    verified: [https://doi.org/10.1038/s41598-021-94459-z, https://pubmed.ncbi.nlm.nih.gov/34285349/]
+    summary: >-
+      Fitbit sleep around the 2019 daylight-saving change, split by a polygenic
+      score for sleep midpoint: evening-type interns adjusted more slowly and
+      showed more social jet lag afterwards.
+  - doi: 10.1371/journal.pone.0260620
+    title: Prediction of Suicidal Ideation Risk in a Prospective Cohort Study of Medical Interns
+    venue: PLOS ONE
+    year: 2021
+    cohorts: [2012, 2013, 2014, 2015]
+    cohorts_from: Methods (2012-2014 cohorts for training, 2015 for testing)
+    verified: [https://doi.org/10.1371/journal.pone.0260620, https://pubmed.ncbi.nlm.nih.gov/34855821/]
+    summary: >-
+      A model of suicidal ideation during internship (PHQ-9 item 9) from
+      baseline survey factors, trained on earlier cohorts and tested on a later one.
+  - doi: 10.1007/s11606-020-05664-x
+    title: Substantial Overlap Between Factors Predicting Symptoms of Depression and Burnout Among Medical Interns
+    venue: Journal of General Internal Medicine
+    year: 2020
+    cohorts: [2017]
+    cohorts_from: Methods (training physicians starting internship in 2017)
+    verified: [https://doi.org/10.1007/s11606-020-05664-x, https://pubmed.ncbi.nlm.nih.gov/32026254/]
+    summary: >-
+      Personal and workplace predictors of PHQ-9 depressive symptoms and of the
+      two abbreviated Maslach burnout subscales largely coincide.
+  - doi: 10.1038/s41746-021-00400-z
+    title: Day-to-day variability in sleep parameters and depression risk
+    venue: npj Digital Medicine
+    year: 2021
+    cohorts: [2017, 2018]
+    cohorts_from: Methods (subjects starting residency in 2017 and 2018)
+    verified: [https://doi.org/10.1038/s41746-021-00400-z, https://pubmed.ncbi.nlm.nih.gov/33603132/]
+    summary: >-
+      Night-to-night variability in Fitbit sleep, more than average sleep, was
+      associated with depressive symptoms and next-day mood.
+  - doi: 10.1038/s41598-022-12066-y
+    title: Prevalence and risk factors for depression among training physicians in China and the United States
+    venue: Scientific Reports
+    year: 2022
+    cohorts: [2016, 2017, 2018]
+    cohorts_from: Methods (three US cohorts enrolled 2016-2018, assessed in parallel with Chinese residents)
+    verified: [https://doi.org/10.1038/s41598-022-12066-y, https://pubmed.ncbi.nlm.nih.gov/35581251/]
+    summary: >-
+      Depressive symptoms during the first year of residency, and their risk
+      factors, compared between Chinese and US trainees.
+  - doi: 10.1017/S0033291722003014
+    title: Using machine learning with intensive longitudinal data to predict depression and suicidal ideation among medical interns over time
+    venue: Psychological Medicine
+    year: 2022
+    cohorts: [2020]
+    cohorts_from: 'Methods, "Participants" (interns enrolled in the 2020-2021 academic year)'
+    verified: [https://doi.org/10.1017/S0033291722003014, https://pubmed.ncbi.nlm.nih.gov/36177889/]
+    summary: >-
+      How early in the first quarter daily mood and Fitbit summaries predict
+      end-of-quarter depression and suicidal ideation; simple models on mood
+      alone did best.
+  - doi: 10.1371/journal.pone.0277350
+    title: A caveat to using wearable sensor data for COVID-19 detection
+    venue: PLOS ONE
+    year: 2022
+    cohorts: [2019, 2020]
+    cohorts_from: Methods (participants drawn from the 2019 and 2020 cohorts)
+    verified: [https://doi.org/10.1371/journal.pone.0277350, https://pubmed.ncbi.nlm.nih.gov/36584148/]
+    summary: >-
+      Wearable step, sleep and resting-heart-rate change metrics around symptom
+      onset separated COVID-19 cases from controls less well in interns than in
+      earlier reports.
+  - doi: 10.1371/journal.pone.0329707
+    title: Feasibility and acceptability of collecting passive phone usage and sensor data via Apple SensorKit
+    venue: PLOS ONE
+    year: 2025
+    cohorts: [2023]
+    cohorts_from: Methods, "Study design" (incoming interns for the 2023-2024 academic year)
+    verified: [https://doi.org/10.1371/journal.pone.0329707, https://pubmed.ncbi.nlm.nih.gov/40802659/]
+    summary: >-
+      Opt-in and retention for five Apple SensorKit sensors in one cohort of
+      iPhone users; opt-in was lower among interns from groups underrepresented
+      in medicine.
+  - doi: 10.1038/s41746-022-00746-y
+    title: Effectiveness of gamified team competition as mHealth intervention for medical interns
+    venue: npj Digital Medicine
+    year: 2023
+    cohorts: [2020]
+    cohorts_from: Results, "Study cohort" (interns who began internship in July 2020)
+    verified: [https://doi.org/10.1038/s41746-022-00746-y, https://pubmed.ncbi.nlm.nih.gov/36631665/]
+    summary: >-
+      A micro-randomized trial of weekly team step and sleep competitions in the
+      first twelve weeks of internship.
+
+# Question 2: named manuscripts with no DOI. Searched on 2026-09-27 (PubMed,
+# medRxiv, the web) by title and authors; neither is published or preprinted.
+unpublished:
+  - name: Social Smartphone Manuscript
+    what: 'Saulnier et al., "Objectively measured smartphone use and mental health outcomes among physician residents" (draft of 2026-05-13): SensorKit features and daily mood in interns who started in July 2024'
+    searched: PubMed (Saulnier KG smartphone residents), medRxiv and web searches by title
+  - name: Sleep & Step ETT
+    what: 'Pereira-Lima, Fang et al., "Objective Sleep, Physical Activity, and Genetic Susceptibility in Depression Prevention: A Series of Emulated Target Trials" (JAMA-format draft): the 2017-2022 cohorts'
+    searched: PubMed (Pereira-Lima K target trial), medRxiv and web searches by title
+
+# Question 4: ihsDataR is now in ihs-pipelines with the same tree, so code
+# evidence under r/ihsDataR/ is pinned there. The converter checks the trees
+# are identical and that each path exists at the commit (--pipelines).
+code_repin:
+  from_prefix: r/ihsDataR/
+  repo: ihs-pipelines
+  commit: d25b7129d45291078cfda07b5acf153a9d05ad82
+  prefix: ihsDataR/
+  source: >-
+    ~/work/ihs-pipelines-staging (REVIEW.md there): ihsDataR/ at d25b712 has
+    tree 52cdc23, the same as r/ihsDataR at the Spine's commit (SPINE_COMMIT). Not
+    pushed yet; the push is a fast-forward, so the commit id stays the same.
+
+# Question 5: the two legacy scripts the Spine cites. Their paths are where
+# docs/WORKFLOWS.md says they go (reference/2024/ in ihs-pipelines); that
+# folder doesn't exist yet. A script counts as a page's evidence of how
+# something is computed only if it has been seen and the cited part checked.
+legacy_scripts:
+  AggregateDailyMetrics_2024.R:
+    seen: true
+    where: srijan-knowledge-graph/scripts/AggregateDailyMetrics_2024.R (not in any git repo)
+    checked: the steps (#L13-106), resting heart rate (#L108-179), active minutes (#L180-262) and Garmin sleep (#L297-330) sections the Spine cites
+  ODBC_connect_IHS2024-25.R:
+    seen: false
+    where: only as an email attachment's file name; not in any repo, not opened
+    checked: nothing
+
+# Question 4 (and 7, 8): prototype runners and readers that the Spine's
+# details name, which were removed from ihsDataR in the prototype's um-gpt-local-proxy@b154606
+# ("Align ihsDataR backlog with aggregate workflows"). The converter checks
+# none of them is in ihs-pipelines at the pinned commit, and adds a limitation
+# to each page that names one.
+removed_code_names:
+  question: 4
+  source: prototype commit um-gpt-local-proxy@b154606 removed them; none is in ihs-pipelines at d25b712
+  names:
+    - garmin_activity_summary_2025
+    - garmin_move_iq_summary_2025
+    - garmin_sleep_summary_2025
+    - garmin_user_metrics_summary
+    - garmin_user_metrics_summary_2025
+    - read_garmin_user_metrics_summary
+    - healthkit_daily_rhr_2025
+    - healthkit_sleep_2025
+    - run_steps_day.R
+
+# Per-entry changes to the Spine's text, applied before conversion.
+entries:
+  - entry: canonical_features/resting_heart_rate_day
+    question: 8
+    replace:
+      - field: description
+        old: '; the current recipe models only the Apple Watch branch (Fitbit/Garmin pending port).'
+        new: ', and the recipe and ihsDataR port all three branches.'
+      - field: description
+        old: 'one value per participant-day.'
+        new: 'one value per participant-day per device.'
+      - field: granularity
+        old: participant-day
+        new: participant-day-device
+    release_hold: true
+    source: >-
+      Prototype commit um-gpt-local-proxy@04e5c2b ("Add combined daily resting heart rate
+      runner", 2026-07-14) added the Fitbit and Garmin branches to the recipe
+      and r/ihsDataR/R/feature_resting_heart_rate_day.R, but left the
+      description written on 2026-07-09 (um-gpt-local-proxy@a1490b4).
+  - entry: feature_recipes/resting_heart_rate_day_v1
+    question: 8
+    set:
+      implemented_in: r/ihsDataR/R/feature_resting_heart_rate_day.R
+    replace:
+      - field: aggregation_window
+        old: participant-day
+        new: participant-day-device
+    source: >-
+      ihsDataR/R/feature_resting_heart_rate_day.R (#L87-101,
+      build_resting_heart_rate_day) combines the three branches exactly as the
+      recipe's cleaning rules say; added in um-gpt-local-proxy@04e5c2b with its runner and tests.
+  - entry: canonical_features/osm_pgs
+    question: 3
+    replace:
+      - field: description
+        old: UK Biobank chronotype GWAS
+        new: UK Biobank accelerometer-based sleep-midpoint GWAS
+    source: 'DST genomics paper (10.1038/s41598-021-94459-z), methods: OSM-PGS was computed with PRSice from the GWAS of accelerometer-based sleep midpoint in UK Biobank'
+  - entry: qc_rules/mood_summary_min_observations
+    question: 3
+    replace:
+      - field: condition
+        old: otherwise the summary is omitted.
+        new: with fewer, the paper assigned the training data's median value of that statistic.
+      - field: on_fail
+        old: set_missing
+        new: impute_training_median
+    source: 'ML intensive longitudinal paper (10.1017/S0033291722003014), methods: summaries needed at least two observations (means) or three (standard deviations); otherwise the training data median was assigned'
+  - entry: data_sources/garmin
+    question: 7
+    replace:
+      - field: known_limitations[0]
+        old: 'The mounted Oracle catalog is table-only and may omit live Garmin views. For activity-summary work, verify IHS_2025.VGARMINACTIVITYSUMMARY with a zero-row broker query before assuming it is unavailable or substituting another object.'
+        new: ''
+    release_hold: true
+    source: generated/schema (export 2026-09-26) has 61 IHS_2025 views, including IHS_2025.VGARMINACTIVITYSUMMARY.
+  - entry: data_sources/participant
+    question: 7
+    replace:
+      - field: known_limitations[0]
+        old: ' Note the table-only catalog metadata export does not list views, so the offline catalog/search will not surface it — confirm via a live broker query.'
+        new: ''
+    release_hold: true
+    source: generated/schema (export 2026-09-26) has IHS_2025.VW_IHS_PARTICIPANT_SUMMARY (a view, with STUDY_PARTICIPANT_ID).
+  - entry: raw_variables/garmin_activity_summary_start_time_epoch_seconds
+    question: 9
+    exclude: >-
+      it describes the same column as the validated
+      garmin_activity_summary_start_time_seconds (IHS_2025.VGARMINACTIVITYSUMMARY.STARTTIMEINSECONDS),
+      whose legacy_behavior already gives the same start and end derivation
+    source: registry/proposed.seed.yaml at SPINE_COMMIT, both entries
+
+# Per-page changes, applied after conversion and before statuses are decided.
+pages:
+  # Question 1: cohorts confirmed on reviewed pages, and code evidence where
+  # ihsDataR implements the rule.
+  - page: features/active_minutes_day
+    question: 1
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L180-262 reads the 2024-cohort exports and keeps dates in [2024-04-01, 2025-07-01); ihsDataR build_active_minutes_day is the 2025 build (IHS_2025 by default, R/data_sources.R#L79)'
+  - page: features/steps_day
+    question: 1
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L100-103 (2024 cohort window); ihsDataR build_steps_day with the 2025 window (inst/routines/export_steps_day.R)'
+  - page: features/resting_heart_rate_day
+    question: 1
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L108-179 (2024 cohort, Fitbit, Garmin and Apple Watch); ihsDataR build_resting_heart_rate_day is the 2025 build'
+    limitations:
+      - "ihsDataR's code doesn't apply the >100 bpm exclusion (qc/rhr_plausible, from MoodDriver) or decode HEALTHKITSAMPLEKEY (qc/healthkit_hexkey_decode); neither does AggregateDailyMetrics_2024.R."
+  - page: features/resting_heart_rate_day
+    question: 8
+    source: ihsDataR/R/feature_resting_heart_rate_day.R has neither step; the recipe's cleaning rules list both
+    hold: >-
+      its recipe lists a hex-key decode and a >100 bpm exclusion that the code
+      doesn't do: the decode rests only on the unseen ODBC_connect_IHS2024-25.R,
+      and whether the pipeline should apply the >100 bpm filter is still open
+  - page: qc/steps_positive
+    question: 1
+    evidence:
+      - code: ihsDataR/R/feature_steps_day.R#L108-113
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L103 (steps>0, 2024); ihsDataR feature_steps_day.R#L110 and qc_steps.R#L41-44 (2025)'
+  - page: qc/latest_inserteddate_dedup
+    question: 1
+    evidence:
+      - code: ihsDataR/R/dedup.R#L14-21
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L41-43 and #L88-90 (2024); ihsDataR dedup_latest, used by every device branch (2025)'
+  - page: qc/healthkit_midnight_date_assignment
+    question: 1
+    evidence:
+      - code: ihsDataR/R/utils_dates.R#L13-28
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L70-84 (hk_step_clean date_select, 2024); ihsDataR assign_daily_date (2025)'
+  - page: qc/apple_watch_source_filter
+    question: 1
+    evidence:
+      - code: ihsDataR/R/feature_resting_heart_rate_day.R#L56
+    cohorts: [2025]
+    source: 'ihsDataR feature_resting_heart_rate_day.R#L56, in build_resting_heart_rate_healthkit (2025). For 2024 the filter rests only on the unseen ODBC_connect_IHS2024-25.R (question 5), so 2024 is not listed'
+    limitations:
+      - In ihsDataR only the resting-heart-rate branch filters on SOURCEPRODUCTTYPE.
+      - For 2024 the filter was applied, if at all, when the data were exported (ODBC_connect_IHS2024-25.R, not yet seen in a repo); AggregateDailyMetrics_2024.R#L122 only reads a file named as Apple-Watch-only.
+  - page: qc/garmin_sleep_validation_filter_legacy_2024
+    question: 1
+    cohorts: [2024, 2025]
+    source: 'AggregateDailyMetrics_2024.R#L307 (VALIDATION contains FINAL) and #L325 (NAPVALIDATION AUTO or DEVICE), 2024; ihsDataR feature_sleep_2025.R#L62 and #L92, 2025'
+  # Question 2: pages whose DOI now counts as evidence, but where part of the
+  # rule comes only from an unpublished manuscript.
+  - page: qc/sensorkit_block_aggregation
+    question: 2
+    hold: >-
+      the block sizes (15-minute app and message blocks, 24-hour phone blocks,
+      visits to the nearest 15 minutes) come from the unpublished Social
+      Smartphone manuscript, not the SensorKit feasibility paper it also cites
+    source: pone.0329707 names the five sensors but not their block sizes; the Social Smartphone draft's methods give them
+  - page: qc/sensorkit_access_caveat
+    question: 2
+    hold: >-
+      the limit to Apple's own phone and messages apps comes from the
+      unpublished Social Smartphone manuscript; the feasibility paper supports
+      the rest (iPhone only, opt-in per sensor, no public sharing)
+    source: pone.0329707 (methods, data availability statement); the Social Smartphone draft's limitations
+  # Question 2 and 3: limitations found while checking pages against papers.
+  - page: features/daily_mood
+    question: 3
+    evidence:
+      - schema: IHS_2026.VW_DAILY_MOOD
+    cohorts: [2025, 2026]
+    hold: >-
+      its only schema evidence, VW_DAILY_MOOD, is in IHS_2025 and IHS_2026 only,
+      and the link from this feature to that view comes from the unpublished
+      Social Smartphone manuscript; MoodDriver used the same 1-10 item in the
+      2018-2023 cohorts, but not from this view
+    source: 'generated/schema: VW_DAILY_MOOD is in IHS_2025 and IHS_2026 only; the Spine source_anchor cites it only under the Social Smartphone Manuscript'
+    limitations:
+      - MoodDriver (2018 to 2023 cohorts) used the same single 1-10 daily mood item, but the Spine doesn't say where those years' answers are in Oracle.
+  - page: qc/rhr_plausible
+    question: 8
+    limitations:
+      - ihsDataR doesn't apply the >100 bpm filter (R/feature_resting_heart_rate_day.R); whether it should is still open.
+  - page: qc/mood_summary_min_observations
+    question: 3
+    hold: >-
+      the Spine's text said a summary with too few observations is left
+      missing, but the paper assigned the training data's median; the text is
+      corrected to the paper, and a person should confirm the corrected rule
+    source: 10.1017/S0033291722003014, methods (the ML models' handling of sparse summaries)
+  - page: qc/active_minutes_plausible
+    question: 2
+    limitations:
+      - ihsDataR (R/qc_active_minutes.R) only warns when a day exceeds 720 minutes; it doesn't set the value missing.
+  - page: qc/steps_plausible_range
+    question: 2
+    limitations:
+      - ihsDataR (R/qc_steps.R) only warns above 30000 steps; it doesn't set the value missing.
+  - page: qc/nightshift_sleep_exclusion
+    question: 2
+    limitations:
+      - In MoodDriver a night-shift schedule set the quarterly bedtime and wake-time minimum and maximum to missing; the paper doesn't say how night shifts were detected.
+  - page: features/social_jet_lag_week
+    question: 3
+    limitations:
+      - The paper computed it for the weeks before and after the 2019 daylight-saving change, not every week of the year.
+
+# The answers, for REVIEW.md. `changes` there is computed by the converter.
+answers:
+  - question: 1
+    answer: >-
+      Confirmed [2024, 2025] on the reviewed feature and QC pages that have
+      code or a checked legacy script: the 2024 legacy script covers 2024 and
+      ihsDataR (the 2025 build) covers 2025. garmin_sleep_validation_filter_legacy_2024
+      goes from [2025] to [2024, 2025]; qc/apple_watch_source_filter lists
+      [2025] only, since for 2024 it rests on the unseen ODBC script. The four features and one QC rule whose
+      only evidence is the unseen ODBC script lose their review (question 5),
+      so their cohorts stay unconfirmed.
+    evidence: AggregateDailyMetrics_2024.R lines cited per page in review_decisions.yaml; ihsDataR at ihs-pipelines@d25b712
+  - question: 2
+    answer: >-
+      MoodDriver is the medRxiv preprint 10.64898/2026.03.03.26347299, verified;
+      its methods match the rules the Spine cites it for, so those pages get
+      `paper` evidence, with a note that it's the lab's own preprint, not yet
+      peer reviewed (the user accepted it on 2026-09-27). The Social Smartphone manuscript and Sleep & Step ETT
+      aren't published or preprinted, and no lab code computes their features,
+      so pages that cite only them stay drafts. Two SensorKit rules stay drafts
+      because part of each comes only from the unpublished manuscript.
+    evidence: doi.org handle API and https://pubmed.ncbi.nlm.nih.gov/41822700/; PubMed, medRxiv and web searches for the other two (2026-09-27)
+  - question: 3
+    answer: >-
+      Each paper's cohorts are now recorded, from its methods, and a page whose
+      only evidence of method is a paper lists the cohorts that paper analysed.
+      Paper pages get the title, cohorts and a short summary, and stay drafts.
+      An independent check corrected three pages: daily_mood (its view is only
+      in 2025 and 2026, and the link to it is unpublished) and
+      mood_summary_min_observations (the paper imputes the training median)
+      stay drafts, and osm_pgs names the right GWAS.
+    evidence: the `papers` list in review_decisions.yaml (section of each paper's methods)
+  - question: 4
+    answer: >-
+      Yes. Every r/ihsDataR code path is now ihs-pipelines@d25b712 ihsDataR/...,
+      checked to exist there; the trees are identical. The one prototype-app
+      path (oracle_broker.py) stays pinned to um-gpt-local-proxy. Pages that
+      name runners since removed from ihsDataR say so in a limitation.
+    evidence: ihs-pipelines-staging REVIEW.md; git rev-parse of both trees (52cdc23); prototype commit um-gpt-local-proxy@b154606
+  - question: 5
+    answer: >-
+      Not yet: reference/ doesn't exist in ihs-pipelines. The names are right.
+      AggregateDailyMetrics_2024.R exists (srijan-knowledge-graph/scripts/, in
+      no repo) and its cited sections were checked. ODBC_connect_IHS2024-25.R
+      is only an email attachment and wasn't opened, so it no longer counts as
+      a page's only evidence of how something is computed.
+    evidence: docs/WORKFLOWS.md "Lab pipelines repo"; ihs-pipelines-staging REVIEW.md "Not in it yet"
+  - question: 6
+    answer: >-
+      Yes, as a DataLab proposal after install, but not as they stand. The
+      survey PHQ-9 item-prefix mapping is useful once checked against
+      IHS_2025.STG_SURVEYDICTIONARY; the construct's export example (a row
+      count and query ids) and the "observed in this run" wording must go.
+      Nothing changes in this conversion.
+    evidence: git diff SPINE_COMMIT -- spine/registry (fields only)
+  - question: 7
+    answer: >-
+      Yes. Dropped from garmin, and the stale sentence cut from participant;
+      both pages' only holds were these, so they are now reviewed.
+    evidence: generated/schema IHS_2025/VGARMINACTIVITYSUMMARY.yml and VW_IHS_PARTICIPANT_SUMMARY.yml (type VIEW)
+  - question: 8
+    answer: >-
+      The recipe is right about the three branches and the description was
+      stale. Fixed the description (including one value per participant-day
+      per device, as the code gives) and linked the code. The page stays a
+      draft: the recipe also lists a hex-key decode and a >100 bpm exclusion
+      the code doesn't do. The three HealthKit
+      resting-heart-rate columns still say their deduplication rule is
+      unreviewed and name a removed runner; that note predates the combined
+      runner by 18 minutes, but the table page stays a draft until someone
+      rewrites those descriptions.
+    evidence: prototype commits um-gpt-local-proxy@a1490b4, um-gpt-local-proxy@8214cce and um-gpt-local-proxy@04e5c2b; ihsDataR/R/feature_resting_heart_rate_day.R; AggregateDailyMetrics_2024.R#L159-161
+  - question: 9
+    answer: >-
+      Keep the validated one; the candidate duplicate is left out. The table
+      page stays a draft because the offset column's entry is still a candidate.
+    evidence: registry/proposed.seed.yaml at SPINE_COMMIT
+  - question: 10
+    answer: >-
+      Agreed. By the backlog's own rule (build function, runner and tests in
+      ihsDataR) both features earned validated on 2026-07-14 (um-gpt-local-proxy@04e5c2b,
+      um-gpt-local-proxy@c8a9c8e); the backlog was last edited on 2026-07-09. Note the registry
+      had already bulk-promoted them on 2026-07-09 (um-gpt-local-proxy@b596221, "Approve all
+      pending spine entities"), so for most entries "validated" says little.
+    evidence: spine/METRICS_BACKLOG.md at SPINE_COMMIT; prototype git log
+  - question: 11
+    answer: >-
+      Yes. The kept notes describe the data's structure (duplicate versions,
+      zero-step rows, naps without SUMMARYID) with no numbers, dates or
+      values, which the knowledge base allows. The one number left, N=831 on
+      qc/osm_pgs_mixed_ancestry, is a published paper's sample size.
+    evidence: docs/KNOWLEDGE_BASE.md "No participant-level data, ever"; the check's scan (0 hits)
+
+# Short and plain, for a reviewer new to the study.
+still_open:
+  - 'Put the two legacy scripts in ihs-pipelines at reference/2024/. ODBC_connect_IHS2024-25.R has to come from the email it was attached to; check it for passwords and participant data first. Then exercise_time_day, heart_rate_intraday, hrv_intraday, vo2max and qc/healthkit_hexkey_decode can be reviewed.'
+  - 'Push ihs-pipelines before ihs-knowledge, so the pinned commit d25b712 exists on GitHub.'
+  - "Social Smartphone and Sleep & Step ETT: add their DOIs when they're out; the drafts that cite only them list what would change."
+  - 'The study ID column (tables/IHS_2025.STUDYPARTICIPANTS): SECONDARYIDENTIFIER as STUDY_PARTICIPANT_ID needs the lab to confirm (open decision 3 in PRODUCT.md is related).'
+  - "Rewrite the HealthKit resting-heart-rate column notes (question 8) and decide whether ihsDataR should apply the >100 bpm exclusion; then resting_heart_rate_day can be reviewed."
+  - 'Confirm the corrected rule on qc/mood_summary_min_observations (the training-median imputation), and where the 2018-2023 daily mood answers are in Oracle (features/daily_mood).'

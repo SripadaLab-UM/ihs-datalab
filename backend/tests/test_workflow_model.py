@@ -300,3 +300,34 @@ def test_the_folder_serves_only_its_workflow_files(tmp_path: Path):
     for path in ("root.yaml", "workflows/.b.yaml", ".b.yaml"):
         with pytest.raises(SourceError):
             folder.read(path)
+
+
+def test_pipeline_problems_check_the_name_and_name_no_host_path(tmp_path):
+    from datalab.workflows.model import Problem
+
+    root = tmp_path / "folder"
+    (root / "ihsDataR" / "inst" / "pipelines" / "bad").mkdir(parents=True)
+    (root / "ihsDataR" / "inst" / "pipelines" / "bad" / "pipeline.yaml").write_text("name: [\n")
+    (tmp_path / "evil").mkdir()
+    (tmp_path / "evil" / "pipeline.yaml").write_text("secret: 1\n")
+    folder = WorkflowFolder(root)
+    for name in (str(tmp_path / "evil"), "../../../evil", str(tmp_path / "nope"), "A"):
+        assert folder.pipeline_problems(name) == [
+            "Pipeline names are lower case letters, digits and _ (at most 48)."
+        ]
+    assert folder.pipeline_problems("missing") == [
+        "ihsDataR/inst/pipelines/missing/pipeline.yaml isn't there."
+    ]
+    assert folder.pipeline_problems("bad")  # its own problems, whatever they are
+    assert all(str(tmp_path) not in why for why in folder.pipeline_problems("bad"))
+    # A link out of the package isn't followed.
+    (root / "ihsDataR" / "inst" / "pipelines" / "linked").symlink_to(tmp_path / "evil")
+    assert folder.pipeline_problems("linked") == [
+        "ihsDataR/inst/pipelines/linked/pipeline.yaml isn't there."
+    ]
+    # The check hands over the name as the file gave it, not in its message.
+    with pytest.raises(WorkflowInvalid) as refused:
+        load_workflow('name: t\nreads: []\nsteps:\n  - id: p\n    pipeline: "x\'."\n')
+    [problem] = [p for p in refused.value.problems if p.pipeline is not None]
+    assert problem.pipeline == "x'."
+    assert problem == Problem(problem.path, problem.message)  # not part of equality

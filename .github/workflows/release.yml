@@ -5,8 +5,20 @@ name: Release
 # 1. build the agent image for Intel/AMD and Apple Silicon and push it to the
 #    GitHub Container Registry;
 # 2. build the DataLab package with that image pinned by digest inside it;
-# 3. create a GitHub Release with the package, the exact dependency versions,
-#    the installers, the exact images (images.json), and a SHA256SUMS file.
+# 3. gather the release's files: the package, every dependency pinned by
+#    hash (requirements.txt), the installers, the exact images (images.json)
+#    and a SHA256SUMS file (job `package`, which never sees the signing key);
+# 4. sign SHA256SUMS with Ed25519 (SHA256SUMS.sig), using the
+#    RELEASE_SIGNING_KEY secret of the protected "release" environment, on a
+#    fresh runner that runs no npm and no build (job `sign`, the only job in
+#    that environment; ci.yml checks it stays so);
+# 5. create the GitHub Release with all of them (job `publish`). DataLab's
+#    updater refuses a release without a valid signature
+#    (docs/DISTRIBUTION.md, "Release signing").
+#
+# If signing fails (or is never approved), nothing is published, but the
+# agent image from step 1 stays pushed to the registry. That's harmless: a
+# DataLab only runs images by the digests in a signed images.json.
 #
 # Not done here yet, because each needs something CI doesn't have:
 # - TODO(signing): Authenticode-sign install.ps1 and uninstall.ps1. Needs the
@@ -122,8 +134,13 @@ jobs:
           echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
 
   package:
+    # Builds the package and gathers the release's files. It runs npm and the
+    # build (with their dependencies' install scripts), so it never sees the
+    # signing key: the `sign` job signs, on a fresh runner.
     needs: manifest
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -136,9 +153,8 @@ jobs:
         env:
           AGENT_IMAGE: ${{ needs.manifest.outputs.image }}
         run: sh scripts/build-release.sh
-      - name: Publish the release
+      - name: Gather the release's files
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           AGENT_IMAGE: ${{ needs.manifest.outputs.image }}
         run: |
           mkdir -p assets
@@ -146,7 +162,7 @@ jobs:
           cp installer/macos/uninstall.sh assets/uninstall-macos.sh
           cp installer/windows/install.ps1 assets/install-windows.ps1
           cp installer/windows/uninstall.ps1 assets/uninstall-windows.ps1
-          cp backend/dist/*.whl backend/dist/constraints.txt assets/
+          cp backend/dist/*.whl backend/dist/requirements.txt assets/
           # Every image this release runs, pinned by digest. The gateway and
           # research proxy are upstream images pinned in the code.
           containers=backend/src/datalab/sessions/containers.py
@@ -165,12 +181,78 @@ jobs:
             echo "- Gateway: \`$gateway\`"
             echo "- Research proxy: \`$proxy\`"
             echo ""
+            echo "SHA256SUMS is signed with the lab's release key (SHA256SUMS.sig); DataLab checks it."
             echo "To check a download against SHA256SUMS: \`shasum -a 256 -c SHA256SUMS --ignore-missing\`"
             echo "on Mac, or compare \`Get-FileHash <file>\` with it on Windows."
-          } > notes.md
+          } > assets/notes.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: assets/
+          if-no-files-found: error
+
+  sign:
+    # The only job that can use the signing key: behind the "release"
+    # environment's required reviewers, on a fresh runner that never runs npm
+    # or the build. It gets the release's files, the tag's own code (for
+    # sign-release.py and the pinned keys) and its locked Python
+    # dependencies, and hands back only SHA256SUMS.sig.
+    needs: package
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: Install the signing script's dependencies (locked)
+        # Only the locked dependencies, by hash: the package itself isn't
+        # built here (no build backend runs), it's read from the tag's source.
+        working-directory: backend
+        run: uv sync --locked --no-dev --no-install-project
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - name: Sign SHA256SUMS
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          # What's signed is what's listed: every file must match first.
+          (cd assets && sha256sum --strict -c SHA256SUMS)
+          # Refuses without the key, or when the tag's code doesn't pin its public key.
+          PYTHONPATH=backend/src uv run --project backend --no-sync \
+            python scripts/sign-release.py assets/SHA256SUMS
+          mkdir -p signature && mv assets/SHA256SUMS.sig signature/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-signature
+          path: signature/SHA256SUMS.sig
+          if-no-files-found: error
+
+  publish:
+    needs: [package, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-assets
+          path: assets
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-signature
+          path: assets
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mv assets/notes.md notes.md
           prerelease=""
           case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" $prerelease \
+            --repo "$GITHUB_REPOSITORY" \
             --title "DataLab $GITHUB_REF_NAME" \
             --notes-file notes.md \
             assets/*

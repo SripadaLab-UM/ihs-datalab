@@ -200,11 +200,13 @@ wheels = [
 name = "datalab"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "keyring" },
     { name = "mcp" },
     { name = "oracledb" },
+    { name = "packaging" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "sqlglot" },
@@ -224,11 +226,13 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=43" },
     { name = "fastapi", specifier = ">=0.118" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "keyring", specifier = ">=25" },
     { name = "mcp", specifier = ">=2.2" },
     { name = "oracledb", specifier = ">=26" },
+    { name = "packaging", specifier = ">=24" },
     { name = "pydantic", specifier = ">=2.11" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "sqlglot", specifier = ">=30" },

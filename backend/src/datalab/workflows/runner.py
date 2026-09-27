@@ -57,8 +57,10 @@ from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
 from datalab.exports import DestinationStore, ExportError, ExportSource
 from datalab.sessions.inputs import NotAttachable, check_attachable
+from datalab.sessions.titles import scrub_title
 from datalab.workflows.model import (
     ORACLE_INPUT,
+    WORKFLOW_NAME,
     BuiltinQc,
     CustomQc,
     Pipeline,
@@ -84,7 +86,7 @@ from datalab.workflows.model import (
     step_outputs,
 )
 from datalab.workflows.qc import builtin_qc
-from datalab.workflows.records import FINISHED, RunStore, now
+from datalab.workflows.records import FINISHED, InputsGone, RunStore, now
 from datalab.workflows.sandbox import (
     RNG_KIND,
     RUNTIME_ENV,
@@ -159,9 +161,54 @@ class _Plan:
     set_id: str | None = None
     replay_exact: bool | None = None
     replay_notes: list[str] = field(default_factory=list)
+    # The run's own copy of the workflow files and the package (a Replay has
+    # the original's kept copies instead).
+    folder: WorkflowFolder | None = None
     run_dir: Path = Path()
     budget: int = 0
     libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+# A cohort year: 2000 to 2029.
+_YEAR = re.compile(r"20[012]\d")
+
+
+def delivery_title(name: str) -> str:
+    """The workflow's name as words, for its dated delivery folder.
+
+    The export scrubs the title of anything shaped like a study identifier,
+    and read as one word, `fitbit_daily_2025` mixes letters and digits the
+    way IDs do, so the whole name went and the folder was called "export".
+    So the name is split into pieces, and each is kept only if it can't be
+    part of an identifier:
+
+    - a word of letters, if the scrub keeps it;
+    - never a piece mixing letters and digits (`p0001`, `syn25`);
+    - a piece of digits only if it is a cohort year (2000 to 2029) and the
+      piece before it was kept, so `steps_0001` can't come out as
+      "steps 0001", nor `syn_25_2001` or `syn25_2001` keep part of a code;
+    - and if the scrub would still change the joined words (`participant
+      2025`), none of it: the folder is called "export". So is a name the
+      file check wouldn't accept.
+    """
+    if not WORKFLOW_NAME.fullmatch(name):
+        return "export"
+    kept: list[str] = []
+    previous_kept = True
+    for piece in re.split(r"[\W_]+", name):
+        if not piece:
+            continue
+        if piece.isalpha():
+            keep = scrub_title(piece) == piece
+        elif piece.isdigit():
+            keep = previous_kept and bool(_YEAR.fullmatch(piece))
+        else:
+            keep = False
+        if keep:
+            kept.append(piece)
+        previous_kept = keep
+    title = " ".join(kept)
+    return title if title and scrub_title(title) == title else "export"
 
 
 def wrapper_bytes() -> bytes:
@@ -223,13 +270,24 @@ class WorkflowRunner:
 
     # --------------------------------------------------------- workflows
 
-    def load(self, path: str) -> tuple[WorkflowFile, Workflow]:
-        """A workflow file from the folder, checked. Raises WorkflowInvalid or SourceError."""
-        file = self.folder.read(path)
-        return file, self.check_text(file.text)
+    def load(
+        self, path: str, folder: WorkflowFolder | None = None
+    ) -> tuple[WorkflowFile, Workflow]:
+        """A workflow file from the folder (or a run's copy of it), checked.
+        Raises WorkflowInvalid or SourceError."""
+        folder = folder or self.folder
+        file = folder.read(path)
+        return file, self.check_text(file.text, folder=folder)
 
-    def check_text(self, text: str, pipelines: PipelineLookup | None = None) -> Workflow:
-        lookup = pipelines or self.folder.pipeline
+    def check_text(
+        self,
+        text: str,
+        pipelines: PipelineLookup | None = None,
+        *,
+        folder: WorkflowFolder | None = None,
+    ) -> Workflow:
+        folder = folder or self.folder
+        lookup = pipelines or folder.pipeline
         try:
             return load_workflow(
                 text,
@@ -238,15 +296,18 @@ class WorkflowRunner:
                 require_small_cells=self.settings.profile == "real",
             )
         except WorkflowInvalid as error:
-            raise WorkflowInvalid(self._explain_pipelines(error.problems, text)) from None
+            raise WorkflowInvalid(self._explain_pipelines(error.problems, text, folder)) from None
 
-    def _explain_pipelines(self, problems: list[Problem], text: str) -> list[Problem]:
+    def _explain_pipelines(
+        self, problems: list[Problem], text: str, folder: WorkflowFolder
+    ) -> list[Problem]:
         out = []
+        explained: set[str] = set()
         for problem in problems:
             out.append(problem)
-            if problem.message.startswith("There's no pipeline "):
-                name = problem.message.removeprefix("There's no pipeline ").strip("'.")
-                for why in self.folder.pipeline_problems(name):
+            if problem.pipeline is not None and problem.pipeline not in explained:
+                explained.add(problem.pipeline)  # once per pipeline, however many steps
+                for why in folder.pipeline_problems(problem.pipeline):
                     out.append(Problem(problem.path, f"pipeline.yaml: {why}"))
         return out
 
@@ -260,35 +321,65 @@ class WorkflowRunner:
         seed: int | None = None,
         set_id: str | None = None,
     ) -> str:
-        file, workflow = self.load(path)
-        values = resolve_params(workflow, params or {})
-        plan = await self._plan(
-            mode="run",
-            workflow=workflow,
-            file=file,
-            params=values,
-            seed=secrets.randbelow(2**31) if seed is None else seed,
-            pipelines=self.folder.pipeline,
-            set_id=set_id,
-        )
-        return self._launch(plan)
+        run_id, folder = await self._pin(path)
+        try:
+            file, workflow = self.load(path, folder)
+            values = resolve_params(workflow, params or {})
+            plan = await self._plan(
+                mode="run",
+                workflow=workflow,
+                file=file,
+                params=values,
+                seed=secrets.randbelow(2**31) if seed is None else seed,
+                pipelines=folder.pipeline,
+                set_id=set_id,
+                run_id=run_id,
+                folder=folder,
+            )
+            return self._launch(plan)
+        except BaseException:
+            # Not started: its copy of the files goes too.
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
+            raise
 
     async def run_again(self, run_id: str) -> str:
         """The current workflow file afresh: new extracts, the original parameters and seed."""
         original = self._original(run_id)
-        file, workflow = self.load(original["workflow_path"])
-        kept = {k: v for k, v in original["params"].items() if k in workflow.parameters}
-        values = resolve_params(workflow, kept)
-        plan = await self._plan(
-            mode="run_again",
-            workflow=workflow,
-            file=file,
-            params=values,
-            seed=original["seed"],
-            pipelines=self.folder.pipeline,
-            original=original,
-        )
-        return self._launch(plan)
+        new_id, folder = await self._pin(original["workflow_path"])
+        try:
+            file, workflow = self.load(original["workflow_path"], folder)
+            kept = {k: v for k, v in original["params"].items() if k in workflow.parameters}
+            values = resolve_params(workflow, kept)
+            plan = await self._plan(
+                mode="run_again",
+                workflow=workflow,
+                file=file,
+                params=values,
+                seed=original["seed"],
+                pipelines=folder.pipeline,
+                original=original,
+                run_id=new_id,
+                folder=folder,
+            )
+            return self._launch(plan)
+        except BaseException:
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / new_id, True)
+            raise
+
+    async def _pin(self, path: str) -> tuple[str, WorkflowFolder]:
+        """A new run's id, and its own copy of its workflow file (`path`) and
+        the package in its folder, which is all it reads from then on: a Sync
+        or Save & share meanwhile can't change what it runs (source.py)."""
+        run_id = new_run_id()
+        try:
+            folder = await asyncio.to_thread(
+                self.folder.snapshot, self.runs_dir / run_id / "source", workflow=path
+            )
+        except BaseException:
+            # A file that's missing, too large or not text: no run, and no folder.
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
+            raise
+        return run_id, folder
 
     async def replay_check(self, run_id: str) -> ReplayCheck:
         original = self._original(run_id)
@@ -433,6 +524,8 @@ class WorkflowRunner:
         set_id: str | None = None,
         image: ImageFacts | None = None,
         deliver: bool = True,
+        run_id: str | None = None,
+        folder: WorkflowFolder | None = None,
     ) -> _Plan:
         needs_container = any(
             isinstance(s, RStep | PipelineStep) or (isinstance(s, QcStep) and s.custom)
@@ -454,7 +547,7 @@ class WorkflowRunner:
                 ) from None
             host = ""
         return _Plan(
-            run_id=new_run_id(),
+            run_id=run_id or new_run_id(),
             mode=mode,
             workflow=workflow,
             file=file,
@@ -466,6 +559,7 @@ class WorkflowRunner:
             deliver=deliver,
             original=original,
             set_id=set_id,
+            folder=folder,
         )
 
     async def _image_or_none(self, ref: str) -> ImageFacts | None:
@@ -476,13 +570,30 @@ class WorkflowRunner:
 
     def _launch(self, plan: _Plan) -> str:
         plan.run_dir = self.runs_dir / plan.run_id
-        plan.run_dir.mkdir(parents=True)  # always new: never an old run's folder
-        workflow = plan.workflow
-        image = plan.image
+        # Always new, never an old run's folder (a run's copy of its files is
+        # already in it: see _pin).
+        plan.run_dir.mkdir(parents=True, exist_ok=plan.folder is not None)
         pipelines = []
-        for step in workflow.steps:
+        for step in plan.workflow.steps:
             if isinstance(step, PipelineStep):
                 pipelines.append({"name": step.pipeline, "step": step.id})
+        try:
+            self._record_new_run(plan, pipelines)
+        except InputsGone:
+            if plan.folder is not None:
+                shutil.rmtree(plan.run_dir, ignore_errors=True)  # and its copy of the files
+            with contextlib.suppress(OSError):
+                plan.run_dir.rmdir()
+            raise RunRefused("This run's extracted inputs have been removed.") from None
+        task = asyncio.create_task(self._run(plan), name=f"workflow {plan.run_id}")
+        self._tasks[plan.run_id] = task
+        task.add_done_callback(lambda _: self._notify())
+        self._notify()
+        return plan.run_id
+
+    def _record_new_run(self, plan: _Plan, pipelines: list[dict[str, Any]]) -> None:
+        workflow = plan.workflow
+        image = plan.image
         self.store.create_run(
             {
                 "id": plan.run_id,
@@ -520,12 +631,11 @@ class WorkflowRunner:
                 "delivery_status": "pending" if workflow.deliver else "none",
             },
             [(s.id, i, step_kind(s)) for i, s in enumerate(workflow.steps)],
+            # A Replay reads its original's kept inputs: they must still be there.
+            needs_inputs_of=plan.original["id"]
+            if plan.mode == "replay" and plan.original
+            else None,
         )
-        task = asyncio.create_task(self._run(plan), name=f"workflow {plan.run_id}")
-        self._tasks[plan.run_id] = task
-        task.add_done_callback(lambda _: self._notify())
-        self._notify()
-        return plan.run_id
 
     # ----------------------------------------------------------- running
 
@@ -937,7 +1047,7 @@ class WorkflowRunner:
                 await asyncio.to_thread(_copy_tree, original_copy, source_copy)
         elif not source_copy.exists():
             try:
-                package = self.folder.package()
+                package = (plan.folder or self.folder).package()
             except SourceError as error:
                 raise _StepFailed(str(error)) from None
             await asyncio.to_thread(_copy_tree, package.root, source_copy)
@@ -1040,7 +1150,7 @@ class WorkflowRunner:
             result = await asyncio.to_thread(
                 exports.export,
                 target,
-                title=plan.workflow.name,
+                title=delivery_title(plan.workflow.name),
                 tag=plan.run_id,
                 sources=sources,
                 about=about,

@@ -319,6 +319,53 @@ async def test_a_step_that_writes_past_the_run_cap_fails(tmp_path):
     assert run["steps"][2]["status"] == "failed"
 
 
+async def test_the_dated_delivery_folder_is_named_after_the_workflow(tmp_path):
+    # Read as one word, a name with a year mixes letters and digits the way
+    # study IDs do, and the folder used to be called "… export run_…".
+    h = harness(tmp_path)
+    h.write(
+        "weekly_steps_2025.yaml", WEEKLY.replace("name: weekly_steps", "name: weekly_steps_2025")
+    )
+    run = await h.run("weekly_steps_2025.yaml")
+    [delivery] = run["deliveries"]
+    name = Path(delivery["folder"]).name
+    assert name.endswith(f" weekly steps 2025 {run['id']}"), name
+    assert " export " not in name
+
+
+@pytest.mark.parametrize(
+    ("name", "title"),
+    [
+        ("fitbit_daily_2025", "fitbit daily 2025"),
+        ("p0001_steps_2025", "steps 2025"),
+        # Digits that aren't a year go, however the name is split.
+        ("steps_0001", "steps"),
+        ("steps-0001", "steps"),
+        ("user_0042_sleep", "user sleep"),
+        # Split up, an ID mustn't come back together ("syn 25 0001").
+        ("steps_syn_25_0001", "steps syn"),
+        ("subject_12_34", "subject"),
+        # If the scrub would still change the words, nothing of the name is used.
+        ("participant_2025", "export"),
+        ("0001", "export"),
+        # A year after a code, or after digits that went, goes with it.
+        ("syn25_2001", "export"),
+        ("steps_syn25_2001", "steps"),
+        ("syn_25_2001", "syn"),
+        ("steps_p12", "steps"),
+        ("2025_steps", "2025 steps"),
+        ("steps_1999", "steps"),
+        # Names the file check refuses aren't read at all.
+        ("p 0001 steps", "export"),
+        ("steps.syn25.0001", "export"),
+    ],
+)
+def test_the_delivery_title_still_loses_an_identifier(tmp_path, name, title):
+    assert runner_module.delivery_title(name) == title
+    folder = exports._new_folder(tmp_path, runner_module.delivery_title(name), "run_x")
+    assert folder.name.endswith(f" {title} run_x"), folder.name
+
+
 async def test_real_profile_delivers_to_the_folder_its_key_names(tmp_path, monkeypatch):
     # The temporary folder is under /private/var, which is never a destination.
     monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())
@@ -450,3 +497,93 @@ async def test_replay_checks_the_kept_text_against_its_blob(tmp_path):
     )
     check = await h.runner.replay_check(first["id"])
     assert any("blob" in reason for reason in check.blocking)
+
+
+# A run's own copy of its files ---------------------------------------------------
+
+
+async def test_a_run_that_fails_to_start_leaves_no_copy_of_its_files(tmp_path, monkeypatch):
+    h = harness(tmp_path)
+
+    def refuse(plan, pipelines):
+        raise RuntimeError("the database is locked")
+
+    monkeypatch.setattr(h.runner, "_record_new_run", refuse)
+    with pytest.raises(RuntimeError):
+        await h.runner.start("weekly_steps.yaml")
+    assert not h.runner.runs_dir.exists() or list(h.runner.runs_dir.iterdir()) == []
+
+
+async def test_one_oversized_workflow_file_blocks_only_its_own_runs(tmp_path):
+    from datalab.workflows.model import MAX_FILE_BYTES
+    from datalab.workflows.source import SourceError
+
+    h = harness(tmp_path)
+    h.write("huge.yaml", "# " + "x" * MAX_FILE_BYTES + "\n")
+    run = await h.run("weekly_steps.yaml")
+    assert run["status"] == "succeeded", [(s["step_id"], s["message"]) for s in run["steps"]]
+    # Its copy holds its own file only.
+    assert [p.name for p in (h.run_dir(run) / "source").iterdir()] == ["weekly_steps.yaml"]
+    with pytest.raises(SourceError, match="larger than"):
+        await h.runner.start("huge.yaml")
+
+
+def test_a_package_too_large_to_copy_is_refused_only_where_its_needed(tmp_path, monkeypatch):
+    from datalab.workflows import source
+    from datalab.workflows.source import SourceError, WorkflowFolder
+
+    root = tmp_path / "folder"
+    (root / "ihsDataR" / "R").mkdir(parents=True)
+    (root / "ihsDataR" / "DESCRIPTION").write_text("Package: ihsDataR\n")
+    (root / "ihsDataR" / "R" / "big.R").write_text("x <- 1\n" * 100)
+    (root / "w.yaml").write_text("name: w\n")
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 200)
+    copy = WorkflowFolder(root).snapshot(tmp_path / "run", workflow="w.yaml")
+    assert not (tmp_path / "run" / "ihsDataR").exists()
+    assert copy.read("w.yaml").text == "name: w\n"  # the workflow file is there
+    with pytest.raises(SourceError, match="too large to run here"):
+        copy.package()
+    assert copy.pipeline("weekly") is None
+    assert copy.pipeline_problems("weekly") == [
+        "The ihsDataR package is too large to run here (over 5000 files or 0 MB)."
+    ]
+    # Within the limits, it's copied (links as links).
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 50 * 1024**2)
+    (root / "ihsDataR" / "R" / "link.R").symlink_to("big.R")
+    copy = WorkflowFolder(root).snapshot(tmp_path / "run2")
+    assert (tmp_path / "run2" / "ihsDataR" / "R" / "big.R").read_text() == "x <- 1\n" * 100
+    assert (tmp_path / "run2" / "ihsDataR" / "R" / "link.R").is_symlink()
+    with pytest.raises(SourceError, match="isn't a plain file"):
+        copy.package()
+
+
+@pytest.mark.parametrize("problem", ["missing", "not text", "too large"])
+async def test_a_workflow_file_that_cant_be_read_leaves_no_run_folder(tmp_path, problem):
+    from datalab.workflows.model import MAX_FILE_BYTES
+    from datalab.workflows.source import SourceError
+
+    h = harness(tmp_path)
+    if problem == "not text":
+        (h.folder / "bad.yaml").write_bytes(b"name: \xff\xfe\n")
+    elif problem == "too large":
+        h.write("bad.yaml", "# " + "x" * MAX_FILE_BYTES + "\n")
+    with pytest.raises(SourceError):
+        await h.runner.start("bad.yaml")
+    assert not h.runner.runs_dir.exists() or list(h.runner.runs_dir.iterdir()) == []
+
+
+def test_a_packages_dot_files_are_neither_copied_nor_counted(tmp_path, monkeypatch):
+    from datalab.workflows import source
+    from datalab.workflows.source import WorkflowFolder
+
+    package = tmp_path / "folder" / "ihsDataR"
+    (package / ".git").mkdir(parents=True)
+    (package / ".git" / "pack").write_bytes(b"x" * 1000)
+    (package / ".Rhistory").write_bytes(b"x" * 1000)
+    (package / "DESCRIPTION").write_text("Package: ihsDataR\n")
+    monkeypatch.setattr(source, "_MAX_PACKAGE_BYTES", 200)
+    copy = WorkflowFolder(tmp_path / "folder").snapshot(tmp_path / "run")
+    assert sorted(p.name for p in (tmp_path / "run" / "ihsDataR").iterdir()) == ["DESCRIPTION"]
+    assert copy.package().name == "ihsDataR"
+    live = WorkflowFolder(tmp_path / "folder").package()
+    assert copy.package().tree_sha256 == live.tree_sha256

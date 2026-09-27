@@ -153,6 +153,30 @@ def test_extract_names_each_columns_type_as_oracle_does(database, tmp_path):
     ]
 
 
+def test_dates_times_and_raw_are_written_as_r_reads_them(database, tmp_path):
+    """The exact CSV text for each kind of date and time, and RAW (see `csv_value`)."""
+    sql = (
+        "SELECT DATE '2025-05-03' d, TIMESTAMP '2025-05-03 07:30:00.123456789' ts9, "
+        "TIMESTAMP '2025-05-03 00:00:00 -04:00' tz, DATE '2025-05-03' + 7.5 / 24 dt, "
+        "HEXTORAW('00FF10AB') r FROM DUAL UNION ALL "
+        "SELECT DATE '2025-05-04', CAST(TIMESTAMP '2025-05-04 00:00:00' AS TIMESTAMP(9)), "
+        "TIMESTAMP '2025-05-04 00:00:00 +00:00', DATE '2025-05-04', HEXTORAW('0E10') FROM DUAL"
+    )
+    out = tmp_path / "out.csv"
+    result = extract(database, sql, out)
+    assert result.column_types[:3] == ["DATE", "TIMESTAMP(9)", "TIMESTAMP(9) WITH TIME ZONE"]
+    assert out.read_bytes().decode() == (
+        "D,TS9,TZ,DT,R\r\n"
+        # A DATE column all at midnight: plain dates. A TIMESTAMP keeps its time
+        # (to microseconds: the driver drops the rest), and so does a DATE column
+        # with any time of day. The driver gives a zoned value without its offset.
+        "2025-05-03,2025-05-03 07:30:00.123456,2025-05-03 00:00:00,2025-05-03 07:30:00,00FF10AB\r\n"
+        "2025-05-04,2025-05-04 00:00:00,2025-05-04 00:00:00,2025-05-04 00:00:00,0E10\r\n"
+    )
+    assert result.preview == [line.split(",") for line in out.read_text().splitlines()[1:]]
+    assert result.bytes_written == out.stat().st_size
+
+
 def test_a_database_that_isnt_there_fails_the_query_cleanly(tmp_path):
     """Connecting is part of the query: a refused connection is a QueryFailed."""
     import dataclasses

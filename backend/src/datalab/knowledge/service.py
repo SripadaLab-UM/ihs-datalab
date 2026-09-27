@@ -89,6 +89,75 @@ class NotActionable(RuntimeError):
     """The proposal can't be changed now (already saved, replaced, …)."""
 
 
+# What the Knowledge tab lists and reads from the clone: the top files, pages,
+# lab skills, and generated/'s notes. Not generated/schema (thousands of
+# catalog files) or the repo's automation.
+_BROWSABLE = ("top", "page", "skill", "skill_file", "generated")
+MAX_HISTORY = 100
+
+
+def _browsable_path(path: str) -> bool:
+    return kb.place(path) in _BROWSABLE and copied(path)
+
+
+def _json_safe(value: Any) -> Any:
+    """YAML's values as plain JSON: dates (as keys too) become text, and so does
+    anything else JSON has no word for."""
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        return [_json_safe(v) for v in value]
+    if value is None or isinstance(value, bool | int | float | str):
+        return value
+    if isinstance(value, datetime.date):
+        return value.isoformat()
+    return str(value)
+
+
+def text_digest(text: str | None) -> str | None:
+    """What Save & share would commit for a file, as the person saw it: the
+    sha256 of its text (None: deleted)."""
+    return hashlib.sha256(text.encode()).hexdigest() if text is not None else None
+
+
+@dataclass(frozen=True)
+class PageEntry:
+    """One file of the knowledge base as last synced, for the Knowledge tab's list."""
+
+    path: str
+    place: str  # kb.Place
+    size: int
+    # From the front matter: a page's id, a skill's name (else the file name).
+    title: str
+    # A page's summary, or a skill's description.
+    summary: str
+    status: str | None
+    kind: str | None
+
+
+@dataclass(frozen=True)
+class PageText:
+    path: str
+    place: str
+    head: str
+    text: str
+    # The parsed front matter (None if there's none, or it isn't valid), and
+    # the text after it.
+    front_matter: dict[str, Any] | None
+    body: str
+
+
+@dataclass(frozen=True)
+class CommitEntry:
+    commit: str
+    author: str
+    date: str
+    subject: str
+    paths: list[str]
+    # How many files it changed (`paths` holds at most 20).
+    changed: int
+
+
 @dataclass(frozen=True)
 class FileView:
     change: Change
@@ -140,7 +209,8 @@ class Knowledge:
         self._locks_lock = threading.Lock()
         self._sha256: dict[str, str] = {}  # blob id -> sha256 of its content
         if self.unavailable is None:
-            self.store.end_interrupted_saves()
+            for interrupted in self.store.end_interrupted_saves():
+                self._announce_quietly(interrupted)
             self._prune_quietly()
             sessions.register_workspace_seed(SEED, self._seed, into="kb")
             sessions.register_after_turn(self._after_turn)
@@ -169,7 +239,9 @@ class Knowledge:
             "message": None,
         }
         if sign_in.state != "signed in":
-            return {**out, "repo": "signed out", "message": "Sign in to GitHub to use it."}
+            # Why, when the sign-in ran out; else what to do.
+            why = sign_in.message if sign_in.state == "signed out" else None
+            return {**out, "repo": "signed out", "message": why or "Sign in to GitHub to use it."}
         if self._problem is not None:
             state, message = self._problem
             if state in ("no access", "signed out") or not self.clone.exists():
@@ -201,6 +273,102 @@ class Knowledge:
             self.store.record_sync(REPO, head=head)
             self._prune_quietly()
         return self.status()
+
+    # Reading the clone (the Knowledge tab) ------------------------------------
+    #
+    # GitHub's main as last synced, read from the clone's objects: never the
+    # working tree, and only paths in the knowledge base's layout.
+
+    def pages(self) -> tuple[str | None, list[PageEntry]]:
+        """The commit last synced, and its pages, skills, and top files."""
+        if self.unavailable is not None:
+            raise NotAvailable(self.unavailable)
+        with self.clone.lock:
+            head = self.clone.remote_head()
+            if head is None:
+                return None, []
+            entries = self._browsable(self.clone.ls_tree(head))
+            blobs = self.clone.read_blobs(
+                e.blob for path, e in entries.items() if path.endswith(".md")
+            )
+        found = []
+        for path, entry in sorted(entries.items()):
+            fields: dict[str, Any] = {}
+            if path.endswith(".md"):
+                text = kb.as_text(blobs.get(entry.blob, b""))
+                fields = (kb.front_matter(text)[0] or {}) if text is not None else {}
+            where = kb.place(path) or ""
+            title = fields.get("name" if where == "skill" else "id")
+            summary = fields.get("description" if where == "skill" else "summary")
+            status, kind = fields.get("status"), fields.get("kind")
+            found.append(
+                PageEntry(
+                    path=path,
+                    place=where,
+                    size=entry.size,
+                    title=title if isinstance(title, str) and title else path.rsplit("/", 1)[-1],
+                    summary=summary[:400] if isinstance(summary, str) else "",
+                    status=status if status in kb.STATUSES else None,
+                    kind=kind if isinstance(kind, str) else None,
+                )
+            )
+        return head, found
+
+    def page(self, path: str) -> PageText:
+        """One file of the commit last synced, as text."""
+        if self.unavailable is not None:
+            raise NotAvailable(self.unavailable)
+        with self.clone.lock:
+            head = self.clone.remote_head()
+            entry = self._browsable(self.clone.ls_tree(head)).get(path) if head else None
+            if head is None or entry is None:
+                raise NotFound("That isn't a page or skill of the knowledge base.")
+            content = self.clone.read_blobs([entry.blob]).get(entry.blob, b"")
+        text = kb.as_text(content)
+        if text is None:
+            raise NotFound("That file isn't text.")
+        fields = kb.front_matter(text)[0] if path.endswith(".md") else None
+        _, body, _ = kb.split_front_matter(text) if fields is not None else (None, text, 1)
+        return PageText(
+            path=path,
+            place=kb.place(path) or "",
+            head=head,
+            text=text,
+            front_matter=_json_safe(fields) if fields else None,
+            body=body,
+        )
+
+    def history(self, limit: int = 20) -> list[CommitEntry]:
+        """The latest commits of GitHub's main as last synced, newest first."""
+        if self.unavailable is not None:
+            raise NotAvailable(self.unavailable)
+        limit = max(1, min(limit, MAX_HISTORY))
+        with self.clone.lock:
+            head = self.clone.remote_head()
+            if head is None:
+                return []
+            out = self.clone.git(
+                "log", f"-n{limit}", "-z", "--name-only", "--no-renames",
+                "--format=%x1e%H%x1f%an%x1f%aI%x1f%s", head, "--",
+            ).stdout.decode("utf-8", "replace")  # fmt: skip
+        commits = []
+        for record in out.split("\x1e"):
+            header, _, names = record.partition("\0")
+            fields = header.split("\x1f")
+            if len(fields) != 4:
+                continue
+            # Only what the tab lists: not the automation, or the catalog's files.
+            paths = [p for p in names.lstrip("\n").split("\0") if p and _browsable_path(p)]
+            commit, author, date, subject = fields
+            commits.append(CommitEntry(commit, author, date, subject, paths[:20], len(paths)))
+        return commits
+
+    def _browsable(self, entries: dict[str, TreeEntry]) -> dict[str, TreeEntry]:
+        return {
+            path: entry
+            for path, entry in entries.items()
+            if entry.regular and _browsable_path(path) and entry.size <= kb.size_limit(path)
+        }
 
     def prune_bases(self) -> int:
         """Remove the base refs of conversations that no longer exist, and the
@@ -382,7 +550,7 @@ class Knowledge:
                 fd = checkpoints.open_object(Entry("", change.sha256, 0, 0, False))
                 with os.fdopen(fd, "rb") as handle:
                     raw = kb.as_text(handle.read())
-                agent = kb.keep_review_fields(raw, before) if raw is not None else None
+                agent = kb.agents_text(change.path, raw, before) if raw is not None else None
             left_out = change.path in edits and edits[change.path] is None
             edited = change.path in edits and edits[change.path] is not None
             after = before if left_out else edits[change.path] if edited else agent
@@ -483,8 +651,16 @@ class Knowledge:
                     edits["files"][path] = text
             return self.store.update(proposal, edits=edits)
 
-    def accept(self, proposal_id: str, confirmed: list[str]) -> Proposal:
-        """Save & share the proposal as the signed-in person."""
+    def accept(
+        self,
+        proposal_id: str,
+        confirmed: list[str],
+        seen: dict[str, str | None],
+        findings_seen: list[str],
+    ) -> Proposal:
+        """Save & share the proposal as the signed-in person, only if it's what
+        they saw: `seen` is each file's text as they saw it (text_digest), and
+        `findings_seen` the ids of the check's findings they were shown."""
         proposal = self.get(proposal_id)
         with self._lock(proposal.conversation_id):
             proposal = self._actionable(proposal_id)
@@ -494,6 +670,16 @@ class Knowledge:
             if account is None:
                 raise SignInNeeded("Sign in to GitHub to share changes.")
             views = self.files(proposal)
+            if seen != {v.change.path: text_digest(v.after) for v in views}:
+                raise NotActionable(
+                    "This proposal changed since you looked at it (in another window?). "
+                    "Nothing was saved: check it again, then save."
+                )
+            if set(findings_seen) != {f.id for f in self.preview(proposal).findings}:
+                raise NotActionable(
+                    "The check's findings changed since you looked at them. "
+                    "Nothing was saved: check them again, then save."
+                )
             files = self._shared_files(views)
             if not files:
                 raise NotActionable("There's nothing in this proposal to save.")
@@ -612,6 +798,12 @@ class Knowledge:
                 "commit": proposal.commit,
             },
         )
+
+    def _announce_quietly(self, proposal: Proposal) -> None:
+        try:
+            self._announce(proposal)
+        except Exception:  # its conversation was deleted meanwhile
+            log.warning("couldn't announce %s in its conversation", proposal.id)
 
     def _lock(self, conversation_id: str) -> threading.Lock:
         with self._locks_lock:

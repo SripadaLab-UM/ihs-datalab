@@ -29,6 +29,10 @@ Query the IHS database carefully and show your work.
    `STATS_*`), and window functions. Not allowed: package calls such as
    `DBMS_LOB.SUBSTR` (use `SUBSTR`, which works on long text), XML functions,
    `SYS_CONTEXT`, and functions defined in the database.
+   A `TIMESTAMP WITH TIME ZONE` column comes back in the CSV as its local
+   time without the offset, so values in different offsets can't be compared
+   or subtracted there. Select `SYS_EXTRACT_UTC(col)` for the instant in UTC,
+   or `TO_CHAR(col, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')` to keep the offset.
 10. If a query is rejected (it isn't a single SELECT, or it's too large), read
     the message, narrow the query, and try again. Don't try to get around a
     limit; ask the person instead.

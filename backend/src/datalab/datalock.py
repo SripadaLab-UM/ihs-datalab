@@ -92,15 +92,18 @@ def holder(data_dir: Path) -> int | None:
 
 # Windows can release a crashed process's locks a little late.
 _WINDOWS_RETRY_SECONDS = 2.0
+# Elsewhere a lock is only ever held briefly by the probe (`in_use`): a
+# DataLab starting at that instant waits this long rather than refusing.
+_POSIX_RETRY_SECONDS = 0.75
 
 
-def _lock(handle: IO[bytes], path: Path) -> None:
+def _lock(handle: IO[bytes], path: Path, *, retry: bool = True) -> None:
     if sys.platform == "win32":
         import msvcrt
 
         # Locks one byte far past anything written, so the record stays
         # readable (Windows locks stop other processes reading what they cover).
-        deadline = time.monotonic() + _WINDOWS_RETRY_SECONDS
+        deadline = time.monotonic() + (_WINDOWS_RETRY_SECONDS if retry else 0)
         while True:
             handle.seek(1 << 20)
             try:
@@ -115,13 +118,19 @@ def _lock(handle: IO[bytes], path: Path) -> None:
     except ImportError:
         _fallback(path)
         return
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError as error:
-        raise DataFolderInUse(str(path)) from error
-    except OSError:
-        # Some network file systems don't support locks at all.
-        _fallback(path)
+    deadline = time.monotonic() + (_POSIX_RETRY_SECONDS if retry else 0)
+    while True:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError as error:
+            if time.monotonic() >= deadline:
+                raise DataFolderInUse(str(path)) from error
+            time.sleep(0.05)
+        except OSError:
+            # Some network file systems don't support locks at all.
+            _fallback(path)
+            return
 
 
 def _fallback(path: Path) -> None:
@@ -195,3 +204,26 @@ def release_all() -> None:
     while _held:
         _, lock = _held.popitem()
         lock.release()
+
+
+def in_use(data_dir: Path) -> bool:
+    """Whether another process holds the data folder's lock.
+
+    A probe: it takes the lock for an instant only if it's free, and never
+    writes the owner's record, so it can't disturb a DataLab that is running
+    or about to start (which would see the folder free a moment later)."""
+    path = data_dir / LOCK_NAME
+    if not path.exists() or held(data_dir):
+        return False
+    try:
+        handle = path.open("a+b")
+    except OSError:
+        return False
+    try:
+        # No waiting: held means held (and the probe lets go at once).
+        _lock(handle, path, retry=False)
+    except DataFolderInUse:
+        return True
+    finally:
+        handle.close()
+    return False

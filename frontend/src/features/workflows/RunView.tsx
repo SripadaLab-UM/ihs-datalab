@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 
 import { type RunDetail, workflowsApi } from "@/api/workflows";
-import { Button, Chip, EmptyNote, Icon } from "@/components/ui";
+import { Button, Chip, EmptyNote, Icon, InfoTip } from "@/components/ui";
 
 import { DeliveryStatus } from "./Delivery";
 import { runKey, useRun } from "./hooks";
@@ -287,9 +287,12 @@ function RepeatActions({ run }: { run: RunDetail }) {
   if (isLive(run)) return null;
   return (
     <section aria-labelledby="repeat-title" className="flex flex-col gap-3">
-      <h2 id="repeat-title" className="dl-label">
-        Repeat this run
-      </h2>
+      <div className="flex items-center gap-1">
+        <h2 id="repeat-title" className="dl-label">
+          Repeat this run
+        </h2>
+        <InfoTip term="replay" />
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col items-start gap-1.5">
           <Button onClick={() => again.mutate()} disabled={again.isPending}>

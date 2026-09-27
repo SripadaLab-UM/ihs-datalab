@@ -114,8 +114,7 @@ class RepoSettings:
 class WorkflowSettings:
     """`[workflows]`: the workflow runner (milestone 6).
 
-    To come: how long run folders are kept, and the pipelines repo in place
-    of `folder` (milestone 5's `repos.pipelines`).
+    To come: how long run folders are kept.
     """
 
     # Workflow runs going at once. Their SQL steps also share the data
@@ -123,7 +122,8 @@ class WorkflowSettings:
     max_concurrent_runs: int = 1
     # Where workflow files are read from: a folder laid out like the
     # ihs-pipelines repo (`workflows/*.yaml`, `ihsDataR/`), or holding the
-    # YAML files directly. Unset: `<data folder>/workflows-local`.
+    # YAML files directly. Unset: the clone of `repos.pipelines` when that's
+    # set, else `<data folder>/workflows-local` (workflows/source.py).
     folder: str | None = None
     # Each R, pipeline, or custom QC step's container.
     step_timeout_seconds: float = 30 * 60
@@ -152,17 +152,30 @@ class WorkflowSettings:
 class UpdateSettings:
     """`[updates]`: checking for and installing new releases (milestone 7).
 
-    To come: where backups go and how many are kept (see DISTRIBUTION.md).
+    See docs/DISTRIBUTION.md, "Updating". To come: where backups go and how
+    many are kept.
     """
 
-    # Whether DataLab asks GitHub for a newer release when it starts. Nothing
-    # checks yet; the updater will read this.
+    # Whether DataLab asks GitHub for a newer release when it starts. "Check
+    # now" in Settings → Updates works either way.
     check_on_start: bool = True
-    # Where releases come from.
-    repository: str = "SripadaLab-UM/ihs_datalab"
+    # Where releases come from: the app repo's GitHub Releases, read without
+    # signing in (the repo is public).
+    repository: str = "SripadaLab-UM/ihs-datalab"
+    # Which releases are offered: "stable" (full releases only),
+    # "pre-release" (pre-releases too), or "auto": pre-releases while the
+    # installed DataLab is itself a pre-release, else stable only.
+    channel: str = "auto"
 
     def __post_init__(self) -> None:
         _check_repo("updates.repository", self.repository)
+        if self.channel not in UPDATE_CHANNELS:
+            raise ValueError(
+                f"updates.channel must be one of {', '.join(UPDATE_CHANNELS)}, not {self.channel!r}"
+            )
+
+
+UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)
@@ -220,6 +233,32 @@ def _release_agent_image() -> str | None:
     return None
 
 
+_PINNED = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
+
+
+def _agent_image(profile: Profile, raw: dict) -> str:
+    """The agent image: an override (DATALAB_AGENT_IMAGE, or agent_image in
+    settings.toml), else the one the release pins, else the development image.
+
+    In the real profile an override must be pinned by digest: refused in an
+    installed release, which always pins its own, and warned about loudly in
+    a development copy."""
+    release = _release_agent_image()
+    override = os.environ.get("DATALAB_AGENT_IMAGE") or raw.get("agent_image")
+    if override and profile == "real" and not _PINNED.fullmatch(override):
+        if release is not None:
+            raise ValueError(
+                f"The agent image {override!r} (DATALAB_AGENT_IMAGE or agent_image) isn't "
+                "pinned by digest (…@sha256:…). The real DataLab only runs a pinned image."
+            )
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "THE REAL PROFILE IS RUNNING AN AGENT IMAGE NOT PINNED BY DIGEST: %s", override
+        )
+    return override or release or Settings.agent_image
+
+
 def default_data_dir(profile: Profile) -> Path:
     if sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support" / "DataLab"
@@ -258,10 +297,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle=oracle,
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
-        agent_image=os.environ.get("DATALAB_AGENT_IMAGE")
-        or raw.get("agent_image")
-        or _release_agent_image()
-        or Settings.agent_image,
+        agent_image=_agent_image(profile, raw),
         model_base_url=raw.get("model_base_url", Settings.model_base_url),
         default_model=raw.get("default_model", Settings.default_model),
         allowed_models=_allowed_models(raw),

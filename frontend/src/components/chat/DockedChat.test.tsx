@@ -148,6 +148,19 @@ it("shows an existing conversation as the Workspace does, with nothing added to 
   expect(api.createConversation).not.toHaveBeenCalled();
 });
 
+it("unticks the context when it's about something else, but not when it's edited", async () => {
+  listed = [conversation("c1", "Sleep tables")];
+  const update = show({ conversationId: "c1", context: query });
+  await screen.findByRole("button", { name: /Sleep tables/ });
+  fireEvent.click(include());
+  // The same query, edited: still ticked.
+  update({ context: { ...query, text: "SELECT 2 FROM dual" } });
+  expect(include()).toBeChecked();
+  // Another file altogether: the person ticks it again if they want it sent.
+  update({ context: { label: "ihsDataR/R/steps.R, as on main", text: "x <- 1", language: "r" } });
+  expect(screen.getByRole("checkbox", { name: /Send with your message/ })).not.toBeChecked();
+});
+
 it("shows exactly what would be sent, the first lines and then all of them", async () => {
   const long = { ...query, text: "SELECT a,\n  b,\n  c,\n  d\nFROM t\n" };
   show({ context: long });
@@ -225,4 +238,25 @@ it("fences the context after the message", () => {
   expect(withContext("Why?", { label: "The page", text: "Use ```sql blocks```\n\n" })).toBe(
     "Why?\n\nThe page:\n````\nUse ```sql blocks```\n````",
   );
+});
+
+it("says a catalog-only mode reads the catalog, not that it queries the database", async () => {
+  vi.mocked(api.modes).mockResolvedValue([
+    { id: "knowledge", label: "Knowledge writing", kind: "data", description: "Write or tidy a page.", starters: ["Tidy it."], tab_only: true, queries: false },
+    { id: "extraction", label: "Data extraction", kind: "data", description: "Get a clean dataset.", starters: ["?"], tab_only: false, queries: true },
+  ] as never); // prettier-ignore
+  client = new QueryClient();
+  const view = render(
+    <QueryClientProvider client={client}>
+      <DockedChat mode="knowledge" />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Reads the database catalog (tables and columns), never rows")).toBeTruthy();
+  expect(screen.queryByText("Queries the IHS database, read-only")).toBeNull();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <DockedChat key="other" mode="extraction" />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Queries the IHS database, read-only")).toBeTruthy();
 });

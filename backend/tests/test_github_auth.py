@@ -12,6 +12,7 @@ import httpx
 import pytest
 
 from datalab.repos.github import (
+    RAN_OUT,
     Account,
     GitHubAuth,
     GitHubUnavailable,
@@ -215,7 +216,10 @@ def test_a_refused_refresh_token_means_signing_in_again(auth, github, clock, git
     with pytest.raises(SignInNeeded):
         auth.access_token()
     assert github_keychain.saved == {}
-    assert auth.status().state == "signed out"
+    status = auth.status()
+    assert status.state == "signed out" and status.message == RAN_OUT
+    # Until the person signs in again, or out.
+    assert auth.sign_out().message is None and auth.status().message is None
 
 
 def test_a_refresh_token_past_its_expiry_isnt_sent(auth, github, clock, github_keychain):

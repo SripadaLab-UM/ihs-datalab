@@ -18,6 +18,10 @@ const VegaChart = lazy(() => import("./VegaChart"));
 // Code inside a block (```) stays code, even on one line: only inline code opens files.
 const InBlock = createContext(false);
 
+/** Links the page beside the text follows itself, such as the Knowledge tab's links
+ *  between pages: what to do when one is clicked, or null to treat it as any link. */
+export const InternalLinks = createContext<((href: string) => (() => void) | null) | null>(null);
+
 /**
  * Renders an agent's Markdown. Charts in ```vega-lite blocks are drawn inline.
  * Images are only shown if they're embedded (data: URLs). Links to images
@@ -84,6 +88,15 @@ export function Markdown({ text, numbers }: { text: string; numbers?: AnswerNumb
             );
           },
           a({ href, children }) {
+            const internal = use(InternalLinks);
+            const follow = href && internal ? internal(href) : null;
+            if (follow) {
+              return (
+                <button type="button" onClick={follow} className="text-accent underline" title={href}>
+                  {children}
+                </button>
+              );
+            }
             // Links to files in the container open them in DataLab's viewer.
             const file = href && openFile ? workspaceFile(href) : null;
             if (file && openFile) {

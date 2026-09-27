@@ -1,12 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Route, Routes, useLocation, useParams, useSearchParams } from "react-router";
+import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { api } from "@/api/client";
+import { pipelinesApi } from "@/api/pipelines";
 import { workflowsApi } from "@/api/workflows";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { Button, Icon } from "@/components/ui";
+import { ACTIONABLE } from "@/features/pipelines/pipelines";
 import { useTabState } from "@/features/sql/hooks";
 
 import { Destinations } from "./Delivery";
@@ -18,10 +20,10 @@ import { workflowPath } from "./words";
 
 const WIDE = "(min-width: 1280px)";
 
-// DataLab has no "Workflow authoring" mode yet (sessions/modes.py). Until it
-// does, the docked chat opens in Data engineering, the mode for the lab's
-// pipelines repo, where workflow files live beside the code they call.
-export const CHAT_MODE = "engineering";
+// Workflow authoring (sessions/modes.py): the agent drafts workflow files in its
+// copy of the pipelines repo, and its changes become a Pipelines proposal that
+// a person reviews and saves there.
+export const CHAT_MODE = "workflows";
 
 /** Routines, runs and destinations, with a Workflow authoring chat docked beside them. */
 export function WorkflowsPage() {
@@ -112,9 +114,10 @@ export function WorkflowsPage() {
         <>
           <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
-            aria-label="Workflow authoring chat, in Data engineering mode"
+            aria-label="Workflow authoring chat"
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
+            {chatId && <WaitingInPipelines conversationId={chatId} />}
             <DockedChat
               key={chatKey}
               mode={CHAT_MODE}
@@ -127,6 +130,36 @@ export function WorkflowsPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** The chat's changes are a Pipelines proposal: reviewed, tested and saved there, never here. */
+function WaitingInPipelines({ conversationId }: { conversationId: string }) {
+  const navigate = useNavigate();
+  const [, setProposalId] = useTabState("datalab:pipelines:proposal", "");
+  const proposals = useQuery({
+    queryKey: ["pipeline-proposals", conversationId],
+    queryFn: () => pipelinesApi.proposals(conversationId),
+    // A turn's proposal is made after the turn: looked for again now and then.
+    refetchInterval: 10_000,
+    retry: false,
+  });
+  const waiting = proposals.data?.find((p) => p.conversation_id === conversationId && ACTIONABLE.has(p.status));
+  if (!waiting) return null;
+  return (
+    <p role="status" className="flex items-center gap-2 border-b border-line bg-accent-soft px-4 py-2 font-sans text-[12.5px]">
+      <span className="min-w-0 flex-1">This chat's change is waiting for review in Pipelines.</span>
+      <Button
+        variant="secondary"
+        className="shrink-0 px-2 py-0.5 text-[12px]"
+        onClick={() => {
+          setProposalId(waiting.id);
+          navigate("/pipelines");
+        }}
+      >
+        Review it
+      </Button>
+    </p>
   );
 }
 

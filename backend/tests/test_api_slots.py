@@ -16,17 +16,12 @@ def client(settings, catalog):
         yield client
 
 
-@pytest.mark.parametrize("area", ["pipelines", "settings"])
-def test_areas_not_built_yet_say_so(client, area):
-    client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
-    assert client.get(f"/api/{area}/status").json() == {"available": False}
-
-
 def test_workflows_say_where_their_files_are(client, settings):
     client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
     assert client.get("/api/workflows/status").json() == {
         "available": True,
         "folder": str(settings.data_dir / "workflows-local"),
+        "message": None,
     }
     assert client.get("/api/workflows").json() == []
 
@@ -36,6 +31,13 @@ def test_knowledge_says_its_repo_isnt_configured(client):
     status = client.get("/api/knowledge/status").json()
     assert (status["available"], status["repo"]) == (False, "not configured")
     # The tests' profile is practice, which never uses the lab's repos.
+    assert "Practice" in status["message"]
+
+
+def test_pipelines_says_its_repo_isnt_used_in_practice(client):
+    client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
+    status = client.get("/api/pipelines/status").json()
+    assert (status["available"], status["repo"]) == (False, "not configured")
     assert "Practice" in status["message"]
 
 

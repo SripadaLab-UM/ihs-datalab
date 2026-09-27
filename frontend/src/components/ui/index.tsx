@@ -3,6 +3,7 @@ import { type ButtonHTMLAttributes, type ReactNode, useEffect, useId, useRef, us
 import { createPortal } from "react-dom";
 
 import { type AnyIcon, Icon } from "./Icon";
+import { InfoTip } from "./InfoTip";
 
 export function Button({
   variant = "secondary",
@@ -51,22 +52,20 @@ export function Chip({
   );
 }
 
-/** Which kind of session this is: always visible, so nobody is unsure. */
+/** Which kind of session this is: always visible, so nobody is unsure. Its tooltip says what that means. */
 export function SessionBadge({ kind }: { kind: "data" | "research" }) {
   return kind === "data" ? (
-    <span
-      className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-data"
-      title="The agent can query the study database, read-only. It can't reach websites; its model runs on U-M's approved GPT service."
-    >
-      <Icon name="lock" size={13} /> Data session · database access, web blocked
-    </span>
+    <InfoTip term="data-session">
+      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-data">
+        <Icon name="lock" size={13} /> Data session · database access, web blocked
+      </span>
+    </InfoTip>
   ) : (
-    <span
-      className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-research"
-      title="The agent can use the web. It has no connection to the study database and none of its data folders. Anything you attach may reach the web."
-    >
-      <Icon name="globe" size={13} /> Research session · web access, no database connection
-    </span>
+    <InfoTip term="research-session">
+      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-research">
+        <Icon name="globe" size={13} /> Research session · web access, no database connection
+      </span>
+    </InfoTip>
   );
 }
 
@@ -217,6 +216,7 @@ export function Tabs<T extends string>({
 }
 
 export { Icon } from "./Icon";
+export { InfoTip, TOOLTIP_TERMS, type TermId } from "./InfoTip";
 
 const KIND_ICON: Record<string, AnyIcon> = {
   html: "page",

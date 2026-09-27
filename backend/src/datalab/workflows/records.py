@@ -40,6 +40,15 @@ UNKNOWN_DELIVERY = (
     "the destination. Check the destination folder."
 )
 FINISHED = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
+# Held for every write to the run tables, by every RunStore, and by Storage
+# (storage.py) while it decides whether a run's files can go: DataLab's
+# stores share one SQLite connection, so a transaction alone can't keep the
+# two apart.
+WRITE_LOCK = threading.RLock()
+
+
+class InputsGone(RuntimeError):
+    """A Replay's original run no longer has its kept inputs: nothing was recorded."""
 
 
 def now() -> str:
@@ -49,17 +58,32 @@ def now() -> str:
 class RunStore:
     def __init__(self, db: sqlite3.Connection) -> None:
         self._db = db
-        self._lock = threading.Lock()
+        self._lock = WRITE_LOCK
 
     # ------------------------------------------------------------ writes
 
-    def create_run(self, fields: dict[str, Any], steps: list[tuple[str, int, str]]) -> None:
-        """A new run, and each of its steps as pending: (step id, position, kind)."""
+    def create_run(
+        self,
+        fields: dict[str, Any],
+        steps: list[tuple[str, int, str]],
+        *,
+        needs_inputs_of: str | None = None,
+    ) -> None:
+        """A new run, and each of its steps as pending: (step id, position, kind).
+
+        `needs_inputs_of`: a Replay's original run. The row goes in only if
+        that run still has its kept inputs, checked in the insert itself, so
+        Storage can't remove them between a Replay's check and its start.
+        Raises InputsGone otherwise.
+        """
         row = _encode(fields, _RUN_COLUMNS)
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
-                self._insert("workflow_runs", row)
+                if needs_inputs_of is None:
+                    self._insert("workflow_runs", row)
+                elif not self._insert_if_inputs_kept(row, needs_inputs_of):
+                    raise InputsGone(needs_inputs_of)
                 for step_id, position, kind in steps:
                     self._insert(
                         "workflow_run_steps",
@@ -169,6 +193,16 @@ class RunStore:
         columns = ", ".join(row)
         marks = ", ".join("?" for _ in row)
         self._db.execute(f"INSERT INTO {table} ({columns}) VALUES ({marks})", tuple(row.values()))
+
+    def _insert_if_inputs_kept(self, row: dict[str, Any], original: str) -> bool:
+        columns = ", ".join(row)
+        marks = ", ".join("?" for _ in row)
+        inserted = self._db.execute(
+            f"INSERT INTO workflow_runs ({columns}) SELECT {marks} WHERE EXISTS "
+            "(SELECT 1 FROM workflow_runs WHERE id = ? AND inputs_kept = 1)",
+            (*row.values(), original),
+        )
+        return inserted.rowcount == 1
 
     def _update(self, table: str, row: dict[str, Any], where: str, args: tuple) -> None:
         if not row:

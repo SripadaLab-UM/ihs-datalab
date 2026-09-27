@@ -13,11 +13,12 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import datetime
 import re
 import shutil
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -156,7 +157,13 @@ class OracleDatabase:
                 description = cursor.description or []
                 columns = [str(d[0]) for d in description]
                 result = self._write_rows(
-                    cursor, columns, partial, max_rows, max_bytes, preview_rows
+                    cursor,
+                    columns,
+                    partial,
+                    max_rows,
+                    max_bytes,
+                    preview_rows,
+                    stopped=lambda: self._stopped(cancel, timed_out),
                 )
                 result.column_types = [_type_label(d) for d in description]
             partial.replace(out_path)
@@ -189,9 +196,25 @@ class OracleDatabase:
         max_rows: int,
         max_bytes: int,
         preview_rows: int,
+        stopped: Callable[[], None] = lambda: None,
     ) -> ExtractResult:
+        """Write every row to `path`. `stopped` raises if Stop or the deadline came.
+
+        The driver call is cancelled in Oracle for those; `stopped` is for the
+        rewrite afterwards, which doesn't talk to the database.
+        """
         preview: list[list[str]] = []
         rows = 0
+        # Per column: whether it held a date or time, and whether any had a time of day.
+        dated = [False] * len(columns)
+        timed = [False] * len(columns)
+        # Only Oracle DATE columns can be written as plain dates. A TIMESTAMP
+        # keeps its time, midnight or not: it is a moment, not a day.
+        described = list(getattr(cursor, "description", None) or [])
+        is_date = [
+            index < len(described) and described[index][1] is oracledb.DB_TYPE_DATE
+            for index in range(len(columns))
+        ]
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(columns)
@@ -203,7 +226,9 @@ class OracleDatabase:
                         "return, so it was stopped and nothing was kept. Narrow the query: "
                         "fewer rows, columns or cohorts."
                     )
-                values = [["" if v is None else str(v) for v in row] for row in batch]
+                values = [
+                    [csv_value(v, i, dated, timed) for i, v in enumerate(row)] for row in batch
+                ]
                 if len(preview) < preview_rows:
                     preview.extend(values[: preview_rows - len(preview)])
                 writer.writerows(values)
@@ -217,7 +242,22 @@ class OracleDatabase:
                 if shutil.disk_usage(path.parent).free < self._limits.min_free_disk_bytes:
                     raise LimitExceeded("The disk is nearly full, so the query was stopped.")
             size = handle.tell()
+        date_only = [i for i in range(len(columns)) if is_date[i] and dated[i] and not timed[i]]
+        if date_only:
+            if shutil.disk_usage(path.parent).free < self._limits.min_free_disk_bytes + size:
+                raise LimitExceeded("The disk is nearly full, so the query was stopped.")
+            size = _dates_only(path, date_only, stopped)
+            preview = [_drop_midnight(row, date_only) for row in preview]
         return ExtractResult(columns, preview, rows, size, 0.0)
+
+    def _stopped(self, cancel: threading.Event, timed_out: threading.Event) -> None:
+        if cancel.is_set():
+            raise QueryCancelled("The query was stopped.")
+        if timed_out.is_set():
+            raise QueryTimedOut(
+                f"The query ran longer than {self._limits.deadline_seconds:.0f} seconds "
+                "and was cancelled."
+            )
 
     def session_privileges(self, *, timeout: float | None = None) -> SessionPrivileges:
         """Ask the database what a DataLab session is allowed to do."""
@@ -240,6 +280,75 @@ class OracleDatabase:
             return SessionPrivileges(roles, system, non_read)
         finally:
             _close_quietly(connection)
+
+
+def csv_value(value: Any, index: int, dated: list[bool], timed: list[bool]) -> str:
+    """One value as text for a result CSV, the way R and the lab's code read it.
+
+    - A date or time is `YYYY-MM-DD HH:MM:SS` (with `.ffffff` if it has
+      fractions), which R's `as.POSIXct` reads; it drops the time from the
+      ISO `T` form without a warning. A DATE column whose every value is at
+      midnight is then written as plain dates by `_dates_only`, as R writes
+      such a column and as the legacy scripts (through ROracle) saw it: the
+      Garmin calendar-date rule in ihsDataR treats any time part as a cutoff.
+      python-oracledb returns a TIMESTAMP WITH TIME ZONE as the local time
+      without its offset, and it is written so.
+    - RAW is upper-case hex, as Oracle's RAWTOHEX gives it, so a key reads
+      the same whether the SQL converts it or not.
+    - Missing is empty.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, datetime.datetime):
+        dated[index] = True
+        if value.time() != datetime.time(0) or value.tzinfo is not None:
+            timed[index] = True
+        return str(value)
+    if isinstance(value, bytes):
+        return value.hex().upper()
+    return str(value)
+
+
+_MIDNIGHT = " 00:00:00"
+
+
+def _drop_midnight(row: list[str], columns: list[int]) -> list[str]:
+    out = list(row)
+    for i in columns:
+        if out[i].endswith(_MIDNIGHT):
+            out[i] = out[i][: -len(_MIDNIGHT)]
+    return out
+
+
+_REWRITE_CHECK_ROWS = 5_000
+
+
+def _dates_only(path: Path, columns: list[int], stopped: Callable[[], None]) -> int:
+    """Rewrite `path` with the given columns as plain dates. Returns the new size.
+
+    Checks `stopped` every few thousand rows, so Stop and the deadline still
+    end a query while its result is being rewritten.
+    """
+    rewritten = path.with_name(path.name + ".dates")
+    try:
+        with (
+            path.open(newline="", encoding="utf-8") as source,
+            rewritten.open("w", newline="", encoding="utf-8") as target,
+        ):
+            reader = csv.reader(source)
+            writer = csv.writer(target)
+            writer.writerow(next(reader))
+            for number, row in enumerate(reader, 1):
+                if number % _REWRITE_CHECK_ROWS == 0:
+                    stopped()
+                writer.writerow(_drop_midnight(row, columns))
+            stopped()
+            size = target.tell()
+        rewritten.replace(path)
+    except BaseException:
+        rewritten.unlink(missing_ok=True)
+        raise
+    return size
 
 
 def _require_marker(cursor: oracledb.Cursor) -> None:

@@ -15,10 +15,11 @@ import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 
-from datalab import __version__, datalock, db
+from datalab import __version__, datalock, db, updates
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
+from datalab.api.github import GitHubServices, build_github_router
 from datalab.api.inputs import build_inputs_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
@@ -37,6 +38,8 @@ from datalab.data.service import Database, DataService
 from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
+from datalab.releases import UpdateChecker
+from datalab.repos.github import GitHubAuth
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions import helper
@@ -49,6 +52,8 @@ from datalab.sessions.plans import PlanDesk, PlanStore
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
+from datalab.update_gate import UpdateGate, UpdateGateMiddleware
+from datalab.updater import Updater, busy_reason
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
 VERSION = __version__
@@ -80,6 +85,7 @@ def create_app(
     browser: BrowserSession | None = None,
     protect_api: bool = True,
     web_dist: Path | None = None,
+    recovery: updates.Recovery | None = None,
 ) -> FastAPI:
     require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
@@ -87,9 +93,11 @@ def create_app(
     if catalog is None:
         catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
-    data = DataService(
-        database or _LazyOracle(settings), access_log, settings.limits, allowed, catalog
-    )
+    # Connects on first use (and again after a new password is saved).
+    lazy: _LazyOracle | None = None
+    if database is None:
+        database = lazy = _LazyOracle(settings)
+    data = DataService(database, access_log, settings.limits, allowed, catalog)
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
@@ -108,7 +116,33 @@ def create_app(
     plan_desk.turn_running = sessions.turn_running
     plan_desk.current_turn = sessions.current_turn
     plan_desk.queries_so_far = access_log.for_session
-    agent_tools = build_agent_tools(data, catalog, tokens, research_helper, plan_desk)
+    # One GitHub sign-in for both lab repos: only one object may refresh its
+    # tokens, since each refresh replaces the refresh token.
+    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    # Built here, before the agent tools, whose check_workflow uses the
+    # workflows' check (they're included below, in their place).
+    pipelines = build_pipelines_router(
+        PipelineServices(settings, connection, conversations, sessions, auth=github)
+    )
+    workflows_router = build_workflows_router(
+        WorkflowServices(
+            settings,
+            connection,
+            data,
+            access_log,
+            catalog=catalog,
+            # New workflow files are shared with the pipelines repo's Save & share.
+            pipelines=pipelines.pipelines,  # type: ignore[attr-defined]
+        )
+    )
+    agent_tools = build_agent_tools(
+        data,
+        catalog,
+        tokens,
+        research_helper,
+        plan_desk,
+        check_workflow_text=workflows_router.runner.check_text,  # type: ignore[attr-defined]
+    )
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
         transport_security=TransportSecuritySettings(
@@ -219,18 +253,58 @@ def create_app(
     app.include_router(
         build_sql_router(SqlServices(settings, data, catalog, access_log, destinations))
     )
+    app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
-        build_knowledge_router(KnowledgeServices(settings, connection, conversations, sessions))
+        build_knowledge_router(
+            KnowledgeServices(settings, connection, conversations, sessions, auth=github)
+        )
     )
-    app.include_router(
-        build_workflows_router(WorkflowServices(settings, connection, data, access_log))
-    )
-    app.include_router(build_pipelines_router(PipelineServices(settings, conversations, sessions)))
+    app.include_router(workflows_router)
+    app.include_router(pipelines)
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )
-    app.include_router(build_settings_router(SettingsServices(settings, connection)))
+    # Checking GitHub for a newer release happens here in the host process
+    # only (`datalab serve` asks once at start, if `updates.check_on_start`).
+    update_checker = UpdateChecker(settings)
+    app.state.update_checker = update_checker
+
+    def request_shutdown() -> bool:
+        # `datalab serve` sets this; without it (tests), nothing restarts.
+        shutdown = getattr(app.state, "shutdown", None)
+        if shutdown is None:
+            return False
+        shutdown()
+        return True
+
+    # Closed by the updater once it starts changing things: from then on
+    # nothing new may start (update_gate.py).
+    gate = UpdateGate()
+    updater = Updater(
+        settings,
+        update_checker,
+        busy=lambda: busy_reason(connection, sessions.any_busy, gate.in_flight),
+        stop_sessions=sessions.close_all,
+        shutdown=request_shutdown,
+        gate=gate,
+    )
+    app.include_router(
+        build_settings_router(
+            SettingsServices(
+                settings,
+                connection,
+                turn_running=sessions.is_busy,
+                model_http=model_http,
+                model_key=model_key,
+                password_changed=lazy.reset if lazy else lambda: None,
+                recovery=recovery,
+                checker=update_checker,
+                updater=updater,
+            )
+        )
+    )
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
+    app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
     app.add_middleware(ApiProtection, session=browser, enforce=protect_api)
@@ -298,6 +372,11 @@ class _LazyOracle:
             preview_rows=preview_rows,
             cancel=cancel,
         )
+
+    def reset(self) -> None:
+        """Connect with the password saved now, from the next query on."""
+        with self._lock:
+            self._database = None
 
     def _get(self) -> OracleDatabase:
         with self._lock:

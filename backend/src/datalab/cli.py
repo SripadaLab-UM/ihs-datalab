@@ -41,6 +41,22 @@ def main(argv: list[str] | None = None) -> int:
     back.add_argument(
         "--yes", action="store_true", help="restore even though it drops what was recorded since"
     )
+    github = commands.add_parser("github", help="sign in to GitHub for the lab's repositories")
+    github_commands = github.add_subparsers(dest="github_command", required=True)
+    github_sign_in = github_commands.add_parser(
+        "sign-in", help="sign in with a code at github.com/login/device"
+    )
+    github_sign_in.add_argument("--no-browser", action="store_true", help="don't open the page")
+    github_sign_in.add_argument(
+        "--again", action="store_true", help="sign in again even if already signed in"
+    )
+    repos = commands.add_parser("repos", help="the lab's repositories")
+    repos_commands = repos.add_subparsers(dest="repos_command", required=True)
+    repos_commands.add_parser("sync", help="clone or update the knowledge base and pipelines")
+    versions = commands.add_parser(
+        "versions", help="the DataLab versions installed side by side, and which one opens"
+    )
+    versions.add_argument("--use", metavar="VERSION", help="open this version from now on")
     commands.add_parser("db-check", help="connect and report what the session may do")
     safety = commands.add_parser("safety-check", help="run the Safety check and print the results")
     safety.add_argument(
@@ -107,6 +123,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "rollback":
         return _rollback(settings, args)
 
+    if args.command == "github":
+        return _github_sign_in(settings, args)
+
+    if args.command == "repos":
+        return _repos_sync(settings)
+
+    if args.command == "versions":
+        return _versions(settings, args.use)
+
     if args.command == "db-check":
         return _db_check(settings)
 
@@ -149,7 +174,7 @@ def _serve(settings, *, open_browser: bool) -> int:
         print(recovery.message, flush=True)
     browser = BrowserSession(settings.port)
     try:
-        app = create_app(settings, browser=browser, web_dist=_web_dist())
+        app = create_app(settings, browser=browser, web_dist=_web_dist(), recovery=recovery)
     except db.DatabaseNewerThanApp as error:
         print(error)
         return 1
@@ -166,15 +191,30 @@ def _serve(settings, *, open_browser: bool) -> int:
     print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
     if open_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+    # Asks GitHub for a newer release in the background, if allowed; being
+    # offline or rate-limited only shows in Settings → Updates.
+    threading.Thread(
+        target=app.state.update_checker.check_on_start, name="update-check", daemon=True
+    ).start()
     # Open event streams from browser tabs never end on their own, so give
     # shutdown a few seconds, then stop sessions and containers regardless.
-    uvicorn.run(
-        app,
-        host=settings.host,
-        port=settings.port,
-        log_level="warning",
-        timeout_graceful_shutdown=5,
+    server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=settings.host,
+            port=settings.port,
+            log_level="warning",
+            timeout_graceful_shutdown=5,
+        )
     )
+
+    def shutdown() -> None:
+        # The updater restarts DataLab by quitting it (after starting the
+        # helper that opens the new version).
+        server.should_exit = True
+
+    app.state.shutdown = shutdown
+    server.run()
     return 0
 
 
@@ -318,6 +358,101 @@ def _rollback(settings, args) -> int:
     print(
         f"Rolled back. The database as it was a moment ago is kept in {kept.folder}, "
         "in case you need it."
+    )
+    return 0
+
+
+def _github_auth(settings):
+    from datalab.repos.github import GitHubAuth
+
+    return GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+
+
+def _github_sign_in(settings, args) -> int:
+    from datalab.repos import commands
+
+    return commands.sign_in(
+        settings, _github_auth(settings), open_browser=not args.no_browser, again=args.again
+    )
+
+
+def _repos_sync(settings) -> int:
+    from datalab.repos import commands
+
+    auth = _github_auth(settings)
+    if commands.why_not(settings, auth) is None:
+        from datalab.datalock import refuse_second_instance
+
+        # The clones and their record belong to the DataLab using this folder.
+        refuse_second_instance(settings.data_dir, settings.profile)
+    return commands.sync(settings, auth)
+
+
+def _versions(settings, use: str | None) -> int:
+    from datalab import __version__
+    from datalab.updater import Layout, UpdateFailed, default_root
+
+    layout = Layout(default_root())
+    current, previous = layout.pointer()
+    installed = layout.installed()
+    if use is None:
+        if not installed:
+            print(f"No versions installed side by side in {layout.versions}.")
+            print(f"This is DataLab {__version__}, running from {sys.prefix}.")
+            return 0
+        for version in reversed(installed):
+            notes = [
+                label
+                for label, applies in (
+                    ("opens from the launcher", version == current),
+                    ("the one before", version == previous),
+                    ("running this command", version == layout.running_version()),
+                )
+                if applies
+            ]
+            print(f"{version:<16} {', '.join(notes)}")
+        return 0
+    import os
+
+    from datalab import updates
+    from datalab.config import default_data_dir
+    from datalab.releases import parse_version
+
+    # An update under way (in either profile's data folder) is the startup
+    # recovery's to sort out, with the launcher as the update left it.
+    folders = {settings.data_dir}
+    if not os.environ.get("DATALAB_DATA_DIR"):
+        folders |= {default_data_dir("real"), default_data_dir("practice")}
+    for folder in sorted(folders):
+        try:
+            marker = updates.read_marker(folder)
+        except updates.UnreadableMarker:
+            print(f"An update left a note in {folder} that DataLab couldn't read. Open DataLab")
+            print("once so it can sort that out, then try again.")
+            return 1
+        if marker is not None:
+            print(
+                f"An update from {marker.from_version} to {marker.to_version} hasn't finished "
+                f"({folder}). Open DataLab once so it can sort that out, then try again."
+            )
+            return 1
+    parsed = parse_version(use)
+    version = str(parsed) if parsed else use
+    if version not in installed:
+        print(f"DataLab {use} isn't installed here. Installed: {', '.join(installed) or 'none'}.")
+        return 1
+    if version == current:
+        print(f"DataLab {version} is already the one the launcher opens.")
+        return 0
+    try:
+        layout.switch(version, previous=current)
+    except UpdateFailed as error:
+        print(error)
+        return 1
+    print(f"The launcher opens DataLab {version} from now on (it opened {current}).")
+    print(
+        "If that version says the database is newer than it, go back with "
+        f"datalab versions --use {current}, or run datalab rollback (with {version})."
     )
     return 0
 

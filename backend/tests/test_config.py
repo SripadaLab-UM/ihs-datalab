@@ -43,6 +43,14 @@ def test_sections_are_read_from_their_tables(settings_file):
     assert settings.workflows == WorkflowSettings(max_concurrent_runs=2)
     assert settings.updates.check_on_start is False
     assert settings.updates.repository == UpdateSettings.repository
+    assert settings.updates.channel == "auto"
+
+
+def test_releases_come_from_the_app_repo_by_its_real_name(settings_file):
+    # The repo's name has a hyphen; "ihs_datalab" is only the local folder's.
+    assert UpdateSettings().repository == "SripadaLab-UM/ihs-datalab"
+    settings_file.write_text('[updates]\nchannel = "stable"\n')
+    assert load_settings("practice").updates.channel == "stable"
 
 
 def test_sections_are_frozen(settings_file):
@@ -68,6 +76,7 @@ def test_sections_are_frozen(settings_file):
         ('[repos]\nknowledge = "lab/.."\n', "owner/name"),
         ('[repos]\nknowledge = "https://github.com/lab/kb"\n', "owner/name"),
         ('[updates]\nrepository = "lab"\n', "owner/name"),
+        ('[updates]\nchannel = "nightly"\n', "updates.channel"),
         ('[repos]\nclient_id = "Iv23 x; rm"\n', "client id"),
         ("[playground]\npreview_rows = 1.5\n", "playground.preview_rows"),
     ],
@@ -86,3 +95,31 @@ def test_optional_text_takes_text_and_numbers_take_whole_numbers():
     assert _fits(float, 3) and _fits(float, 1.5) and not _fits(float, False)
     with pytest.raises(TypeError):
         _fits(list[str], ["a"])  # a section field type not handled yet: said so, not guessed
+
+
+PINNED_AGENT = "ghcr.io/sripadalab-um/datalab-agent@sha256:" + "a" * 64
+
+
+def test_an_installed_real_datalab_only_runs_a_pinned_agent_image(settings_file, monkeypatch):
+    from datalab import config
+
+    monkeypatch.setenv("DATALAB_PROFILE", "real")
+    monkeypatch.setattr(config, "_release_agent_image", lambda: PINNED_AGENT)
+    assert load_settings("real").agent_image == PINNED_AGENT
+    monkeypatch.setenv("DATALAB_AGENT_IMAGE", "ghcr.io/sripadalab-um/datalab-agent:latest")
+    with pytest.raises(ValueError, match="isn't pinned by digest"):
+        load_settings("real")
+    monkeypatch.setenv("DATALAB_AGENT_IMAGE", PINNED_AGENT.replace("a" * 64, "b" * 64))
+    assert load_settings("real").agent_image.endswith("b" * 64)
+    # Practice may run a local image.
+    monkeypatch.setenv("DATALAB_AGENT_IMAGE", "datalab-agent:dev")
+    assert load_settings("practice").agent_image == "datalab-agent:dev"
+
+
+def test_a_development_copy_warns_about_an_unpinned_image(settings_file, monkeypatch, caplog):
+    from datalab import config
+
+    monkeypatch.setattr(config, "_release_agent_image", lambda: None)
+    monkeypatch.setenv("DATALAB_AGENT_IMAGE", "datalab-agent:dev")
+    assert load_settings("real").agent_image == "datalab-agent:dev"
+    assert "NOT PINNED BY DIGEST" in caplog.text

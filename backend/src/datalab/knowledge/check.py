@@ -42,6 +42,7 @@ from typing import Any, Literal
 
 import yaml
 
+from datalab import safeyaml
 from datalab.repos.git import name_problem
 
 Severity = Literal["error", "data", "warning"]
@@ -259,7 +260,12 @@ def front_matter(text: str) -> tuple[dict[str, Any] | None, str | None]:
     if raw is None:
         return None, "it doesn't start with front matter between --- lines"
     try:
-        value = yaml.safe_load(raw)
+        # Strict: no anchors or aliases, no repeated or non-plain keys. A
+        # second `status:` line would otherwise win over the first unseen.
+        value = safeyaml.load(raw, max_bytes=MAX_TEXT_BYTES)
+    except safeyaml.YamlRefused as refused:
+        where = f" (line {refused.line + 1})" if refused.line else ""
+        return None, f"its front matter can't be used{where}: {refused.message}"
     except yaml.YAMLError as error:
         mark = getattr(error, "problem_mark", None)
         where = f" (line {mark.line + 2})" if mark is not None else ""
@@ -276,9 +282,16 @@ def review_changes(old: str | None, new: str) -> list[str]:
     after = front_matter(new)[0] or {}
     changes = []
     if old is not None and before.get("status") != after.get("status"):
-        changes.append(f"status: {before.get('status', 'none')} → {after.get('status', 'none')}")
+        was = before.get("status", "none")
+        changes.append(
+            f"status: {was} → {after.get('status', 'none')} in the agent's text; kept as "
+            f"{was}: only a person changes a page's status"
+        )
     elif old is None and after.get("status") not in (None, "draft"):
-        changes.append(f"a new page with status {after.get('status')}")
+        changes.append(
+            f"a new page with status {after.get('status')} in the agent's text; kept as "
+            "draft: only a person changes a page's status"
+        )
     for key in REVIEW_FIELDS:
         if str(before.get(key, "")) != str(after.get(key, "")):
             changes.append(f"{key} changed (DataLab fills it in when a person saves)")
@@ -288,11 +301,77 @@ def review_changes(old: str | None, new: str) -> list[str]:
 def keep_review_fields(new: str, old: str | None) -> str:
     """`new` with `reviewed_by` and `reviewed_on` as they were in `old`
     (or absent): only DataLab's save flow sets them."""
-    old_lines = _front_lines(old) if old is not None else {}
-    text = new
-    for key in REVIEW_FIELDS:
-        text = _set_field(text, key, old_lines.get(key))
-    return text
+    before = (front_matter(old)[0] or {}) if old is not None else {}
+    lines = _front_lines(old) if old is not None else {}
+    return _with_fields(
+        new,
+        {key: before.get(key, _ABSENT) for key in REVIEW_FIELDS},
+        {key: lines.get(key) for key in REVIEW_FIELDS},
+    )
+
+
+def keep_status(new: str, old: str | None) -> str:
+    """`new` with the status `old` had (`draft` for a new page), so an agent
+    can't mark a page reviewed: only a person's own edit changes it."""
+    if old is None:
+        fields = front_matter(new)[0]
+        if fields and "status" in fields:
+            return _with_fields(new, {"status": "draft"}, {"status": "status: draft"})
+        return new
+    before = front_matter(old)[0] or {}
+    return _with_fields(
+        new, {"status": before.get("status", _ABSENT)}, {"status": _front_lines(old).get("status")}
+    )
+
+
+_ABSENT = object()
+
+
+def _with_fields(
+    text: str, values: Mapping[str, Any], lines: Mapping[str, str | None] | None = None
+) -> str:
+    """`text` with these top-level front-matter fields set (or, _ABSENT,
+    removed), judged on the parsed front matter, never on its lines.
+
+    Unchanged if they already are. Otherwise the `lines` given (the field
+    as the base wrote it) are tried first, keeping the page's layout and
+    comments, and kept only if the parsed result is exactly what's wanted;
+    if not, the front matter is written out again. Front matter that can't
+    be parsed strictly (a key given twice, an alias, …) is left as it is:
+    the check refuses the page, so it can't be saved."""
+    raw, body, _ = split_front_matter(text)
+    fields, _ = front_matter(text)
+    if raw is None or fields is None:
+        return text
+    wanted = dict(fields)
+    for key, value in values.items():
+        if value is _ABSENT:
+            wanted.pop(key, None)
+        else:
+            wanted[key] = value
+    if wanted == fields:
+        return text
+    if lines is not None:
+        attempt = text
+        for key in values:
+            attempt = _set_field(attempt, key, lines.get(key))
+        if front_matter(attempt)[0] == wanted:
+            return attempt
+    newline = "\r\n" if text.startswith("---\r\n") else "\n"
+    dumped = yaml.safe_dump(
+        wanted, sort_keys=False, allow_unicode=True, default_flow_style=None, width=4096
+    )
+    out = f"---{newline}{dumped.replace(chr(10), newline)}---{newline}{body}"
+    if front_matter(out)[0] != wanted:  # written as meant, or not at all
+        raise ValueError("DataLab couldn't rewrite the front matter.")
+    return out
+
+
+def agents_text(path: str, new: str, old: str | None) -> str:
+    """What DataLab proposes of the agent's text for `path`: never its
+    review fields, nor, on a page, its status."""
+    text = keep_review_fields(new, old)
+    return keep_status(text, old) if place(path) == "page" else text
 
 
 def stamp_review(text: str, reviewer: str, day: datetime.date) -> str:
@@ -300,8 +379,14 @@ def stamp_review(text: str, reviewer: str, day: datetime.date) -> str:
     fields, _ = front_matter(text)
     if not fields or fields.get("status") != "reviewed":
         return text
-    text = _set_field(text, "reviewed_by", f"reviewed_by: {reviewer}")
-    return _set_field(text, "reviewed_on", f"reviewed_on: {day.isoformat()}")
+    stamp = {"reviewed_by": reviewer, "reviewed_on": day}
+    # Line by line keeps the page's layout; checked on the parsed result,
+    # and written out again if the lines didn't give exactly that.
+    lined = _set_field(text, "reviewed_by", f"reviewed_by: {reviewer}")
+    lined = _set_field(lined, "reviewed_on", f"reviewed_on: {day.isoformat()}")
+    if front_matter(lined)[0] == {**fields, **stamp}:
+        return lined
+    return _with_fields(text, stamp)
 
 
 def _front_lines(text: str) -> dict[str, str]:
@@ -547,8 +632,8 @@ def _schema_index(
         table = name[: -len(".yml")]
         problems = []
         try:
-            raw = yaml.safe_load(text)
-        except yaml.YAMLError:
+            raw = safeyaml.load(text, max_bytes=MAX_SCHEMA_BYTES)
+        except (yaml.YAMLError, safeyaml.YamlRefused):
             raw = None
         if not isinstance(raw, dict):
             problems.append("It isn't a catalog table (a set of fields).")

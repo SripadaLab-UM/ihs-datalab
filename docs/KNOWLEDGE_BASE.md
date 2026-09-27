@@ -1,8 +1,10 @@
 # Lab knowledge base
 
-Status: the backend is **implemented** (milestone 5, 2026-09-27): sign-in,
-the clone, each conversation's copy, proposed edits, Save & share, and the
-check. The Knowledge tab and the move of the Spine's content come next.
+Status: **implemented** (milestone 5, 2026-09-27): sign-in, the clone, each
+conversation's copy, proposed edits, Save & share, and the check; in the app,
+Settings → GitHub, the proposed-edit cards in the chat, and the Knowledge
+tab (reading pages, skills and recent changes). Reverting, editing a page
+directly, and the move of the Spine's content come next.
 
 The knowledge base holds the lab's shared, durable knowledge about IHS data:
 what tables and variables mean, device quirks, cleaning and QC rules, how
@@ -96,9 +98,10 @@ The rules are deliberately few:
 - **Every page has typed evidence and states its limitations.** "The model
   said so" is never enough.
 - **Only people review.** `reviewed_by` and `reviewed_on` are filled in by
-  DataLab from the person saving. When an agent's proposal would change a
-  page's status, the diff card highlights it so it can't slip through
-  unnoticed.
+  DataLab from the person saving. An agent can't change a page's status
+  either: its version keeps the status the page had (`draft` for a new
+  page), the diff card says the agent tried, and only the person's own
+  edit changes it.
 - **Say which years.** Tables, columns, and rules drift between cohorts, so
   pages state which cohorts they apply to, and note differences.
 - **No participant-level data, ever.** That means no IDs, no per-person dates,
@@ -190,7 +193,9 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   app skill, a Codex system skill, or any `kb-*` name: Codex 0.157.1 lists
   same-named skills side by side, the lab's first, so one could stand in for
   DataLab's own. Such a skill is also left out of the copy. Changes to `reviewed_by`
-  and `reviewed_on` are dropped (and flagged); status changes are flagged.
+  and `reviewed_on` are dropped (and flagged), and so is an agent's change
+  to a page's `status`: its version keeps the base's (`draft` for a new
+  page), so only a person's own edit on the card changes it.
   The proposal is a `kb_proposal` event in the conversation's log, with the
   diff (capped at 64 KB a file and 256 KB in all; the full diff is in the
   API) and the check's counts.
@@ -213,8 +218,30 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   resolution says. A deleted conversation's base is removed (and `git gc`
   prunes its commits) when DataLab starts and after each sync.
 - The API is `/api/knowledge/…`: `status`, `sync`, `sign-in` (start, poll,
-  cancel), `sign-out`, and `proposals` (list, get, `edits`, `accept`,
-  `reject`). The tables are migration 0007.
+  cancel), `sign-out`, `proposals` (list, get, `edits`, `accept`,
+  `reject`), and, for the Knowledge tab, `pages` (list, and read one) and
+  `history` (the latest commits). Those two read only GitHub's `main` as
+  last synced, from the clone's objects (never its working tree), and only
+  paths in the layout: not `generated/schema/` or `.github/`. The tables are
+  migration 0007.
+- **In the app.** Settings → GitHub signs in (the code, GitHub's device
+  page, and polling until it's entered) and out. Each proposal is a card
+  under the turn's answer, never folded away: the files with a diff each,
+  the check (possible participant data is ticked off one by one before
+  Save & share can be pressed), what was refused and why, and the person's
+  own edit or leaving a file out. Every end of Save & share says plainly
+  what happened: saved (with the commit), someone else changed it (GitHub's
+  version against theirs, to resolve), the check stopped it, or it failed;
+  nothing is shared otherwise. Save & share sends what the person saw
+  (each file's text as a digest, and the check's findings), and DataLab
+  refuses if it would commit anything else, such as an edit made in
+  another window; an edit still open in its editor holds the button until
+  it's kept or cancelled. A conflict counts as resolved only by text written
+  against GitHub's version it conflicted with. A save cut off by DataLab
+  stopping ends as failed when it starts again, to be tried again. The Knowledge tab lists pages and skills by
+  folder, renders them with their front matter as facts, shows recent
+  changes, and docks a chat in Knowledge writing mode: a data session with
+  the catalog tools that table and query pages cite, but no queries.
 
 ## The check
 
@@ -224,7 +251,12 @@ computer. It runs in DataLab before every save, again after a rebase if
 someone else's change landed in between, and in GitHub Actions after every
 push. There it uses the same published check.
 
-- Front matter is valid, and ids are unique and match file names.
+- Front matter is valid, and ids are unique and match file names. It's
+  read strictly (`safeyaml.py`): a key given twice, a key that isn't a
+  plain name (`<<`, a list or map), anchors and aliases, and deep nesting
+  are errors, so a second `status:` line can't win over the one DataLab
+  keeps. DataLab keeps an agent's `status` and review fields on the parsed
+  front matter.
 - `related` and `evidence` links resolve.
 - Tables and columns that pages mention exist in `generated/schema`. After a
   schema refresh, this is what flags pages affected by schema drift.
@@ -261,6 +293,10 @@ maintainer installs it once with their own credentials:
    the maintainer's own git credentials (or GitHub's web editor), and push
    to `main`.
 3. Update `DATALAB_REF` when the lab moves to a new DataLab release.
+
+**Installed (2026-09-27)** in `ihs-knowledge` as
+`.github/workflows/kb-check.yml`, pinned to DataLab `4cf1e19`, once the app
+repo was made public. Its first run passed on commit `21364e7`.
 
 In Actions, possible participant data is reported as warnings, since
 DataLab only saves a hit after the person saving confirmed it; errors fail

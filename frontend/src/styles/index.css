@@ -237,3 +237,9 @@ input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--color-accent);
 }
+
+/* What the first-run tour's current step is about (features/help/Tour.tsx). */
+[data-tour-on] {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 3px;
+}

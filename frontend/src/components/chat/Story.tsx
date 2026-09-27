@@ -17,7 +17,7 @@ export function Story({ rows, renderRow }: { rows: Row[]; renderRow: (row: Row) 
   if (rows.length === 0) return null;
   const ruled = (row: Row | undefined) => row?.type === "step" || row?.type === "group";
   return (
-    <ol className="flex flex-col">
+    <ol data-tour="steps" className="flex flex-col">
       {rows.map((row, i) => (
         <li
           key={rowKey(row)}
@@ -47,6 +47,8 @@ function rowKey(row: Row): string {
       return `approval-${row.approval.id}`;
     case "review":
       return `review-${row.index}`;
+    case "proposal":
+      return `proposal-${row.proposal.id}`;
   }
 }
 

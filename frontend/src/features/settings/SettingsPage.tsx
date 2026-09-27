@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useLocation } from "react-router";
 
 import { api } from "@/api/client";
 
 import { AboutSection } from "./sections/AboutSection";
 import { ConnectionsSection } from "./sections/ConnectionsSection";
+import { DestinationKeysSection } from "./sections/DestinationKeysSection";
 import { DiagnosticsSection } from "./sections/DiagnosticsSection";
 import { ExportDestinations } from "./sections/ExportDestinations";
 import { GitHubSection } from "./sections/GitHubSection";
@@ -15,13 +18,27 @@ import { UpdatesSection } from "./sections/UpdatesSection";
 // nothing, so their work changes only its own file.
 export function SettingsPage() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const practice = health.data?.profile === "practice";
+  // Other screens link to a section by its id (`/settings#destination-keys`).
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    let id: string;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch {
+      return; // a malformed link: stay at the top
+    }
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
+  }, [hash, health.isSuccess]);
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-14 px-8 py-12">
         <SafetySection />
         <ConnectionsSection />
         <GitHubSection />
-        <ExportDestinations practice={health.data?.profile === "practice"} />
+        <ExportDestinations practice={practice} />
+        {health.data && <DestinationKeysSection practice={practice} />}
         <StorageSection />
         <UpdatesSection />
         <DiagnosticsSection />

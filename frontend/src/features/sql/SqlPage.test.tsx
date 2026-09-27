@@ -30,6 +30,10 @@ vi.mock("@/api/client", () => ({
     destinations: vi.fn(async () => [{ id: "practice", name: "Practice exports", path: "/x", available: true }]),
   },
 }));
+// Save as workflow's dialog has its own tests (features/workflows): here, only what the page gives it.
+vi.mock("@/api/workflows", () => ({
+  workflowsApi: { destinations: vi.fn(async () => []), draft: vi.fn(() => new Promise(() => {})) },
+}));
 // The chat has its own tests: here, only what the page gives it.
 const chatProps = vi.fn();
 vi.mock("@/components/chat/DockedChat", () => ({
@@ -234,4 +238,28 @@ it("reads the rows with the arrow keys, one tab stop for the grid", async () => 
   expect(cell.className).not.toContain("truncate");
   expect(cell.closest("tr")).toHaveAttribute("aria-current", "true");
   expect(within(rows).getByText(/^Row 2: STUDY_PARTICIPANT_ID x+$/)).toBeInTheDocument();
+});
+
+it("offers Save as workflow for a query that passes the check, with its binds' values", async () => {
+  const { workflowsApi } = await import("@/api/workflows");
+  show();
+  const button = await screen.findByRole("button", { name: /Save as workflow/ });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.change(await screen.findByRole("textbox", { name: ":d" }), { target: { value: "2025-04-01" } });
+  fireEvent.click(button);
+  const dialog = await screen.findByRole("dialog", { name: "Save as workflow" });
+  expect(within(dialog).getByRole("textbox", { name: /Name/ })).toHaveValue("vfitbitdailydata");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Draft the workflow" }));
+  await waitFor(() => expect(workflowsApi.draft).toHaveBeenCalled());
+  expect(vi.mocked(workflowsApi.draft).mock.calls[0][0].queries).toEqual([{ sql: SQL, binds: { d: "2025-04-01" } }]);
+});
+
+it("doesn't offer Save as workflow for a query the check refuses", async () => {
+  vi.mocked(sqlApi.check).mockResolvedValue({
+    ok: false, errors: [{ message: "Only SELECT queries are allowed.", severity: "error", position: null }],
+    warnings: [], tables: [], binds: [],
+  }); // prettier-ignore
+  show("DELETE FROM IHS_2025.VFITBITDAILYDATA");
+  expect(await screen.findByText(/Only SELECT queries are allowed/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Save as workflow/ })).toBeDisabled();
 });

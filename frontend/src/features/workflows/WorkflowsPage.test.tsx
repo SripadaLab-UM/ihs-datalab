@@ -3,7 +3,9 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
+import { api } from "@/api/client";
 import { ApiError } from "@/api/http";
+import { pipelinesApi } from "@/api/pipelines";
 import type { RunDetail, RunStep, Workflow, WorkflowRun } from "@/api/workflows";
 import { workflowsApi } from "@/api/workflows";
 
@@ -25,6 +27,7 @@ vi.mock("@/api/workflows", () => ({
   },
   runStreamUrl: (id: string) => `/stream/${id}`,
 }));
+vi.mock("@/api/pipelines", () => ({ pipelinesApi: { proposals: vi.fn(async () => []) } }));
 vi.mock("@/api/client", () => ({
   api: {
     health: vi.fn(async () => ({ profile: "practice" })),
@@ -393,7 +396,7 @@ it("shows the replay check's reasons and asks before an inexact replay, and agai
   });
   vi.mocked(workflowsApi.replay).mockResolvedValue(summary({ id: "run_3", mode: "replay", status: "running" }));
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText("This Replay can't be exact:")).toBeInTheDocument();
   expect(within(dialog).getByText("DataLab's step wrapper has changed since this run.")).toBeInTheDocument();
@@ -443,7 +446,7 @@ it("replays an exact run without delivering unless asked", async () => {
   vi.mocked(workflowsApi.replayCheck).mockResolvedValue({ exact: true, reasons: [], blocking: [] });
   vi.mocked(workflowsApi.replay).mockResolvedValue(summary({ id: "run_3", mode: "replay", status: "running" }));
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText(/This Replay can be exact/)).toBeInTheDocument();
   fireEvent.click(within(dialog).getByRole("button", { name: "Replay" }));
@@ -457,7 +460,7 @@ it("says why a run can't be replayed at all", async () => {
     blocking: ["This run's extracted inputs have been removed."],
   });
   show("/workflows/runs/run_1");
-  fireEvent.click(await screen.findByRole("button", { name: /Replay/ }));
+  fireEvent.click(await screen.findByRole("button", { name: /^Replay/ }));
   const dialog = await screen.findByRole("dialog");
   expect(await within(dialog).findByText("This run's extracted inputs have been removed.")).toBeInTheDocument();
   expect(within(dialog).getByRole("button", { name: "Replay" })).toBeDisabled();
@@ -490,9 +493,36 @@ it("docks a chat that is offered the workflow file, not sent it", async () => {
   await waitFor(() =>
     expect(chatProps).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        mode: "engineering",
+        mode: "workflows",
         context: { label: "The workflow file weekly_steps.yaml", text: YAML, language: "yaml" },
       }),
     ),
   );
+});
+
+it("points to the chat's change waiting for review in Pipelines", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "open");
+  sessionStorage.setItem("datalab:workflows:chat", "c_mine");
+  vi.mocked(api.conversations).mockResolvedValue([{ id: "c_mine" }] as never);
+  const proposal = (id: string, conversation_id: string, status: string) => ({ id, conversation_id, status });
+  vi.mocked(pipelinesApi.proposals).mockResolvedValue([
+    proposal("p_saved", "c_mine", "saved"),
+    proposal("p_other", "c_other", "open"),
+    proposal("p_mine", "c_mine", "open"),
+  ] as never);
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/workflows"]}>
+        <Routes>
+          <Route path="workflows/*" element={<WorkflowsPage />} />
+          <Route path="pipelines" element={<p>Pipelines tab</p>} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("This chat's change is waiting for review in Pipelines.")).toBeInTheDocument();
+  expect(pipelinesApi.proposals).toHaveBeenCalledWith("c_mine");
+  fireEvent.click(screen.getByRole("button", { name: "Review it" }));
+  expect(await screen.findByText("Pipelines tab")).toBeInTheDocument();
+  expect(sessionStorage.getItem("datalab:pipelines:proposal")).toBe("p_mine");
 });

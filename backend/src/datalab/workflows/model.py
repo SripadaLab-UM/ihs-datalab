@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -33,6 +33,7 @@ from pydantic import (
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 
+from datalab import safeyaml
 from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.exports import effective_name, safe_name
 from datalab.sessions.titles import normalize_title, scrub_title
@@ -50,6 +51,8 @@ _ID = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _FILE = re.compile(r"[a-z0-9][a-z0-9_.-]{0,99}")
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+# A workflow's name, as the file check requires it.
+WORKFLOW_NAME = _NAME
 _OBJECT = re.compile(r"[A-Z][A-Z0-9_$#]{0,127}\.[A-Z][A-Z0-9_$#]{0,127}")
 _COLUMN = re.compile(r"[A-Za-z][A-Za-z0-9_$#]{0,127}")
 # The one output of a step that has `output:`, as R sees it: outputs$final.
@@ -62,6 +65,9 @@ ORACLE_INPUT = "oracle"
 class Problem:
     path: str  # where in the file: "steps[1].inputs.raw", or "" for the whole file
     message: str
+    # The pipeline a "there's no pipeline" problem is about, as the file names
+    # it, so its own problems can be looked up (never parsed from `message`).
+    pipeline: str | None = field(default=None, compare=False)
 
     def __str__(self) -> str:
         return f"{self.path}: {self.message}" if self.path else self.message
@@ -290,12 +296,20 @@ PipelineLookup = Callable[[str], Pipeline | None]
 
 
 def parse_yaml(text: str) -> Any:
+    """A workflow or pipeline file's data. Every caller comes through here
+    (the runner, validate, Save as workflow, Save & share, check_workflow),
+    and the text may be an agent's: anchors, aliases, repeated keys, deep
+    nesting and large files are refused before anything is built
+    (safeyaml.py)."""
     if len(text.encode()) > MAX_FILE_BYTES:
         raise WorkflowInvalid(
             [Problem("", f"The file is larger than {MAX_FILE_BYTES // 1024} KB.")]
         )
     try:
-        return _dates_as_text(yaml.safe_load(text))
+        return _dates_as_text(safeyaml.load(text, max_bytes=MAX_FILE_BYTES))
+    except safeyaml.YamlRefused as refused:
+        where = f"line {refused.line}" if refused.line else ""
+        raise WorkflowInvalid([Problem(where, refused.message)]) from None
     except yaml.YAMLError as error:
         mark = getattr(error, "problem_mark", None)
         where = f"line {mark.line + 1}" if mark is not None else ""
@@ -315,16 +329,35 @@ def problem_position(text: str, path: str) -> tuple[int, int] | None:
     Keys can hold dots (`deliver.without_small_cells.clean.stats`), so at each
     mapping the longest key that the rest of the path starts with is taken.
     """
-    if not path:
-        return None
-    if found := _LINE_PATH.fullmatch(path):
-        return int(found.group(1)), 1
-    if len(text.encode()) > MAX_FILE_BYTES:
-        return None
-    try:
-        node = yaml.compose(text, Loader=yaml.SafeLoader)
-    except yaml.YAMLError:
-        return None
+    return problem_positions(text, [path]).get(path)
+
+
+def problem_positions(text: str, paths: list[str]) -> dict[str, tuple[int, int] | None]:
+    """`problem_position` for several paths, reading the file once."""
+    out: dict[str, tuple[int, int] | None] = {}
+    root: yaml.Node | None = None
+    composed = False
+    for path in paths:
+        if path in out:
+            continue
+        if not path:
+            out[path] = None
+            continue
+        if found := _LINE_PATH.fullmatch(path):
+            out[path] = (int(found.group(1)), 1)
+            continue
+        if not composed:
+            composed = True
+            if len(text.encode()) <= MAX_FILE_BYTES:
+                try:
+                    root = yaml.compose(text, Loader=yaml.SafeLoader)
+                except yaml.YAMLError:
+                    root = None
+        out[path] = _position(root, path) if root is not None else None
+    return out
+
+
+def _position(node: yaml.Node | None, path: str) -> tuple[int, int] | None:
     at: yaml.Node | None = None
     rest = path
     while rest and node is not None:
@@ -566,7 +599,13 @@ def check_workflow(
         if isinstance(step, PipelineStep):
             found = pipelines(step.pipeline) if pipelines else None
             if found is None:
-                problem(f"{where}.pipeline", f"There's no pipeline {step.pipeline!r}.")
+                problems.append(
+                    Problem(
+                        f"{where}.pipeline",
+                        f"There's no pipeline {step.pipeline!r}.",
+                        pipeline=step.pipeline,
+                    )
+                )
             else:
                 pipeline_reads[step.id] = {r.object for r in found.spec.reads}
                 for name in found.spec.parameters:
@@ -722,7 +761,7 @@ def _check_extracts(
         label = f"Pipeline {pipeline.name!r} reads[{index}]"
         sql = extract_sql(entry)
         try:
-            checked = check_sql(sql, allowed_schemas=allowed or _schemas_named(sql), columns=None)
+            checked = check_sql(sql, allowed_schemas=allowed or schemas_named(sql), columns=None)
         except SqlRejected as error:
             problems.append(Problem(where, f"{label}: {error}"))
             continue
@@ -741,7 +780,7 @@ def _check_sql_step(
 ) -> list[Problem]:
     try:
         checked = check_sql(
-            step.sql, allowed_schemas=allowed or _schemas_named(step.sql), columns=None
+            step.sql, allowed_schemas=allowed or schemas_named(step.sql), columns=None
         )
     except SqlRejected as error:
         return [Problem(f"{where}.sql", str(error))]
@@ -755,7 +794,7 @@ def _check_sql_step(
     return problems
 
 
-def _schemas_named(sql: str) -> frozenset[str]:
+def schemas_named(sql: str) -> frozenset[str]:
     try:
         tree = sqlglot.parse_one(sql, read="oracle")
     except SqlglotError:
@@ -765,12 +804,12 @@ def _schemas_named(sql: str) -> frozenset[str]:
 
 def sql_tables(sql: str) -> frozenset[str]:
     """The objects a SQL step reads, as SCHEMA.OBJECT (it must pass the SQL check)."""
-    checked = check_sql(sql, allowed_schemas=_schemas_named(sql), columns=None)
+    checked = check_sql(sql, allowed_schemas=schemas_named(sql), columns=None)
     return frozenset(str(t) for t in checked.tables)
 
 
 def sql_binds(sql: str) -> tuple[str, ...]:
-    return check_sql(sql, allowed_schemas=_schemas_named(sql), columns=None).binds
+    return check_sql(sql, allowed_schemas=schemas_named(sql), columns=None).binds
 
 
 def check_reads(workflow: Workflow, pipeline_reads: Mapping[str, set[str]]) -> list[Problem]:

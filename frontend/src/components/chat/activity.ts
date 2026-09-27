@@ -7,7 +7,7 @@
 // rendered as text (and Markdown, for guides), never as HTML.
 
 import type { Approval } from "./ApprovalCard";
-import { finalAnswer, type Item, type Turn } from "./transcript";
+import { finalAnswer, type Item, type KbProposalItem, type Turn } from "./transcript";
 
 export type IconName =
   | "book" | "search" | "table" | "link" | "db" | "code" | "chart" | "shield"
@@ -44,6 +44,7 @@ export type Row =
   | { type: "say"; key: string; text: string }
   | { type: "approval"; approval: Approval }
   | { type: "review"; index: number }
+  | { type: "proposal"; proposal: KbProposalItem }
   | { type: "notice"; key: string; tone: "error" | "info"; text: string };
 
 // The lab's guides (agent skills), by the name the agent reads them under.
@@ -311,6 +312,9 @@ export function activityRows(items: Item[], running: boolean): Row[] {
       case "review":
         rows.push({ type: "review", index });
         break;
+      case "kb_proposal":
+        rows.push({ type: "proposal", proposal: item });
+        break;
       case "notice":
         rows.push({ type: "notice", key: `notice-${index}`, tone: item.tone, text: item.text });
         break;
@@ -347,4 +351,102 @@ export function nowLine(rows: Row[], reasoning: string): string {
 export function answerOf(turn: Turn): string {
   const hasFinal = turn.items.some((item) => item.kind === "message" && item.phase === "final_answer");
   return hasFinal || turn.status === "completed" ? finalAnswer(turn) : "";
+}
+
+// Proposed knowledge edits (docs/KNOWLEDGE_BASE.md, "How edits happen") --------
+
+/** "Knowledge edits proposed (2 pages)". */
+export function proposalTitle(proposal: Pick<KbProposalItem, "files" | "refused">): string {
+  const n = proposal.files.length;
+  if (n === 0) return "Knowledge edits the agent couldn't propose";
+  const pages = proposal.files.every((f) => f.path.endsWith(".md"));
+  return `Knowledge edits proposed (${plural(n, pages ? "page" : "file")})`;
+}
+
+export interface ProposalStateView {
+  /** The chip beside the title. */
+  label: string;
+  tone?: "good" | "attn" | "bad" | "you";
+  /** One plain sentence: where it is and what happens next. */
+  text: string;
+  /** The person can still edit, save or discard it. */
+  actionable: boolean;
+}
+
+/** Each state of a proposal (backend ProposalState), in plain words. */
+export function proposalState(status: string, message = ""): ProposalStateView {
+  switch (status) {
+    case "open":
+      return { label: "needs you", tone: "you", text: "Nothing is shared until you save it. You can edit it first.", actionable: true };
+    case "saving":
+      return { label: "saving…", text: "Checking it, then saving and sharing it on GitHub…", actionable: false };
+    case "saved":
+      return { label: "saved and shared", tone: "good", text: message || "Saved and shared on GitHub.", actionable: false };
+    case "conflict":
+      return {
+        label: "someone else changed it",
+        tone: "attn",
+        text: "Someone else changed these pages on GitHub since. Nothing was shared: choose what each should say, then save again.",
+        actionable: true,
+      };
+    case "check_failed":
+      return {
+        label: "the check stopped it",
+        tone: "bad",
+        text: "The check found problems, so nothing was shared. Fix them (or confirm the possible participant data), then save again.",
+        actionable: true,
+      };
+    case "failed":
+      return { label: "didn't save", tone: "bad", text: `${message || "Saving failed."} Nothing was shared; you can try again.`, actionable: true };
+    case "rejected":
+      return { label: "discarded", text: "Discarded. Nothing was shared.", actionable: false };
+    case "superseded":
+      return { label: "replaced", text: "Replaced by a newer proposal, further down.", actionable: false };
+    case "withdrawn":
+      return { label: "withdrawn", text: "The agent undid these edits.", actionable: false };
+    default:
+      return { label: status.replace(/_/g, " "), text: message, actionable: false };
+  }
+}
+
+/** The check's counts, as chips: errors block, possible participant data needs you. */
+export function checkChips(check: { errors: number; data: number; warnings: number }): Chip[] {
+  if (!check.errors && !check.data && !check.warnings) return [{ text: "passes the check", tone: "good" }];
+  return [
+    ...(check.errors ? [{ text: plural(check.errors, "error"), tone: "bad" as const }] : []),
+    ...(check.data ? [{ text: plural(check.data, "possible participant-data hit"), tone: "attn" as const }] : []),
+    ...(check.warnings ? [{ text: plural(check.warnings, "warning") }] : []),
+  ];
+}
+
+/**
+ * Why Save & share can't be pressed yet, or null when it can. Every error
+ * blocks; so does each possible participant-data hit the person hasn't
+ * confirmed; and there must be something to share, by someone signed in.
+ */
+export function saveBlocker(options: {
+  findings: { id: string; severity: string }[];
+  confirmed: ReadonlySet<string>;
+  signedIn: boolean;
+  sharing: number;
+  /** Files someone else changed on GitHub that the person hasn't resolved yet. */
+  unresolved?: number;
+  /** Files with an open editor whose text isn't kept yet: saving would leave it out. */
+  unkept?: string[];
+}): string | null {
+  const errors = options.findings.filter((f) => f.severity === "error").length;
+  const unconfirmed = options.findings.filter((f) => f.severity === "data" && !options.confirmed.has(f.id)).length;
+  if (options.unkept?.length) {
+    return `Keep or cancel your edit of ${options.unkept.join(" and ")} first: Save & share saves only what's kept.`;
+  }
+  if (!options.signedIn) return "Sign in to GitHub (in Settings) to save and share.";
+  if (options.sharing === 0) return "Every file is left out: there's nothing to share.";
+  if (options.unresolved) {
+    return `Resolve ${options.unresolved === 1 ? "the file" : `the ${options.unresolved} files`} someone else changed on GitHub first: write what each should say, or leave it out.`;
+  }
+  if (errors) return `Fix ${errors === 1 ? "the error" : `the ${errors} errors`} the check found first: edit the page, or leave it out.`;
+  if (unconfirmed) {
+    return `Check ${unconfirmed === 1 ? "the possible participant data" : `the ${unconfirmed} possible participant-data hits`} first, and confirm each is a false positive (or edit it out).`;
+  }
+  return null;
 }

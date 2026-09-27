@@ -31,6 +31,10 @@ jobs:
         run: uv run pytest -q
       - name: Evaluation graders
         run: uv run ruff check ../evals && uv run ruff format --check ../evals && uv run pytest -q ../evals/test_graders.py
+      - name: Spine conversion
+        run: uv run ruff check ../scripts/convert-spine && uv run ruff format --check ../scripts/convert-spine && uv run pytest -q ../scripts/convert-spine
+      - name: Release parity check (comparison logic)
+        run: uv run ruff check ../scripts/parity && uv run ruff format --check ../scripts/parity && uv run pytest -q ../scripts/parity
 
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with
@@ -116,37 +120,57 @@ jobs:
         # Catches dependencies that only the development setup provides.
         run: |
           sh scripts/build-release.sh
-          uv venv -q /tmp/clean --python 3.13
-          uv pip install -q --python /tmp/clean/bin/python \
-            --constraints backend/dist/constraints.txt backend/dist/*.whl
+          uv venv -q --no-config /tmp/clean --python 3.13
+          # As the installers and the updater install it: every file by hash,
+          # wheels only, from PyPI only.
+          (cd backend/dist && uv pip install -q --no-config --require-hashes \
+            --only-binary :all: --default-index https://pypi.org/simple \
+            --python /tmp/clean/bin/python -r requirements.txt)
           /tmp/clean/bin/datalab --version
           /tmp/clean/bin/python -c "import datalab.app, datalab.safety, datalab.trial; from datalab.cli import _web_dist; assert _web_dist(), 'web UI missing from the package'"
 
   windows-installer:
     # No Windows machine runs the full install in CI (Docker Desktop), but the
-    # installer must at least parse, and find constraints.txt next to a
-    # package given by its bare file name.
+    # installer must at least parse, find the package beside it when it isn't
+    # given, and find requirements.txt next to a package given by its bare
+    # file name.
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - name: The installer parses (Windows PowerShell 5.1, as people run it)
+      - name: The installers parse (Windows PowerShell 5.1, as people run them)
         shell: powershell
         run: |
-          $errors = $null
-          [System.Management.Automation.Language.Parser]::ParseFile("installer/windows/install.ps1", [ref]$null, [ref]$errors) | Out-Null
-          if ($errors) { $errors | ForEach-Object { Write-Host $_ }; exit 1 }
-      - name: A bare package file name finds constraints.txt beside it
+          foreach ($file in "install.ps1", "uninstall.ps1") {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile("installer/windows/$file", [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Host "${file}: $_" }; exit 1 }
+          }
+      - name: Without -Package, the package beside the installer is used
+        shell: powershell
+        run: |
+          $dir = New-Item -ItemType Directory -Path (Join-Path $Env:RUNNER_TEMP "beside")
+          Set-Content (Join-Path $dir "datalab-0.0.0-py3-none-any.whl") "x"
+          Set-Content (Join-Path $dir "requirements.txt") "x"
+          $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
+          $start = $script.IndexOf('if (-not $Package) {')
+          $end = $script.IndexOf('if (-not $Requirements) { Write-Host')
+          $ScriptFolder = $dir.FullName; $Package = ""; $Requirements = ""
+          Invoke-Expression $script.Substring($start, $end - $start)
+          if ($Package -ne (Join-Path $dir "datalab-0.0.0-py3-none-any.whl")) { Write-Host "Package: '$Package'"; exit 1 }
+          if ($Requirements -ne (Join-Path $dir "requirements.txt")) { Write-Host "Requirements: '$Requirements'"; exit 1 }
+          Write-Host "Found $Package and $Requirements"
+      - name: A bare package file name finds requirements.txt beside it
         shell: powershell
         run: |
           $dir = New-Item -ItemType Directory -Path (Join-Path $Env:RUNNER_TEMP "pkg")
           Set-Content (Join-Path $dir "datalab-0.0.0-py3-none-any.whl") "x"
-          Set-Content (Join-Path $dir "constraints.txt") "x"
+          Set-Content (Join-Path $dir "requirements.txt") "x"
           Set-Location $dir
           # Run the installer's package-resolution lines on their own.
           $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
           $start = $script.IndexOf('$IsUrl =')
-          $end = $script.IndexOf('if (-not $Constraints) { Write-Host')
-          $Package = "datalab-0.0.0-py3-none-any.whl"; $Constraints = ""
+          $end = $script.IndexOf('if (-not $Requirements) { Write-Host')
+          $Package = "datalab-0.0.0-py3-none-any.whl"; $Requirements = ""
           Invoke-Expression $script.Substring($start, $end - $start)
-          if ($Constraints -ne (Join-Path $dir "constraints.txt")) { Write-Host "Found: '$Constraints'"; exit 1 }
-          Write-Host "Found $Constraints"
+          if ($Requirements -ne (Join-Path $dir "requirements.txt")) { Write-Host "Found: '$Requirements'"; exit 1 }
+          Write-Host "Found $Requirements"

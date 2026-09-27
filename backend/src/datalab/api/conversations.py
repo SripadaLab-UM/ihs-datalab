@@ -116,6 +116,12 @@ class ModeOut(BaseModel):
     kind: Literal["data", "research"]
     description: str
     starters: list[str]
+    # Opened only by the tab that docks it: not offered for a new conversation.
+    tab_only: bool = False
+    # Whether the agent can run queries (False: the catalog tools only).
+    queries: bool = True
+    # Whether files and folders can be attached.
+    attachments: bool = True
 
 
 class PlanSectionOut(BaseModel):
@@ -200,6 +206,9 @@ def build_conversations_router(
                 kind=m.kind,
                 description=m.description,
                 starters=list(m.starters),
+                tab_only=m.tab_only,
+                queries=m.queries,
+                attachments=m.attachments,
             )
             for m in MODES.values()
         ]

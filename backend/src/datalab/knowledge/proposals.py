@@ -14,6 +14,8 @@ Some differences can't be proposed, and are listed with the reason instead:
 
 `reviewed_by` and `reviewed_on` are never taken from the agent: DataLab
 fills them in from the person who saves (check.py, `keep_review_fields`).
+Nor is a page's `status`: the agent's version keeps the base's (`draft` for
+a new page), and only a person's own edit changes it (`keep_status`).
 """
 
 from __future__ import annotations
@@ -128,8 +130,8 @@ def compare(workspace: Workspace, base: Base) -> tuple[list[Change], list[Refusa
             refused.append(Refusal(path, "it isn't a text file"))
             continue
         old = _text(base.read(path)) if known is not None and known.regular else None
-        if old is not None and kb.keep_review_fields(text, old) == old:
-            continue  # only fields DataLab sets itself changed
+        if old is not None and kb.agents_text(path, text, old) == old:
+            continue  # only fields a person or DataLab sets changed
         flags = tuple(kb.review_changes(old, text))
         changes.append(
             Change(path, "modified" if old is not None else "added", digest, size, flags)
@@ -333,18 +335,24 @@ class ProposalStore:
             )
         return proposal
 
-    def end_interrupted_saves(self) -> None:
-        """A save cut off by DataLab stopping didn't finish: say so. (If its
-        push had landed, trying again finds nothing left to save.)"""
+    def end_interrupted_saves(self) -> list[Proposal]:
+        """A save cut off by DataLab stopping didn't finish: say so, so it can
+        be tried again. (If its push had landed, trying again finds nothing
+        left to save.) The proposals it ended."""
         result = json.dumps(
             {"state": "failed", "message": "DataLab stopped while saving. Try again."}
         )
         with self._lock:
+            ids = [
+                row[0]
+                for row in self._db.execute("SELECT id FROM kb_proposals WHERE status = 'saving'")
+            ]
             self._db.execute(
                 "UPDATE kb_proposals SET status = 'failed', result_json = ?, updated_at = ? "
                 "WHERE status = 'saving'",
                 (result, _now()),
             )
+        return [p for p in (self.get(i) for i in ids) if p is not None]
 
     # Each conversation's base ---------------------------------------------
 

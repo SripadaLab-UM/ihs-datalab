@@ -49,6 +49,9 @@ class Seed:
     run: WorkspaceSeed
     # The folder in /work it becomes.
     into: str
+    # Only for conversations in these modes (all, when None). A mode never
+    # changes, so the others are simply never seeded, and nothing is recorded.
+    modes: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if not _PLACE.fullmatch(self.into) or self.into in ("outputs",):
@@ -81,6 +84,8 @@ def run_seeds(
     """Run the seeds that haven't run for this conversation (on a worker thread)."""
     done = records(paths)
     for seed in seeds:
+        if seed.modes is not None and conversation.mode not in seed.modes:
+            continue
         entry = done.get(seed.name)
         if entry is not None and entry.get("status") != "started":
             continue

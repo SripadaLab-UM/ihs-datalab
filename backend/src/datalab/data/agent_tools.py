@@ -8,7 +8,9 @@ Research sessions have no route here at all (their gateway doesn't forward to
 
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -29,6 +31,12 @@ from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
 from datalab.sessions.plans import Outcome, PlanDesk
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
+from datalab.workflows.model import MAX_FILE_BYTES as MAX_WORKFLOW_BYTES
+from datalab.workflows.model import WorkflowInvalid, problem_positions
+
+# DataLab's own check of a workflow file's text (WorkflowRunner.check_text):
+# raises WorkflowInvalid with every problem.
+WorkflowCheck = Callable[[str], object]
 
 # The kind of approval DataLab asks the person for, carried in the elicitation message.
 HELPER_APPROVAL = "research_helper"
@@ -60,16 +68,20 @@ def build_agent_tools(
     tokens: SessionTokens,
     helper: ResearchHelper | None = None,
     plans: PlanDesk | None = None,
+    check_workflow_text: WorkflowCheck | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
     @server.tool(annotations=_READ_ONLY)
-    def search_catalog(query: str, cohorts: list[str] | None = None, limit: int = 15) -> str:
+    def search_catalog(
+        query: str, ctx: Context, cohorts: list[str] | None = None, limit: int = 15
+    ) -> str:
         """Find tables and views by name, comment, or column. Metadata only.
 
         query: words to look for, e.g. "fitbit sleep" or "phq9".
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
+        _session(ctx, tokens, "search_catalog")
         hits = catalog.search(query, limit=max(1, min(limit, 50)), schemas=cohorts)
         return _json(
             [
@@ -87,37 +99,40 @@ def build_agent_tools(
         )
 
     @server.tool(annotations=_READ_ONLY)
-    def describe_table(table: str) -> str:
+    def describe_table(table: str, ctx: Context) -> str:
         """Columns, types, comments, and primary key of one table.
 
         table: schema-qualified name, e.g. "IHS_2025.VFITBITDAILYDATA".
         """
+        _session(ctx, tokens, "describe_table")
         info = catalog.get(table)
         if info is None:
             raise ToolError(f"{table} isn't in the catalog. Use search_catalog to find tables.")
         return _json(_describe(info, catalog))
 
     @server.tool(annotations=_READ_ONLY)
-    def join_paths(first_table: str, second_table: str) -> str:
+    def join_paths(first_table: str, second_table: str, ctx: Context) -> str:
         """How two tables can be joined: shared columns, most useful first, and caveats.
 
         Metadata only. Flags cross-cohort joins, type mismatches, a missing
         date column, and tables that link different participant identifiers.
         first_table, second_table: schema-qualified names, e.g. "IHS_2025.VFITBITSLEEP".
         """
+        _session(ctx, tokens, "join_paths")
         result = join_keys(catalog, first_table, second_table)
         if "error" in result:
             raise ToolError(result["error"])
         return _json(result)
 
     @server.tool(annotations=_READ_ONLY)
-    def find_concept(concept: str, cohorts: list[str] | None = None) -> str:
+    def find_concept(concept: str, ctx: Context, cohorts: list[str] | None = None) -> str:
         """Candidate tables for a research concept, such as "sleep" or "depression".
 
         Metadata only: searches names and comments with the words the catalog
         uses for the concept. Check each candidate with describe_table.
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
+        _session(ctx, tokens, "find_concept")
         return _json(concept_candidates(catalog, concept[:200], cohorts))
 
     @server.tool(annotations=_READ_ONLY)
@@ -130,7 +145,7 @@ def build_agent_tools(
         binds: values for the bind variables, e.g. {"start_date": "2025-04-01"}.
         preview_rows: how many rows to return inline (the file has them all).
         """
-        access = _session(ctx, tokens)
+        access = _session(ctx, tokens, "query")
         try:
             outcome = await service.run_query(
                 session_id=access.session_id,
@@ -153,6 +168,32 @@ def build_agent_tools(
             }
         )
 
+    if check_workflow_text is not None:
+        workflow_check = check_workflow_text
+        checking = asyncio.Semaphore(CHECKS_AT_ONCE)
+
+        @server.tool(annotations=_READ_ONLY)
+        async def check_workflow(text: str, ctx: Context) -> str:
+            """Check a workflow file's text with DataLab's own workflow check.
+
+            The same check the Workflows tab and every run use: the YAML
+            model, step references, parameters and binds, `reads:`, QC and
+            small-cell rules, and destinations. Pipelines are looked up as on
+            the repo's main branch. Nothing is saved or run.
+            text: the whole workflow file (YAML), as written in /work/pipelines/workflows.
+            """
+            _session(ctx, tokens, "check_workflow")
+            problems = await _checked_in_thread(workflow_check, text, checking)
+            return _json(
+                {
+                    "valid": not problems,
+                    "problems": problems,
+                    "note": "Fix every problem before you finish. DataLab checks the file "
+                    "again before Save & share, with the pipelines in your change and the "
+                    "real study data's small-cell rule, and a file that fails can't be saved.",
+                }
+            )
+
     if plans is not None:
 
         @server.tool(description=plan_schema.tool_description())
@@ -169,7 +210,7 @@ def build_agent_tools(
             revises: str = "",
             revision_reason: str = "",
         ) -> str:
-            access = _session(ctx, tokens)
+            access = _session(ctx, tokens, "propose_plan")
             core = {
                 "question_and_purpose": question_and_purpose,
                 "data_and_scope": data_and_scope,
@@ -243,7 +284,7 @@ def build_agent_tools(
             question first and may edit or decline it, so ask sparingly and
             make the question self-contained. Plain text only.
             """
-            access = _session(ctx, tokens)
+            access = _session(ctx, tokens, "ask_research_helper")
             try:
                 cleaned = clean_question(question)
             except Unshowable as error:
@@ -295,13 +336,85 @@ class AgentTokenMiddleware:
         await self._app(scope, receive, send)
 
 
-def _session(ctx: Context, tokens: SessionTokens) -> SessionAccess:
+def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
+    """The session calling `tool`, if its mode allows it (sessions/modes.py)."""
     request = ctx.request_context.request
     headers = getattr(request, "headers", None) or {}
     access = tokens.resolve(bearer_token(headers.get("authorization")))
     if access is None or access.kind != "data":
         raise ToolError("This session isn't allowed to query data.")
+    if not access.allows(tool):
+        raise ToolError(
+            f"{tool} isn't available in this mode. Knowledge writing has the catalog tools "
+            "only (metadata, no rows): write any SQL a page needs and say it needs checking "
+            "in a Data extraction conversation."
+        )
     return access
+
+
+# check_workflow runs off the event loop, a few at a time, each for a limited
+# time, and reports at most MAX_PROBLEMS problems.
+MAX_PROBLEMS = 50
+CHECK_SECONDS = 20.0
+CHECKS_AT_ONCE = 2
+
+
+async def _checked_in_thread(
+    check: WorkflowCheck, text: str, slots: asyncio.Semaphore
+) -> list[dict[str, Any]]:
+    """The problems DataLab's workflow check finds in `text`.
+
+    The slot is held until the thread really ends, even after a timeout:
+    Python can't stop a thread, so a slow check keeps its slot and later
+    ones wait (or time out) rather than piling up threads."""
+    try:
+        await asyncio.wait_for(slots.acquire(), CHECK_SECONDS)
+    except TimeoutError:
+        return [_whole("DataLab is busy checking other drafts. Try again in a minute.")]
+    work = asyncio.ensure_future(asyncio.to_thread(_check_problems, check, text))
+    work.add_done_callback(lambda _: slots.release())
+    try:
+        return await asyncio.wait_for(asyncio.shield(work), CHECK_SECONDS)
+    except TimeoutError:
+        return [_whole(f"The check took over {CHECK_SECONDS:.0f} s. Make the file smaller.")]
+
+
+def _check_problems(check: WorkflowCheck, text: str) -> list[dict[str, Any]]:
+    """On a worker thread: the check, with each problem's line (the file read once)."""
+    early = _draft_problems(text)
+    if early is not None:
+        return early
+    try:
+        check(text)
+    except WorkflowInvalid as error:
+        shown = error.problems[:MAX_PROBLEMS]
+        positions = problem_positions(text, [p.path for p in shown])
+        found = [
+            {
+                "where": p.path,
+                "line": (positions.get(p.path) or (None, None))[0],
+                "message": p.message,
+            }
+            for p in shown
+        ]
+        if len(error.problems) > MAX_PROBLEMS:
+            more = len(error.problems) - MAX_PROBLEMS
+            found.append(_whole(f"And {more} more problems: fix these first, then check again."))
+        return found
+    return []
+
+
+def _whole(message: str) -> dict[str, Any]:
+    return {"where": "", "line": None, "message": message}
+
+
+def _draft_problems(text: str) -> list[dict[str, Any]] | None:
+    """A problem found before the full check reads the text, or None to go
+    on to it. The check's own YAML reading refuses anchors, aliases,
+    repeated keys and deep nesting (workflows/model.py: parse_yaml)."""
+    if len(text.encode()) > MAX_WORKFLOW_BYTES:
+        return [_whole(f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB.")]
+    return None
 
 
 def _describe(info: TableInfo, catalog: Catalog) -> dict[str, Any]:

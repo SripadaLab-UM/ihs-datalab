@@ -1,0 +1,262 @@
+import { useQuery } from "@tanstack/react-query";
+import { createContext, type ReactNode, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router";
+
+import { api } from "@/api/client";
+import { Button } from "@/components/ui";
+import { pageBySlug, slug } from "@/lib/guide";
+
+import { GuideMarkdown } from "./GuideMarkdown";
+
+export interface TourStep {
+  id: string;
+  title: string;
+  text: string;
+}
+
+/** The tour's steps: each `##` in docs/guide/tour.md. */
+export function tourSteps(): TourStep[] {
+  const body = pageBySlug("tour")?.body ?? "";
+  const parts = body.split(/^## (.+)$/m);
+  const steps: TourStep[] = [];
+  for (let i = 1; i < parts.length; i += 2) {
+    steps.push({ id: slug(parts[i]), title: parts[i].trim(), text: parts[i + 1].trim() });
+  }
+  return steps;
+}
+
+/**
+ * What each step points at, by its heading's anchor: selectors tried in
+ * order, the first one on screen wins. A step whose place isn't on screen
+ * (no conversation open yet) is still read; it just points at nothing.
+ */
+export const TOUR_ANCHORS: Record<string, string[]> = {
+  "ask-a-question": ["[data-tour=composer]", "[data-tour=new-conversation]"],
+  "watch-the-steps": ["[data-tour=steps]", "[data-tour=composer]"],
+  "open-a-step": ["[data-tour=steps] button[aria-expanded]", "[data-tour=how-made]"],
+  "read-the-answer-its-trace-and-review": ["[data-tour=answer]"],
+  "find-the-outputs-and-export": ["[data-tour=outputs]", "[data-tour=export]"],
+};
+
+const SEEN_KEY = "datalab.tour.seen";
+// If this browser won't keep it (a private window, say), it's remembered for this page at least.
+let seenHere = false;
+
+export function tourSeen(): boolean {
+  if (seenHere) return true;
+  try {
+    return localStorage.getItem(SEEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markTourSeen() {
+  seenHere = true;
+  try {
+    localStorage.setItem(SEEN_KEY, "1");
+  } catch {
+    // Storage refused: the tour won't start again on this page, and may on the next.
+  }
+}
+
+/** For tests: forget that the tour was seen on this page. */
+export function resetTourMemory() {
+  seenHere = false;
+}
+
+interface TourControl {
+  open: boolean;
+  start: () => void;
+}
+
+const TourContext = createContext<TourControl>({ open: false, start: () => undefined });
+
+export function useTour(): TourControl {
+  return use(TourContext);
+}
+
+/**
+ * The first-run tour. It starts by itself once, in the Workspace of the
+ * practice DataLab, and again whenever Help's "Take the tour" asks.
+ */
+export function TourProvider({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  // Kept here, so leaving the page for Help and coming back keeps the step.
+  const [index, setIndex] = useState(0);
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const { pathname } = useLocation();
+  const practice = health.data?.profile === "practice";
+  // Where focus was when the tour opened, to give back when it closes.
+  const returnTo = useRef<HTMLElement | null>(null);
+  const isOpen = useRef(false);
+  // Set when the tour opens: the card takes focus then, not when it comes back after Help.
+  const fresh = useRef(false);
+  const begin = useCallback((restart: boolean) => {
+    if (isOpen.current && !restart) return;
+    if (!isOpen.current) {
+      const active = document.activeElement;
+      returnTo.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    }
+    isOpen.current = true;
+    fresh.current = true;
+    if (restart) setIndex(0);
+    setOpen(true);
+  }, []);
+  useEffect(() => {
+    if (practice && pathname.startsWith("/workspace") && !tourSeen()) begin(false);
+  }, [practice, pathname, begin]);
+  const start = useCallback(() => begin(true), [begin]);
+  const close = useCallback((stepId: string) => {
+    markTourSeen();
+    isOpen.current = false;
+    setOpen(false);
+    const back = returnTo.current;
+    returnTo.current = null;
+    if (back?.isConnected) back.focus();
+    else focusNear(stepId);
+  }, []);
+  const takeFocus = useCallback(() => {
+    const was = fresh.current;
+    fresh.current = false;
+    return was;
+  }, []);
+  return (
+    <TourContext value={{ open, start }}>
+      {children}
+      {/* Out of the way while Help is read; it's back on leaving Help. */}
+      {open && !pathname.startsWith("/help") && <TourCard index={index} onStep={setIndex} onClose={close} takeFocus={takeFocus} />}
+    </TourContext>
+  );
+}
+
+function findAnchor(stepId: string): HTMLElement | null {
+  for (const selector of TOUR_ANCHORS[stepId] ?? []) {
+    const found = [...document.querySelectorAll<HTMLElement>(selector)].find((el) => el.checkVisibility?.() ?? true);
+    if (found) return found;
+  }
+  return null;
+}
+
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Where focus goes when what had it before the tour is gone: the step's place, else the page's main part. */
+function focusNear(stepId: string) {
+  const anchor = findAnchor(stepId);
+  const target = anchor?.matches(FOCUSABLE) ? anchor : anchor?.querySelector<HTMLElement>(FOCUSABLE);
+  if (target) return target.focus();
+  const main = document.querySelector<HTMLElement>("main");
+  if (!main) return;
+  // Focusable just for this, and not after: the tabindex goes once focus moves on.
+  if (!main.hasAttribute("tabindex")) {
+    main.setAttribute("tabindex", "-1");
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
+  main.focus();
+}
+
+/** One step at a time, in a corner over the conversation list: you can try each step as you read it. */
+export function TourCard({
+  index,
+  onStep: setIndex,
+  onClose: close,
+  takeFocus = () => true,
+}: {
+  index: number;
+  onStep: (index: number) => void;
+  /** Given the step it closed on. */
+  onClose: (stepId: string) => void;
+  /** Whether to take focus on mount: yes when the tour has just opened, not when it's back after Help. */
+  takeFocus?: () => boolean;
+}) {
+  const steps = useMemo(tourSteps, []);
+  const step = steps[index];
+  const titleId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const last = index === steps.length - 1;
+
+  const onClose = () => close(step?.id ?? "");
+  // Focus on the step's title, so it's read out, when the tour opens and when
+  // the step changes; not when the card is back after Help, where the person
+  // may be using a link.
+  const focused = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    if (focused.current === index) return; // StrictMode's second run
+    const first = focused.current === null;
+    focused.current = index;
+    if (first && !takeFocus()) return;
+    heading.current?.focus();
+  }, [index, takeFocus]);
+
+  // The place on screen this step is about, outlined while it's shown. The
+  // page changes as the person follows along (a conversation opens, an answer
+  // arrives), so it's looked for again every moment; it's scrolled to only
+  // when the step changes.
+  useLayoutEffect(() => {
+    if (!step) return;
+    let shown: HTMLElement | null = null;
+    const mark = (scroll: boolean) => {
+      const anchor = findAnchor(step.id);
+      if (anchor === shown) return;
+      shown?.removeAttribute("data-tour-on");
+      anchor?.setAttribute("data-tour-on", "");
+      if (scroll) anchor?.scrollIntoView?.({ block: "nearest" });
+      shown = anchor;
+    };
+    mark(true);
+    const again = window.setInterval(() => mark(false), 700);
+    return () => {
+      window.clearInterval(again);
+      shown?.removeAttribute("data-tour-on");
+    };
+  }, [step]);
+
+  if (!step) return null;
+  return (
+    <section
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+      className="dl-in fixed bottom-28 left-4 z-40 lg:bottom-4 flex w-[min(18rem,calc(100vw-2rem))] flex-col gap-3 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-5 pt-4 pb-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]"
+    >
+      <p className="dl-label">
+        Tour · {index + 1} of {steps.length}
+      </p>
+      <h2 ref={heading} id={titleId} tabIndex={-1} className="font-serif text-[22px] leading-tight outline-none">
+        {step.title}
+      </h2>
+      <div className="[&_.prose-datalab]:text-[16px]">
+        <GuideMarkdown page={{ slug: "tour" }} text={step.text} onNavigate={onClose} />
+      </div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className="mr-auto">
+          {!last && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="font-sans text-[13px] text-muted underline decoration-faint underline-offset-4 hover:text-ink"
+            >
+              Skip the tour
+            </button>
+          )}
+        </span>
+        {index > 0 && <Button onClick={() => setIndex(index - 1)}>Back</Button>}
+        {last ? (
+          <Button variant="primary" onClick={onClose}>
+            Done
+          </Button>
+        ) : (
+          <Button variant="primary" onClick={() => setIndex(index + 1)}>
+            Next
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}

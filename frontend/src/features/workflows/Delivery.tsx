@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 
 import { type Delivery, type Workflow, type WorkflowRun, workflowsApi } from "@/api/workflows";
-import { Chip, Icon } from "@/components/ui";
+import { Chip, Icon, InfoTip } from "@/components/ui";
 
 import { deliveryProblems, isLive, plural, problemWhere, short, when } from "./words";
 
@@ -92,7 +92,8 @@ export function DeliveryBlocked({ workflow }: { workflow: Pick<Workflow, "proble
       </ul>
       <p className="mt-1.5 text-muted">
         Add a <code className="font-mono text-[12px]">small_cells</code> check over each delivered CSV, or give the
-        reason it isn't needed under <code className="font-mono text-[12px]">deliver.without_small_cells</code>.
+        reason it isn't needed under <code className="font-mono text-[12px]">deliver.without_small_cells</code>.{" "}
+        <InfoTip term="small-cells" className="align-middle" />
       </p>
     </div>
   );

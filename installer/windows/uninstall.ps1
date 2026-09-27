@@ -2,11 +2,13 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File uninstall.ps1 [-DeleteData | -KeepData]
 #
-# Removes DataLab, its Start menu entry, its container images, and the keys it
-# saved in Credential Manager, and what the installer left behind (its
-# after-restart task or shortcut, and its progress files). It asks before
-# deleting DataLab's data folder (conversations and query results). It never
-# touches your export folders, uv, WSL or Docker Desktop.
+# Removes DataLab (every version installed side by side), its Start menu
+# entries, its container images, and the keys it saved in Credential Manager,
+# and what the installer left behind (its after-restart task or shortcut, and
+# its progress files). It asks before deleting DataLab's data folder
+# (conversations and query results). It never touches your export folders, and
+# leaves Docker Desktop, WSL and uv installed; at the end it says how to remove
+# each of them, if nothing else on the computer needs them.
 param([switch]$DeleteData, [switch]$KeepData)
 $ErrorActionPreference = "Stop"
 $Env:Path = (Join-Path $Env:USERPROFILE ".local\bin") + ";$Env:Path"
@@ -18,7 +20,7 @@ foreach ($task in "DataLab setup for $MySid (continue after restart)", "DataLab 
     Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
 }
 Remove-Item (Join-Path ([Environment]::GetFolderPath("Startup")) "DataLab setup.lnk") -ErrorAction SilentlyContinue
-foreach ($file in "installer-resume.json", "constraints.txt") {
+foreach ($file in "installer-resume.json", "constraints.txt", "requirements.txt") {
     Remove-Item (Join-Path $Env:LOCALAPPDATA "DataLab\$file") -ErrorAction SilentlyContinue
 }
 Get-ChildItem -LiteralPath $Env:TEMP -File -Filter "DataLab-setup-*.ps1" -Force -ErrorAction SilentlyContinue |
@@ -129,16 +131,47 @@ function Remove-RecordedAdminFolder($sid) {
 
 Remove-RecordedAdminFolder $MySid
 
+# DataLab itself: the versions installed side by side (see install.ps1), or
+# the copy an earlier installer made with uv.
+$Root = if ($Env:DATALAB_INSTALL_DIR) { $Env:DATALAB_INSTALL_DIR } else { Join-Path $Env:LOCALAPPDATA "DataLab\app" }
+$Shim = Join-Path $Root "bin\datalab.cmd"
+$choice = @()
+if ($DeleteData) { $choice = @("--delete-data") } elseif ($KeepData) { $choice = @("--keep-data") }
+$uninstalled = $false
+if ((Test-Path -LiteralPath $Shim) -and (Test-Path -LiteralPath (Join-Path $Root "current"))) {
+    & $Shim uninstall @choice
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $uninstalled = $true
+    Remove-Tree $Root
+    if (Test-Path -LiteralPath $Root) { Write-Host "Some of DataLab's program files ($Root) couldn't be removed; delete that folder later." }
+}
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    $DataLab = Join-Path (uv tool dir --bin) "datalab.exe"
-    if (Test-Path $DataLab) {
-        $choice = @()
-        if ($DeleteData) { $choice = @("--delete-data") } elseif ($KeepData) { $choice = @("--keep-data") }
-        & $DataLab uninstall @choice
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $OldDataLab = Join-Path (uv tool dir --bin) "datalab.exe"
+    if (Test-Path -LiteralPath $OldDataLab) {
+        if (-not $uninstalled) {
+            & $OldDataLab uninstall @choice
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
         uv tool uninstall datalab
     }
 }
-$Link = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs\DataLab.lnk"
-if (Test-Path $Link) { Remove-Item $Link }
+$StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
+    $Link = Join-Path $StartMenu $name
+    if (Test-Path -LiteralPath $Link) { Remove-Item -LiteralPath $Link }
+}
 Write-Host "DataLab has been removed."
+Write-Host ""
+Write-Host "Still installed, because other programs may use them (remove them only if nothing"
+Write-Host "else on this computer needs them):"
+Write-Host "  - Docker Desktop: Start menu > Settings > Apps > Installed apps > Docker Desktop >"
+Write-Host "    Uninstall. It needs an administrator (on a managed computer, ask IT)."
+Write-Host "  - WSL (Windows Subsystem for Linux): Settings > Apps > Installed apps > Windows"
+Write-Host "    Subsystem for Linux > Uninstall. The Windows features it turned on stay on until an"
+Write-Host "    administrator turns them off in 'Turn Windows features on or off' (Virtual Machine"
+Write-Host "    Platform, Windows Subsystem for Linux)."
+Write-Host "  - uv (the tool that installed DataLab), in PowerShell:"
+Write-Host "      uv cache clean; Remove-Item -Recurse (uv python dir), (uv tool dir)"
+Write-Host "      Remove-Item `"$(Join-Path $Env:USERPROFILE '.local\bin')\uv*.exe`""
+Write-Host "  - Your account's membership of the docker-users group, which an administrator can"
+Write-Host "    remove in Computer Management > Local Users and Groups (IT, on a managed computer)."

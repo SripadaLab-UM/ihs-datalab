@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { api, type PlanSchema } from "@/api/client";
-import { Button, Chip, Icon } from "@/components/ui";
+import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
 import type { Approval } from "./ApprovalCard";
 import {
@@ -535,6 +535,7 @@ function Editing({
             A different kind of analysis?
           </button>
         )}
+        <InfoTip term="plan" align="end" />
         <Button onClick={() => onAnswer(false)} disabled={decided}>
           Not yet
         </Button>

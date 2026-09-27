@@ -23,8 +23,13 @@ conversation.
 | **Data engineering** | 🔒 Data | Yu and others maintaining the lab's R pipelines (`ihsDataR`) | Work in a copy of the package, follow its conventions, run its tests, and hand back a reviewable change. |
 | **Research** | 🌐 Research | Literature, methods, packages, ideas | Cite sources. Produce notes and code that can be brought into a data session. |
 
-Workflow authoring (Yu's routines) is designed with workflows, in step 3. It
-may be a mode, or it may be a button on the Workflows screen.
+Two more modes open only from the tab that docks them, not from **New**
+(built):
+
+| Mode | Session | Docked in | The agent's priorities |
+|---|---|---|---|
+| **Workflow authoring** | 🔒 Data | Workflows tab | Draft or change workflow files in its copy of the pipelines repo (`/work/pipelines/workflows/`), following [WORKFLOWS.md](WORKFLOWS.md): declared `reads:`, QC with `small_cells` on every delivered CSV, destination keys. It checks each draft with `check_workflow`, DataLab's own workflow check. Its changes become a Pipelines proposal, which a person reviews, tests, and saves there; the agent never saves. The database tools as in Data extraction, read-only. |
+| **Knowledge writing** | 🔒 Data | Knowledge tab | Write or tidy a page or lab skill in `/work/kb`, in the layout and page format of [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), as proposed-edit cards. Never sets `reviewed_by`, `reviewed_on`, or a page's status. The catalog tools only (metadata): its session token allows just `search_catalog`, `describe_table`, `join_paths` and `find_concept`, DataLab refuses every other data tool, and Codex doesn't list them. Nothing can be attached (a file could hold study data); the page open in the tab can go with a message. |
 
 ## How the agent is instructed
 
@@ -263,9 +268,9 @@ times.)
 |---|---|---|
 | **Workspace** | Conversations, inputs, outputs, history | Full-width chat, any mode |
 | **SQL Playground** | Your own SQL editor, results preview, catalog browser | Data extraction mode, seeded with the current query |
-| **Workflows** | Routines, runs, batches, destinations | Workflow authoring (designed in step 3) |
+| **Workflows** | Routines, runs, batches, destinations | Workflow authoring mode |
 | **Pipelines** | `ihsDataR` code browser, agent-proposed changes to review, tests | Data engineering mode |
-| **Knowledge** | Knowledge pages, lab skills, change history | Helps write or tidy a page or skill |
+| **Knowledge** | Knowledge pages, lab skills, change history | Knowledge writing mode: helps write or tidy a page or skill |
 | **Settings & Safety** | Connections, GitHub sign-in, export destinations, Safety check | none |
 
 ## The Workspace tab

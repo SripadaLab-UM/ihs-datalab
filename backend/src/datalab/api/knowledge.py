@@ -7,12 +7,14 @@ the conversation's base and proposes the edits (a `kb_proposal` event, then
 `kb_proposal_updated` as it's edited, saved, or discarded). See
 docs/KNOWLEDGE_BASE.md, "How edits happen", and knowledge/service.py.
 
-- Sign-in: `POST /sign-in` starts GitHub's device flow and returns the code
-  to enter; the page then calls `POST /sign-in/poll` every `interval`
-  seconds until it's signed in (or expired, denied); `POST /sign-in/cancel`
-  and `POST /sign-out`. After signing in, `POST /sync` downloads the repo.
+- Signing in to GitHub is `/api/github` (api/github.py): one sign-in for
+  both lab repos. After signing in, `POST /sync` downloads the repo.
 - Proposals: list and get; `PUT …/edits` for the person's own text;
   `POST …/accept` (Save & share) and `POST …/reject`.
+- Reading (the Knowledge tab): `GET /pages` lists the pages, lab skills, and
+  top files of GitHub's main as last synced, `GET /pages/{path}` reads one,
+  and `GET /history` gives its latest commits. Read-only, from the clone's
+  objects, and only paths in the knowledge base's layout.
 """
 
 from __future__ import annotations
@@ -21,16 +23,23 @@ import asyncio
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from datalab.config import Settings
+from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Proposal, unified_diff
-from datalab.knowledge.service import Knowledge, NotActionable, NotAvailable, NotFound
-from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignIn, SignInNeeded
+from datalab.knowledge.service import (
+    MAX_HISTORY,
+    Knowledge,
+    NotActionable,
+    NotAvailable,
+    NotFound,
+    text_digest,
+)
+from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignInNeeded
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 
@@ -43,8 +52,11 @@ class KnowledgeServices:
     database: sqlite3.Connection  # for this area's own tables (migration 0007)
     conversations: ConversationStore  # proposed-edit cards are conversation events
     sessions: SessionManager  # the workspace seed and after-turn hook
-    # Tests only: a sign-in and a remote other than GitHub's.
+    # The app's one GitHub sign-in, shared with the pipelines repo (only one
+    # object may refresh its tokens); made here from `[repos] client_id` if
+    # not given.
     auth: GitHubAuth | None = None
+    # Tests only: a remote other than GitHub's.
     remote: str | None = None
 
 
@@ -72,17 +84,6 @@ class KnowledgeStatus(BaseModel):
     last_error: str | None = None
     ahead: int = 0
     behind: int = 0
-    message: str | None = None
-
-
-class SignInOut(BaseModel):
-    state: Literal["signed out", "waiting", "signed in", "expired", "denied", "failed"]
-    user_code: str | None = None
-    verification_uri: str | None = None
-    expires_at: str | None = None
-    # Seconds to wait between polls.
-    interval: int | None = None
-    account: AccountOut | None = None
     message: str | None = None
 
 
@@ -147,9 +148,16 @@ class FileDetail(FileSummary):
     edited: bool
     left_out: bool
     diff: str
-    # For a file that conflicted: the text on GitHub's main now.
+    # What Save & share would commit for it, as a digest: sent back with
+    # accept, so what's saved is what the person saw.
+    after_sha256: str | None = None
+    # For a file that conflicted: the text on GitHub's main now ("deleted" if
+    # GitHub no longer has it, "not text" if it isn't UTF-8 text), and whether
+    # the person has written what it should say against that version.
     conflict: bool = False
     theirs: str | None = None
+    theirs_state: Literal["text", "deleted", "not text"] | None = None
+    resolved: bool = False
 
 
 class ProposalDetail(BaseModel):
@@ -170,6 +178,45 @@ class AcceptIn(BaseModel):
     # Ids of data findings the person has checked and confirmed aren't
     # participant data.
     confirmed: list[str] = []
+    # What the person saw: each file's after_sha256, and the ids of the
+    # check's findings. Save & share refuses if either has changed since.
+    seen: dict[str, str | None]
+    findings: list[str]
+
+
+class KbEntryOut(BaseModel):
+    path: str
+    # top, page, skill, skill_file, or generated.
+    place: str
+    size: int
+    title: str
+    summary: str
+    status: str | None
+    kind: str | None
+
+
+class KbPagesOut(BaseModel):
+    # The commit they're from: GitHub's main as last synced (None before the first sync).
+    head: str | None
+    pages: list[KbEntryOut]
+
+
+class KbPageOut(BaseModel):
+    path: str
+    place: str
+    head: str
+    text: str
+    front_matter: dict[str, Any] | None
+    body: str
+
+
+class KbCommitOut(BaseModel):
+    commit: str
+    author: str
+    date: str
+    subject: str
+    paths: list[str]
+    changed: int
 
 
 def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
@@ -199,11 +246,6 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         except GitHubUnavailable as error:
             raise HTTPException(502, str(error)) from None
 
-    def auth() -> GitHubAuth:
-        if knowledge.auth is None or not knowledge.available:
-            raise NotAvailable(knowledge.unavailable)
-        return knowledge.auth
-
     @router.get("/status")
     async def status() -> KnowledgeStatus:
         return KnowledgeStatus(**_plain(await run(knowledge.status)))
@@ -212,25 +254,18 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     async def sync() -> KnowledgeStatus:
         return KnowledgeStatus(**_plain(await run(knowledge.sync)))
 
-    @router.get("/sign-in")
-    async def sign_in_state() -> SignInOut:
-        return _sign_in(await run(lambda: auth().status()))
+    @router.get("/pages")
+    async def pages() -> KbPagesOut:
+        head, found = await run(knowledge.pages)
+        return KbPagesOut(head=head, pages=[KbEntryOut(**vars(e)) for e in found])
 
-    @router.post("/sign-in")
-    async def start_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().start()))
+    @router.get("/pages/{path:path}")
+    async def page(path: str) -> KbPageOut:
+        return KbPageOut(**vars(await run(lambda: knowledge.page(path))))
 
-    @router.post("/sign-in/poll")
-    async def poll_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().poll()))
-
-    @router.post("/sign-in/cancel")
-    async def cancel_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().cancel()))
-
-    @router.post("/sign-out")
-    async def sign_out() -> SignInOut:
-        return _sign_in(await run(lambda: auth().sign_out()))
+    @router.get("/history")
+    async def history(limit: int = Query(20, ge=1, le=MAX_HISTORY)) -> list[KbCommitOut]:
+        return [KbCommitOut(**vars(c)) for c in await run(lambda: knowledge.history(limit))]
 
     @router.get("/proposals")
     async def proposals(conversation_id: str | None = None) -> list[ProposalOut]:
@@ -249,7 +284,12 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
 
     @router.post("/proposals/{proposal_id}/accept")
     async def accept(proposal_id: str, body: AcceptIn) -> ProposalDetail:
-        return await run(lambda: _detail(knowledge, knowledge.accept(proposal_id, body.confirmed)))
+        return await run(
+            lambda: _detail(
+                knowledge,
+                knowledge.accept(proposal_id, body.confirmed, body.seen, body.findings),
+            )
+        )
 
     @router.post("/proposals/{proposal_id}/reject")
     async def reject(proposal_id: str) -> ProposalDetail:
@@ -264,27 +304,6 @@ def _plain(status: dict[str, Any]) -> dict[str, Any]:
     if isinstance(account, Account):
         status = {**status, "account": {"login": account.login, "name": account.name}}
     return status
-
-
-def _account(account: Account | None) -> AccountOut | None:
-    return AccountOut(login=account.login, name=account.name) if account else None
-
-
-def _sign_in(state: SignIn) -> SignInOut:
-    expires = (
-        datetime.fromtimestamp(state.expires_at, UTC).isoformat(timespec="seconds")
-        if state.expires_at
-        else None
-    )
-    return SignInOut(
-        state=state.state,
-        user_code=state.user_code,
-        verification_uri=state.verification_uri,
-        expires_at=expires,
-        interval=state.interval,
-        account=_account(state.account),
-        message=state.message,
-    )
 
 
 def _summary(proposal: Proposal) -> ProposalOut:
@@ -310,14 +329,19 @@ def _detail(knowledge: Knowledge, proposal: Proposal) -> ProposalDetail:
     views = knowledge.files(proposal)
     conflicts = set(proposal.result.get("conflicts") or [])
     upstream = proposal.result.get("upstream")
+    resolutions = proposal.edits.get("resolutions") or {}
+    resolved_against = proposal.edits.get("resolved_against")
     files = []
     for view in views:
         path = view.change.path
-        theirs = None
+        theirs, theirs_state = None, None
         if path in conflicts and upstream:
             with knowledge.clone.lock:
                 content = knowledge.clone.show(upstream, path)
-            theirs = content.decode("utf-8", "replace") if content is not None else None
+            theirs = kb.as_text(content) if content is not None else None
+            theirs_state = (
+                "deleted" if content is None else "text" if theirs is not None else "not text"
+            )
         files.append(
             FileDetail(
                 path=path,
@@ -329,8 +353,14 @@ def _detail(knowledge: Knowledge, proposal: Proposal) -> ProposalDetail:
                 edited=view.edited,
                 left_out=view.left_out,
                 diff=unified_diff(path, view.before, view.after),
+                after_sha256=text_digest(view.after),
                 conflict=path in conflicts,
                 theirs=theirs,
+                theirs_state=theirs_state,
+                # Written against the version of main it conflicted with.
+                resolved=path in resolutions
+                and upstream is not None
+                and resolved_against == upstream,
             )
         )
     report = knowledge.preview(proposal) if views else None

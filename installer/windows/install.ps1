@@ -1,10 +1,14 @@
 # DataLab installer for Windows.
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 -Package <datalab .whl file or URL> [-Settings <lab settings file>]
-#       [-Constraints <constraints.txt>] [-Yes]
+#   powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 [-Settings <lab settings file>]
+#       [-Package <datalab .whl file or URL>] [-Requirements <requirements.txt>]
+#       [-Practice] [-NoGitHub] [-Yes]
 #
-# constraints.txt holds the exact tested dependency versions; it's found
-# automatically if it sits next to a local package file.
+# Without -Package, it uses the one datalab-<version>-py3-none-any.whl beside
+# this script (download both from the same release into one folder).
+# requirements.txt comes with each release: every dependency pinned by version
+# and hash, and the package by its checksum. It's found automatically next to
+# a local package file. Nothing is installed that it doesn't name.
 #
 # The people running this aren't expected to know Windows administration, so
 # every step says what is about to happen, why, and what to click.
@@ -17,16 +21,24 @@
 #   2. Starts Docker Desktop.
 #   3. Installs uv (a Python installer) for you, if it isn't there already.
 #   4. Installs DataLab, with its own Python, in your user account (no admin rights).
+#      Each version gets its own folder, so an update installs beside the one in use
+#      and the previous version is kept (docs/DISTRIBUTION.md).
 #   5. Downloads the pinned container images.
 #   6. Saves the lab's settings and asks for your U-M GPT key and database password,
 #      which go into Windows Credential Manager.
-#   7. Adds DataLab to the Start menu.
+#   7. Offers the GitHub sign-in for the lab's knowledge base and pipelines, then
+#      downloads both. Skipped for the practice profile (-Practice).
+#   8. Adds DataLab to the Start menu ("DataLab", or "DataLab (practice)").
 #
 # Everything after step 1 runs as you, without administrator rights.
 param(
     [string]$Package = "",
     [string]$Settings = "",
-    [string]$Constraints = "",
+    [string]$Requirements = "",
+    # The practice profile: synthetic data only, and no lab repos.
+    [switch]$Practice,
+    # Leave the GitHub sign-in for later (Settings > GitHub in DataLab).
+    [switch]$NoGitHub,
     # Answer yes to every question, including the restart (for IT, or testing).
     [switch]$Yes,
     # Windows starts the installer with this after the restart.
@@ -59,6 +71,8 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
 # The text of this script as it's running, for the administrator part (see
 # Invoke-AdminPart). Empty when the script wasn't started from its file.
 $ScriptText = $MyInvocation.MyCommand.ScriptContents
+# The installer's own folder, where the package is looked for without -Package.
+$ScriptFolder = $PSScriptRoot
 $UvVersion = "0.12.19"
 # Pinned downloads, checked (SHA-256 and publisher's signature) before they run.
 $WslVersion = "2.7.14"
@@ -160,10 +174,12 @@ function Test-CanUseDocker {
 # installer adds the account that runs it), even if it needs a new sign-in to
 # take effect. Matched by SID, so no domain controller is needed. $null if the
 # group can't be read (the administrator part then checks again).
+# Checked quietly, first whether the group is there at all (before Docker
+# Desktop is installed, it isn't), so expected cases never show up as errors.
 function Test-InDockerUsers($sid) {
-    try {
-        $members = Get-LocalGroupMember -Group $DockerUsers -ErrorAction Stop
-    } catch { return $null }
+    if (-not (Get-LocalGroup -Name $DockerUsers -ErrorAction SilentlyContinue)) { return $null }
+    $members = @(Get-LocalGroupMember -Group $DockerUsers -ErrorAction SilentlyContinue -ErrorVariable unreadable)
+    if ($unreadable) { return $null }
     return [bool]($members | Where-Object { $_.SID.Value -eq $sid })
 }
 
@@ -311,10 +327,14 @@ function Save-Download($url, $sha256, $publisher, $file) {
         throw "The download of $url didn't match its expected checksum, so it wasn't run."
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $file
-    if ($signature.Status -ne "Valid" -or (Get-Organisation $signature.SignerCertificate) -cne $publisher) {
+    $signedBy = Get-Organisation $signature.SignerCertificate
+    if ($signature.Status -ne "Valid" -or $signedBy -cne $publisher) {
         Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
         throw "The download of $url isn't signed by its publisher ($publisher), so it wasn't run."
     }
+    # For the log (audits): what was checked, and whose signature it has,
+    # as the certificate itself names it.
+    Say "Checked: SHA-256 and signature ($signedBy)"
 }
 
 # The organisation (O=) a certificate was issued to, exactly as written in it.
@@ -331,6 +351,38 @@ function Get-Organisation($certificate) {
 # the administrator part (Invoke-AdminPart).
 function Get-BytesHash([byte[]]$bytes) {
     return [BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes))
+}
+
+# Turns off QuickEdit for this console window only: otherwise a click in it
+# starts selecting text ("Select" in the title) and pauses the script until
+# Esc. It changes this window's mode through the Windows API, nothing saved
+# (not the person's console settings, nor the registry). The API call is
+# defined in memory: Add-Type would compile code through files in TEMP.
+function Disable-QuickEdit {
+    try {
+        $name = New-Object System.Reflection.AssemblyName("DataLabConsole")
+        $assembly = [System.Reflection.Emit.AssemblyBuilder]::DefineDynamicAssembly($name,
+            [System.Reflection.Emit.AssemblyBuilderAccess]::Run)
+        $type = $assembly.DefineDynamicModule("DataLabConsole").DefineType("DataLabConsole.Native", "Public, Class")
+        $calls = @(
+            @("GetStdHandle", [IntPtr], [Type[]]@([int])),
+            @("GetConsoleMode", [bool], [Type[]]@([IntPtr], [uint32].MakeByRefType())),
+            @("SetConsoleMode", [bool], [Type[]]@([IntPtr], [uint32])))
+        foreach ($call in $calls) {
+            $null = $type.DefinePInvokeMethod($call[0], "kernel32.dll",
+                [System.Reflection.MethodAttributes]"Public, Static, PinvokeImpl",
+                [System.Reflection.CallingConventions]::Standard, $call[1], $call[2],
+                [System.Runtime.InteropServices.CallingConvention]::Winapi,
+                [System.Runtime.InteropServices.CharSet]::Auto)
+        }
+        $native = $type.CreateType()
+        $console = $native::GetStdHandle(-10)  # the console's input
+        $mode = [uint32]0
+        if ($native::GetConsoleMode($console, [ref]$mode)) {
+            # ENABLE_QUICK_EDIT_MODE (0x40) off; ENABLE_EXTENDED_FLAGS (0x80) makes that apply.
+            $null = $native::SetConsoleMode($console, [uint32](($mode -band (-bnot 0x40)) -bor 0x80))
+        }
+    } catch { Write-Verbose "Couldn't turn off QuickEdit: $_" }
 }
 
 # ---------------------------------------------------------------------------
@@ -409,6 +461,7 @@ function Grant-ResultToPerson($folder, [string[]]$files) {
 
 if ($Prepare) {
     $Host.UI.RawUI.WindowTitle = "DataLab setup (administrator part)"
+    Disable-QuickEdit
     $result = @{ ok = $false; restart = $false; error = "" }
     $ready = $false
     $resultFile = Join-Path $WorkDir "result.json"
@@ -516,12 +569,22 @@ if ($Prepare) {
         # controller, which isn't reachable off the VPN.
         # Add-LocalGroupMember takes a SID only as text ("S-1-5-..."), not as a SecurityIdentifier.
         $sid = (New-Object System.Security.Principal.SecurityIdentifier($ForUserSid)).Value
-        try {
-            Add-LocalGroupMember -Group $DockerUsers -Member $sid
-            Good "Added you to the $DockerUsers group (it takes effect after the restart)."
-            $result.restart = $true
-        } catch [Microsoft.PowerShell.Commands.MemberExistsException] {
+        # Checked first, quietly, so the expected cases don't show in the log as errors.
+        if (-not (Get-LocalGroup -Name $DockerUsers -ErrorAction SilentlyContinue)) {
+            throw "Docker Desktop's '$DockerUsers' group isn't on this computer, so your account can't be added to it. Reinstall Docker Desktop, or ask IT."
+        }
+        $members = @(Get-LocalGroupMember -Group $DockerUsers -ErrorAction SilentlyContinue)
+        if ($members | Where-Object { $_.SID.Value -eq $sid }) {
             Good "You're already in the $DockerUsers group."
+        } else {
+            try {
+                Add-LocalGroupMember -Group $DockerUsers -Member $sid
+                Good "Added you to the $DockerUsers group (it takes effect after the restart)."
+                $result.restart = $true
+            } catch [Microsoft.PowerShell.Commands.MemberExistsException] {
+                # (The list above can come back short, e.g. with a member Windows can't name.)
+                Good "You're already in the $DockerUsers group."
+            }
         }
         $result.ok = $true
         Write-Host "`nAll done here. This window closes in a moment." -ForegroundColor Green
@@ -601,6 +664,35 @@ function Unregister-Resume {
     Remove-Item $ResumeShortcut -ErrorAction SilentlyContinue
 }
 
+# What of DataLab is running, in words, or "" if nothing: a DataLab process
+# (the side-by-side versions under $root, or an older installer's copy under
+# uv's tools folder), or something listening on DataLab's ports (8765 real,
+# 8766 practice).
+function Get-RunningDataLab($root) {
+    $found = @()
+    $places = @((Join-Path $root "versions"), (Join-Path $Env:APPDATA "uv\tools\datalab"))
+    # (The older installer's command, which starts that copy.)
+    $oldCommand = Join-Path $Env:USERPROFILE ".local\bin\datalab.exe"
+    foreach ($process in @(Get-Process -ErrorAction SilentlyContinue)) {
+        $path = $null
+        try { $path = $process.Path } catch { Write-Verbose "No path for process $($process.Id)" }
+        if (-not $path) { continue }
+        if ([string]::Equals($path, $oldCommand, [StringComparison]::OrdinalIgnoreCase)) { $found += "process $($process.Id)" }
+        foreach ($place in $places) {
+            if ($path.StartsWith($place + [System.IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+                $found += "process $($process.Id)"
+            }
+        }
+    }
+    try {
+        $listening = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+        foreach ($port in 8765, 8766) {
+            if ($listening | Where-Object { $_.Port -eq $port }) { $found += "something on port $port" }
+        }
+    } catch { Write-Verbose "Couldn't list the listening ports: $_" }
+    return (@($found | Select-Object -Unique) -join ", ")
+}
+
 # When Windows last started (in ticks, 0 if unknown): to tell whether it has
 # restarted since a restart was asked for.
 function Get-BootTime {
@@ -621,7 +713,8 @@ $saved = $null
 if (Test-Path $ResumeFile) { $saved = Get-Content $ResumeFile -Raw | ConvertFrom-Json }
 if ($Resume) {
     if (-not $saved) { Write-Host "There's no DataLab install waiting to continue."; exit 2 }
-    $Package = $saved.Package; $Settings = $saved.Settings; $Constraints = $saved.Constraints
+    $Package = $saved.Package; $Settings = $saved.Settings; $Requirements = $saved.Requirements
+    $Practice = [bool]$saved.Practice; $NoGitHub = [bool]$saved.NoGitHub
     Write-Host ""
     Write-Host "Welcome back! Let's finish setting up DataLab." -ForegroundColor Cyan
     Write-Host "This part shouldn't need administrator permission. If it does, it says why first."
@@ -631,23 +724,45 @@ if ($Resume) {
     Write-Host "It takes about 20-30 minutes, most of it downloading. It walks you through"
     Write-Host "each step and tells you whenever it needs you to do something."
 }
-if (-not $Package) { Write-Host "Pass the DataLab package: install.ps1 -Package <file or URL>"; exit 2 }
+if (-not $Package) {
+    # The package beside this script: download the installer and the package
+    # (and requirements.txt) from the same release into one folder.
+    $besideScript = @(Get-ChildItem -LiteralPath $ScriptFolder -File -Filter "datalab-*-py3-none-any.whl" -ErrorAction SilentlyContinue)
+    if ($besideScript.Count -eq 1) { $Package = $besideScript[0].FullName }
+    elseif ($besideScript.Count -eq 0) {
+        Write-Host "The DataLab package (datalab-<version>-py3-none-any.whl) isn't in the installer's folder,"
+        Write-Host "$ScriptFolder. Download it from the same release into that folder, or pass -Package <file>."
+        exit 2
+    } else {
+        Write-Host "There's more than one DataLab package in $ScriptFolder"
+        Write-Host "($(($besideScript | ForEach-Object Name) -join ', ')). Pass the one to install: -Package <file>."
+        exit 2
+    }
+}
 
 # Check the package before anything else, so a wrong path is found before
 # any administrator step or restart.
 $IsUrl = $Package -match '^[a-zA-Z][a-zA-Z0-9+.-]*://'
 if (-not $IsUrl) {
     # A bare file name ("datalab-....whl") has no parent folder of its own, so
-    # resolve it first: constraints.txt is looked for next to the real file.
+    # resolve it first: requirements.txt is looked for next to the real file.
     if (-not (Test-Path -LiteralPath $Package -PathType Leaf)) { Write-Host "Package file not found: $Package"; exit 2 }
     $Package = (Resolve-Path -LiteralPath $Package).ProviderPath
 }
-if (-not $Constraints -and -not $IsUrl) {
-    $Beside = Join-Path ([System.IO.Path]::GetDirectoryName($Package)) "constraints.txt"
-    if (Test-Path -LiteralPath $Beside) { $Constraints = $Beside }
+if (-not $Requirements -and -not $IsUrl) {
+    $Beside = Join-Path ([System.IO.Path]::GetDirectoryName($Package)) "requirements.txt"
+    if (Test-Path -LiteralPath $Beside) { $Requirements = $Beside }
 }
-if (-not $Constraints) { Write-Host "constraints.txt (the tested dependency versions) wasn't found. Pass -Constraints."; exit 2 }
-$Constraints = (Resolve-Path -LiteralPath $Constraints).ProviderPath
+if (-not $Requirements) { Write-Host "requirements.txt (every dependency, pinned by hash) wasn't found. Pass -Requirements."; exit 2 }
+$Requirements = (Resolve-Path -LiteralPath $Requirements).ProviderPath
+# The package's file name carries its version: datalab-<version>-py3-none-any.whl
+$FileName = [System.IO.Path]::GetFileName(($Package -split '\?')[0])
+if ($FileName -notmatch '^datalab-([0-9][A-Za-z0-9.+!]*)-py3-none-any\.whl$') {
+    Write-Host "The package must be a datalab-<version>-py3-none-any.whl file."; exit 2
+}
+$Version = $Matches[1]
+# (Not $Profile: PowerShell uses that name for its own profile script.)
+$DataLabProfile = if ($Practice) { "practice" } else { "real" }
 if ($Settings) {
     if (-not (Test-Path -LiteralPath $Settings -PathType Leaf)) { Write-Host "Settings file not found: $Settings"; exit 2 }
     $Settings = (Resolve-Path -LiteralPath $Settings).ProviderPath
@@ -675,7 +790,8 @@ if ($RestartBoot -ne 0) {
 
 function Save-Progress($prepared) {
     New-Item -ItemType Directory -Force $StateDir | Out-Null
-    @{ Package = $Package; Settings = $Settings; Constraints = $Constraints; Prepared = $prepared
+    @{ Package = $Package; Settings = $Settings; Requirements = $Requirements; Prepared = $prepared
+        Practice = [bool]$Practice; NoGitHub = [bool]$NoGitHub
         Restarts = $Restarts; RestartBoot = $RestartBoot } |
         ConvertTo-Json | Set-Content -Encoding UTF8 $ResumeFile
 }
@@ -832,7 +948,7 @@ function Stop-StillNoDocker {
     Stop-Install "Your account can't use Docker yet (see above)."
 }
 
-Step "Step 1 of 7: Getting Windows ready (WSL and Docker Desktop)"
+Step "Step 1 of 8: Getting Windows ready (WSL and Docker Desktop)"
 Say "DataLab runs its analysis in Docker, a sealed-off space on your computer."
 Say "Docker needs a Windows feature called WSL."
 $missing = @()
@@ -884,7 +1000,7 @@ if ($missing) {
 }
 Good "WSL and Docker Desktop are ready."
 
-Step "Step 2 of 7: Starting Docker Desktop"
+Step "Step 2 of 8: Starting Docker Desktop"
 if (-not (Test-DockerRunning)) {
     Say "Starting Docker Desktop. The first start can take a few minutes."
     Say "If Docker Desktop shows a welcome screen or asks you to sign in, you can"
@@ -910,7 +1026,11 @@ if (-not (Test-DockerRunning)) {
 }
 Good "Docker Desktop is running."
 
-Step "Step 3 of 7: Installing uv (the tool that installs DataLab)"
+Step "Step 3 of 8: Installing uv (the tool that installs DataLab)"
+# Nothing from the environment may steer uv or pip (another index, checks
+# turned off) or Python.
+@(Get-ChildItem Env: | Where-Object { $_.Name -match '^(UV|PIP)_' -or $_.Name -in 'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV' }) |
+    ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
 $LocalBin = Join-Path $Env:USERPROFILE ".local\bin"
 $Env:Path = "$LocalBin;$Env:Path"
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
@@ -918,51 +1038,160 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 uv --version
 
-Step "Step 4 of 7: Installing DataLab"
-# uv cuts a --constraints path at its first space ("failed to read from file
+Step "Step 4 of 8: Installing DataLab"
+# Beside the data folders: versions\<version>\, current, previous, bin\datalab.cmd.
+# The real and practice DataLabs share them.
+$Root = if ($Env:DATALAB_INSTALL_DIR) { $Env:DATALAB_INSTALL_DIR } else { Join-Path $StateDir "app" }
+# A DataLab that's running holds its files open, and an update of the
+# version it runs couldn't replace them; its data shouldn't change under it
+# either. So it's closed first, never stopped by the installer.
+while ($true) {
+    $running = Get-RunningDataLab $Root
+    if (-not $running) { break }
+    Write-Host ""
+    Note "DataLab is running ($running). Close it first: close its window, or press"
+    Note "Ctrl-C in it."
+    if ($Yes) { Stop-Install "DataLab is running, so it wasn't changed. Close it, then run the installer again." }
+    $answer = Read-Host "   Press Enter once it's closed (or type q to stop here)"
+    if ($answer -match '^q') { Say "OK. Nothing was changed; run the installer again when DataLab is closed."; exit 1 }
+}
+# uv cuts a path at its first space ("failed to read from file
 # C:\Users\me\OneDrive"), and on Michigan Medicine computers downloads usually
-# sit under "OneDrive - Michigan Medicine". So uv gets a copy under a plain
-# name, given relative to its folder. (The package path itself is fine.)
-New-Item -ItemType Directory -Force $StateDir | Out-Null
-Copy-Item -LiteralPath $Constraints (Join-Path $StateDir "constraints.txt") -Force
-Push-Location $StateDir
-try {
-    uv tool install --force --python 3.13 --constraints constraints.txt $Package
-} finally { Pop-Location }
-if ($LASTEXITCODE -ne 0) { Stop-Install "Installing DataLab didn't work (see the messages above)." }
-$DataLab = Join-Path (uv tool dir --bin) "datalab.exe"
+# sit under "OneDrive - Michigan Medicine". So uv gets the package and
+# requirements.txt under plain names, from their own folder.
+$Stage = Join-Path $StateDir "install"
+if (Test-Path -LiteralPath $Stage) { Remove-Tree $Stage }
+New-Item -ItemType Directory -Force $Stage | Out-Null
+if ($IsUrl) {
+    if ($Package -notmatch '^https://') { Stop-Install "Only https downloads: $Package" }
+    $ProgressPreference = "SilentlyContinue"
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    Invoke-WebRequest -UseBasicParsing -Uri $Package -OutFile (Join-Path $Stage $FileName)
+} else {
+    Copy-Item -LiteralPath $Package (Join-Path $Stage $FileName) -Force
+}
+Copy-Item -LiteralPath $Requirements (Join-Path $Stage "requirements.txt") -Force
+# The package must be the one requirements.txt names, by its checksum.
+$Sha256 = (Get-FileHash -LiteralPath (Join-Path $Stage $FileName) -Algorithm SHA256).Hash.ToLower()
+$Pinned = Get-Content -LiteralPath (Join-Path $Stage "requirements.txt") | Where-Object { $_ -ceq "./$FileName --hash=sha256:$Sha256" }
+if (-not $Pinned) {
+    Stop-Install ("requirements.txt doesn't name this package with this checksum. Use the two " +
+        "files from the same DataLab release.")
+}
+Say "Checked: SHA-256 of $FileName (as requirements.txt names it)"
+$Target = Join-Path $Root "versions\$Version"
+$Complete = Join-Path $Target ".complete"
+if ((Test-Path -LiteralPath $Complete) -and ((Get-Content -LiteralPath $Complete -Raw) -match "`"wheel_sha256`": `"$Sha256`"")) {
+    Good "DataLab $Version is installed already."
+} else {
+    # A folder without .complete (or with another package) is replaced.
+    if (Test-Path -LiteralPath $Target) { Remove-Tree $Target }
+    if (Test-Path -LiteralPath $Target) { Stop-Install "The folder $Target couldn't be replaced. Close DataLab, then run the installer again." }
+    New-Item -ItemType Directory -Force -Path (Join-Path $Root "versions") | Out-Null
+    uv venv -q --no-config --python 3.13 $Target
+    if ($LASTEXITCODE -ne 0) { Stop-Install "Making DataLab's Python environment didn't work (see the messages above)." }
+    # Every file checked against requirements.txt's hashes, only wheels, and only from PyPI.
+    Push-Location $Stage
+    try {
+        uv pip install -q --no-config --require-hashes --only-binary :all: `
+            --default-index https://pypi.org/simple `
+            --python (Join-Path $Target "Scripts\python.exe") -r requirements.txt
+    } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Tree $Target
+        Stop-Install "Installing DataLab didn't work (see the messages above)."
+    }
+    $Said = & (Join-Path $Target "Scripts\datalab.exe") --version
+    if ($Said -ne "datalab $Version") {
+        Remove-Tree $Target
+        Stop-Install "The installed DataLab says '$Said', not $Version."
+    }
+    $Stamp = Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"
+    Set-Content -LiteralPath $Complete -Encoding ASCII `
+        -Value "{`"version`": `"$Version`", `"wheel_sha256`": `"$Sha256`", `"installed_at`": `"$Stamp`"}"
+}
+Remove-Tree $Stage
+# The Start menu entry runs bin\datalab.cmd, which opens whichever version
+# `current` names: an update switches that, and keeps `previous`.
+$Bin = Join-Path $Root "bin"
+New-Item -ItemType Directory -Force -Path $Bin | Out-Null
+$Shim = @'
+@echo off
+rem Runs the DataLab version the launcher opens (named in ..\current).
+setlocal
+set /p DATALAB_VERSION=<"%~dp0..\current"
+"%~dp0..\versions\%DATALAB_VERSION%\Scripts\datalab.exe" %*
+exit /b %ERRORLEVEL%
+'@
+Set-Content -LiteralPath (Join-Path $Bin "datalab.cmd") -Value $Shim -Encoding ASCII
+$CurrentFile = Join-Path $Root "current"
+$Old = if (Test-Path -LiteralPath $CurrentFile) { (Get-Content -LiteralPath $CurrentFile -TotalCount 1).Trim() } else { "" }
+if ($Old -and $Old -ne $Version) { Set-Content -LiteralPath (Join-Path $Root "previous") -Value $Old -Encoding ASCII }
+Set-Content -LiteralPath $CurrentFile -Value $Version -Encoding ASCII
+$DataLab = Join-Path $Bin "datalab.cmd"
 & $DataLab --version
+# An earlier installer's copy (uv tool install): the Start menu no longer
+# opens it, and a second "datalab" command would only confuse. DataLab isn't
+# running (checked above), so its files can go.
+if (Test-Path -LiteralPath (Join-Path $Env:APPDATA "uv\tools\datalab")) {
+    # (Invoke-Quiet: uv's messages on its error output would stop this script.)
+    $code = Invoke-Quiet (Get-Command uv).Source @("tool", "uninstall", "datalab") 120
+    if ($code -eq 0) { Say "(Removed the copy of DataLab an earlier installer made.)" }
+}
 
-Step "Step 5 of 7: Downloading DataLab's containers (a few GB; this takes a while)"
-& $DataLab pull-images
+Step "Step 5 of 8: Downloading DataLab's containers (a few GB; this takes a while)"
+& $DataLab --profile $DataLabProfile pull-images
 if ($LASTEXITCODE -ne 0) {
     Stop-Install ("Downloading the containers didn't work (the messages above say why). If you're " +
         "offline, reconnect, then run the installer again.")
 }
 
-Step "Step 6 of 7: Your keys"
+Step "Step 6 of 8: Your keys"
 Say "Next, DataLab asks for your U-M GPT API key (and the database password, if"
 Say "your lab uses one). Nothing shows on screen while you type or paste; that's"
 Say "normal. Press Enter when done. They're kept in Windows Credential Manager."
-if ($Settings) { & $DataLab setup --settings $Settings } else { & $DataLab setup }
+if ($Settings) { & $DataLab --profile $DataLabProfile setup --settings $Settings } else { & $DataLab --profile $DataLabProfile setup }
 
-Step "Step 7 of 7: Adding DataLab to the Start menu"
+Step "Step 7 of 8: The lab's knowledge base and pipelines"
+if ($Practice) {
+    Say "Skipped: practice DataLab doesn't use the lab's repositories."
+} elseif ($NoGitHub -or $Yes) {
+    # (-Yes runs unattended; the sign-in needs the person at github.com.)
+    Say "Skipped. Sign in later in DataLab, under Settings > GitHub."
+} elseif (Ask "Sign in to GitHub now, to download them?") {
+    Say "DataLab shows a code: open the page it names, enter the code, and approve."
+    # As the person, never elevated: the sign-in goes in their own Credential Manager.
+    # 2: not set up here (the lab's settings don't name the repos); it says so.
+    # 1: not signed in, or no access to a repo; it says whom to ask.
+    & $DataLab --profile $DataLabProfile github sign-in
+    if ($LASTEXITCODE -ne 2) {
+        & $DataLab --profile $DataLabProfile repos sync
+        if ($LASTEXITCODE -ne 0) { Note "You can sync again later in DataLab (Knowledge and Pipelines)." }
+    }
+} else {
+    Say "Skipped. Sign in later in DataLab, under Settings > GitHub."
+}
+
+Step "Step 8 of 8: Adding DataLab to the Start menu"
 # DataLab runs in a PowerShell window, so it's easy to see it's running and to
-# quit (close the window or press Ctrl-C).
+# quit (close the window or press Ctrl-C). It opens the version `current`
+# names, which is what an update switches. Real and practice each have their
+# own entry, so neither replaces the other.
 $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
-$Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "DataLab.lnk"))
+$LinkName = if ($Practice) { "DataLab (practice)" } else { "DataLab" }
+$Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "$LinkName.lnk"))
 $Shortcut.TargetPath = $WindowsPowerShell
-$Shortcut.Arguments = "-NoExit -Command `"& '$DataLab' serve`""
-$Shortcut.Description = "IHS DataLab"
+$Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$($DataLab -replace "'", "''")' --profile $DataLabProfile serve`""
+$Shortcut.Description = if ($Practice) { "IHS DataLab (practice: synthetic data only)" } else { "IHS DataLab" }
 $Shortcut.Save()
-Good "Added DataLab to the Start menu."
+Good "Added $LinkName to the Start menu."
 Remove-Item $ResumeFile -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "All done! DataLab is installed." -ForegroundColor Green
-Say "To open it: Start menu > type DataLab > press Enter. It opens in your browser."
+Say "To open it: Start menu > type $LinkName > press Enter. It opens in your browser."
 Say "A small window stays open while DataLab runs; close it to quit DataLab."
-Say "(Or run: `"$DataLab`" serve)"
+Say "(Or run: `"$DataLab`" --profile $DataLabProfile serve)"
 } finally {
     $SetupLock.Dispose()
 }

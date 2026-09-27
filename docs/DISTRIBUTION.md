@@ -1,9 +1,11 @@
 # Installing, updating, and running DataLab
 
 Status: **draft** for v1. This is a proposal under discussion. Implemented so
-far: the installers' first version, and the data side of updating (database
-backups, `datalab rollback`, and recovering from an interrupted update; see
-"How updating keeps the database safe" below).
+far: the installers, with versions side by side and the GitHub steps; the
+update check, the **Update available** pill and the updater (Mac tried;
+Windows covered by unit tests only, see "Windows specifics"); and the data
+side of updating (database backups, `datalab rollback`, and recovering from
+an interrupted update; see "How updating keeps the database safe" below).
 
 Goal: a colleague with no technical background can install DataLab in about
 15 minutes, and after that never needs a terminal.
@@ -13,7 +15,7 @@ Goal: a colleague with no technical background can install DataLab in about
 | Piece | What it is | Where it comes from |
 |---|---|---|
 | Docker Desktop | Runs the sealed agent containers | Docker, installed or checked by the installer |
-| DataLab app | The host program: web UI, data service, and orchestration | A GitHub release, with exact pinned versions |
+| DataLab app | The host program: web UI, data service, and orchestration. One folder per version, side by side | A GitHub release, with exact pinned versions |
 | Agent image | Codex, R, Python, and the curated toolkit | Pulled pre-built from the org's container registry, pinned by digest |
 | Gateway image | The small network allowlist and key-injecting gateway | Same registry, pinned by digest |
 | Git | Syncs the lab repos | Checked and installed by the installer if missing |
@@ -30,21 +32,31 @@ tested.
 The user pastes **one command** into Terminal on Mac or PowerShell on Windows.
 It comes from the install page in the app repo. The installer then:
 
-1. **Signs in to GitHub** in the browser, using the "enter this code at
-   github.com/login/device" flow. The sign-in is for the private
-   knowledge-base and pipelines repos; the app and images are public. If the
-   user isn't yet in the `datalab-users` team, the installer says whom to ask
-   and finishes everything else.
-2. **Checks Docker Desktop.** If it's missing, the installer downloads and
+1. **Checks Docker Desktop.** If it's missing, the installer downloads and
    installs it. This asks for an administrator password on Mac, and on
    Windows it enables WSL2 and may need one restart.
-3. **Installs DataLab** from the latest release into a user-level folder,
+2. **Installs DataLab** from the latest release into a user-level folder,
    using `uv`. `uv` brings its own Python, so there is no Python or Node setup
-   to do, and no admin rights are needed for this step. The installer also
+   to do, and no admin rights are needed for this step. Each version gets a
+   folder of its own (see "Where the app lives" below), so an update never
+   replaces the version in use. The installer also
    makes sure **Git** is present, which knowledge and pipeline syncing need.
    On Mac, Git comes with Apple's command-line tools. On Windows, the
    installer installs Git for Windows.
-4. **Pulls the pinned images** and clones the two lab repos.
+3. **Pulls the pinned images**, then asks for the keys (`datalab setup`).
+4. **Offers the GitHub sign-in** and clones the two lab repos, never as an
+   administrator. The sign-in uses the "enter this code at
+   github.com/login/device" flow (`datalab github sign-in`, the same code as
+   Settings → GitHub), and is for the private knowledge-base and pipelines
+   repos only; the app and images are public. Then `datalab repos sync`
+   clones both. If GitHub says the account can't open a repo, it says whom
+   to ask (`[repos] access_contact`) to be added to the `datalab-users` team,
+   and the installer finishes everything else. It's skipped for the practice
+   profile, when the lab's settings don't name the repos, or with
+   `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
+   Settings. The installer refuses to run as root (`sudo`), and so does
+   `datalab github sign-in`: the sign-in belongs in the person's own
+   keychain.
 5. **Adds a DataLab launcher**: an app in Applications on Mac, and a Start
    menu entry on Windows. The first launch opens **Connections**, which
    asks for the U-M GPT key and Oracle password and saves them to the
@@ -58,9 +70,11 @@ containers.
 ## Updating
 
 - On startup, DataLab checks GitHub for a newer release. If there is one, a
-  pill says **Update available**, with the release notes.
-- **Update and restart** installs the new version alongside the current one,
-  pulls the new images, restarts, and runs the Safety check.
+  pill says **Update available**; it opens Settings → **Updates**, which has
+  the release notes and **Install update**.
+- **Install update** asks the person to confirm, then installs the new
+  version alongside the current one, pulls the new images, restarts, and
+  asks the person to run the Safety check.
 - If anything fails, DataLab stays on the previous version, which is kept.
 - **Updates never touch your work files.** Conversations, workspaces, runs,
   and repos are left alone. The one thing an update may change is DataLab's
@@ -80,10 +94,209 @@ This replaces the prototype's approach of fast-forwarding a git checkout,
 which needed seven safety gates. There is no checkout on users' machines to
 protect.
 
+### Checking for a new version
+
+`datalab/releases.py`. DataLab's host process asks the GitHub Releases API of
+the app repo (`[updates] repository`, `SripadaLab-UM/ihs-datalab`) once at
+start, in the background, if `[updates] check_on_start` is on (the default),
+and again when the person presses **Check now** (at most once a minute). The
+browser never makes this call, and containers can't: the check runs only in
+the host.
+
+- **No sign-in.** The app repo is public, so releases are read without a
+  token; the GitHub sign-in (for the lab repos) is never sent. While the repo
+  was private GitHub answered 404, which shows as a quiet "can't check for
+  updates" with whom to ask (`[repos] access_contact`); nothing else changes.
+- **Offline, rate-limited, or GitHub down** are states, not errors: the
+  Updates section says so in a sentence, and no pill shows. When GitHub asks
+  DataLab to wait (a 403 with no requests left, or a 429), it doesn't ask
+  again until the time GitHub gave.
+
+**Which releases are offered.**
+
+- Never a draft. The tag must be a PEP 440 version newer than the installed
+  one, compared as versions (`v0.1.0-alpha.3` is 0.1.0a3, newer than 0.1.0a2
+  and older than 0.1.0).
+- **Channels** (`[updates] channel`): `stable` offers full releases only;
+  `pre-release` offers pre-releases too; `auto` (the default) offers
+  pre-releases while the installed DataLab is itself a pre-release, and only
+  full releases after that. A release counts as a pre-release if GitHub marks
+  it so or its version is one.
+- Only a release with everything an update needs: the package for exactly
+  that version (`datalab-<version>-py3-none-any.whl`), `requirements.txt`,
+  `images.json`, `SHA256SUMS` and `SHA256SUMS.sig`. GitHub must give its own
+  checksum (`digest`) of every one of them; a release where it doesn't is
+  skipped, never checked less. The check reads `SHA256SUMS` and its
+  signature, each checked against GitHub's checksum, verifies the signature
+  (see "Release signing"), and `SHA256SUMS` must list the other three, each
+  agreeing with GitHub's checksum. A release that doesn't pass is skipped (the
+  log says why, or Updates when it's the newest) and the newest of the rest
+  is offered.
+- **Nothing at all while updates aren't set up**: until the lab's public key
+  is pinned in the package (`release_keys.py` holds a placeholder), DataLab
+  trusts no release, doesn't ask GitHub, and Updates says so. New versions
+  are then installed with the installer.
+- The release notes are shown as text, never as HTML.
+
+### Release signing
+
+A release's `SHA256SUMS` is signed with the lab's **release key** (Ed25519),
+in the release workflow, as `SHA256SUMS.sig` (`datalab/signing.py`,
+`scripts/sign-release.py`). The signing is a job of its own (`sign`), the only
+one in the "release" environment: on a fresh runner, it gets the release's
+files from the build job, checks them against `SHA256SUMS`, installs only
+the tag's locked Python dependencies, signs, and hands back only the
+signature. It never runs npm or the build, whose dependencies' install
+scripts therefore never see the key (a CI test keeps it that way). Each DataLab trusts only the public keys pinned in
+its own package (`datalab/release_keys.py`), and refuses a release with a
+missing or bad signature. Since `SHA256SUMS` names every other file by its
+checksum, including `requirements.txt` (every dependency by hash) and
+`images.json` (every image by digest), the signature covers everything an
+update installs. The package's name in `SHA256SUMS` carries its version,
+which must be the tag's, so an old signed release can't be passed off as a
+newer one.
+
+**Changing keys.** The pinned keys are a list, and any of them will do. To
+move to a new key, release a version that pins both the current and the new
+key (signed with the current one, so every installed DataLab accepts it);
+the release after that can be signed with the new key. The signing script
+refuses a key the package being released doesn't pin, so a release is never
+signed with a key its own version won't accept next time.
+
+**What this protects against.** Someone who can change the app repo's
+releases but doesn't hold the signing key: a GitHub token or account that can
+upload or replace release assets, or create a release; a release file changed
+on GitHub's storage or on the way; an index serving different dependency
+files (their hashes are signed, and only PyPI is used). The key lives only in
+the "release" environment, behind its required reviewers and limited to `v*`
+tags, so a workflow run on any other branch or tag can't use it.
+
+**What it doesn't.** Code merged into `main` and released the normal way;
+the build's own dependencies (npm and Python packages, the build tools and
+the GitHub Actions used): the package is built with them, and whatever they
+put in it is signed with everything else;
+anyone who can approve a run of the release environment, or steal the key;
+GitHub withholding new releases (an update that never comes looks like none
+being out); the first install, which trusts whatever installer and package
+the person downloaded (the installer checks the package against
+`requirements.txt`, but nothing checks the pair against the key); and uv and
+the Python it downloads, which DataLab trusts as they are.
+
+**Setting up release signing** (the maintainer, once; DataLab never makes
+the key):
+
+1. Make the key on your own computer:
+   `uv run --project backend python scripts/sign-release.py --new-key`. It
+   prints a private and a public key. Keep the private key only in the next
+   step (a password manager copy is fine); never commit or paste it anywhere
+   else.
+2. In the app repo's Settings → Environments, create **release**, add
+   **required reviewers** (the maintainers), restrict its **deployment
+   branches and tags** to tags matching `v*`, and add the private key as the
+   environment secret `RELEASE_SIGNING_KEY`.
+3. In Settings → General → Releases, turn on **immutable releases**, so a
+   published release's files can't be replaced.
+4. In Settings → Rules, add a **tag ruleset** for `v*`: only maintainers may
+   create these tags, and they can't be moved (updated) or deleted.
+5. Replace the placeholder in `backend/src/datalab/release_keys.py` with the
+   public key, and release. Versions from then on check updates; earlier ones
+   (with the placeholder) never offer one, so people on them install the next
+   version with the installer, once.
+
+Until step 5, the release workflow stops at signing, so no unsigned release
+is published. A release whose signing fails (or is never approved) still
+leaves its agent image pushed to the container registry, since the image is
+built first. That's harmless: DataLab runs images only by the digests in a
+signed `images.json`, and a failed release publishes none.
+
+### How an update is installed
+
+`datalab/updater.py`, only after the person confirms, and only when nothing
+is working (no agent turn, query, workflow run, pipeline test, or request
+that changes something, such as an export or a sync, going), and the other
+profile's DataLab isn't open:
+
+1. **Download and check.** The package, `requirements.txt` and
+   `images.json` go to `<app>/downloads/<version>/`, each refused unless it
+   matches the signed `SHA256SUMS`. `requirements.txt` must pin every
+   dependency as `name==version` with hashes, name the package once, by its
+   checksum, and hold nothing else (no index, no URL, no `-e`). `images.json`
+   must pin the agent, gateway and proxy images by digest, and name exactly
+   the images the new package runs (its `release.json` and `containers.py`).
+   Nothing else has changed yet.
+2. **Close the gate, stop conversations, then back up.** From here on
+   DataLab refuses (409) every request that could start or change something
+   (`update_gate.py`), and every page shows a banner; it checks once more
+   that nothing began during the download. Then `updates.begin`: marker
+   "started", then "backed-up" (see "The update marker" below).
+3. **Install beside the old version**: `uv venv` and
+   `uv pip install --no-config --require-hashes --only-binary :all:
+   --default-index https://pypi.org/simple -r requirements.txt` into
+   `<app>/versions/<version>/`, with no `UV_*`, `PIP_*` or `PYTHONPATH` from
+   the environment and no uv config files; check the new `datalab --version`,
+   then the new version pulls its own pinned images. Marker "installed".
+   `.complete` records the package's checksum, so a folder is reused only
+   for exactly the same package.
+4. **Switch the launcher**: `<app>/current` now names the new version and
+   `<app>/previous` the old one. Marker "switched". Versions older than
+   those two are then removed (program files only, never data).
+5. **Restart**, once what began before the gate closed has finished (it
+   waits up to a minute; otherwise it asks the person to quit and reopen,
+   with the gate still closed). A small helper, run by the old version's
+   own Python in isolated mode (`python -I`, from the install folder), waits
+   for this DataLab to quit, opens the new one as the launcher does (a
+   Terminal window on Mac, PowerShell on Windows), and waits for it to
+   finish the update. If the new version doesn't start, it puts `current`
+   back and opens the old version, whose startup recovery sorts out the
+   marker. It looks once more before going back, and doesn't if the update
+   finished after all or something holds the data folder. A new version that
+   is still starting (a long migration) is never interrupted.
+
+If step 3 or 4 fails, the launcher is put back, what the step installed is
+removed, the marker cleared ("abandoned") and the gate opened; the backup
+stays. The running
+version's folder is never touched, and a version folder only counts once it
+has `.complete` (written last), so a cut-off install is redone next time.
+
+**Going back.** The previous version stays installed.
+`datalab versions` lists the installed versions, and
+`datalab versions --use <version>` points the launcher at one (not while an
+update's marker is there: opening DataLab sorts that out first). If the newer
+version had changed the database, the older one says so at start; then
+`datalab rollback` (run with the older version) restores the update's backup.
+
+### Where the app lives
+
+Beside the data folders, in `~/Library/Application Support/DataLab/app` on
+Mac and `%LOCALAPPDATA%\DataLab\app` on Windows (`DATALAB_INSTALL_DIR` for
+tests):
+
+```
+versions/<version>/   one Python environment per version; .complete when whole
+current               the version the launcher opens
+previous              the one it opened before the last switch
+bin/datalab           the launcher's command: runs `current` (datalab.cmd on Windows)
+downloads/<version>/  a release's files while it's being installed
+```
+
+The launcher (DataLab.app, the Start menu entry) runs `bin/datalab serve`,
+so switching `current` is all an update changes in it. If the version
+`current` names can't run, the Mac `bin/datalab` falls back to `previous`
+and says so; by hand, `versions/<old>/bin/datalab versions --use <old>`
+(`Scripts\datalab.exe` on Windows) points it back.
+
+**The real and practice DataLabs share all of this**: the versions, `current`
+and `previous`. An update switches both, so it refuses while the other
+profile's DataLab is open. Each has its own launcher on Mac, "DataLab" and
+"DataLab (practice)", so installing one never replaces the other's. An installer from
+before this layout used `uv tool install`; that copy can't update itself
+(Updates says so), and the new installer replaces it.
+
 ### How updating keeps the database safe
 
-This part is built (milestone 7); the updater that calls it, the **Update
-available** pill, and the Storage view come later.
+This part is built (milestone 7), and Settings shows it (**Updates**: the
+version, the check for a new one, an update in progress, what the startup
+recovery did, and the backups). The updater above calls it.
 
 **Backups.** Before any migration runs on a database that has data, and
 before an update switches versions, DataLab backs up `datalab.sqlite`:
@@ -130,8 +343,9 @@ newest backup this version can read.
   rollback doesn't happen. Only values in columns the older layout lacks stay
   behind, in the "restore" backup, and they are listed as dropped.
 - It backs up the database it replaces (reason "restore"), so a rollback can
-  itself be undone. These backups are kept indefinitely; the Storage view
-  (still to come) will show them and let the person delete them.
+  itself be undone. These backups are kept indefinitely; Settings →
+  Storage shows them and deletes one only after the person confirms that
+  it may hold the only copy of what the rollback dropped.
 - Upgrading again after a rollback puts each query back under its owner: a
   migration that adds a column the rollback couldn't keep derives it again
   where it can (0006 reads a query's origin from its owner id).
@@ -218,11 +432,23 @@ named folders set up in Settings:
   Dropbox isn't installed, the option says so.
 
 **Nothing is deleted automatically.** Settings has a **Storage** view that
-shows disk use per conversation and per run, and offers one-click cleanup of
-old ones. This matches the promise "nothing is deleted unless you delete it".
-The SQL Playground's results (`<data_dir>/playground/<pg_id>/results/`, one
-CSV per query, up to the extraction cap each) are never cleaned up either,
-so the Storage view should show them too, with a way to remove old ones.
+shows disk use: the database, each conversation (workspace, checkpoints,
+query results), the SQL Playground's results
+(`<data_dir>/playground/<pg_id>/results/`, one CSV per query), each workflow
+run's folder, the backups, exports and logs. This matches the promise
+"nothing is deleted unless you delete it". The person can remove, one at a
+time and each confirmed (`datalab/storage.py`):
+
+- a Playground result, unless its query is running (the query stays in the
+  history);
+- a finished run's files, unless a Replay of it is going. Its record stays,
+  in the database and as `record.json`; the run can't be replayed after;
+- a backup, except one an update in progress relies on. A rollback's backup
+  needs an extra confirmation.
+
+Never the database, the audit log, exports, or anything else; items are
+named by id, never by path, and links are never followed. Conversations are
+deleted from the Workspace.
 
 ## Uninstalling
 
@@ -331,13 +557,67 @@ Windows specifics).
   - Before starting Docker Desktop, it moves aside socket files an earlier
     Docker left behind, and stops a leftover Docker VM: either stops Docker
     Desktop from starting.
-  - uv cuts a `--constraints` path at its first space, and downloads on these
-    machines usually sit under `OneDrive - Michigan Medicine`, so the installer
-    hands uv a copy of `constraints.txt` under a plain name.
+  - uv cuts a path at its first space, and downloads on these machines
+    usually sit under `OneDrive - Michigan Medicine`, so the installer hands
+    uv copies of the package and `requirements.txt` under plain names, from
+    their own folder.
+  - The person's part installs like the Mac installer (see "Where the app
+    lives"): each version in `%LOCALAPPDATA%\DataLab\app\versions\<version>`,
+    with `uv pip install --no-config --require-hashes --only-binary :all:
+    --default-index https://pypi.org/simple -r requirements.txt`, no `UV_*`,
+    `PIP_*` or `PYTHONPATH` from the environment, and the package checked
+    against its line in `requirements.txt` first (the log says "Checked:
+    SHA-256 of ..."). The Start menu entry ("DataLab", or "DataLab
+    (practice)" with `-Practice`) runs `bin\datalab.cmd`, which opens the
+    version `current` names. A copy an older installer made with
+    `uv tool install` is removed once the new one is in place.
+  - Without `-Package`, the installer uses the one
+    `datalab-<version>-py3-none-any.whl` in its own folder, so the command in
+    the README works as written from the folder the release's files were
+    downloaded to.
+  - Before installing (step 4) it checks that DataLab isn't running: a
+    DataLab process (from the installed versions or an older installer's
+    copy) or something listening on 8765 or 8766. If one is, it asks the
+    person to close it and waits; with `-Yes` it stops and says so. It never
+    stops DataLab itself. (Re-running an older installer while DataLab ran
+    failed with "Access is denied" removing uv's copy.)
+  - After the keys, it offers the GitHub sign-in and syncs the lab repos
+    (step 7), as the person, never elevated; skipped with `-Practice`,
+    `-NoGitHub` or `-Yes`. `-Practice` and `-NoGitHub` are kept across the
+    restart.
+  - Each download the administrator part checks is logged as
+    "Checked: SHA-256 and signature (<organisation>)", with the organisation
+    read from the signing certificate, for audits.
+  - The administrator window turns QuickEdit off for itself (through the
+    console API, defined in memory, not `Add-Type`): a click in it otherwise
+    selects text and pauses it until Esc. The person's console settings and
+    the registry aren't changed.
+  - The `docker-users` checks look first (the group, then its members,
+    quietly), so the expected cases (no group yet, already a member) don't
+    show up in logs as errors.
+  - `uninstall.ps1` removes every installed version and both Start menu
+    entries, and ends by saying what it leaves installed (Docker Desktop,
+    WSL and its Windows features, uv, `docker-users` membership) and how to
+    remove each.
 - Credentials go in Windows Credential Manager, and paths use
   `%LOCALAPPDATA%`.
+- **Updating on Windows is UNTESTED on a real machine.** It follows the
+  same steps as on Mac, with the Windows paths (`Scripts\datalab.exe`,
+  `bin\datalab.cmd`), the helper started detached, the new version opened in
+  a new PowerShell window, and a process check through the Windows API; unit
+  tests cover the paths and commands it builds.
 - Windows must be tested on a real managed machine before it's promised to
-  colleagues.
+  colleagues. The installer's first version was re-tested on one: a Michigan
+  Medicine Windows 11 Enterprise (26100) laptop with CrowdStrike, Defender
+  and CyberArk EPM, PowerShell in FullLanguage mode, no AppLocker, and a
+  user profile owned by SYSTEM.
+- **Testing notes.** Start the installer from a normal PowerShell window, or
+  through Task Scheduler. Not from an app packaged as MSIX (the Claude
+  desktop app is one): Windows redirects the AppData writes of anything such
+  an app starts into the app's own package folder, so the installer's state,
+  DataLab's versions and the Start menu entry would land where a normal run
+  never finds them. On the re-test machine the installer was started as a
+  one-off scheduled task for the person's account.
 
 ## Connectivity
 
@@ -355,15 +635,24 @@ Windows specifics).
   - build and push the agent image (the gateway and research proxy are
     upstream images, pinned by digest in the code);
   - publish a release that lists the exact image digests (also in
-    `images.json`), with the installers and a `SHA256SUMS` file.
+    `images.json`), with the installers, `requirements.txt` (every
+    dependency by hash, then the package by its checksum), a `SHA256SUMS`
+    file and its signature, `SHA256SUMS.sig`, made in the protected
+    "release" environment (see "Release signing"). The update check offers
+    only releases with all of these (see "Which releases are offered"); a
+    pre-release is tagged `v0.1.0-alpha.3` and marked so.
 - Not automated yet: signing the Windows scripts and anything macOS runs
   directly (they need the lab's signing identities), and the Windows test on a
   real managed machine. `release.yml` marks each as a TODO.
 - Everything is pinned: Python dependencies (`uv.lock`), npm
   (`package-lock.json`), base images, and the Codex CLI version.
 - **Diagnostics instead of bug-report uploads.** "Copy diagnostics" in
-  Settings produces a metadata-only report: versions, Safety check results,
-  and recent errors without content. The user pastes it into an email or a
+  Settings produces a metadata-only report (`datalab/diagnostics.py`):
+  versions, OS and Docker, the profile, data-folder paths with the home
+  folder as `~`, whether keys are saved (never the keys, the database server
+  or account), Safety check results by check id, the database layout and
+  update state, failure counts, and recent problems as DataLab's own message
+  templates without their values. The user pastes it into an email or a
   GitHub issue. The prototype's feedback flow could zip query results and
   upload them to Dropbox; nothing like that exists in v1.
 

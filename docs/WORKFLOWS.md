@@ -2,7 +2,8 @@
 
 Status: **draft** for v1. The runner, run records, Run again, Replay and
 delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core)),
-and so is the Workflows tab, read-only for now; the Pipelines tab is not yet.
+and so are the Workflows tab, read-only for now, and the Pipelines tab
+([As built](#as-built-pipelines)).
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -113,7 +114,17 @@ objects first, then runs the pipeline.
 ### Step types
 
 - **`sql`**: a read-only query through DataLab's data service. The full result
-  is saved as a CSV.
+  is saved as a CSV. Dates and times are written `YYYY-MM-DD HH:MM:SS`, which
+  R's `as.POSIXct` reads, and a DATE column whose every value is at midnight
+  as plain dates (`YYYY-MM-DD`), as R itself writes one. A TIMESTAMP keeps its
+  time; one WITH TIME ZONE is written as its local time, without the offset
+  (python-oracledb doesn't return it). So values in different offsets can't
+  be compared or subtracted in the file. Select `SYS_EXTRACT_UTC(col)` for
+  the instant in UTC, or `TO_CHAR(col, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')` to
+  keep the offset as text.
+  RAW is written as upper-case hex, as `RAWTOHEX` gives it. A hex key made of
+  digits and one `E` (`12E4`) looks like a number to Excel, which changes it
+  when the file is opened there: read keys as text.
 - **`r`**: a short inline R script.
 - **`pipeline`**: runs a pipeline from `ihsDataR`.
 - **`qc`**: built-in checks, which run as DataLab's own code: row counts,
@@ -193,7 +204,8 @@ Each bespoke request, such as SensorKit preprocessing, follows the same path:
 
 Before v1 ships, the 8 default workflows and `daily_metrics_2025` are run in
 both the prototype and v1 on the same inputs, and their outputs must match.
-This is a one-off validation, not a user-facing feature.
+This is a one-off validation, not a user-facing feature. The harness is in
+`scripts/parity/` and the results are in `docs/acceptance/2026-09-27-parity.md`.
 
 ## Carried over from the prototype
 
@@ -218,14 +230,30 @@ The backend is in `backend/src/datalab/workflows/`, with its routes under
 `/api/workflows`. The design and its evidence are in the runner spike
 (`spikes/2026-09-27-workflow-runner/README.md`).
 
-**Where files come from.** For now, a folder: `[workflows] folder` in
-`settings.toml`, or `<data folder>/workflows-local/`. It is laid out like
-`ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds the YAML files
-directly. Milestone 5 swaps in the synced repo.
+**Where files come from.** The synced `ihs-pipelines` clone
+(`<data folder>/repos/ihs-pipelines`) when `[repos] pipelines` is set and
+it has been synced; `[workflows] folder` in `settings.toml` overrides it,
+and otherwise `<data folder>/workflows-local/` (`workflows_folder` in
+workflows/source.py). Until the clone's first sync, files come from
+`workflows-local`, and `GET /api/workflows/status` says so. The folder is
+laid out like `ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds
+the YAML files directly.
+
+**Each run is pinned.** When a run starts, its workflow files and the
+package are copied into its run folder (`source/`), and the run reads only
+that copy. From the clone, the copy is GitHub's `main` as last synced,
+taken under the clone's lock, so a Sync or Save & share during the run
+can't give it a package from another commit; the run records that commit.
+From another folder, the copy is the run's own workflow file and the
+package, within the package's limits (5000 files, 50 MB): a larger package
+isn't copied, and only pipeline steps are refused, saying why.
 
 **What the file check adds to the example above:**
 
 - `schema_version: 1` (optional; other versions are refused).
+- The YAML is read strictly (`safeyaml.py`), by every caller: no anchors
+  or aliases (a few hundred bytes of them can stand for gigabytes), no key
+  given twice or that isn't a plain name, at most 32 levels deep, 256 KB.
 - **`reads:`** lists every Oracle object the workflow reads, as
   `SCHEMA.OBJECT`. Every object a SQL step names must be in it (joins,
   subqueries; CTE names don't count), a pipeline's own `reads:` must be in
@@ -268,10 +296,12 @@ directly. Milestone 5 swaps in the synced repo.
   - reasoning cleverer than elimination and propagation: the check is sound
     but not complete (it doesn't search every whole-number solution, and a
     group of more than 400 linked hidden cells gets the propagation only).
-- In the real profile, every delivered CSV needs a passing `small_cells`
-  check over that exact output, and every other delivered file (TSV, Excel,
-  …), which built-in checks can't read, needs a reason under
-  `deliver.without_small_cells: {<output>: <why>}`. A reason is at most 300
+- In the real profile, every delivered file needs either a passing
+  `small_cells` check over that exact output or a reason under
+  `deliver.without_small_cells: {<output>: <why>}`. A CSV can have either,
+  such as a row-level export that holds no counts of people; every other
+  file (TSV, Excel, …), which built-in checks can't read, needs a reason.
+  A reason is at most 300
   characters, is refused if it looks like it holds an identifier, a date or
   an email (the export folder-name scan), and is recorded in the delivery
   manifest.
@@ -313,9 +343,131 @@ tick, and a Replay that delivers is asked about a second time. A custom
 check's found and wanted values, and a step's counts, are kept as numbers
 only, so text an R check wrote can't carry a value into the record or the
 tab. Destination
-keys are listed read-only; folders are chosen in Settings. Editing waits for
-the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
-until there is a Workflow authoring mode.
+keys are listed read-only; folders are chosen in Settings. New files come
+from Save as workflow ([As built](#as-built-save-as-workflow)); editing an
+existing one isn't in the tab yet. The docked chat opens in Workflow
+authoring mode (sessions/modes.py): the agent drafts in its copy of the repo,
+checks each draft with the `check_workflow` tool (the same check as the tab
+and every run, with pipelines as on `main`), and its changes become a
+Pipelines proposal to review and save there.
+
+## As built (Pipelines)
+
+The backend is in `backend/src/datalab/pipelines/`, with its routes under
+`/api/pipelines`; the tab is `frontend/src/features/pipelines/`.
+
+**The repo.** `[repos] pipelines` is cloned and synced like the knowledge
+base (`repos/sync.py`, with milestone 5's isolation: no global or system
+config, every filter and driver switched off, `--no-ext-diff`). There's one
+GitHub sign-in for both repos; signing in is in Settings → GitHub. The tab
+browses GitHub's `main` as last synced, read-only.
+
+**Changes.** Each new Data engineering or Workflow authoring conversation
+gets its own copy of the repo at `/work/pipelines` (without `.github/`, and with no repository
+metadata or credentials). After each turn, what the agent changed in
+`ihsDataR/` and `workflows/` becomes one proposal, replacing any earlier
+one still open; changes anywhere else in the copy, and anything in
+`.github/`, are listed as not proposed. Proposals are shown in the
+Pipelines tab only, for now (not as cards in the chat).
+
+**Tests.** The package's tests (`testthat::test_local`) run on the
+proposal's exact tree, in the workflow sandbox's container: no network, a
+read-only root, the agent image, and a working folder of their own where
+compiled code can run (the steps' `/tmp` stays noexec). Two run at a time
+at most. The counts, the failing tests, and the log are kept against that
+tree (migration 0010). They're a quality check, not a safety gate: the
+counts are written by the same R process as the code under test, which
+could write any counts it likes. What keeps a change safe is the sandbox
+and the person reading the diff.
+
+**The check** (pipelines/check.py) blocks on paths that can't be changed
+(anything outside `ihsDataR/` and `workflows/`, or in `.github/`), and asks
+the person to confirm, one by one, with the line shown:
+
+- possible participant data: the knowledge base's scan, plus every changed
+  data file (CSV and the like, fixtures included), column names that look
+  like identifiers (`id`, `mrn`, `dob`, `subject`…), and short numbers next
+  to dates, which the knowledge base's scan lets through;
+- code that runs outside the test container once shared: `.Rprofile`,
+  `configure`, `cleanup`, compiled code in `src/`, and `.onLoad`,
+  `.onAttach` and the like in `R/`.
+
+**Save & share** runs the check (which includes the workflow file check on
+every changed `workflows/*.yaml`, with pipelines looked up in the change's
+own tree and the real profile's small-cell rule: a failure is an error),
+requires the tests to have passed on the change (running them first if
+not), commits it as the person, rebases onto `main`, runs the tests again when the rebased package (the `ihsDataR` tree)
+isn't the one they passed on, and pushes exactly that commit, whose message
+names the test run that passed on it. A conflict shares nothing: discard the
+change and ask the agent to make it again. The change isn't edited in
+DataLab: ask the agent.
+
+Not built yet: the ad hoc run of a pipeline's workflow, and the converted
+`ihsDataR` itself (its pipelines have no `pipeline.yaml` yet).
+
+## As built (Save as workflow)
+
+The drafting is `backend/src/datalab/workflows/drafts.py`, the routes
+`POST /api/workflows/drafts` and `/saves` (api/workflows.py), and the dialog
+`frontend/src/features/workflows/SaveAsWorkflow.tsx`.
+
+**The draft.** DataLab writes it itself from the SQL and binds, with no
+model and no data. A query the SQL check refuses (with the catalog, as in
+the Playground) makes no draft. Each query becomes a SQL step; `reads:`
+comes from the same analysis as the file check's `reads:` rule.
+
+- **Parameters.** Each bind becomes a lower-case parameter. Its type comes
+  from the catalog type of the column it's compared with (a number or a
+  date; a bind inside TO_DATE is a date); otherwise it stays text, as the
+  Playground sent it, so `'12'` against a VARCHAR2 column isn't turned into
+  a number. The value it ran with is kept as the default only for a date,
+  or a number compared as a range (`>`, `BETWEEN`) or named as a limit
+  (`min_…`, `max_…`). Text never is, and nothing is when the bind's name,
+  or the column it's compared with, looks like it's about a person (the
+  Save & share check's identifier words, plus `identifier`, `birth`,
+  `name`, `postal` and the like: `:dob`, `PARTICIPANTIDENTIFIER = :p`,
+  `LASTNAME = :n`). A note says why each other one has no default.
+- **Checks.** Each step gets `min_rows: 1`, the named output columns (not
+  after `*`), and, when the query aggregates (GROUP BY, or an aggregate
+  outside a WHERE), `small_cells` with `min: 11`. It covers `COUNT(…)`, and
+  `SUM` of 1s and 0s (`SUM(CASE WHEN … THEN 1 ELSE 0 END)`) as counts, and
+  every other aggregate too (`SUM(x)`, `AVG`, `MAX`), with a note: DataLab
+  can't tell that one isn't a count, so it fails closed. When an aggregate
+  has no name, or the counting happens in a subquery, the list is left
+  empty and the file check asks the person for it.
+- **Delivery.** With a destination key, `deliver:` delivers every output.
+  In the real profile a delivered row-level extract then needs a reason
+  under `deliver.without_small_cells`, written by the person.
+- **The data check.** The draft gets Save & share's check
+  (pipelines/check.py) for possible participant data, such as an id typed
+  into the SQL. Each finding must be confirmed before saving, wherever it's
+  saved, and one edited away no longer counts.
+
+**Review.** The dialog shows the YAML in the editor, editable, with the
+file check's problems marked (checked again after each edit) and the
+draft's notes. Only the person's Save saves anything; drafting saves
+nothing, and no agent tool reaches these routes. Escape doesn't close a
+review being saved, and asks first when it's been edited.
+
+**Saving.** Where the Workflows tab's files are the synced pipelines clone,
+Save is the Pipelines tab's Save & share (`Pipelines.share_workflow`, the
+same `share.save_and_share`): the check, the package's tests on the
+change's tree, a commit as the person with `DataLab-Workflow-From` (and the
+conversation) in its message, rebased and pushed. Possible participant
+data waits for the person to confirm each finding. A file already in the
+repo isn't replaced (whatever its case, or as `.yml`); if someone saves the
+same name meanwhile, nothing is shared, and if they saved exactly this
+file, the dialog says it was already there rather than that it was shared. Otherwise (practice, no `[repos] pipelines`, or a
+`[workflows] folder`) the file is written into that folder, never over
+another, and the dialog says it isn't shared. With the repo configured but
+not yet synced, Save waits for a sync.
+
+**From a conversation.** Turn this into a workflow is in the Queries panel:
+the person picks among the queries that ran (each SQL once), and the draft
+goes through the same review and Save. It takes the SQL only: the
+workspace's R scripts read `/data/oracle` files and outputs by their own
+paths, not a workflow's `inputs`/`outputs`, so turning them into R steps
+needs the Workflow authoring agent (not built).
 
 ## Open questions
 

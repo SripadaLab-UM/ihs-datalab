@@ -5,6 +5,9 @@ import { NavLink, Outlet } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
 import { clearAllDrafts } from "@/components/chat/plan";
+import { HelpLink } from "@/features/help/HelpLink";
+import { TourProvider } from "@/features/help/Tour";
+import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
 
 const TABS = [
   { to: "/workspace", label: "Workspace" },
@@ -34,6 +37,7 @@ export function Shell() {
           open DataLab again with the link it printed when it started.
         </div>
       )}
+      <UpdatingBanner />
       <header className="flex items-center gap-8 border-b border-line px-5">
         <span className="py-3.5 font-serif text-[21px] leading-none">datalab.</span>
         <nav className="flex gap-1 self-stretch overflow-x-auto">
@@ -52,17 +56,25 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
-        {health.data?.profile === "practice" && (
-          <span
-            className="ml-auto shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
-            title="The practice profile: synthetic data only, never the real study database"
-          >
-            practice · synthetic data
-          </span>
-        )}
+        {/* The pill, the practice badge and Help sit together at the right,
+            closer to each other than to the tabs. */}
+        <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
+          <UpdatePill />
+          {health.data?.profile === "practice" && (
+            <span
+              className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
+              title="The practice profile: synthetic data only, never the real study database"
+            >
+              practice · synthetic data
+            </span>
+          )}
+          <HelpLink />
+        </div>
       </header>
       <div className="min-h-0 flex-1">
-        <Outlet />
+        <TourProvider>
+          <Outlet />
+        </TourProvider>
       </div>
     </div>
   );

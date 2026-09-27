@@ -6,7 +6,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { api, type Conversation, type Mode } from "@/api/client";
 import { DockedChat } from "@/components/chat/DockedChat";
 import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
-import { Button, Icon, Modal, Panel } from "@/components/ui";
+import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
@@ -99,7 +99,7 @@ export function WorkspacePage() {
         )}
       >
         <div className="flex gap-2 px-3 pt-4 pb-2">
-          <Button className="flex-1 justify-start bg-surface" onClick={() => setCreating(true)}>
+          <Button data-tour="new-conversation" className="flex-1 justify-start bg-surface" onClick={() => setCreating(true)}>
             <Icon name="pen" size={14} /> New conversation
           </Button>
           {railOpen && (
@@ -171,9 +171,12 @@ export function WorkspacePage() {
                 headerStart={showRail}
                 headerActions={
                   <>
-                    <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
-                      <Icon name="export" size={14} /> Export
-                    </Button>
+                    <span data-tour="export" className="flex items-center gap-0.5">
+                      <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
+                        <Icon name="export" size={14} /> Export
+                      </Button>
+                      <InfoTip term="export" align="end" />
+                    </span>
                     <Button
                       variant="ghost"
                       className="px-1 text-[13px] xl:hidden"
@@ -200,7 +203,7 @@ export function WorkspacePage() {
               it reads, as it works.
             </p>
             <div>
-              <Button variant="primary" className="mt-2 px-4 py-2" onClick={() => setCreating(true)}>
+              <Button data-tour="new-conversation" variant="primary" className="mt-2 px-4 py-2" onClick={() => setCreating(true)}>
                 <Icon name="pen" size={14} /> New conversation
               </Button>
             </div>
@@ -214,10 +217,11 @@ export function WorkspacePage() {
           ref={panelBox}
           aria-label="Files, inputs, queries and history"
           className={clsx(
-            "relative min-h-0 border-l border-line bg-rail",
+            "min-h-0 border-l border-line bg-rail",
+            // One position only: with both, "relative" won and the drawer fell into the grid below the chat.
             panelOpen
-              ? "absolute inset-y-0 right-0 z-30 block w-[min(22rem,100%)] shadow-xl xl:static xl:w-auto xl:shadow-none"
-              : "hidden xl:block",
+              ? "absolute inset-y-0 right-0 z-30 block w-[min(22rem,100%)] shadow-xl xl:relative xl:w-auto xl:shadow-none"
+              : "relative hidden xl:block",
           )}
         >
           {panelOpen && (
@@ -299,7 +303,10 @@ function NewConversation({ onClose }: { onClose: () => void }) {
         <div>
           <p className={label}>What would you like to do?</p>
           <div className="mt-2 grid grid-cols-2 gap-2">
-            {modes.data?.map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
+            {/* Modes a tab docks (Workflow authoring, Knowledge writing) open from that tab. */}
+            {modes.data
+              ?.filter((m) => !m.tab_only)
+              .map((m) => <ModeCard key={m.id} mode={m} selected={mode === m.id} onSelect={() => setMode(m.id)} />)}
           </div>
         </div>
         {/* No title to type: DataLab names the conversation from its first question. */}

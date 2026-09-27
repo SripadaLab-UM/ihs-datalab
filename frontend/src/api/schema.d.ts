@@ -683,6 +683,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_github_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sign In State */
+        get: operations["sign_in_state_api_github_sign_in_get"];
+        put?: never;
+        /** Start Sign In */
+        post: operations["start_sign_in_api_github_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Sign In */
+        post: operations["poll_sign_in_api_github_sign_in_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Sign In */
+        post: operations["cancel_sign_in_api_github_sign_in_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Out */
+        post: operations["sign_out_api_github_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/status": {
         parameters: {
             query?: never;
@@ -717,69 +803,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/knowledge/sign-in": {
+    "/api/knowledge/pages": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Sign In State */
-        get: operations["sign_in_state_api_knowledge_sign_in_get"];
+        /** Pages */
+        get: operations["pages_api_knowledge_pages_get"];
         put?: never;
-        /** Start Sign In */
-        post: operations["start_sign_in_api_knowledge_sign_in_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/knowledge/sign-in/poll": {
+    "/api/knowledge/pages/{path}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Page */
+        get: operations["page_api_knowledge_pages__path__get"];
         put?: never;
-        /** Poll Sign In */
-        post: operations["poll_sign_in_api_knowledge_sign_in_poll_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/knowledge/sign-in/cancel": {
+    "/api/knowledge/history": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** History */
+        get: operations["history_api_knowledge_history_get"];
         put?: never;
-        /** Cancel Sign In */
-        post: operations["cancel_sign_in_api_knowledge_sign_in_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sign Out */
-        post: operations["sign_out_api_knowledge_sign_out_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1132,6 +1200,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Draft
+         * @description A workflow file drafted from SQL and its binds, checked. Nothing is saved.
+         */
+        post: operations["draft_api_workflows_drafts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/drafts/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Draft
+         * @description A draft's text checked again, as Save will check it.
+         */
+        post: operations["check_draft_api_workflows_drafts_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/saves": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save
+         * @description Save a new workflow file the person has reviewed: Save & share into
+         *     the pipelines repo, or written into the local folder (see save_target).
+         */
+        post: operations["save_api_workflows_saves_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/saves/{save_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Save Status
+         * @description A Save & share as it goes (it runs the package's tests, so it takes a while).
+         */
+        get: operations["save_status_api_workflows_saves__save_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/status": {
         parameters: {
             query?: never;
@@ -1141,6 +1290,159 @@ export interface paths {
         };
         /** Status */
         get: operations["status_api_pipelines_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_pipelines_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Files */
+        get: operations["files_api_pipelines_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** File */
+        get: operations["file_api_pipelines_files__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposals */
+        get: operations["proposals_api_pipelines_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposal */
+        get: operations["proposal_api_pipelines_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test */
+        post: operations["test_api_pipelines_proposals__proposal_id__tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept */
+        post: operations["accept_api_pipelines_proposals__proposal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject */
+        post: operations["reject_api_pipelines_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/tests/{test_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Test Log */
+        get: operations["test_log_api_pipelines_tests__test_id__log_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1187,6 +1489,197 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connections */
+        get: operations["connections_api_settings_connections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/database-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Password
+         * @description Save or replace the database password, in the keychain only.
+         */
+        put: operations["save_password_api_settings_connections_database_password_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/model-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Model Key
+         * @description Save or replace the U-M GPT key, in the keychain only.
+         */
+        put: operations["save_model_key_api_settings_connections_model_key_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Connections */
+        post: operations["test_connections_api_settings_connections_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage Usage */
+        get: operations["storage_usage_api_settings_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/storage/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Storage Remove
+         * @description Remove one item the person chose and confirmed. Refuses, changing nothing,
+         *     when it's in use or isn't something that can go.
+         */
+        post: operations["storage_remove_api_settings_storage_remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Updates Status */
+        get: operations["updates_status_api_settings_updates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/updates/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Update Check
+         * @description What the last check found (no network): for the Update available pill.
+         */
+        get: operations["update_check_api_settings_updates_check_get"];
+        put?: never;
+        /**
+         * Check Now
+         * @description Ask GitHub now (at most once a minute; never while GitHub asked to wait).
+         */
+        post: operations["check_now_api_settings_updates_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/updates/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Update
+         * @description Install the release on offer, once the person has confirmed. Returns at
+         *     once; GET /updates/check follows it. DataLab restarts at the end.
+         */
+        post: operations["install_update_api_settings_updates_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diagnostics Text */
+        get: operations["diagnostics_text_api_settings_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -1215,6 +1708,12 @@ export interface components {
              * @default []
              */
             confirmed: string[];
+            /** Seen */
+            seen: {
+                [key: string]: string | null;
+            };
+            /** Findings */
+            findings: string[];
         };
         /** AccountOut */
         AccountOut: {
@@ -1268,6 +1767,27 @@ export interface components {
             kind: "file" | "folder";
             /** Available */
             available: boolean;
+        };
+        /** BackupInfoOut */
+        BackupInfoOut: {
+            /** Name */
+            name: string;
+            /** App Version */
+            app_version: string;
+            /** From Version */
+            from_version: string | null;
+            /** Reason */
+            reason: string;
+            /** Created At */
+            created_at: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Schema Version */
+            schema_version: string | null;
+            /** Usable */
+            usable: boolean;
+            /** Kept */
+            kept: boolean;
         };
         /** CatalogCohort */
         CatalogCohort: {
@@ -1419,6 +1939,32 @@ export interface components {
             /** Type */
             type: string | null;
         };
+        /** ConnectionCheckOut */
+        ConnectionCheckOut: {
+            /** Ok */
+            ok: boolean;
+            /** Message */
+            message: string;
+        };
+        /** ConnectionTestOut */
+        ConnectionTestOut: {
+            database: components["schemas"]["DatabaseCheckOut"];
+            model: components["schemas"]["ConnectionCheckOut"];
+        };
+        /** ConnectionsOut */
+        ConnectionsOut: {
+            /**
+             * Profile
+             * @enum {string}
+             */
+            profile: "real" | "practice";
+            /** Settings File */
+            settings_file: string;
+            oracle: components["schemas"]["OracleConnectionOut"];
+            model: components["schemas"]["ModelKeyOut"];
+            /** Read Only Because */
+            read_only_because: string | null;
+        };
         /** ConversationChange */
         ConversationChange: {
             /** Rigor Review */
@@ -1449,6 +1995,17 @@ export interface components {
             rigor_review: boolean;
             /** Busy */
             busy: boolean;
+        };
+        /** DatabaseCheckOut */
+        DatabaseCheckOut: {
+            /** Ok */
+            ok: boolean;
+            /** Message */
+            message: string;
+            /** Enabled Roles */
+            enabled_roles: string[];
+            /** Read Only */
+            read_only: boolean | null;
         };
         /** DeliverOut */
         DeliverOut: {
@@ -1527,6 +2084,69 @@ export interface components {
             severity: "error" | "warning";
             position: components["schemas"]["PositionOut"] | null;
         };
+        /** DiagnosticsOut */
+        DiagnosticsOut: {
+            /** Text */
+            text: string;
+        };
+        /** DraftCheckIn */
+        DraftCheckIn: {
+            /** Text */
+            text: string;
+        };
+        /**
+         * DraftCheckOut
+         * @description A draft's text, checked again after an edit: the file check and the data check.
+         */
+        DraftCheckOut: {
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** DraftIn */
+        DraftIn: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Destination */
+            destination?: string | null;
+            /** Queries */
+            queries?: components["schemas"]["DraftQueryIn"][];
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Query Ids */
+            query_ids?: string[];
+        };
+        /** DraftOut */
+        DraftOut: {
+            /** Text */
+            text: string;
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Notes */
+            notes: string[];
+            target: components["schemas"]["SaveTargetOut"];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** DraftQueryIn */
+        DraftQueryIn: {
+            /** Sql */
+            sql: string;
+            /** Binds */
+            binds?: {
+                [key: string]: boolean | number | string | null;
+            };
+        };
         /** EditsIn */
         EditsIn: {
             /**
@@ -1590,6 +2210,8 @@ export interface components {
             left_out: boolean;
             /** Diff */
             diff: string;
+            /** After Sha256 */
+            after_sha256?: string | null;
             /**
              * Conflict
              * @default false
@@ -1597,6 +2219,13 @@ export interface components {
             conflict: boolean;
             /** Theirs */
             theirs?: string | null;
+            /** Theirs State */
+            theirs_state?: ("text" | "deleted" | "not text") | null;
+            /**
+             * Resolved
+             * @default false
+             */
+            resolved: boolean;
         };
         /** FileOut */
         FileOut: {
@@ -1709,6 +2338,60 @@ export interface components {
             /** Line */
             line?: number | null;
         };
+        /** GitHubAccountOut */
+        GitHubAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** GitHubRepoOut */
+        GitHubRepoOut: {
+            /**
+             * Area
+             * @enum {string}
+             */
+            area: "knowledge" | "pipelines";
+            /** Name */
+            name: string;
+        };
+        /** GitHubSignInOut */
+        GitHubSignInOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri */
+            verification_uri?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /** Message */
+            message?: string | null;
+        };
+        /** GitHubStatusOut */
+        GitHubStatusOut: {
+            /** Available */
+            available: boolean;
+            /** Message */
+            message?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /**
+             * Repos
+             * @default []
+             */
+            repos: components["schemas"]["GitHubRepoOut"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1740,6 +2423,62 @@ export interface components {
             message: string | null;
             /** Has Result */
             has_result: boolean;
+        };
+        /** KbCommitOut */
+        KbCommitOut: {
+            /** Commit */
+            commit: string;
+            /** Author */
+            author: string;
+            /** Date */
+            date: string;
+            /** Subject */
+            subject: string;
+            /** Paths */
+            paths: string[];
+            /** Changed */
+            changed: number;
+        };
+        /** KbEntryOut */
+        KbEntryOut: {
+            /** Path */
+            path: string;
+            /** Place */
+            place: string;
+            /** Size */
+            size: number;
+            /** Title */
+            title: string;
+            /** Summary */
+            summary: string;
+            /** Status */
+            status: string | null;
+            /** Kind */
+            kind: string | null;
+        };
+        /** KbPageOut */
+        KbPageOut: {
+            /** Path */
+            path: string;
+            /** Place */
+            place: string;
+            /** Head */
+            head: string;
+            /** Text */
+            text: string;
+            /** Front Matter */
+            front_matter: {
+                [key: string]: unknown;
+            } | null;
+            /** Body */
+            body: string;
+        };
+        /** KbPagesOut */
+        KbPagesOut: {
+            /** Head */
+            head: string | null;
+            /** Pages */
+            pages: components["schemas"]["KbEntryOut"][];
         };
         /** KnowledgeStatus */
         KnowledgeStatus: {
@@ -1792,6 +2531,41 @@ export interface components {
             description: string;
             /** Starters */
             starters: string[];
+            /**
+             * Tab Only
+             * @default false
+             */
+            tab_only: boolean;
+            /**
+             * Queries
+             * @default true
+             */
+            queries: boolean;
+            /**
+             * Attachments
+             * @default true
+             */
+            attachments: boolean;
+        };
+        /** ModelKeyIn */
+        ModelKeyIn: {
+            /**
+             * Key
+             * Format: password
+             */
+            key: string;
+        };
+        /** ModelKeyOut */
+        ModelKeyOut: {
+            /** Base Url */
+            base_url: string;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "keychain" | "environment" | "missing";
+            /** Can Set Key */
+            can_set_key: boolean;
         };
         /** ModelsOut */
         ModelsOut: {
@@ -1859,6 +2633,33 @@ export interface components {
             /** Checkpoint */
             checkpoint?: number | null;
         };
+        /** OracleConnectionOut */
+        OracleConnectionOut: {
+            /** Configured */
+            configured: boolean;
+            /** Practice */
+            practice: boolean;
+            /** Dsn */
+            dsn: string | null;
+            /** User */
+            user: string | null;
+            /** Read Only Roles */
+            read_only_roles: string[];
+            /** Allowed Schemas */
+            allowed_schemas: string[];
+            /** Password */
+            password: ("keychain" | "environment" | "missing") | null;
+            /** Can Set Password */
+            can_set_password: boolean;
+        };
+        /** OraclePasswordIn */
+        OraclePasswordIn: {
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
+        };
         /** ParameterOut */
         ParameterOut: {
             /** Name */
@@ -1873,10 +2674,314 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** PipelineAcceptIn */
+        PipelineAcceptIn: {
+            /**
+             * Confirmed
+             * @default []
+             */
+            confirmed: string[];
+        };
+        /** PipelineAccountOut */
+        PipelineAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** PipelineFileChange */
+        PipelineFileChange: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+        };
+        /** PipelineFileDiff */
+        PipelineFileDiff: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+            /** Before */
+            before: string | null;
+            /** After */
+            after: string | null;
+            /** Binary */
+            binary: boolean;
+            /** Diff */
+            diff: string;
+        };
+        /** PipelineFileOut */
+        PipelineFileOut: {
+            /** Path */
+            path: string;
+            /** Head */
+            head: string;
+            /** Size */
+            size: number;
+            /** Text */
+            text: string | null;
+            /**
+             * Too Large
+             * @default false
+             */
+            too_large: boolean;
+        };
+        /** PipelineFindingOut */
+        PipelineFindingOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "data" | "code";
+            /** Message */
+            message: string;
+            /** Line */
+            line?: number | null;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** PipelineProposalDetail */
+        PipelineProposalDetail: {
+            proposal: components["schemas"]["PipelineProposalOut"];
+            /** Files */
+            files: components["schemas"]["PipelineFileDiff"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** PipelineProposalOut */
+        PipelineProposalOut: {
+            /** Id */
+            id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "superseded" | "withdrawn" | "rejected" | "saving" | "saved" | "conflict" | "check_failed" | "tests_failed" | "failed";
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Turn */
+            turn: number;
+            /** Base */
+            base: string;
+            /** Files */
+            files: components["schemas"]["PipelineFileChange"][];
+            /** Refused */
+            refused: components["schemas"]["PipelineRefusedOut"][];
+            result?: components["schemas"]["PipelineSaveResultOut"] | null;
+            /** Commit */
+            commit?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            test?: components["schemas"]["PipelineTestOut"] | null;
+        };
+        /** PipelineRefusedOut */
+        PipelineRefusedOut: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PipelineSaveResultOut */
+        PipelineSaveResultOut: {
+            /** State */
+            state: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /** Upstream */
+            upstream?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: string[];
+            /**
+             * After Rebase
+             * @default false
+             */
+            after_rebase: boolean;
+            /** Test */
+            test?: string | null;
+        };
+        /** PipelineTestFailureOut */
+        PipelineTestFailureOut: {
+            /** File */
+            file: string;
+            /** Test */
+            test: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "failure" | "error";
+        };
+        /** PipelineTestFileOut */
+        PipelineTestFileOut: {
+            /** File */
+            file: string;
+            /** Tests */
+            tests: number;
+            /** Failed */
+            failed: number;
+            /** Skipped */
+            skipped: number;
+            /** Errors */
+            errors: number;
+        };
+        /** PipelineTestLogOut */
+        PipelineTestLogOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** PipelineTestOut */
+        PipelineTestOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "passed" | "failed" | "error";
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Commit */
+            commit?: string | null;
+            /** Message */
+            message?: string | null;
+            /**
+             * Tests
+             * @default 0
+             */
+            tests: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Warnings
+             * @default 0
+             */
+            warnings: number;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["PipelineTestFileOut"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+            /**
+             * Failures
+             * @default []
+             */
+            failures: components["schemas"]["PipelineTestFailureOut"][];
+        };
+        /** PipelineTreeFile */
+        PipelineTreeFile: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /** PipelineTreeOut */
+        PipelineTreeOut: {
+            /** Head */
+            head: string | null;
+            /** Files */
+            files: components["schemas"]["PipelineTreeFile"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+        };
         /** PipelinesStatus */
         PipelinesStatus: {
             /** Available */
             available: boolean;
+            /**
+             * Repo
+             * @enum {string}
+             */
+            repo: "not configured" | "signed out" | "no access" | "not cloned" | "in sync" | "behind" | "diverged" | "sync failed";
+            /** Name */
+            name?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["PipelineAccountOut"] | null;
+            /** Head */
+            head?: string | null;
+            /** Last Sync */
+            last_sync?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Message */
+            message?: string | null;
         };
         /** PlanLimitsOut */
         PlanLimitsOut: {
@@ -2021,6 +3126,13 @@ export interface components {
             /** Message */
             message: string | null;
         };
+        /** RecoveryOut */
+        RecoveryOut: {
+            /** Outcome */
+            outcome: string;
+            /** Message */
+            message: string;
+        };
         /** Refused */
         Refused: {
             /** Path */
@@ -2034,6 +3146,25 @@ export interface components {
             path: string;
             /** Reason */
             reason: string;
+        };
+        /** ReleaseOut */
+        ReleaseOut: {
+            /** Version */
+            version: string;
+            /** Tag */
+            tag: string;
+            /** Title */
+            title: string;
+            /** Notes */
+            notes: string;
+            /** Published At */
+            published_at: string | null;
+            /** Page */
+            page: string | null;
+            /** Prerelease */
+            prerelease: boolean;
+            /** Size Bytes */
+            size_bytes: number;
         };
         /** ReplayCheckOut */
         ReplayCheckOut: {
@@ -2237,6 +3368,21 @@ export interface components {
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
         };
+        /** SaveIn */
+        SaveIn: {
+            /** Text */
+            text: string;
+            /** Confirmed */
+            confirmed?: string[];
+            /**
+             * Source
+             * @default playground
+             * @enum {string}
+             */
+            source: "playground" | "conversation";
+            /** Conversation Id */
+            conversation_id?: string | null;
+        };
         /** SaveResultOut */
         SaveResultOut: {
             /** State */
@@ -2263,6 +3409,21 @@ export interface components {
              */
             after_rebase: boolean;
         };
+        /**
+         * SaveTargetOut
+         * @description Where Save puts a new workflow file on this computer.
+         */
+        SaveTargetOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "share" | "local" | "unavailable";
+            /** Folder */
+            folder: string | null;
+            /** Message */
+            message: string;
+        };
         /** SetDestinationKey */
         SetDestinationKey: {
             /** Destination Id */
@@ -2272,25 +3433,6 @@ export interface components {
         SettingsStatus: {
             /** Available */
             available: boolean;
-        };
-        /** SignInOut */
-        SignInOut: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
-            /** User Code */
-            user_code?: string | null;
-            /** Verification Uri */
-            verification_uri?: string | null;
-            /** Expires At */
-            expires_at?: string | null;
-            /** Interval */
-            interval?: number | null;
-            account?: components["schemas"]["AccountOut"] | null;
-            /** Message */
-            message?: string | null;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -2405,6 +3547,177 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** StorageGroupOut */
+        StorageGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** About */
+            about: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Items */
+            items: components["schemas"]["StorageItemOut"][];
+        };
+        /** StorageItemOut */
+        StorageItemOut: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Detail */
+            detail: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Modified At */
+            modified_at: string | null;
+            /** Removable */
+            removable: boolean;
+            /** Not Removable Because */
+            not_removable_because: string | null;
+            /** Kept */
+            kept: boolean;
+            /** Kept Because */
+            kept_because: string | null;
+            /** Removing Loses */
+            removing_loses: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /** StorageOut */
+        StorageOut: {
+            /** Data Dir */
+            data_dir: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Free Bytes */
+            free_bytes: number | null;
+            /** Groups */
+            groups: components["schemas"]["StorageGroupOut"][];
+        };
+        /** StorageRemoveIn */
+        StorageRemoveIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "playground-result" | "run-files" | "backup";
+            /** Id */
+            id: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** StorageRemovedOut */
+        StorageRemovedOut: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Freed Bytes */
+            freed_bytes: number;
+        };
+        /** UpdateCheckOut */
+        UpdateCheckOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "not-checked" | "not-configured" | "up-to-date" | "available" | "offline" | "rate-limited" | "not-visible" | "failed";
+            /** Message */
+            message: string;
+            /** Current Version */
+            current_version: string;
+            /** Channel */
+            channel: string;
+            /** Checked At */
+            checked_at: string | null;
+            available: components["schemas"]["ReleaseOut"] | null;
+            /** Can Install */
+            can_install: boolean;
+            /** Cannot Install Because */
+            cannot_install_because: string | null;
+            install: components["schemas"]["UpdateInstallOut"];
+            /** Updating */
+            updating: boolean;
+        };
+        /** UpdateHistoryOut */
+        UpdateHistoryOut: {
+            /** At */
+            at: string;
+            /** Outcome */
+            outcome: string;
+            /** From Version */
+            from_version: string | null;
+            /** To Version */
+            to_version: string | null;
+        };
+        /** UpdateInstallIn */
+        UpdateInstallIn: {
+            /** Version */
+            version: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** UpdateInstallOut */
+        UpdateInstallOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "idle" | "downloading" | "stopping" | "backing-up" | "installing" | "pulling-images" | "switching" | "restarting" | "failed";
+            /** Version */
+            version: string | null;
+            /** Message */
+            message: string;
+            /** Started At */
+            started_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
+        };
+        /** UpdateMarkerOut */
+        UpdateMarkerOut: {
+            /** From Version */
+            from_version: string;
+            /** To Version */
+            to_version: string;
+            /** State */
+            state: string;
+            /** Started At */
+            started_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Backup */
+            backup: string | null;
+        };
+        /** UpdatesOut */
+        UpdatesOut: {
+            /** Version */
+            version: string;
+            check: components["schemas"]["UpdateCheckOut"];
+            marker: components["schemas"]["UpdateMarkerOut"] | null;
+            /** Marker Unreadable */
+            marker_unreadable: boolean;
+            recovery: components["schemas"]["RecoveryOut"] | null;
+            /** History */
+            history: components["schemas"]["UpdateHistoryOut"][];
+            /** Set Aside Notes */
+            set_aside_notes: string[];
+            /** Backups */
+            backups: components["schemas"]["BackupInfoOut"][];
+            /** Migrations Applied */
+            migrations_applied: number;
+            /** Latest Migration */
+            latest_migration: string | null;
+        };
         /** ValidateIn */
         ValidateIn: {
             /** Path */
@@ -2502,6 +3815,31 @@ export interface components {
             /** Reproduced */
             reproduced: boolean | null;
         };
+        /** WorkflowSaveOut */
+        WorkflowSaveOut: {
+            /** Id */
+            id: string | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "saving" | "saved" | "already_there" | "check_failed" | "tests_failed" | "conflict" | "failed";
+            /** Shared */
+            shared: boolean;
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /** Test */
+            test?: string | null;
+        };
         /**
          * WorkflowTextOut
          * @description A workflow file's text, as it is in the folder now (read-only here).
@@ -2527,6 +3865,8 @@ export interface components {
             available: boolean;
             /** Folder */
             folder: string;
+            /** Message */
+            message?: string | null;
         };
     };
     responses: never;
@@ -3736,6 +5076,126 @@ export interface operations {
             };
         };
     };
+    status_api_github_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubStatusOut"];
+                };
+            };
+        };
+    };
+    sign_in_state_api_github_sign_in_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    start_sign_in_api_github_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    poll_sign_in_api_github_sign_in_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    cancel_sign_in_api_github_sign_in_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    sign_out_api_github_sign_out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
     status_api_knowledge_status_get: {
         parameters: {
             query?: never;
@@ -3776,7 +5236,7 @@ export interface operations {
             };
         };
     };
-    sign_in_state_api_knowledge_sign_in_get: {
+    pages_api_knowledge_pages_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -3791,16 +5251,18 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SignInOut"];
+                    "application/json": components["schemas"]["KbPagesOut"];
                 };
             };
         };
     };
-    start_sign_in_api_knowledge_sign_in_post: {
+    page_api_knowledge_pages__path__get: {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                path: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -3811,14 +5273,25 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SignInOut"];
+                    "application/json": components["schemas"]["KbPageOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
     };
-    poll_sign_in_api_knowledge_sign_in_poll_post: {
+    history_api_knowledge_history_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -3831,47 +5304,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SignInOut"];
+                    "application/json": components["schemas"]["KbCommitOut"][];
                 };
             };
-        };
-    };
-    cancel_sign_in_api_knowledge_sign_in_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    sign_out_api_knowledge_sign_out_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4513,6 +5955,136 @@ export interface operations {
             };
         };
     };
+    draft_api_workflows_drafts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_draft_api_workflows_drafts_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DraftCheckIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DraftCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_api_workflows_saves_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSaveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_status_api_workflows_saves__save_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                save_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSaveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     status_api_pipelines_status_get: {
         parameters: {
             query?: never;
@@ -4529,6 +6101,267 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    sync_api_pipelines_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    files_api_pipelines_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTreeOut"];
+                };
+            };
+        };
+    };
+    file_api_pipelines_files__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineFileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_pipelines_proposals_get: {
+        parameters: {
+            query?: {
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposal_api_pipelines_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_api_pipelines_proposals__proposal_id__tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_api_pipelines_proposals__proposal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineAcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_api_pipelines_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_log_api_pipelines_tests__test_id__log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTestLogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -4583,6 +6416,274 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsStatus"];
+                };
+            };
+        };
+    };
+    connections_api_settings_connections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionsOut"];
+                };
+            };
+        };
+    };
+    save_password_api_settings_connections_database_password_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OraclePasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_model_key_api_settings_connections_model_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connections_api_settings_connections_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestOut"];
+                };
+            };
+        };
+    };
+    storage_usage_api_settings_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageOut"];
+                };
+            };
+        };
+    };
+    storage_remove_api_settings_storage_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageRemoveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageRemovedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updates_status_api_settings_updates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesOut"];
+                };
+            };
+        };
+    };
+    update_check_api_settings_updates_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+        };
+    };
+    check_now_api_settings_updates_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+        };
+    };
+    install_update_api_settings_updates_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInstallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diagnostics_text_api_settings_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticsOut"];
                 };
             };
         };

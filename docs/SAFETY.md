@@ -1,6 +1,10 @@
 # DataLab safety promises
 
-Status: **draft** for v1. Under discussion and not yet implemented.
+Status: **implemented** for v1, except the connectors for outside AI tools
+(the outside-tool MCP server, and the connector tokens and per-route scopes
+described under "Outside AI connectors"), which aren't built yet. The agent's
+own tool server (`/mcp`, used by Codex inside DataLab) is built. Implemented isn't accepted:
+acceptance is tracked in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 DataLab lets you use an AI agent (OpenAI Codex on U-M GPT) with sensitive IHS
 data. This page says what DataLab promises, how it keeps each promise, and how
@@ -65,18 +69,22 @@ returns an answer and is then deleted.
    Each conversation has a **Data accessed** panel. It lists every query the
    AI ran: which tables, when, how many rows, and where the result went.
 
-8. **You can check all of this.**
-   The **Safety check** screen tests these promises live and shows the results.
+8. **You can check the first three.**
+   The **Safety check** in Settings & Safety tests promises 1 to 3 live when
+   you press **Run safety check** (or run `datalab safety-check`), and shows
+   the results. It doesn't run by itself. The other promises are covered by
+   the rules below and DataLab's automated tests, not by this screen.
 
 ## Outside AI tools
 
-Other AI tools, such as Claude, can connect to DataLab to use and test it.
-They are **not** approved for study data, so what they can reach depends on
-which DataLab they connect to:
+Other AI tools, such as Claude, are used to try and test DataLab. They are
+**not** approved for study data:
 
 - The **practice** DataLab has only synthetic data, and you can't attach
-  your own files to it. Outside tools can do everything there.
-- A **real-data** DataLab doesn't accept outside tools at all in v1.
+  your own files to it. Outside tools may be used with it.
+- Outside AI tools must not be used with a **real-data** DataLab. Nothing
+  technical stops a tool that controls your terminal or browser, so this is a
+  rule for people. Connectors, once built, will refuse the real profile.
 
 ## What DataLab does *not* promise
 
@@ -339,10 +347,12 @@ access. It never gains it.
 
 ### Outside AI connectors
 
-- DataLab exposes its features to outside tools through an MCP server and a
-  `datalab` CLI. Both use the same API as the UI, and every request carries a
-  connector token whose scope the host app enforces on every route.
-- **v1: practice profile only.**
+- **Not built yet (the design):** DataLab exposes its features to outside
+  tools through an MCP server and a `datalab` CLI. Both use the same API as
+  the UI, and every request carries a connector token whose scope the host
+  app enforces on every route.
+- **v1: practice profile only.** The practice profile's limits below are
+  built; the connectors that would rely on them aren't yet.
   - The practice profile has its own data folder and uses only the synthetic
     backend.
   - It can't attach host files. It can't use real export destinations, only a
@@ -358,7 +368,7 @@ access. It never gains it.
   bound to `127.0.0.1`, since its dev passwords are public. Its setup scripts
   refuse to run against anything that isn't the local Oracle Database Free
   container.
-- **Real-profile connectors are deferred** until the exact permitted fields,
+- **Not built yet: real-profile connectors are deferred** until the exact permitted fields,
   operations, and error handling are specified. Even "metadata" can leak
   through error messages or SQL in workflow files.
 
