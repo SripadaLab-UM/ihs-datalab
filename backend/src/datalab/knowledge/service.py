@@ -271,7 +271,7 @@ class Knowledge:
                 return None
             mark = fingerprint(base, changes, refused)
             latest = self.store.latest(conversation_id)
-            if latest is not None and latest.fingerprint == mark:
+            if latest is not None and latest.fingerprint == mark and latest.status != "withdrawn":
                 return None  # nothing new since the last proposal
             for old in actionable:
                 self._set_status(old, "superseded", "Replaced by a newer proposal.")

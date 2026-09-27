@@ -281,6 +281,9 @@ def test_a_proposal_is_announced_once_replaced_when_it_changes_and_withdrawn_if_
     assert lab.knowledge.get(second.id).status == "withdrawn"
     updates = [(u["id"], u["status"]) for u in events(lab, cid, "kb_proposal_updated")]
     assert updates == [(first.id, "superseded"), (second.id, "withdrawn")]
+    # Made again after being undone: a new card.
+    again = turn(lab, cid, {"qc/wear-time.md": NEW_PAGE, "qc/other.md": page("other", "qc", "qc")})
+    assert again is not None and again.fingerprint == second.fingerprint
     # Acting on a replaced proposal is refused.
     response = lab.client.post(f"/api/knowledge/proposals/{first.id}/accept", json={})
     assert response.status_code == 409
