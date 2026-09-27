@@ -448,7 +448,10 @@ src/datalab/
     (`exports.py`).
 - **Local API protection.** The app listens on `127.0.0.1` only. The launcher
   opens it with a one-time token that sets a session cookie, so other local
-  programs or web pages can't drive DataLab's API.
+  programs or web pages can't drive DataLab's API. The cookie is named for
+  the port (`datalab_session_8766`): browsers share cookies between ports of
+  one host, so two DataLabs on one computer (practice and an evaluation run,
+  say) would otherwise sign each other's windows out.
 
 ### 10. Images (`images/`)
 

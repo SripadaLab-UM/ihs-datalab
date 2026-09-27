@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 
 from datalab.app import create_app
-from datalab.web import COOKIE, BrowserSession
+from datalab.web import BrowserSession
 from tests.conftest import FakeDatabase
 
 
@@ -11,7 +11,7 @@ def make(settings, catalog, tmp_path):
     (dist / "index.html").write_text("<html>DataLab</html>")
     (dist / "assets" / "app.js").write_text("console.log(1)")
     (tmp_path / "secret.txt").write_text("not for the browser")
-    browser = BrowserSession()
+    browser = BrowserSession(settings.port)
     app = create_app(
         settings,
         database=FakeDatabase(),
@@ -30,11 +30,28 @@ def test_api_needs_the_sign_in_cookie(settings, catalog, tmp_path):
         assert client.get("/api/health").status_code == 200  # the launcher's readiness check
         signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
         assert signed_in.status_code == 303
-        cookie = signed_in.cookies[COOKIE]
+        cookie = signed_in.cookies[browser.cookie_name]
         assert "httponly" in signed_in.headers["set-cookie"].lower()
         assert "samesite=strict" in signed_in.headers["set-cookie"].lower()
-        client.cookies.set(COOKIE, cookie)
+        client.cookies.set(browser.cookie_name, cookie)
         assert client.get("/api/conversations").status_code == 200
+
+
+def test_each_port_has_its_own_cookie(settings, catalog, tmp_path):
+    """Browsers share cookies between ports of one host: two DataLabs on one
+    computer mustn't sign each other's windows out, or accept each other's."""
+    app, browser = make(settings, catalog, tmp_path)
+    assert browser.cookie_name == f"datalab_session_{settings.port}"
+    other = BrowserSession(settings.port + 1)
+    assert other.cookie_name != browser.cookie_name
+    with TestClient(app) as client:
+        signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
+        assert signed_in.headers["set-cookie"].startswith(f"{browser.cookie_name}=")
+        value = signed_in.cookies[browser.cookie_name]
+        client.cookies.clear()
+        # The right value under another instance's name doesn't sign in here.
+        client.cookies.set(other.cookie_name, value)
+        assert client.get("/api/conversations").status_code == 401
 
 
 def test_sign_in_link_works_once(settings, catalog, tmp_path):
@@ -47,9 +64,9 @@ def test_sign_in_link_works_once(settings, catalog, tmp_path):
 
 
 def test_wrong_cookie_is_refused(settings, catalog, tmp_path):
-    app, _ = make(settings, catalog, tmp_path)
+    app, browser = make(settings, catalog, tmp_path)
     with TestClient(app) as client:
-        client.cookies.set(COOKIE, "guess")
+        client.cookies.set(browser.cookie_name, "guess")
         assert client.get("/api/conversations").status_code == 401
 
 

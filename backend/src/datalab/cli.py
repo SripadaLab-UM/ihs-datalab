@@ -96,7 +96,7 @@ def _serve(settings, *, open_browser: bool) -> int:
     from datalab.app import create_app
     from datalab.web import BrowserSession
 
-    browser = BrowserSession()
+    browser = BrowserSession(settings.port)
     app = create_app(settings, browser=browser, web_dist=_web_dist())
     url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
     print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
