@@ -16,10 +16,19 @@ def client(settings, catalog):
         yield client
 
 
-@pytest.mark.parametrize("area", ["workflows", "pipelines", "settings"])
+@pytest.mark.parametrize("area", ["pipelines", "settings"])
 def test_areas_not_built_yet_say_so(client, area):
     client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
     assert client.get(f"/api/{area}/status").json() == {"available": False}
+
+
+def test_workflows_say_where_their_files_are(client, settings):
+    client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
+    assert client.get("/api/workflows/status").json() == {
+        "available": True,
+        "folder": str(settings.data_dir / "workflows-local"),
+    }
+    assert client.get("/api/workflows").json() == []
 
 
 def test_knowledge_says_its_repo_isnt_configured(client):

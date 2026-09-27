@@ -1,7 +1,8 @@
 # Workflows and pipelines
 
-Status: **draft** for v1. This is a proposal under discussion and has not been
-implemented.
+Status: **draft** for v1. The runner, run records, Run again, Replay and
+delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core));
+the Workflows and Pipelines tabs are not yet.
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -210,6 +211,50 @@ Git replaces all of these.
 - Pipeline code changes are saved directly after review and passing tests,
   like knowledge-base edits. There are no pull requests for now.
 - No compare step in v1.
+
+## As built (milestone 6 core)
+
+The backend is in `backend/src/datalab/workflows/`, with its routes under
+`/api/workflows`. The design and its evidence are in the runner spike
+(`spikes/2026-09-27-workflow-runner/README.md`).
+
+**Where files come from.** For now, a folder: `[workflows] folder` in
+`settings.toml`, or `<data folder>/workflows-local/`. It is laid out like
+`ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds the YAML files
+directly. Milestone 5 swaps in the synced repo.
+
+**What the file check adds to the example above:**
+
+- `schema_version: 1` (optional; other versions are refused).
+- **`reads:`** lists every Oracle object the workflow reads, as
+  `SCHEMA.OBJECT`. Every object a SQL step names must be in it (joins,
+  subqueries; CTE names don't count), a pipeline's own `reads:` must be in
+  it, and every entry must be used. At run time the list goes to the data
+  service as the only tables its SQL may read.
+- Step ids and output files are lower case. A step with `output:` has one
+  output, `final` in R (`outputs$final`); `outputs: {name: file}` gives
+  several, referred to as `step.name`. References point at earlier steps.
+- Every SQL bind (`:start_date`) must be a declared parameter.
+- `small_cells` takes `count_columns` (or `count_column`), `min` (11 by
+  default, or `$param`), and optionally `totals: {column, value, within}`
+  (total rows) or `total_column`, so a hidden count that a shown total gives
+  away fails too.
+- A pipeline's `inst/pipelines/<name>/pipeline.yaml` has `reads:` with
+  `columns` and `where:` (or `whole_table: true`), `parameters`, and
+  `outputs`. DataLab extracts those objects into `/run/in/oracle/` before
+  the step, and builds the package once per source tree in the sandbox.
+
+**Destinations.** `deliver: destination:` is a key each computer maps to one
+of its export folders (`export_destinations.key`, set with `PUT
+/api/workflows/destinations/<key>`). The practice profile always delivers to
+its own practice folder.
+
+**Run again** runs the current file with the original parameters and seed,
+extracting afresh. **Replay** reruns the kept definition, extracts, image,
+seed and pipeline library; `GET /api/workflows/runs/<id>/replay` says first
+whether it can be exact, and why not (the image gone, another platform,
+DataLab's step wrapper or version changed). It records afterwards whether
+every output matched byte for byte, and doesn't deliver unless asked.
 
 ## Open questions
 

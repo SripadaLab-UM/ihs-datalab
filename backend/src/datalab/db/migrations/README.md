@@ -13,5 +13,5 @@ after these for anything else.
 | 0001–0005 | queries, conversations, attachments, exports, rigor | in use |
 | 0006 | `queries.origin`: conversation, playground, or run | in use |
 | 0007 | knowledge: proposed edits, each conversation's base, repo sync state (milestone 5) | in use |
-| 0008 | workflow runs and their steps (milestone 6) | reserved |
+| 0008 | workflow runs, their steps and deliveries; `export_destinations.key` (milestone 6) | in use |
 | 0009 | update metadata: installed versions and backups (milestone 7) | reserved |

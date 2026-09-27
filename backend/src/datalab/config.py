@@ -114,17 +114,38 @@ class RepoSettings:
 class WorkflowSettings:
     """`[workflows]`: the workflow runner (milestone 6).
 
-    To come: time limits and container limits for R steps, how long run
-    folders are kept.
+    To come: how long run folders are kept, and the pipelines repo in place
+    of `folder` (milestone 5's `repos.pipelines`).
     """
 
     # Workflow runs going at once. Their SQL steps also share the data
     # service's query slots (`limits.max_concurrent_queries`).
     max_concurrent_runs: int = 1
+    # Where workflow files are read from: a folder laid out like the
+    # ihs-pipelines repo (`workflows/*.yaml`, `ihsDataR/`), or holding the
+    # YAML files directly. Unset: `<data folder>/workflows-local`.
+    folder: str | None = None
+    # Each R, pipeline, or custom QC step's container.
+    step_timeout_seconds: float = 30 * 60
+    step_memory: str = "4g"
+    step_cpus: str = "2"
+    step_pids: int = 256
+    # Everything one run may write in its run folder: extracts, outputs, logs.
+    max_run_bytes: int = 20 * 1024**3
 
     def __post_init__(self) -> None:
         if self.max_concurrent_runs < 1:
             raise ValueError("workflows.max_concurrent_runs must be at least 1")
+        if self.step_timeout_seconds <= 0:
+            raise ValueError("workflows.step_timeout_seconds must be more than 0")
+        if not re.fullmatch(r"[1-9][0-9]*[kmg]", self.step_memory):
+            raise ValueError("workflows.step_memory must be a size such as 4g or 512m")
+        if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", self.step_cpus) or float(self.step_cpus) <= 0:
+            raise ValueError("workflows.step_cpus must be a number of CPUs, such as 2")
+        if not 16 <= self.step_pids <= 4096:
+            raise ValueError("workflows.step_pids must be between 16 and 4096")
+        if self.max_run_bytes < 1024**2:
+            raise ValueError("workflows.max_run_bytes must be at least 1 MB")
 
 
 @dataclass(frozen=True)

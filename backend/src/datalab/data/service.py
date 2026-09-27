@@ -21,7 +21,7 @@ from datalab.config import QueryLimits
 from datalab.data.access_log import AccessLog, Origin, check_owner
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
-from datalab.data.sqlcheck import SqlRejected, check_sql
+from datalab.data.sqlcheck import SqlRejected, TableRef, check_sql
 
 
 class Database(Protocol):
@@ -80,11 +80,16 @@ class DataService:
         results_dir: Path,
         preview_rows: int | None = None,
         origin: Origin = "conversation",
+        allowed_tables: frozenset[str] | None = None,
     ) -> QueryOutcome:
         """Check, run, and log one query. Raises SqlRejected or QueryFailed.
 
         `session_id` is the query's owner: a conversation id, or a playground
         (`pg_…`) or workflow run (`run_…`) id, matching `origin`.
+
+        `allowed_tables` (`SCHEMA.OBJECT`, upper case), when given, is all the
+        query may read: a workflow's declared `reads:`. Anything else is
+        refused before the query runs, and logged as rejected.
         """
         # Before anything is logged or run: a wrong owner is a bug in DataLab.
         check_owner(origin, session_id)
@@ -95,6 +100,8 @@ class DataService:
                 sql, allowed_schemas=self._allowed_schemas, columns=self._catalog.column_index()
             )
             _check_binds(checked.binds, binds)
+            if allowed_tables is not None:
+                _check_tables(checked.tables, allowed_tables)
         except SqlRejected as rejection:
             self._log.rejected(
                 query_id=query_id,
@@ -198,6 +205,15 @@ def _check_binds(expected: tuple[str, ...], given: dict[str, Any]) -> None:
         raise SqlRejected(f"Missing values for bind variables: {', '.join(missing)}.")
     if extra:
         raise SqlRejected(f"Values were given for binds the query doesn't use: {', '.join(extra)}.")
+
+
+def _check_tables(tables: tuple[TableRef, ...], allowed: frozenset[str]) -> None:
+    outside = sorted(str(t) for t in tables if str(t) not in allowed)
+    if outside:
+        raise SqlRejected(
+            f"This query reads {', '.join(outside)}, which the workflow doesn't declare "
+            "under `reads:`."
+        )
 
 
 def _new_query_id() -> str:

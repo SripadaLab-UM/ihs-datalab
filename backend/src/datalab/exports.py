@@ -64,6 +64,8 @@ class Destination:
     name: str
     path: str
     added_at: str
+    # What workflow files call it (`deliver: destination:`), set per computer.
+    key: str | None = None
 
     @property
     def available(self) -> bool:
@@ -98,12 +100,35 @@ class DestinationStore:
     def list(self) -> list[Destination]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, name, path, added_at FROM export_destinations ORDER BY rowid"
+                "SELECT id, name, path, added_at, key FROM export_destinations ORDER BY rowid"
             ).fetchall()
         return [Destination(*row) for row in rows]
 
     def get(self, destination_id: str) -> Destination | None:
         return next((d for d in self.list() if d.id == destination_id), None)
+
+    def by_key(self, key: str) -> Destination | None:
+        """The destination a workflow file names, as mapped on this computer."""
+        return next((d for d in self.list() if d.key == key), None)
+
+    def set_key(self, destination_id: str, key: str | None) -> bool:
+        """Map a workflow destination key to this destination, moving it from
+        any other one: a key names exactly one folder per computer."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                if key is not None:
+                    self._db.execute(
+                        "UPDATE export_destinations SET key = NULL WHERE key = ?", (key,)
+                    )
+                cursor = self._db.execute(
+                    "UPDATE export_destinations SET key = ? WHERE id = ?", (key, destination_id)
+                )
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+        return cursor.rowcount > 0
 
     def add(self, name: str, path: Path) -> Destination:
         destination = Destination(
@@ -113,8 +138,9 @@ class DestinationStore:
             added_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         )
         with self._lock:
+            # Columns named: the table gains columns over time (0008 added `key`).
             self._db.execute(
-                "INSERT INTO export_destinations VALUES (?, ?, ?, ?)",
+                "INSERT INTO export_destinations (id, name, path, added_at) VALUES (?, ?, ?, ?)",
                 (destination.id, destination.name, destination.path, destination.added_at),
             )
         return destination
