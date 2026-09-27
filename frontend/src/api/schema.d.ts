@@ -700,6 +700,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/knowledge/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_knowledge_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sign In State */
+        get: operations["sign_in_state_api_knowledge_sign_in_get"];
+        put?: never;
+        /** Start Sign In */
+        post: operations["start_sign_in_api_knowledge_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/sign-in/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Sign In */
+        post: operations["poll_sign_in_api_knowledge_sign_in_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/sign-in/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Sign In */
+        post: operations["cancel_sign_in_api_knowledge_sign_in_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Out */
+        post: operations["sign_out_api_knowledge_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposals */
+        get: operations["proposals_api_knowledge_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposal */
+        get: operations["proposal_api_knowledge_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/proposals/{proposal_id}/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Edit */
+        put: operations["edit_api_knowledge_proposals__proposal_id__edits_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/proposals/{proposal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept */
+        post: operations["accept_api_knowledge_proposals__proposal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/knowledge/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject */
+        post: operations["reject_api_knowledge_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflows/status": {
         parameters: {
             query?: never;
@@ -792,6 +963,21 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcceptIn */
+        AcceptIn: {
+            /**
+             * Confirmed
+             * @default []
+             */
+            confirmed: string[];
+        };
+        /** AccountOut */
+        AccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
         /** ApprovalAnswer */
         ApprovalAnswer: {
             /** Approve */
@@ -1041,6 +1227,21 @@ export interface components {
             severity: "error" | "warning";
             position: components["schemas"]["PositionOut"] | null;
         };
+        /** EditsIn */
+        EditsIn: {
+            /**
+             * Files
+             * @default {}
+             */
+            files: {
+                [key: string]: string | null;
+            };
+            /**
+             * Reset
+             * @default []
+             */
+            reset: string[];
+        };
         /** EventOut */
         EventOut: {
             /** Seq */
@@ -1065,6 +1266,37 @@ export interface components {
             folder: string;
             /** Files */
             files: string[];
+        };
+        /** FileDetail */
+        FileDetail: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+            /** Flags */
+            flags: string[];
+            /** Before */
+            before: string | null;
+            /** Agent */
+            agent: string | null;
+            /** After */
+            after: string | null;
+            /** Edited */
+            edited: boolean;
+            /** Left Out */
+            left_out: boolean;
+            /** Diff */
+            diff: string;
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Theirs */
+            theirs?: string | null;
         };
         /** FileOut */
         FileOut: {
@@ -1140,6 +1372,36 @@ export interface components {
             /** Path */
             path: string;
         };
+        /** FileSummary */
+        FileSummary: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+            /** Flags */
+            flags: string[];
+        };
+        /** FindingOut */
+        FindingOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "data" | "warning";
+            /** Message */
+            message: string;
+            /** Line */
+            line?: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1178,9 +1440,35 @@ export interface components {
             available: boolean;
             /**
              * Repo
-             * @constant
+             * @enum {string}
              */
-            repo: "not configured";
+            repo: "not configured" | "signed out" | "no access" | "not cloned" | "in sync" | "behind" | "diverged" | "sync failed";
+            /** Name */
+            name?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["AccountOut"] | null;
+            /** Head */
+            head?: string | null;
+            /** Last Sync */
+            last_sync?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Message */
+            message?: string | null;
         };
         /** ModeOut */
         ModeOut: {
@@ -1343,6 +1631,43 @@ export interface components {
             /** Checkpoint */
             checkpoint: number;
         };
+        /** ProposalDetail */
+        ProposalDetail: {
+            proposal: components["schemas"]["ProposalOut"];
+            /** Files */
+            files: components["schemas"]["FileDetail"][];
+            /** Findings */
+            findings: components["schemas"]["FindingOut"][];
+        };
+        /** ProposalOut */
+        ProposalOut: {
+            /** Id */
+            id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "superseded" | "withdrawn" | "rejected" | "saving" | "saved" | "conflict" | "check_failed" | "failed";
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Turn */
+            turn: number;
+            /** Base */
+            base: string;
+            /** Files */
+            files: components["schemas"]["FileSummary"][];
+            /** Refused */
+            refused: components["schemas"]["RefusedOut"][];
+            result?: components["schemas"]["SaveResultOut"] | null;
+            /** Commit */
+            commit?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+        };
         /** QueryRecordOut */
         QueryRecordOut: {
             /** Id */
@@ -1366,6 +1691,13 @@ export interface components {
         };
         /** Refused */
         Refused: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** RefusedOut */
+        RefusedOut: {
             /** Path */
             path: string;
             /** Reason */
@@ -1464,10 +1796,55 @@ export interface components {
             /** Results */
             results: components["schemas"]["CheckResultOut"][];
         };
+        /** SaveResultOut */
+        SaveResultOut: {
+            /** State */
+            state: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /** Upstream */
+            upstream?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["FindingOut"][];
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: string[];
+            /**
+             * After Rebase
+             * @default false
+             */
+            after_rebase: boolean;
+        };
         /** SettingsStatus */
         SettingsStatus: {
             /** Available */
             available: boolean;
+        };
+        /** SignInOut */
+        SignInOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri */
+            verification_uri?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["AccountOut"] | null;
+            /** Message */
+            message?: string | null;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -2740,6 +3117,289 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeStatus"];
+                };
+            };
+        };
+    };
+    sync_api_knowledge_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeStatus"];
+                };
+            };
+        };
+    };
+    sign_in_state_api_knowledge_sign_in_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    start_sign_in_api_knowledge_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    poll_sign_in_api_knowledge_sign_in_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    cancel_sign_in_api_knowledge_sign_in_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    sign_out_api_knowledge_sign_out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    proposals_api_knowledge_proposals_get: {
+        parameters: {
+            query?: {
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposal_api_knowledge_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_api_knowledge_proposals__proposal_id__edits_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EditsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_api_knowledge_proposals__proposal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_api_knowledge_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
