@@ -1,0 +1,129 @@
+{
+  "task": "plan_affects",
+  "mode": "analysis",
+  "prompt": "Does sleeping less make interns' mood worse in the 2025 cohort?",
+  "tests": "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Association or estimation (proposed association)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, repeated_observations, sensitivity, temporal_alignment"
+    },
+    {
+      "name": "says what claim is intended",
+      "passed": true,
+      "detail": "the plan says whether it's a causal claim or an association"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"association\",\n  \"analysis_type_label\": \"Association or estimation\",\n  \"rationale\": \"The question asks whether less sleep relates to worse mood; with observational longitudinal data this is best treated as an association rather than a causal effect unless a causal design is specified.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 IHS cohort, are interns' mood ratings worse on days after they slept less?\\n\\nPurpose: Estimate the longitudinal association between nightly sleep duration and subsequent daily mood within interns, while making clear that this does not by itself show that sleep causes mood changes.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort/schema: IHS_2025 only.\\n\\nPrimary candidate tables checked in the catalog and column metadata: IHS_2025.VFITBITSLEEPLOGS for Fitbit sleep logs and IHS_2025.VW_DAILY_MOOD for daily mood. These share PARTICIPANTIDENTIFIER but no shared date column, so dates must be derived and aligned before joining.\\n\\nUnit of analysis: participant-day with an observed main nightly sleep episode and a mood score aligned to the following calendar day. Include participants with at least one aligned sleep-mood day; the within-person estimate will require participants with at least two aligned observations and variation in sleep duration. I have checked metadata but have not queried outcome values.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before interpreting results I will check: row counts and distinct participant counts in both sources; duplicate sleep or mood records per participant-day; date parsing and date ranges; impossible or implausible sleep values; whether ISMAINSLEEP identifies a single main sleep episode; missing sleep and mood; unmatched sleep and mood days; mood score coding and numeric range; and how many participants contribute within-person variation.\\n\\nLimitations: observational association can be affected by workload, rotation, baseline mental health, device wear, survey response timing, and other time-varying factors. Fitbit users may not represent all interns. If mood score direction is not documented in metadata, I will infer it only after checking coding and will state the assumption.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"First I will run a small reproducible pilot that exercises the extraction, alignment, data-quality checks, and model on a bounded subset, then report pilot scope, sample flow, data issues, and expected full-run size before asking whether to scale to the full cohort.\\n\\nFinal deliverables after approval to scale: a concise static HTML report in /work/outputs with methods, sample sizes, effect estimates and uncertainty intervals, sensitivity checks, limitations, and no participant identifiers or row-level records; plus the complete analysis source in /work.\"\n    },\n    {\n      \"kind\": \"target_quantity\",\n      \"label\": \"Target quantity (estimand)\",\n      \"content\": \"Primary estimand: the within-person association between nightly sleep duration and next-day mood score among 2025 interns with aligned Fitbit sleep and daily mood observations. I will express this as the expected difference in mood score for a 1-hour shorter-than-usual sleep duration for the same participant, with uncertainty intervals that account for repeated observations.\\n\\nThis is not a causal estimand unless the study team specifies and supports a causal design; wording will avoid \\u201csleep makes mood worse\\u201d as a causal claim.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Sleep: IHS_2025.VFITBITSLEEPLOGS.MINUTESASLEEP, summarized as hours asleep for the main sleep episode where ISMAINSLEEP indicates the main sleep record when available. STARTDATE and ENDDATE will be parsed to determine the sleep night and alignment.\\n\\nMood: IHS_2025.VW_DAILY_MOOD.MOOD_SCORE, parsed and checked as the daily mood score; MOOD_STARTDATE and MOOD_ENDDATE define response timing and calendar day. If the score direction is not explicit, I will report the observed coding/range and state how \\u201cworse\\u201d is defined.\"\n    },\n    {\n      \"kind\": \"method\",\n      \"label\": \"Method and adjustment\",\n      \"content\": \"Primary model: a repeated-measures regression of mood score on person-mean-centered sleep duration, including participant fixed effects or an equivalent within-person specification. This targets whether a given intern reports worse mood after sleeping less than their own average. I will use cluster-robust uncertainty by participant where feasible.\\n\\nPlanned adjustment: day-of-week or calendar time if coverage supports it, to reduce confounding by weekly schedule patterns. I will not add broad covariates without checking availability and temporal ordering.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"The analysis separates within-person and between-person information. The primary estimate uses within-person deviations in sleep duration; I will report total aligned observations, distinct participants, and the number of participants with enough observations and sleep variation to contribute to the within-person estimate. Uncertainty will be clustered by participant or otherwise matched to repeated observations.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Default alignment: the main sleep episode ending on calendar day D is paired with mood recorded on day D, representing next-day mood after that sleep episode. I will check whether sleep timestamps and mood timestamps are consistently parseable and whether multiple mood entries occur per day. If multiple mood entries exist on a day, I will aggregate to participant-day before modeling and report the rule used.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"I will quantify missingness and coverage at each step: sleep records without parseable dates or minutes asleep, mood records without parseable/numeric scores, participant-days missing either component, and participants lost during alignment. Complete-case aligned days will be used for the primary analysis; coverage limitations will be emphasized.\"\n    },\n    {\n      \"kind\": \"sensitivity\",\n      \"label\": \"Sensitivity analyses\",\n      \"content\": \"Planned sensitivity checks: compare the primary next-day alignment with same-calendar-date alternatives if timestamp patterns make that plausible; repeat using thresholds for implausible sleep duration such as excluding <2 or >14 hours; and, if multiple mood records per day occur, compare mean versus last mood score for that day.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 40.00463604927063,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_f4bbbc6fb22e2b09",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "association",
+        "analysis_type_label": "Association or estimation",
+        "rationale": "The question asks whether less sleep relates to worse mood; with observational longitudinal data this is best treated as an association rather than a causal effect unless a causal design is specified.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 IHS cohort, are interns' mood ratings worse on days after they slept less?\n\nPurpose: Estimate the longitudinal association between nightly sleep duration and subsequent daily mood within interns, while making clear that this does not by itself show that sleep causes mood changes."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort/schema: IHS_2025 only.\n\nPrimary candidate tables checked in the catalog and column metadata: IHS_2025.VFITBITSLEEPLOGS for Fitbit sleep logs and IHS_2025.VW_DAILY_MOOD for daily mood. These share PARTICIPANTIDENTIFIER but no shared date column, so dates must be derived and aligned before joining.\n\nUnit of analysis: participant-day with an observed main nightly sleep episode and a mood score aligned to the following calendar day. Include participants with at least one aligned sleep-mood day; the within-person estimate will require participants with at least two aligned observations and variation in sleep duration. I have checked metadata but have not queried outcome values."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting results I will check: row counts and distinct participant counts in both sources; duplicate sleep or mood records per participant-day; date parsing and date ranges; impossible or implausible sleep values; whether ISMAINSLEEP identifies a single main sleep episode; missing sleep and mood; unmatched sleep and mood days; mood score coding and numeric range; and how many participants contribute within-person variation.\n\nLimitations: observational association can be affected by workload, rotation, baseline mental health, device wear, survey response timing, and other time-varying factors. Fitbit users may not represent all interns. If mood score direction is not documented in metadata, I will infer it only after checking coding and will state the assumption."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "First I will run a small reproducible pilot that exercises the extraction, alignment, data-quality checks, and model on a bounded subset, then report pilot scope, sample flow, data issues, and expected full-run size before asking whether to scale to the full cohort.\n\nFinal deliverables after approval to scale: a concise static HTML report in /work/outputs with methods, sample sizes, effect estimates and uncertainty intervals, sensitivity checks, limitations, and no participant identifiers or row-level records; plus the complete analysis source in /work."
+          },
+          {
+            "kind": "target_quantity",
+            "label": "Target quantity (estimand)",
+            "content": "Primary estimand: the within-person association between nightly sleep duration and next-day mood score among 2025 interns with aligned Fitbit sleep and daily mood observations. I will express this as the expected difference in mood score for a 1-hour shorter-than-usual sleep duration for the same participant, with uncertainty intervals that account for repeated observations.\n\nThis is not a causal estimand unless the study team specifies and supports a causal design; wording will avoid \u201csleep makes mood worse\u201d as a causal claim."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Sleep: IHS_2025.VFITBITSLEEPLOGS.MINUTESASLEEP, summarized as hours asleep for the main sleep episode where ISMAINSLEEP indicates the main sleep record when available. STARTDATE and ENDDATE will be parsed to determine the sleep night and alignment.\n\nMood: IHS_2025.VW_DAILY_MOOD.MOOD_SCORE, parsed and checked as the daily mood score; MOOD_STARTDATE and MOOD_ENDDATE define response timing and calendar day. If the score direction is not explicit, I will report the observed coding/range and state how \u201cworse\u201d is defined."
+          },
+          {
+            "kind": "method",
+            "label": "Method and adjustment",
+            "content": "Primary model: a repeated-measures regression of mood score on person-mean-centered sleep duration, including participant fixed effects or an equivalent within-person specification. This targets whether a given intern reports worse mood after sleeping less than their own average. I will use cluster-robust uncertainty by participant where feasible.\n\nPlanned adjustment: day-of-week or calendar time if coverage supports it, to reduce confounding by weekly schedule patterns. I will not add broad covariates without checking availability and temporal ordering."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "The analysis separates within-person and between-person information. The primary estimate uses within-person deviations in sleep duration; I will report total aligned observations, distinct participants, and the number of participants with enough observations and sleep variation to contribute to the within-person estimate. Uncertainty will be clustered by participant or otherwise matched to repeated observations."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Default alignment: the main sleep episode ending on calendar day D is paired with mood recorded on day D, representing next-day mood after that sleep episode. I will check whether sleep timestamps and mood timestamps are consistently parseable and whether multiple mood entries occur per day. If multiple mood entries exist on a day, I will aggregate to participant-day before modeling and report the rule used."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "I will quantify missingness and coverage at each step: sleep records without parseable dates or minutes asleep, mood records without parseable/numeric scores, participant-days missing either component, and participants lost during alignment. Complete-case aligned days will be used for the primary analysis; coverage limitations will be emphasized."
+          },
+          {
+            "kind": "sensitivity",
+            "label": "Sensitivity analyses",
+            "content": "Planned sensitivity checks: compare the primary next-day alignment with same-calendar-date alternatives if timestamp patterns make that plausible; repeat using thresholds for implausible sleep duration such as excluding <2 or >14 hours; and, if multiple mood records per day occur, compare mean versus last mood score for that day."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 75472,
+        "inputTokens": 73070,
+        "cachedInputTokens": 41472,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2402,
+        "reasoningOutputTokens": 335
+      },
+      "last": {
+        "totalTokens": 21491,
+        "inputTokens": 20059,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1432,
+        "reasoningOutputTokens": 210
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_049de2bab5b50289",
+  "attempt": 1
+}

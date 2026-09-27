@@ -1,0 +1,109 @@
+{
+  "task": "plan_describe",
+  "mode": "analysis",
+  "prompt": "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, month by month.",
+  "tests": "plan type: a descriptive question gets a describe plan, not an invented exposure",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Describe or compare (proposed describe)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, repeated_observations, temporal_alignment"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"describe\",\n  \"analysis_type_label\": \"Describe or compare\",\n  \"rationale\": \"The question asks for month-by-month description of a single Fitbit sleep measure in one cohort, not an exposure-outcome association or prediction.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Describe nightly Fitbit sleep duration among 2025 IHS cohort participants during the intern year, month by month, to show the observed pattern and data coverage across training months. This is a descriptive analysis, not a causal or comparative claim.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025. Primary table checked in metadata: IHS_2025.FITBITSLEEPLOGS; candidate view IHS_2025.VFITBITSLEEPLOGS has the same sleep columns but character date fields. Unit of analysis: a main-sleep episode/night from Fitbit sleep logs. Planned intern-year window: nights starting from 2025-07-01 through 2026-06-30, inclusive of start dates. Include records with nonmissing PARTICIPANTIDENTIFIER, STARTDATE, MINUTESASLEEP, and ISMAINSLEEP indicating the main sleep episode. Exclude non-main sleep logs for the primary summaries, because the request is nightly sleep duration rather than naps or all sleep bouts.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before interpreting summaries, check record counts, participant counts, date range, duplicate participant-start/end rows, number of sleep records per participant-month, missingness in key fields, ISMAINSLEEP values, and impossible or implausible durations. The primary summaries could be misleading if device wear/sync coverage differs by month or if participants with more observed nights dominate the night-level mean. Results describe recorded Fitbit main-sleep logs only, not necessarily all sleep, and do not imply causes of month-to-month changes.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A static researcher-facing HTML report in /work/outputs plus the complete analysis source in /work. The report will include the plan label, provenance (tables and SQL files), sample flow, data-quality checks, a month-by-month table, and a month-by-month figure. I will keep participant identifiers and row-level sleep logs out of /work/outputs.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Sleep duration: IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP converted to hours as MINUTESASLEEP / 60. Month: calendar month of STARTDATE for nights beginning during the intern year. Main sleep indicator: IHS_2025.FITBITSLEEPLOGS.ISMAINSLEEP. Planned summaries by month: number of main-sleep records/nights, number of participants with at least one record, median sleep hours, IQR, mean sleep hours, and an uncertainty interval for the mean that accounts for repeated nights within participants where feasible.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"Nightly observations are repeated within participants. I will present both night-level summaries and participant-month summaries so months are not interpreted only as a pool of nights. Uncertainty for mean sleep duration will account for clustering by participant, or be labelled descriptive only if the data structure prevents a stable clustered interval.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"A night will be assigned to the calendar month of STARTDATE, interpreted as the night beginning date. Records crossing midnight will remain assigned by STARTDATE. The intern-year window uses STARTDATE from 2025-07-01 to 2026-06-30 inclusive; records outside this window are excluded from primary summaries.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"Missing STARTDATE, MINUTESASLEEP, PARTICIPANTIDENTIFIER, or main-sleep status will be counted and excluded from primary sleep-duration summaries. Month-level coverage will be reported as observed nights and participants with records, because absence of Fitbit records may reflect non-wear, non-syncing, or no eligible sleep record rather than no sleep.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 33.46851897239685,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_caafc6b2aa4baab4",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "The question asks for month-by-month description of a single Fitbit sleep measure in one cohort, not an exposure-outcome association or prediction.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Describe nightly Fitbit sleep duration among 2025 IHS cohort participants during the intern year, month by month, to show the observed pattern and data coverage across training months. This is a descriptive analysis, not a causal or comparative claim."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025. Primary table checked in metadata: IHS_2025.FITBITSLEEPLOGS; candidate view IHS_2025.VFITBITSLEEPLOGS has the same sleep columns but character date fields. Unit of analysis: a main-sleep episode/night from Fitbit sleep logs. Planned intern-year window: nights starting from 2025-07-01 through 2026-06-30, inclusive of start dates. Include records with nonmissing PARTICIPANTIDENTIFIER, STARTDATE, MINUTESASLEEP, and ISMAINSLEEP indicating the main sleep episode. Exclude non-main sleep logs for the primary summaries, because the request is nightly sleep duration rather than naps or all sleep bouts."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting summaries, check record counts, participant counts, date range, duplicate participant-start/end rows, number of sleep records per participant-month, missingness in key fields, ISMAINSLEEP values, and impossible or implausible durations. The primary summaries could be misleading if device wear/sync coverage differs by month or if participants with more observed nights dominate the night-level mean. Results describe recorded Fitbit main-sleep logs only, not necessarily all sleep, and do not imply causes of month-to-month changes."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A static researcher-facing HTML report in /work/outputs plus the complete analysis source in /work. The report will include the plan label, provenance (tables and SQL files), sample flow, data-quality checks, a month-by-month table, and a month-by-month figure. I will keep participant identifiers and row-level sleep logs out of /work/outputs."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Sleep duration: IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP converted to hours as MINUTESASLEEP / 60. Month: calendar month of STARTDATE for nights beginning during the intern year. Main sleep indicator: IHS_2025.FITBITSLEEPLOGS.ISMAINSLEEP. Planned summaries by month: number of main-sleep records/nights, number of participants with at least one record, median sleep hours, IQR, mean sleep hours, and an uncertainty interval for the mean that accounts for repeated nights within participants where feasible."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "Nightly observations are repeated within participants. I will present both night-level summaries and participant-month summaries so months are not interpreted only as a pool of nights. Uncertainty for mean sleep duration will account for clustering by participant, or be labelled descriptive only if the data structure prevents a stable clustered interval."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "A night will be assigned to the calendar month of STARTDATE, interpreted as the night beginning date. Records crossing midnight will remain assigned by STARTDATE. The intern-year window uses STARTDATE from 2025-07-01 to 2026-06-30 inclusive; records outside this window are excluded from primary summaries."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Missing STARTDATE, MINUTESASLEEP, PARTICIPANTIDENTIFIER, or main-sleep status will be counted and excluded from primary sleep-duration summaries. Month-level coverage will be reported as observed nights and participants with records, because absence of Fitbit records may reflect non-wear, non-syncing, or no eligible sleep record rather than no sleep."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 71233,
+        "inputTokens": 69393,
+        "cachedInputTokens": 32256,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1840,
+        "reasoningOutputTokens": 422
+      },
+      "last": {
+        "totalTokens": 20387,
+        "inputTokens": 19272,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1115,
+        "reasoningOutputTokens": 286
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_d9f8b9798f4b87b0",
+  "attempt": 2
+}

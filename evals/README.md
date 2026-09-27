@@ -28,7 +28,9 @@ The `plan_` tasks grade the plan the agent proposes, not an answer (DataLab's
 own checks already make it well formed; these check it's the right kind).
 Each also checks its add-on sections are ones that can apply to the question:
 none about comparing cohorts for a one-cohort question, and no "Pilot, then
-full run" that only restates Analysis mode's usual pilot.
+full run" that only restates Analysis mode's usual pilot. It can't judge
+whether an add-on that could apply was needed (association plans often use
+all four that can): that's for the person reading the plans.
 The runner sends the plan back unapproved and stops the turn once it's
 proposed, so each takes a minute or two.
 
