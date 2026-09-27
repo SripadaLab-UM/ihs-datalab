@@ -22,7 +22,7 @@ docker run "${FLAGS[@]}" \
 echo "build took $(echo "$(date +%s.%N) - $s" | bc) s"
 echo "== source tree checksum before $before, after $(tree_sum)"
 
-"${PY:-/Users/ataxali/work/ihs_datalab/backend/.venv/bin/python}" "$HERE/make_fake_data.py" "$W/in/oracle/IHS_SYN.DAILY_WEARABLE.csv" --as-of 2025-04-30
+"${PY:-$(git -C "$HERE" rev-parse --show-toplevel)/backend/.venv/bin/python}" "$HERE/make_fake_data.py" "$W/in/oracle/IHS_SYN.DAILY_WEARABLE.csv" --as-of 2025-04-30
 cat > "$W/step/step.json" <<JSON
 {"step": "metrics", "type": "pipeline", "seed": 1, "params": {"start_date": "2025-04-01", "end_date": "2025-05-01"},
  "inputs": {"IHS_SYN.DAILY_WEARABLE": {"path": "/run/in/oracle/IHS_SYN.DAILY_WEARABLE.csv"}},

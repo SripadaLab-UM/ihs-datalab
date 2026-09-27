@@ -1,0 +1,3 @@
+-v exit=0; host folder created: yes
+docker: Error response from daemon: invalid mount config for type "bind": bind source path does not exist: /host_mnt<spike>/runs/mountflag-1790507953-46942/by-mount
+--mount exit=125; host folder created: no

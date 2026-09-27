@@ -544,7 +544,11 @@ def summarize(record: dict[str, Any]) -> None:
         outs = ", ".join(f"{o['file']} {o['sha256'][:12]} ({o.get('rows', '?')} rows)" for o in (s.get("outputs") or {}).values())
         checks = [f"{c['id']}={c['status']}" for c in (s.get("result") or {}).get("checks", [])]
         print(f"  {s['id']:<14} {s['type']:<10} {s.get('status', ''):<9} {s.get('elapsed_s', '')!s:>5}s  {outs} {' '.join(checks)}")
-    print(f"  delivery: {record['delivery']}")
+    delivery = dict(record["delivery"] or {})
+    for key in ("destination_path", "folder"):
+        if key in delivery:  # printed relative to the spike folder
+            delivery[key] = os.path.relpath(delivery[key], HERE)
+    print(f"  delivery: {delivery or None}")
     if "comparison" in record:
         c = record["comparison"]
         print(f"  compared with {record['of_run']}: {'IDENTICAL' if c['identical'] else 'DIFFERENT'}")

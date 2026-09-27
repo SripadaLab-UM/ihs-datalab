@@ -1,9 +1,0 @@
-### two fresh runs, same source and seed: does re-extraction reproduce too?
-run_20260927T110210_8db0bc [run] succeeded
-run_20260927T110212_1fb1bf [run] succeeded
-identical: True
-
-### controls: another seed, and an image that is not on disk (--pull never)
-replay with another seed: columns that differ: ['steps_ci_high', 'steps_ci_low']
-docker: Error response from daemon: No such image: sha256:0000000000000000000000000000000000000000000000000000000000000000
-

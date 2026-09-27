@@ -1,6 +1,6 @@
 -- DRAFT for backend/src/datalab/db/migrations/0008_workflow_runs.sql (spike
--- only; not applied by the app). Checked against 0001-0005 by
--- check_migration.py.
+-- only; not applied by the app). Checked against 0001-0005 only, by
+-- check_migration.py; 0006 (queries.origin, wave 0) wasn't included.
 --
 -- Workflow runs. The run folder (runs/<id>/) holds the files: the kept
 -- extracts, every step's outputs and result.json, logs, and record.json, a

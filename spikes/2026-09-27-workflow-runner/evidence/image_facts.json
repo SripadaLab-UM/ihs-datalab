@@ -1,0 +1,7 @@
+{
+  "ref": "datalab-agent:dev",
+  "id": "sha256:03c31729eff379e4eff9e23be142bda194a3a3da0fbf3c94892b5ec19a6cb273",
+  "r_version": "R version 4.6.1 (2026-06-24)",
+  "r_packages": 178,
+  "r_packages_sha256": "ae05a133d60d2d9170686618c20a3a0f93f1a719e274d3dda0d8ef157d9ddfb4"
+}

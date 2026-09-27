@@ -7,9 +7,18 @@
 # Workflow runner spike
 
 Run on macOS with Docker Desktop 29.6.2 (linux/arm64), image
-`datalab-agent:dev` (`sha256:f0f76b62c888…`, R 4.6.1, 178 installed R packages), and
+`datalab-agent:dev`, R 4.6.1, 178 installed R packages
+([evidence/image_facts.json](evidence/image_facts.json)), and
 the backend's Python 3.13 venv (for `pyyaml`, `sqlglot` and DataLab's own
-`exports.py`).
+`exports.py`). A parallel session rebuilt `datalab-agent:dev` between the
+first runs and the regenerated evidence: `probe_sandbox.txt` and
+`pipeline_probe.txt` used `sha256:f0f76b62c888…`, and `demo.txt` used
+`sha256:03c31729eff3…`. The R package fingerprint was the same for both
+(`ae05a133…`). The tag moved while the packages stayed put, which is why runs
+pin the digest.
+
+The scripts default to `backend/.venv/bin/python` in this checkout; set `PY`
+to use another interpreter with `pyyaml` and `sqlglot`.
 
 ## Layout
 
@@ -17,13 +26,14 @@ the backend's Python 3.13 venv (for `pyyaml`, `sqlglot` and DataLab's own
 |---|---|
 | `probe_sandbox.sh` | Q1: the step sandbox flags, what each one does, and startup cost |
 | `race_probe.sh` | Q1: a Docker Desktop bind-mount problem found on the way |
+| `mount_flag_probe.sh` | Q1: `-v` and `--mount` when the host folder doesn't exist |
 | `pipeline_probe.sh`, `fakeDataR/` | Q1: build a pipeline package (a stand-in for `ihsDataR`) with no network, run a pipeline from it |
 | `datalab/run_step.R` | Q2: DataLab's step wrapper: reads the contract, sets the seed, writes `result.json` |
 | `runner.py` | Q2, Q4, Q6: the prototype driver: `run`, `again`, `replay`, `compare` |
 | `workflows/*.yaml` | the prototype workflow, and one whose R step misbehaves |
 | `check_reads.py` | Q3: `reads:` against the SQL steps |
-| `0008_workflow_runs.sql`, `check_migration.py` | Q6: draft migration, loaded with a real run record |
-| `demo.sh` | Q2 and Q4 end to end |
+| `0008_workflow_runs.sql`, `check_migration.py` | Q6: draft migration, loaded with a real run record (checked against 0001–0005 only) |
+| `demo.sh` | Q2 and Q4 end to end, then the controls; run it with an empty `runs/` |
 | `evidence/` | output of every script above |
 | `cleanup.sh` | removes containers labelled `datalab.spike=runner`, and nothing else |
 
@@ -61,10 +71,10 @@ What each part was shown to do:
 | `--user 10004:10004` | the image already says `USER agent`; stating it means a changed image can't run steps as root |
 | `--cap-drop ALL`, `no-new-privileges` | `CapEff 0`, `CapBnd 0`, `NoNewPrivs 1` |
 | `--memory` (with `--memory-swap` equal) | a 3 GB allocation in a 2 GB container exits 137 |
-| `--pids-limit` | the 257th process gets `Cannot fork` |
+| `--pids-limit` | starting 300 background processes against a limit of 256 hits the limit (`Cannot fork`); the exact count at which it stops wasn't captured |
 | `--init` | **needed**: `docker stop` takes 0.1 s with it, 10.2 s without, because Rscript as PID 1 ignores SIGTERM. Cancel would hang otherwise |
 | `--pull never` | an image that isn't there fails at once (`No such image`) instead of reaching a registry |
-| `--mount` over `-v` | `-v` silently creates a missing host folder; `--mount` refuses |
+| `--mount` over `-v` | for a host folder that doesn't exist, `-v` succeeds and creates it; `--mount` fails and creates nothing ([evidence/mount_flag_probe.txt](evidence/mount_flag_probe.txt)) |
 | labels | in the app, `datalab.run`, `datalab.profile` and `datalab.instance`, so startup cleanup removes only this instance's leftover step containers, as `remove_all_session_containers` does for sessions (the spike used `datalab.spike=runner`) |
 
 **Pipeline steps** ([evidence/pipeline_probe.txt](evidence/pipeline_probe.txt)):
@@ -87,7 +97,8 @@ env file and no Codex home.
 **Startup overhead** (5 runs each, seconds): `docker run … sh -c true` 0.27;
 `Rscript -e 1` 0.5; `Rscript` loading the tidyverse 1.1; `docker exec` into
 an already-running container 0.27. A fresh container per step costs about
-0.3 s over a warm one. In the prototype, whole R steps took 0.4 to 1.0 s. Not
+0.3 s over a warm one. In the prototype, whole container steps took
+0.28–0.82 s ([evidence/demo.txt](evidence/demo.txt)). Not
 worth a warm pool: a fresh container per step also gives each step a clean
 `/tmp` and exactly its own mounts.
 
@@ -197,16 +208,16 @@ How DataLab enforces it:
 
 ## 4. Replay determinism
 
-Verified byte for byte ([evidence/demo.txt](evidence/demo.txt),
-[evidence/replay_controls.txt](evidence/replay_controls.txt)):
+Verified byte for byte ([evidence/demo.txt](evidence/demo.txt), §2–§5 and
+the controls in §9):
 
 - two Replays of a run reproduce every output, and every QC result, exactly;
 - **control**: a Replay with a different seed changes only the two
   bootstrap CI columns, so the seed is what makes it reproducible;
 - two fresh Runs over the same data with the same seed are identical too,
   because the SQL has `ORDER BY`;
-- Run again over later data gives new results (4,240 rows, 48 weeks), as it
-  should.
+- Run again over later data gives new results, as it should: 4,240
+  extracted rows, and 48 summary rows (16 weeks × 3 devices).
 
 What a Replay must pin, and how:
 
@@ -274,7 +285,12 @@ numeric tolerance and say so. Not tested here.
 The run folder keeps the files: `workflow.yaml`, each step's `spec/`,
 `outputs/`, `result/result.json` and `log.txt`, and `record.json` (a full
 copy of the record, so a folder explains itself). SQLite holds the rest
-(draft [`0008_workflow_runs.sql`](0008_workflow_runs.sql)):
+(draft [`0008_workflow_runs.sql`](0008_workflow_runs.sql)). The draft was
+checked only against migrations 0001–0005, which are what this branch has.
+0006, which adds `queries.origin` (`conversation`, `playground` or `run`)
+and is coming in wave 0, wasn't included. The draft doesn't touch
+`queries`, and its run ids (`run_…`) are the ids 0006 expects for
+`origin = 'run'`, but it should be rechecked once 0006 lands:
 
 - **`workflow_runs`**: id (`run_…`, as 0006's `queries.origin = 'run'`
   expects), mode (`run`, `run_again`, `replay`) and `of_run`, `set_id`,
