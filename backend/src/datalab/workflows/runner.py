@@ -167,6 +167,18 @@ class _Plan:
     libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
+def delivery_title(name: str) -> str:
+    """The workflow's name as words, for its dated delivery folder.
+
+    The export scrubs the title of anything shaped like a study identifier,
+    and read as one word, `fitbit_daily_2025` mixes letters and digits the
+    way IDs do, so the whole name went and the folder was called "export".
+    Split at the underscores, the year is kept as a year, while a real
+    identifier in a name (`p0001_steps`) is still taken out.
+    """
+    return name.replace("_", " ")
+
+
 def wrapper_bytes() -> bytes:
     return resources.files(__package__).joinpath(WRAPPER_NAME).read_bytes()
 
@@ -1106,7 +1118,7 @@ class WorkflowRunner:
             result = await asyncio.to_thread(
                 exports.export,
                 target,
-                title=plan.workflow.name,
+                title=delivery_title(plan.workflow.name),
                 tag=plan.run_id,
                 sources=sources,
                 about=about,

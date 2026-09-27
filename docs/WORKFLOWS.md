@@ -114,7 +114,10 @@ objects first, then runs the pipeline.
 ### Step types
 
 - **`sql`**: a read-only query through DataLab's data service. The full result
-  is saved as a CSV.
+  is saved as a CSV. Dates and times are written `YYYY-MM-DD HH:MM:SS`, which
+  R's `as.POSIXct` reads, and a column whose every value is at midnight as
+  plain dates (`YYYY-MM-DD`), as R itself writes one; RAW is upper-case hex,
+  as `RAWTOHEX` gives it.
 - **`r`**: a short inline R script.
 - **`pipeline`**: runs a pipeline from `ihsDataR`.
 - **`qc`**: built-in checks, which run as DataLab's own code: row counts,
@@ -194,7 +197,8 @@ Each bespoke request, such as SensorKit preprocessing, follows the same path:
 
 Before v1 ships, the 8 default workflows and `daily_metrics_2025` are run in
 both the prototype and v1 on the same inputs, and their outputs must match.
-This is a one-off validation, not a user-facing feature.
+This is a one-off validation, not a user-facing feature. The harness is in
+`scripts/parity/` and the results are in `docs/acceptance/2026-09-27-parity.md`.
 
 ## Carried over from the prototype
 
@@ -285,10 +289,12 @@ isn't copied, and only pipeline steps are refused, saying why.
   - reasoning cleverer than elimination and propagation: the check is sound
     but not complete (it doesn't search every whole-number solution, and a
     group of more than 400 linked hidden cells gets the propagation only).
-- In the real profile, every delivered CSV needs a passing `small_cells`
-  check over that exact output, and every other delivered file (TSV, Excel,
-  …), which built-in checks can't read, needs a reason under
-  `deliver.without_small_cells: {<output>: <why>}`. A reason is at most 300
+- In the real profile, every delivered file needs either a passing
+  `small_cells` check over that exact output or a reason under
+  `deliver.without_small_cells: {<output>: <why>}`. A CSV can have either,
+  such as a row-level export that holds no counts of people; every other
+  file (TSV, Excel, …), which built-in checks can't read, needs a reason.
+  A reason is at most 300
   characters, is refused if it looks like it holds an identifier, a date or
   an email (the export folder-name scan), and is recorded in the delivery
   manifest.

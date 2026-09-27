@@ -319,6 +319,27 @@ async def test_a_step_that_writes_past_the_run_cap_fails(tmp_path):
     assert run["steps"][2]["status"] == "failed"
 
 
+async def test_the_dated_delivery_folder_is_named_after_the_workflow(tmp_path):
+    # Read as one word, a name with a year mixes letters and digits the way
+    # study IDs do, and the folder used to be called "… export run_…".
+    h = harness(tmp_path)
+    h.write(
+        "weekly_steps_2025.yaml", WEEKLY.replace("name: weekly_steps", "name: weekly_steps_2025")
+    )
+    run = await h.run("weekly_steps_2025.yaml")
+    [delivery] = run["deliveries"]
+    name = Path(delivery["folder"]).name
+    assert name.endswith(f" weekly steps 2025 {run['id']}"), name
+    assert " export " not in name
+
+
+def test_the_delivery_title_still_loses_an_identifier(tmp_path):
+    folder = exports._new_folder(
+        tmp_path, runner_module.delivery_title("p0001_steps_2025"), "run_x"
+    )
+    assert folder.name.endswith(" steps 2025 run_x"), folder.name
+
+
 async def test_real_profile_delivers_to_the_folder_its_key_names(tmp_path, monkeypatch):
     # The temporary folder is under /private/var, which is never a destination.
     monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import csv
+import datetime
 import re
 import shutil
 import threading
@@ -192,6 +193,9 @@ class OracleDatabase:
     ) -> ExtractResult:
         preview: list[list[str]] = []
         rows = 0
+        # Per column: whether it held a date or time, and whether any had a time of day.
+        dated = [False] * len(columns)
+        timed = [False] * len(columns)
         with path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(columns)
@@ -203,7 +207,9 @@ class OracleDatabase:
                         "return, so it was stopped and nothing was kept. Narrow the query: "
                         "fewer rows, columns or cohorts."
                     )
-                values = [["" if v is None else str(v) for v in row] for row in batch]
+                values = [
+                    [csv_value(v, i, dated, timed) for i, v in enumerate(row)] for row in batch
+                ]
                 if len(preview) < preview_rows:
                     preview.extend(values[: preview_rows - len(preview)])
                 writer.writerows(values)
@@ -217,6 +223,12 @@ class OracleDatabase:
                 if shutil.disk_usage(path.parent).free < self._limits.min_free_disk_bytes:
                     raise LimitExceeded("The disk is nearly full, so the query was stopped.")
             size = handle.tell()
+        date_only = [i for i in range(len(columns)) if dated[i] and not timed[i]]
+        if date_only:
+            if shutil.disk_usage(path.parent).free < self._limits.min_free_disk_bytes + size:
+                raise LimitExceeded("The disk is nearly full, so the query was stopped.")
+            size = _dates_only(path, date_only)
+            preview = [_drop_midnight(row, date_only) for row in preview]
         return ExtractResult(columns, preview, rows, size, 0.0)
 
     def session_privileges(self, *, timeout: float | None = None) -> SessionPrivileges:
@@ -240,6 +252,63 @@ class OracleDatabase:
             return SessionPrivileges(roles, system, non_read)
         finally:
             _close_quietly(connection)
+
+
+def csv_value(value: Any, index: int, dated: list[bool], timed: list[bool]) -> str:
+    """One value as text for a result CSV, the way R and the lab's code read it.
+
+    - A date or time is `YYYY-MM-DD HH:MM:SS` (with `.ffffff` if it has
+      fractions), which R's `as.POSIXct` reads; it drops the time from the
+      ISO `T` form without a warning. A column whose every value is at
+      midnight is then written as plain dates by `_dates_only`, as R writes
+      such a column and as the legacy scripts (through ROracle) saw it: the
+      Garmin calendar-date rule in ihsDataR treats any time part as a cutoff.
+    - RAW is upper-case hex, as Oracle's RAWTOHEX gives it, so a key reads
+      the same whether the SQL converts it or not.
+    - Missing is empty.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, datetime.datetime):
+        dated[index] = True
+        if value.time() != datetime.time(0):
+            timed[index] = True
+        return str(value)
+    if isinstance(value, bytes):
+        return value.hex().upper()
+    return str(value)
+
+
+_MIDNIGHT = " 00:00:00"
+
+
+def _drop_midnight(row: list[str], columns: list[int]) -> list[str]:
+    out = list(row)
+    for i in columns:
+        if out[i].endswith(_MIDNIGHT):
+            out[i] = out[i][: -len(_MIDNIGHT)]
+    return out
+
+
+def _dates_only(path: Path, columns: list[int]) -> int:
+    """Rewrite `path` with the given columns as plain dates. Returns the new size."""
+    rewritten = path.with_name(path.name + ".dates")
+    try:
+        with (
+            path.open(newline="", encoding="utf-8") as source,
+            rewritten.open("w", newline="", encoding="utf-8") as target,
+        ):
+            reader = csv.reader(source)
+            writer = csv.writer(target)
+            writer.writerow(next(reader))
+            for row in reader:
+                writer.writerow(_drop_midnight(row, columns))
+            size = target.tell()
+        rewritten.replace(path)
+    except BaseException:
+        rewritten.unlink(missing_ok=True)
+        raise
+    return size
 
 
 def _require_marker(cursor: oracledb.Cursor) -> None:
