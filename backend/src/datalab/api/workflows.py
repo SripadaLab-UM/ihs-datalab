@@ -37,6 +37,7 @@ from datalab.workflows.model import (
     Problem,
     Workflow,
     WorkflowInvalid,
+    problem_position,
     step_inputs,
     step_kind,
     step_outputs,
@@ -81,6 +82,10 @@ class WorkflowsStatus(BaseModel):
 class ProblemOut(BaseModel):
     path: str  # where in the file, such as steps[1].inputs.raw
     message: str
+    # The same place as a 1-based line and column in the file's text, when
+    # DataLab has the text and can find it (for the editor's marks).
+    line: int | None = None
+    column: int | None = None
 
 
 class ParameterOut(BaseModel):
@@ -104,6 +109,24 @@ class DeliverOut(BaseModel):
     files: list[str]
 
 
+class WorkflowRunOut(BaseModel):
+    id: str
+    workflow_name: str
+    workflow_path: str
+    mode: Literal["run", "run_again", "replay"]
+    of_run: str | None
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]
+    started_at: str
+    finished_at: str | None
+    started_by: str
+    message: str | None
+    delivery_status: DeliveryStatus
+    delivery_message: str | None
+    replay_exact: bool | None
+    replay_notes: list[str]
+    reproduced: bool | None
+
+
 class WorkflowOut(BaseModel):
     path: str
     name: str | None
@@ -116,6 +139,18 @@ class WorkflowOut(BaseModel):
     deliver: DeliverOut | None
     source: Literal["git", "file"] | None
     blob: str | None
+    commit: str | None
+    # The newest run of this file, in the list only.
+    last_run: WorkflowRunOut | None = None
+
+
+class WorkflowTextOut(BaseModel):
+    """A workflow file's text, as it is in the folder now (read-only here)."""
+
+    path: str
+    text: str
+    source: Literal["git", "file"]
+    blob: str
     commit: str | None
 
 
@@ -148,24 +183,6 @@ class ReplayCheckOut(BaseModel):
     exact: bool
     reasons: list[str]  # why it wouldn't be exact
     blocking: list[str]  # why it can't run at all
-
-
-class WorkflowRunOut(BaseModel):
-    id: str
-    workflow_name: str
-    workflow_path: str
-    mode: Literal["run", "run_again", "replay"]
-    of_run: str | None
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled", "interrupted"]
-    started_at: str
-    finished_at: str | None
-    started_by: str
-    message: str | None
-    delivery_status: DeliveryStatus
-    delivery_message: str | None
-    replay_exact: bool | None
-    replay_notes: list[str]
-    reproduced: bool | None
 
 
 class StepOut(BaseModel):
@@ -289,11 +306,11 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         try:
             file = folder.read(path)
         except SourceError as error:
-            return _invalid(path, [Problem("", str(error))], None)
+            return _invalid(path, _problems_out([Problem("", str(error))]), None)
         try:
             workflow = runner.check_text(file.text)
         except WorkflowInvalid as error:
-            return _invalid(path, error.problems, file)
+            return _invalid(path, _problems_out(error.problems, file.text), file)
         return _workflow_out(path, workflow, runner, file)
 
     @router.get("/status")
@@ -302,7 +319,29 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 
     @router.get("")
     def list_workflows() -> list[WorkflowOut]:
-        return [describe(path) for path in folder.paths()]
+        out = []
+        for path in folder.paths():
+            described = describe(path)
+            last = runner.store.list_runs(path, limit=1)
+            if last:
+                described.last_run = WorkflowRunOut.model_validate(_run_fields(last[0]))
+            out.append(described)
+        return out
+
+    @router.get("/text")
+    def workflow_text(path: str) -> WorkflowTextOut:
+        """A workflow file's text, for the read-only view."""
+        try:
+            file = folder.read(path)
+        except SourceError as error:
+            raise HTTPException(404, str(error)) from error
+        return WorkflowTextOut(
+            path=path,
+            text=file.text,
+            source=file.source,  # type: ignore[arg-type]
+            blob=file.blob,
+            commit=file.commit,
+        )
 
     @router.post("/validate")
     def validate(body: ValidateIn) -> ValidateOut:
@@ -316,7 +355,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         try:
             workflow = runner.check_text(body.text)
         except WorkflowInvalid as error:
-            return ValidateOut(valid=False, problems=_problems_out(error.problems), workflow=None)
+            problems = _problems_out(error.problems, body.text)
+            return ValidateOut(valid=False, problems=problems, workflow=None)
         return ValidateOut(
             valid=True, problems=[], workflow=_workflow_out("", workflow, runner, None)
         )
@@ -469,8 +509,13 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 # ----------------------------------------------------------------- helpers
 
 
-def _problems_out(problems: list[Problem]) -> list[ProblemOut]:
-    return [ProblemOut(path=p.path, message=p.message) for p in problems]
+def _problems_out(problems: list[Problem], text: str | None = None) -> list[ProblemOut]:
+    out = []
+    for p in problems:
+        where = problem_position(text, p.path) if text is not None else None
+        line, column = where or (None, None)
+        out.append(ProblemOut(path=p.path, message=p.message, line=line, column=column))
+    return out
 
 
 def _unprocessable(error: WorkflowInvalid) -> HTTPException:
@@ -483,13 +528,13 @@ def _unprocessable(error: WorkflowInvalid) -> HTTPException:
     )
 
 
-def _invalid(path: str, problems: list[Problem], file: Any) -> WorkflowOut:
+def _invalid(path: str, problems: list[ProblemOut], file: Any) -> WorkflowOut:
     return WorkflowOut(
         path=path,
         name=None,
         description="",
         valid=False,
-        problems=_problems_out(problems),
+        problems=problems,
         parameters=[],
         steps=[],
         reads=[],

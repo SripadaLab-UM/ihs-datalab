@@ -303,6 +303,55 @@ def parse_yaml(text: str) -> Any:
         raise WorkflowInvalid([Problem(where, f"The file isn't valid YAML: {problem}.")]) from None
 
 
+_LINE_PATH = re.compile(r"line (\d+)")
+_INDEX = re.compile(r"\[(\d+)\]")
+
+
+def problem_position(text: str, path: str) -> tuple[int, int] | None:
+    """Where a problem's path (`steps[1].inputs.raw`) is in the file: its
+    1-based line and column, or the nearest enclosing key's when the path
+    names something the file lacks (a missing key). None for the whole file.
+
+    Keys can hold dots (`deliver.without_small_cells.clean.stats`), so at each
+    mapping the longest key that the rest of the path starts with is taken.
+    """
+    if not path:
+        return None
+    if found := _LINE_PATH.fullmatch(path):
+        return int(found.group(1)), 1
+    if len(text.encode()) > MAX_FILE_BYTES:
+        return None
+    try:
+        node = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return None
+    at: yaml.Node | None = None
+    rest = path
+    while rest and node is not None:
+        if isinstance(node, yaml.SequenceNode):
+            index = _INDEX.match(rest)
+            if index is None or int(index.group(1)) >= len(node.value):
+                break
+            node = node.value[int(index.group(1))]
+            at, rest = node, rest[index.end() :].removeprefix(".")
+        elif isinstance(node, yaml.MappingNode):
+            best: tuple[yaml.Node, yaml.Node] | None = None
+            for key, value in node.value:
+                name = str(key.value)
+                matches = rest == name or rest.startswith((f"{name}.", f"{name}["))
+                if matches and (best is None or len(name) > len(str(best[0].value))):
+                    best = (key, value)
+            if best is None:
+                break
+            at, node = best
+            rest = rest[len(str(at.value)) :].removeprefix(".")
+        else:
+            break
+    if at is None:
+        return None
+    return at.start_mark.line + 1, at.start_mark.column + 1
+
+
 def load_workflow(
     text: str,
     *,

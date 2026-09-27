@@ -44,12 +44,21 @@ def test_list_and_validate(api):
         "sql", "qc_builtin", "r", "qc_builtin"
     ]  # fmt: skip
     assert listed["broken.yaml"]["valid"] is False
+    # Where each problem is in the file, for the editor's marks.
+    line = WEEKLY.splitlines().index("  files: [summary]") + 1
     assert listed["broken.yaml"]["problems"] == [
-        {"path": "deliver.files[0]", "message": "'nothing' isn't an earlier step."}
+        {
+            "path": "deliver.files[0]",
+            "message": "'nothing' isn't an earlier step.",
+            "line": line,
+            "column": 11,  # at "nothing"
+        }
     ]
     draft = client.post("/api/workflows/validate", json={"text": "name: x\nsteps: []\n"}).json()
     assert draft["valid"] is False
-    assert {"path": "reads", "message": "This is required."} in draft["problems"]
+    # A missing key has nowhere in the file to be.
+    missing = {"path": "reads", "message": "This is required.", "line": None, "column": None}
+    assert missing in draft["problems"]
     assert client.post("/api/workflows/validate", json={}).status_code == 422
 
 
@@ -89,6 +98,21 @@ def test_run_watch_replay_and_run_again(api):
     refused = client.post(f"/api/workflows/runs/{run_id}/replay", json={})
     assert refused.status_code == 409
     assert refused.json()["detail"]["reasons"]
+
+
+def test_text_and_last_run(api):
+    client, _ = api
+    text = client.get("/api/workflows/text", params={"path": "weekly_steps.yaml"}).json()
+    assert text["text"] == WEEKLY and text["source"] == "file"
+    assert text["blob"].startswith("sha256:")
+    assert client.get("/api/workflows/text", params={"path": "../x.yaml"}).status_code == 404
+    listed = {w["path"]: w for w in client.get("/api/workflows").json()}
+    assert listed["weekly_steps.yaml"]["last_run"] is None
+    run_id = client.post("/api/workflows/runs", json={"path": "weekly_steps.yaml"}).json()["id"]
+    finished(client, run_id)
+    listed = {w["path"]: w for w in client.get("/api/workflows").json()}
+    assert listed["weekly_steps.yaml"]["last_run"]["id"] == run_id
+    assert listed["broken.yaml"]["last_run"] is None
 
 
 def test_errors(api):

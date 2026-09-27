@@ -905,6 +905,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Workflow Text
+         * @description A workflow file's text, for the read-only view.
+         */
+        get: operations["workflow_text_api_workflows_text_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflows/validate": {
         parameters: {
             query?: never;
@@ -1938,6 +1958,10 @@ export interface components {
             path: string;
             /** Message */
             message: string;
+            /** Line */
+            line?: number | null;
+            /** Column */
+            column?: number | null;
         };
         /** ProposalDetail */
         ProposalDetail: {
@@ -2434,6 +2458,7 @@ export interface components {
             blob: string | null;
             /** Commit */
             commit: string | null;
+            last_run?: components["schemas"]["WorkflowRunOut"] | null;
         };
         /** WorkflowRunOut */
         WorkflowRunOut: {
@@ -2476,6 +2501,25 @@ export interface components {
             replay_notes: string[];
             /** Reproduced */
             reproduced: boolean | null;
+        };
+        /**
+         * WorkflowTextOut
+         * @description A workflow file's text, as it is in the folder now (read-only here).
+         */
+        WorkflowTextOut: {
+            /** Path */
+            path: string;
+            /** Text */
+            text: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "git" | "file";
+            /** Blob */
+            blob: string;
+            /** Commit */
+            commit: string | null;
         };
         /** WorkflowsStatus */
         WorkflowsStatus: {
@@ -4031,6 +4075,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowOut"][];
+                };
+            };
+        };
+    };
+    workflow_text_api_workflows_text_get: {
+        parameters: {
+            query: {
+                path: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

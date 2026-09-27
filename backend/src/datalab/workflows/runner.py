@@ -1081,7 +1081,11 @@ class WorkflowRunner:
         self.store.update_run(
             plan.run_id,
             delivery_status="delivered",
-            delivery_message=f"{len(result.files)} files delivered.",
+            delivery_message=(
+                "1 file delivered."
+                if len(result.files) == 1
+                else f"{len(result.files)} files delivered."
+            ),
         )
 
     def _destination(self, key: str) -> tuple[str | None, Path]:

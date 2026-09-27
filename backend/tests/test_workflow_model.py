@@ -11,6 +11,7 @@ from datalab.workflows.model import (
     WorkflowInvalid,
     load_pipeline_file,
     load_workflow,
+    problem_position,
     resolve_params,
 )
 from datalab.workflows.source import WorkflowFolder, git_blob_id
@@ -262,3 +263,27 @@ def test_percent_columns_name_a_count_column():
         "small_cells: { count_column: n_participants, percent_columns: { pct: n_days } }",
     )
     assert any("isn't one of the count columns" in p for p in problems(text))
+
+
+def test_problem_positions_point_into_the_file():
+    text = WEEKLY + "  without_small_cells:\n    summary.final: Only aggregate counts.\n"
+    lines = text.splitlines()
+
+    def line_of(prefix: str) -> int:
+        return next(i for i, line in enumerate(lines, 1) if line.startswith(prefix))
+
+    assert problem_position(text, "steps[1].qc.min_rows") == (line_of("      min_rows"), 7)
+    assert problem_position(text, "steps[2]") == (line_of("  - id: summary"), 5)
+    assert problem_position(text, "deliver.files[0]") == (line_of("  files:"), 11)
+    # A key with a dot in it.
+    assert problem_position(text, "deliver.without_small_cells.summary.final") == (
+        line_of("    summary.final"),
+        5,
+    )
+    # Something the file lacks: the nearest key that's there.
+    assert problem_position(text, "steps[0].inputs.raw") == (line_of("  - id: extract"), 5)
+    assert problem_position(text, "steps[9]") == (line_of("steps:"), 1)
+    assert problem_position(text, "line 4") == (4, 1)
+    assert problem_position(text, "") is None
+    assert problem_position(text, "nothing") is None
+    assert problem_position("a: [", "a") is None
