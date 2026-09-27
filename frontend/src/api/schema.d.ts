@@ -528,6 +528,8 @@ export interface components {
         ConversationChange: {
             /** Rigor Review */
             rigor_review?: boolean | null;
+            /** Title */
+            title?: string | null;
         };
         /** ConversationOut */
         ConversationOut: {

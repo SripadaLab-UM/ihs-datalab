@@ -70,6 +70,12 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
   }, [lastFilesEvent, conversation.id, queryClient]);
 
   // A new conversation, or a new question, brings the view back to the bottom.
+  // A title written from the first question, or a rename in another window.
+  const lastTitleEvent = events.findLast((e) => e.type === "title_changed")?.seq;
+  useEffect(() => {
+    if (lastTitleEvent !== undefined) queryClient.invalidateQueries({ queryKey: ["conversations"] });
+  }, [lastTitleEvent, queryClient]);
+
   useEffect(() => setFollowing(true), [conversation.id, turns.length]);
   useEffect(() => {
     if (following) bottom.current?.scrollIntoView({ block: "end" });
@@ -78,7 +84,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line px-8 py-3.5">
-        <h1 className="truncate font-serif text-[19px]">{conversation.title}</h1>
+        <Title conversation={conversation} />
         <SessionBadge kind={conversation.kind} />
         <span className="font-mono text-[11.5px] text-faint">{conversation.model}</span>
         <div className="ml-auto flex items-center gap-2">
@@ -114,6 +120,60 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
       </div>
       <Composer conversation={conversation} running={running} suggestion={suggestion} />
     </div>
+  );
+}
+
+/** The conversation's title: written from the first question, renamed by clicking it. */
+function Title({ conversation }: { conversation: Conversation }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<string | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  // Enter, Escape and blur can all end one edit: only the first one counts.
+  const ended = useRef(false);
+  const rename = useMutation({
+    mutationFn: (title: string) => api.rename(conversation.id, title),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  const finish = (keep: boolean) => {
+    if (ended.current) return;
+    ended.current = true;
+    const title = (editing ?? "").trim();
+    setEditing(null);
+    if (keep && title && title !== conversation.title) rename.mutate(title);
+    requestAnimationFrame(() => button.current?.focus());
+  };
+  if (editing !== null) {
+    return (
+      <input
+        autoFocus
+        aria-label="Conversation title"
+        value={editing}
+        maxLength={200}
+        onChange={(e) => setEditing(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") finish(true);
+          if (e.key === "Escape") finish(false);
+        }}
+        className="min-w-0 border-b border-ink bg-transparent font-serif text-[19px] outline-none"
+      />
+    );
+  }
+  return (
+    <h1 className="min-w-0 truncate font-serif text-[19px]">
+      <button
+        ref={button}
+        type="button"
+        onClick={() => {
+          ended.current = false;
+          setEditing(conversation.title);
+        }}
+        aria-label={`${conversation.title} (rename)`}
+        title="Rename"
+        className="max-w-full truncate text-left hover:underline hover:decoration-faint hover:underline-offset-4">
+        {conversation.title}
+      </button>
+    </h1>
   );
 }
 

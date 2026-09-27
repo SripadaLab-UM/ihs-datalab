@@ -13,11 +13,27 @@ from typing import Any
 import pytest
 import uvicorn
 
+from datalab import credentials
 from datalab.config import OracleSettings, QueryLimits, Settings
 from datalab.data.catalog import Catalog, Column, TableInfo
 from datalab.data.oracle import ExtractResult, QueryCancelled
 
 COHORTS = frozenset({"IHS_2024", "IHS_2025"})
+
+
+@pytest.fixture(autouse=True)
+def no_real_model_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may reach U-M GPT with the real key from this computer's
+    keychain (conversation titles, for one, would ask the model)."""
+    real = credentials._from_keychain
+    monkeypatch.delenv("DATALAB_MODEL_API_KEY", raising=False)
+    monkeypatch.setattr(
+        credentials,
+        "_from_keychain",
+        lambda service, account: (
+            None if service == credentials.MODEL_KEY_SERVICE else real(service, account)
+        ),
+    )
 
 
 class FakeDatabase:

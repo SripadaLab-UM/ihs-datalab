@@ -99,6 +99,16 @@ class ConversationStore:
                 (title, _now(), conversation_id),
             )
 
+    def rename_if(self, conversation_id: str, title: str, *, current: str) -> bool:
+        """Rename only if the title is still `current`, in one statement: an
+        automatic title never overwrites a name the person chose meanwhile."""
+        with self._lock:
+            changed = self._db.execute(
+                "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND title = ?",
+                (title, _now(), conversation_id, current),
+            ).rowcount
+        return changed > 0
+
     def delete(self, conversation_id: str) -> None:
         with self._lock:
             self._db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
