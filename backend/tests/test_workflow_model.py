@@ -14,7 +14,7 @@ from datalab.workflows.model import (
     problem_position,
     resolve_params,
 )
-from datalab.workflows.source import WorkflowFolder, git_blob_id
+from datalab.workflows.source import SourceError, WorkflowFolder, git_blob_id
 from tests.test_workflow_runner import WEEKLY
 
 COHORTS = frozenset({"IHS_2024", "IHS_2025"})
@@ -287,3 +287,16 @@ def test_problem_positions_point_into_the_file():
     assert problem_position(text, "") is None
     assert problem_position(text, "nothing") is None
     assert problem_position("a: [", "a") is None
+
+
+def test_the_folder_serves_only_its_workflow_files(tmp_path: Path):
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "workflows" / "a.yaml").write_text(WEEKLY)
+    (tmp_path / "workflows" / ".b.yaml").write_text(WEEKLY)
+    (tmp_path / "root.yaml").write_text(WEEKLY)
+    folder = WorkflowFolder(tmp_path)
+    assert folder.paths() == ["workflows/a.yaml"]
+    assert folder.read("workflows/a.yaml").text == WEEKLY
+    for path in ("root.yaml", "workflows/.b.yaml", ".b.yaml"):
+        with pytest.raises(SourceError):
+            folder.read(path)

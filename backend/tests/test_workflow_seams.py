@@ -93,6 +93,23 @@ def test_0008_holds_a_run_its_steps_and_a_delivery(tmp_path):
     assert [s["status"] for s in store.steps(fields["id"])] == ["succeeded", "pending"]
     assert store.mark_interrupted() == [fields["id"]]
     assert [s["status"] for s in store.steps(fields["id"])] == ["succeeded", "skipped"]
+    # Stopped during its delivery: every step done, the status set, never finished.
+    store.create_run(
+        {**fields, "id": "run_d", "status": "succeeded", "delivery_status": "pending"},
+        [("extract", 0, "sql")],
+    )
+    store.update_step("run_d", "extract", status="succeeded")
+    store.create_run(
+        {**fields, "id": "run_e", "status": "succeeded", "delivery_status": "delivered"}, []
+    )
+    assert store.mark_interrupted() == ["run_d", "run_e"]
+    during = store.get_run("run_d")
+    assert during is not None and during["status"] == "succeeded" and during["finished_at"]
+    assert during["delivery_status"] == "failed"
+    assert during["delivery_message"].startswith("Unknown:")
+    after = store.get_run("run_e")
+    assert after is not None and after["finished_at"] and after["delivery_status"] == "delivered"
+    assert store.mark_interrupted() == []
     with pytest.raises(sqlite3.IntegrityError):
         store.create_run({**fields, "id": "run_2", "mode": "rerun"}, [])
     with pytest.raises(KeyError):

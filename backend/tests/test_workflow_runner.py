@@ -397,6 +397,35 @@ async def test_the_manifest_keeps_only_numbers_from_checks(tmp_path):
     assert isinstance(qc["check_raw"]["checks"][0]["observed"], int)  # row counts stay
 
 
+async def test_the_run_record_keeps_only_numbers_from_custom_checks(tmp_path):
+    def custom(run: FakeRun) -> int:
+        run.result(
+            checks=[
+                {"id": "who", "status": "fail", "observed": "SYN-0001", "expected": "SYN-0002"},
+                {"id": "n", "status": "pass", "observed": 3, "expected": 0.5},
+                {"id": "odd", "status": "pass", "observed": ["SYN-0003"], "expected": {"a": 1}},
+            ],
+            counts={"rows": 12, "who": "SYN-0004"},
+        )
+        return 0
+
+    text = WEEKLY.replace(
+        "deliver:",
+        "  - id: custom\n    qc:\n      r: x\n      inputs: { s: summary }\ndeliver:",
+    )
+    h = Harness(tmp_path, sandbox=FakeSandbox({"summary": weekly_summary, "custom": custom}))
+    h.write("weekly_steps.yaml", text)
+    run = await h.run("weekly_steps.yaml")
+    step = next(s for s in run["steps"] if s["step_id"] == "custom")
+    assert "SYN-000" not in json.dumps(run["steps"])
+    assert [(c["observed"], c["expected"]) for c in step["result"]["checks"]] == [
+        (None, None),
+        (3, 0.5),
+        (None, None),
+    ]
+    assert step["result"]["counts"] == {"rows": 12}
+
+
 async def test_the_result_folder_counts_against_the_cap(tmp_path):
     seen = []
 

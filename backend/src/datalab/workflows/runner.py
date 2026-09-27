@@ -35,6 +35,7 @@ import getpass
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -1298,6 +1299,11 @@ def _number_or_none(value: Any) -> int | float | bool | None:
     return value if isinstance(value, int | float | bool) else None
 
 
+def _finite_or_none(value: Any) -> int | float | bool | None:
+    number = _number_or_none(value)
+    return None if isinstance(number, float) and not math.isfinite(number) else number
+
+
 def _spec_facts(facts: Mapping[str, Any]) -> dict[str, Any]:
     return {k: facts[k] for k in ("sha256", "bytes", "rows", "columns") if k in facts}
 
@@ -1368,10 +1374,17 @@ def _read_result(path: Path) -> dict[str, Any]:
     result = dict(result)
     raw_messages, raw_checks = result.get("messages"), result.get("checks")
     messages: list[Any] = raw_messages if isinstance(raw_messages, list) else []
+    counts = result.get("counts")
+    raw_counts: dict[Any, Any] = counts if isinstance(counts, dict) else {}
     checks: list[Any] = raw_checks if isinstance(raw_checks, list) else []
     return {
         "status": result.get("status") if result.get("status") in ("ok", "failed") else "failed",
-        "counts": result.get("counts") if isinstance(result.get("counts"), dict) else {},
+        # Numbers only, like a check's observed and expected.
+        "counts": {
+            str(name)[:100]: number
+            for name, raw in list(raw_counts.items())[:100]
+            if (number := _finite_or_none(raw)) is not None
+        },
         "messages": [_capped_message(m) for m in messages[:MAX_MESSAGES]],
         "checks": [_capped_check(c) for c in checks[:100] if isinstance(c, dict)],
         "r_version": str(result.get("r_version", ""))[:100],
@@ -1389,14 +1402,14 @@ def _capped_message(message: Any) -> dict[str, str]:
 
 
 def _capped_check(check: dict[str, Any]) -> dict[str, Any]:
-    def small(value: Any) -> Any:
-        return value if isinstance(value, int | float | bool) or value is None else str(value)[:200]
-
+    """A custom check's result, as kept in the run record. `observed` and
+    `expected` are kept only as numbers: text there could carry values (a
+    participant id), and the record is shown in the Workflows tab."""
     return {
         "id": str(check.get("id", ""))[:100],
         "status": "pass" if check.get("status") == "pass" else "fail",
-        "observed": small(check.get("observed")),
-        "expected": small(check.get("expected")),
+        "observed": _finite_or_none(check.get("observed")),
+        "expected": _finite_or_none(check.get("expected")),
         "message": str(check.get("message", ""))[:MAX_MESSAGE_CHARS],
     }
 

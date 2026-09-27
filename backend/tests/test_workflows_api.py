@@ -101,11 +101,17 @@ def test_run_watch_replay_and_run_again(api):
 
 
 def test_text_and_last_run(api):
-    client, _ = api
+    client, h = api
     text = client.get("/api/workflows/text", params={"path": "weekly_steps.yaml"}).json()
     assert text["text"] == WEEKLY and text["source"] == "file"
     assert text["blob"].startswith("sha256:")
     assert client.get("/api/workflows/text", params={"path": "../x.yaml"}).status_code == 404
+    # Only the workflow files themselves: no dotfiles, nothing else in the folder.
+    h.write(".hidden.yaml", WEEKLY)
+    (h.folder / "notes.txt").write_text("x")
+    for path in (".hidden.yaml", "notes.txt", "workflows/../weekly_steps.yaml"):
+        assert client.get("/api/workflows/text", params={"path": path}).status_code == 404, path
+    assert ".hidden.yaml" not in {w["path"] for w in client.get("/api/workflows").json()}
     listed = {w["path"]: w for w in client.get("/api/workflows").json()}
     assert listed["weekly_steps.yaml"]["last_run"] is None
     run_id = client.post("/api/workflows/runs", json={"path": "weekly_steps.yaml"}).json()["id"]

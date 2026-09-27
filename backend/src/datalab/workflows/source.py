@@ -88,17 +88,24 @@ class WorkflowFolder:
             return []
         found = []
         for entry in sorted(folder.iterdir()):
-            if entry.suffix.lower() in (".yaml", ".yml") and entry.is_file():
+            if (
+                entry.suffix.lower() in (".yaml", ".yml")
+                and not entry.name.startswith(".")
+                and entry.is_file()
+            ):
                 found.append(entry.relative_to(self.root).as_posix())
         return found
 
     def read(self, path: str) -> WorkflowFile:
-        """One workflow file. Refuses anything outside the folder."""
+        """One workflow file: only one of `paths()`, the .yaml files (not
+        dotfiles) directly in the workflows folder. Refuses anything else."""
         full = self._inside(path)
         if full.parent.resolve() != self.workflows_dir.resolve():
             raise SourceError("Workflow files are read only from the workflows folder.")
-        if full.suffix.lower() not in (".yaml", ".yml"):
+        if full.suffix.lower() not in (".yaml", ".yml") or full.name.startswith("."):
             raise SourceError("A workflow file is a .yaml file.")
+        if path not in self.paths():
+            raise SourceError(f"There's no workflow file {path}.")
         data = _read_limited(full, MAX_FILE_BYTES)
         try:
             text = data.decode("utf-8")

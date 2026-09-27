@@ -287,7 +287,9 @@ disk cap covers the whole step folder.
 
 **Stop** is refused once a run's delivery has started: `export()` runs in a
 thread, so files may already be in the destination. A shutdown waits for the
-delivery to finish, however long it takes, and it is recorded either way.
+delivery to finish, however long it takes, and it is recorded either way. If DataLab
+crashes during a delivery, the next start records it as failed with an
+unknown outcome: check the destination.
 
 **Destinations.** `deliver: destination:` is a key each computer maps to one
 of its export folders (`export_destinations.key`, set with `PUT
@@ -307,7 +309,10 @@ file read-only, with its problems marked in the editor, a form built from
 its parameters, and Run, followed live (`/runs/<id>/stream`) with Stop. A
 run's page shows its steps, what it pinned, its delivery, Run again, and
 Replay: the replay check's reasons come first, an inexact Replay needs a
-tick, and a Replay that delivers is asked about a second time. Destination
+tick, and a Replay that delivers is asked about a second time. A custom
+check's found and wanted values, and a step's counts, are kept as numbers
+only, so text an R check wrote can't carry a value into the record or the
+tab. Destination
 keys are listed read-only; folders are chosen in Settings. Editing waits for
 the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
 until there is a Workflow authoring mode.

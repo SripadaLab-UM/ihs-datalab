@@ -34,6 +34,11 @@ _DELIVERY_COLUMNS = frozenset(
     manifest_sha256 delivered_at
     """.split()  # noqa: SIM905
 )
+# What a delivery a previous DataLab left under way says: it can't be known.
+UNKNOWN_DELIVERY = (
+    "Unknown: DataLab stopped during this delivery, so some or all of its files may be in "
+    "the destination. Check the destination folder."
+)
 FINISHED = frozenset({"succeeded", "failed", "cancelled", "interrupted"})
 
 
@@ -86,29 +91,44 @@ class RunStore:
             self._insert("workflow_run_deliveries", _encode(fields, _DELIVERY_COLUMNS))
 
     def mark_interrupted(self) -> list[str]:
-        """Runs a previous DataLab left going (it stopped or crashed): interrupted."""
+        """Runs a previous DataLab left going (it stopped or crashed).
+
+        A run still queued or running is `interrupted`, and nothing was
+        delivered. A run whose steps had all finished but which never got its
+        `finished_at` stopped during, or just after, its delivery: its status
+        stays, and a delivery still pending is marked as failed with an
+        unknown outcome, since files may already be in the destination.
+        """
         with self._lock:
-            ids = [
-                row[0]
-                for row in self._db.execute(
-                    "SELECT id FROM workflow_runs WHERE status IN ('queued', 'running')"
-                )
-            ]
-            for run_id in ids:
-                self._db.execute(
-                    "UPDATE workflow_runs SET status = 'interrupted', finished_at = ?, "
-                    "message = 'DataLab stopped while this run was going.', "
-                    "delivery_status = CASE delivery_status WHEN 'pending' THEN 'skipped' "
-                    "ELSE delivery_status END WHERE id = ?",
-                    (now(), run_id),
-                )
+            rows = self._db.execute(
+                "SELECT id, status FROM workflow_runs "
+                "WHERE status IN ('queued', 'running') OR finished_at IS NULL ORDER BY id"
+            ).fetchall()
+            for run_id, status in rows:
+                if status in ("queued", "running"):
+                    self._db.execute(
+                        "UPDATE workflow_runs SET status = 'interrupted', finished_at = ?, "
+                        "message = 'DataLab stopped while this run was going.', "
+                        "delivery_status = CASE delivery_status WHEN 'pending' THEN 'skipped' "
+                        "ELSE delivery_status END WHERE id = ?",
+                        (now(), run_id),
+                    )
+                else:
+                    self._db.execute(
+                        "UPDATE workflow_runs SET finished_at = ?, "
+                        "delivery_message = CASE delivery_status WHEN 'pending' THEN ? "
+                        "ELSE delivery_message END, "
+                        "delivery_status = CASE delivery_status WHEN 'pending' THEN 'failed' "
+                        "ELSE delivery_status END WHERE id = ?",
+                        (now(), UNKNOWN_DELIVERY, run_id),
+                    )
                 self._db.execute(
                     "UPDATE workflow_run_steps SET status = CASE status "
                     "WHEN 'running' THEN 'cancelled' ELSE 'skipped' END "
                     "WHERE run_id = ? AND status IN ('pending', 'running')",
                     (run_id,),
                 )
-        return ids
+        return [row[0] for row in rows]
 
     # ------------------------------------------------------------- reads
 
