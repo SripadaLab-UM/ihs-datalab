@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { ApiError } from "@/api/http";
@@ -52,8 +52,11 @@ export function ReplayDialog({ run, onClose }: { run: RunDetail; onClose: () => 
   const destination = run.deliveries[0]?.destination_key;
   const ready = check.isSuccess && blocking.length === 0 && (reasons.length === 0 || inexactOk);
 
+  // The second question about delivering has its own button, somewhere else, which
+  // ignores clicks for a moment: a double-click or a held Enter can't answer it.
+  const armed = useArmed(confirmDelivery);
   const start = () => {
-    if (deliver && !confirmDelivery) return setConfirmDelivery(true);
+    if (deliver) return setConfirmDelivery(true);
     replay.mutate();
   };
 
@@ -129,13 +132,25 @@ export function ReplayDialog({ run, onClose }: { run: RunDetail; onClose: () => 
         )}
 
         {confirmDelivery && (
-          <div role="alert" className="border-l-2 border-you pl-3">
+          <div role="alert" className="flex flex-col items-start gap-2 border-l-2 border-you pl-3">
             <p className="font-medium text-you">Deliver this replay?</p>
             <p className="text-ink">
               Its files will leave DataLab for{" "}
               {destination ? <span className="font-mono">{destination}</span> : "the workflow's destination"}, as if it
-              were a new run. Choose Replay and deliver again to go ahead.
+              were a new run. Choose Yes, deliver to go ahead, or untick delivering above to replay without it.
             </p>
+            <div className="flex gap-2">
+              <Button
+                variant="primary"
+                disabled={!armed || !ready || replay.isPending}
+                onClick={() => armed && replay.mutate()}
+              >
+                {replay.isPending ? "Starting…" : "Yes, deliver"}
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmDelivery(false)}>
+                Not now
+              </Button>
+            </div>
           </div>
         )}
 
@@ -148,13 +163,11 @@ export function ReplayDialog({ run, onClose }: { run: RunDetail; onClose: () => 
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!ready || replay.isPending} onClick={start}>
-            {replay.isPending
+          <Button variant="primary" disabled={!ready || replay.isPending || confirmDelivery} onClick={start}>
+            {replay.isPending && !deliver
               ? "Starting…"
               : deliver
-                ? confirmDelivery
-                  ? "Yes, replay and deliver"
-                  : "Replay and deliver…"
+                ? "Replay and deliver…"
                 : reasons.length
                   ? "Replay, not exact"
                   : "Replay"}
@@ -163,4 +176,17 @@ export function ReplayDialog({ run, onClose }: { run: RunDetail; onClose: () => 
       </div>
     </Modal>
   );
+}
+
+/** Whether a control that just appeared may be used yet: only after ARM_MS. */
+export const ARM_MS = 500;
+function useArmed(shown: boolean): boolean {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    setArmed(false);
+    if (!shown) return;
+    const timer = setTimeout(() => setArmed(true), ARM_MS);
+    return () => clearTimeout(timer);
+  }, [shown]);
+  return armed;
 }

@@ -36,7 +36,7 @@ export function DeliveryStatus({
       return (
         <p role="alert" className="flex items-baseline gap-1.5 font-sans text-[13px] text-danger">
           <Icon name="alert" size={13} className="shrink-0 translate-y-[2px]" />
-          <span>The delivery failed: {run.delivery_message}</span>
+          <span>The delivery didn't complete. {run.delivery_message}</span>
         </p>
       );
     case "delivered":

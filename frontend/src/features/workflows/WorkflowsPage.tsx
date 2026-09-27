@@ -112,7 +112,7 @@ export function WorkflowsPage() {
         <>
           <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
-            aria-label="Workflow authoring chat"
+            aria-label="Workflow authoring chat, in Data engineering mode"
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
             <DockedChat

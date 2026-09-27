@@ -86,7 +86,7 @@ function checksOf(step: RunStep): Check[] {
 
 function StepDetail({ step, checks }: { step: RunStep; checks: Check[] }) {
   const result = (step.result ?? {}) as { counts?: Record<string, unknown>; messages?: Message[] };
-  const counts = Object.entries(result.counts ?? {});
+  const counts = Object.entries(result.counts ?? {}).filter(([, value]) => numberOnly(value) !== "");
   const messages = Array.isArray(result.messages) ? result.messages : [];
   const inputs = Object.entries(step.inputs as Record<string, FileFacts>);
   const outputs = Object.entries(step.outputs as Record<string, FileFacts>);
@@ -134,8 +134,8 @@ function StepDetail({ step, checks }: { step: RunStep; checks: Check[] }) {
                   <td className={clsx("py-1 pr-3", c.status === "pass" ? "text-data" : "text-danger")}>
                     {c.status === "pass" ? "passed" : "failed"}
                   </td>
-                  <td className="py-1 pr-3 font-mono text-[12px] tabular">{shown(c.observed)}</td>
-                  <td className="py-1 pr-3 font-mono text-[12px] tabular">{shown(c.expected)}</td>
+                  <td className="py-1 pr-3 font-mono text-[12px] tabular">{numberOnly(c.observed)}</td>
+                  <td className="py-1 pr-3 font-mono text-[12px] tabular">{numberOnly(c.expected)}</td>
                   <td className="py-1 text-muted">{c.message}</td>
                 </tr>
               ))}
@@ -148,7 +148,7 @@ function StepDetail({ step, checks }: { step: RunStep; checks: Check[] }) {
           <p className="flex flex-wrap gap-x-4 font-mono text-[12px] text-ink">
             {counts.map(([name, value]) => (
               <span key={name}>
-                {name} <span className="tabular">{shown(value)}</span>
+                {name} <span className="tabular">{numberOnly(value)}</span>
               </span>
             ))}
           </p>
@@ -210,8 +210,8 @@ function Files({ files }: { files: [string, FileFacts][] }) {
   );
 }
 
-function shown(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (Array.isArray(value)) return value.length ? value.join(", ") : "none";
-  return String(value);
+/** A check's found and wanted values, and a step's counts: numbers only. Anything else
+ *  (text a custom check wrote could hold a participant's id) isn't shown. */
+export function numberOnly(value: unknown): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toLocaleString() : "";
 }

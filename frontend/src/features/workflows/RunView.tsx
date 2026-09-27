@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 
@@ -273,6 +273,9 @@ function RepeatActions({ run }: { run: RunDetail }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [replaying, setReplaying] = useState(false);
+  // Run again runs the file as it is now, so it delivers where the file says now.
+  const workflows = useQuery({ queryKey: ["workflows"], queryFn: workflowsApi.list });
+  const current = workflows.data?.find((w) => w.path === run.workflow_path);
   const again = useMutation({
     mutationFn: () => workflowsApi.again(run.id),
     onSuccess: (started) => {
@@ -293,7 +296,17 @@ function RepeatActions({ run }: { run: RunDetail }) {
             <Icon name="restore" size={13} /> {again.isPending ? "Starting…" : "Run again"}
           </Button>
           <p className="font-sans text-[12.5px] text-muted">
-            The workflow file as it is now, with the same parameters and seed, on today's data: new results.
+            The workflow file as it is now, with the same parameters and seed, on today's data: new results
+            {current?.deliver ? (
+              <>
+                , delivered to <span className="font-mono text-ink">{current.deliver.destination}</span> if every check
+                passes.
+              </>
+            ) : current ? (
+              ". It doesn't deliver anything."
+            ) : (
+              ", delivered wherever the file says now if every check passes."
+            )}
           </p>
           {again.error && <p className="font-sans text-[12.5px] text-danger">{again.error.message}</p>}
         </div>

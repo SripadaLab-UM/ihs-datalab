@@ -121,6 +121,12 @@ export function WorkflowView({ workflow }: { workflow: Workflow }) {
           Read-only here. Editing and saving workflows in DataLab comes with the lab's shared pipelines repository; for
           now, edit the file in its folder and it's checked again when you come back.
         </p>
+        {text.data && text.data.blob !== workflow.blob && workflow.problems.length > 0 && (
+          <p className="font-sans text-[12.5px] text-attn">
+            The file has changed since it was checked, so its problems aren't marked. Come back to this page to check it
+            again.
+          </p>
+        )}
         {text.isError ? (
           <p className="font-sans text-[13px] text-danger">{text.error.message}</p>
         ) : (
@@ -129,7 +135,8 @@ export function WorkflowView({ workflow }: { workflow: Workflow }) {
             language="yaml"
             value={text.data?.text ?? ""}
             readOnly
-            diagnostics={text.data ? diagnostics : undefined}
+            // Marks only on the text they were found in: the file may have changed since it was checked.
+            diagnostics={text.data && text.data.blob === workflow.blob ? diagnostics : undefined}
             className="h-[clamp(14rem,48vh,36rem)]"
           />
         )}
@@ -165,6 +172,10 @@ function RunForm({ workflow, onStarted }: { workflow: Workflow; onStarted: (run:
   const [values, setValues] = useState<Record<string, ParamValue>>(() =>
     Object.fromEntries(workflow.parameters.map((p) => [p.name, initial(p)])),
   );
+  // Fields the browser couldn't read as a number ("1e"): it reports them as empty,
+  // which would quietly run with the default instead.
+  const [unreadable, setUnreadable] = useState<Record<string, string>>({});
+  const [tried, setTried] = useState(false);
   const start = useMutation({
     mutationFn: () => workflowsApi.start(workflow.path, typed(workflow.parameters, values)),
     onSuccess: (run) => {
@@ -175,14 +186,18 @@ function RunForm({ workflow, onStarted }: { workflow: Workflow; onStarted: (run:
   });
   const problems = start.error instanceof ApiError ? problemsOf(start.error) : [];
   const byParam = new Map(problems.filter((p) => p.path.startsWith("params.")).map((p) => [p.path.slice(7), p.message]));
+  for (const [name, message] of Object.entries(unreadable)) byParam.set(name, message);
+  const blocked = Object.keys(unreadable).length > 0;
   const other = problems.filter((p) => !p.path.startsWith("params."));
 
   return (
     <form
+      noValidate
       className="flex flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault();
-        start.mutate();
+        setTried(true);
+        if (!blocked) start.mutate();
       }}
     >
       {workflow.parameters.length > 0 ? (
@@ -194,7 +209,11 @@ function RunForm({ workflow, onStarted }: { workflow: Workflow; onStarted: (run:
               parameter={p}
               value={values[p.name]}
               problem={byParam.get(p.name)}
-              onChange={(value) => setValues({ ...values, [p.name]: value })}
+              onChange={(value, problem) => {
+                setValues({ ...values, [p.name]: value });
+                const { [p.name]: _, ...rest } = unreadable;
+                setUnreadable(problem ? { ...rest, [p.name]: problem } : rest);
+              }}
             />
           ))}
         </fieldset>
@@ -210,7 +229,12 @@ function RunForm({ workflow, onStarted }: { workflow: Workflow; onStarted: (run:
           {workflow.deliver && " Files are delivered only if every check passes."}
         </span>
       </div>
-      {start.error && (other.length > 0 || byParam.size === 0) && (
+      {tried && blocked && (
+        <p role="alert" className="font-sans text-[13px] text-danger">
+          Nothing was run: correct the values marked above first.
+        </p>
+      )}
+      {start.error && !blocked && (other.length > 0 || byParam.size === 0) && (
         <div role="alert" className="font-sans text-[13px] text-danger">
           <p>{start.error.message}</p>
           {other.length > 0 && (
@@ -253,6 +277,12 @@ function typed(parameters: WorkflowParameter[], values: Record<string, ParamValu
   return out;
 }
 
+function unreadableAs(p: WorkflowParameter, validity: ValidityState): string | undefined {
+  if (validity.badInput) return p.type === "date" ? "This isn't a whole date." : "This isn't a number.";
+  if (p.type === "integer" && validity.stepMismatch) return "Give a whole number.";
+  return undefined;
+}
+
 function ParamField({
   parameter: p,
   value,
@@ -262,7 +292,8 @@ function ParamField({
   parameter: WorkflowParameter;
   value: ParamValue | undefined;
   problem?: string;
-  onChange: (value: ParamValue) => void;
+  /** With what's wrong with the value as typed, if the browser couldn't read it. */
+  onChange: (value: ParamValue, problem?: string) => void;
 }) {
   const field = clsx(
     "w-full rounded-[3px] border bg-field px-2 py-1 font-mono text-[12.5px] outline-none focus:border-ink",
@@ -297,7 +328,7 @@ function ParamField({
         value={String(value ?? "")}
         placeholder={p.default === null ? "required" : undefined}
         aria-invalid={problem ? true : undefined}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) => onChange(e.target.value, unreadableAs(p, e.target.validity))}
         className={field}
       />
       {hint}

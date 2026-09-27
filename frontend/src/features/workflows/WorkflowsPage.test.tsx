@@ -49,9 +49,11 @@ vi.mock("@/components/editor/CodeEditor", () => ({
 
 // jsdom has no EventSource: a stand-in the test can speak through.
 class FakeEventSource {
+  static readonly CLOSED = 2;
   static last: FakeEventSource | null = null;
   listeners: Record<string, ((e: MessageEvent<string>) => void)[]> = {};
   closed = false;
+  readyState = 1;
   constructor(readonly url: string) {
     FakeEventSource.last = this;
   }
@@ -201,6 +203,16 @@ it("shows a file's problems against their paths, as marks in the read-only edito
   ]);
 });
 
+it("doesn't mark a file that changed since it was checked", async () => {
+  vi.mocked(workflowsApi.list).mockResolvedValue([
+    workflow({ valid: false, problems: [{ path: "steps[0].sql", message: "Bad.", line: 3, column: 5 }] }),
+  ]);
+  vi.mocked(workflowsApi.text).mockResolvedValue({ path: "weekly_steps.yaml", text: YAML, source: "file", blob: "sha256:new", commit: null });
+  show(FILE);
+  expect(await screen.findByText(/changed since it was checked/)).toBeInTheDocument();
+  expect(editorProps.mock.lastCall![0].diagnostics).toBeUndefined();
+});
+
 it("says plainly when delivery is blocked waiting for a small-cells check or a reason", async () => {
   const blocked = {
     path: "deliver.files[0]",
@@ -256,6 +268,34 @@ it("runs with the parameter form's values, follows the run live, and stops it", 
   );
   expect(await screen.findByText("Stopped.")).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Stop/ })).not.toBeInTheDocument();
+});
+
+it("won't run with a number the browser couldn't read", async () => {
+  show(FILE);
+  const field = await screen.findByRole("spinbutton");
+  // What a browser reports for "1e": an empty value, and badInput.
+  Object.defineProperty(field, "validity", { value: { badInput: true, stepMismatch: false } });
+  fireEvent.change(field, { target: { value: "" } });
+  expect(screen.getByText("This isn't a number.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  expect(await screen.findByText(/Nothing was run/)).toBeInTheDocument();
+  expect(workflowsApi.start).not.toHaveBeenCalled();
+});
+
+it("asks for the run instead once its live updates close for good", async () => {
+  vi.mocked(workflowsApi.run).mockResolvedValue(
+    detail({ status: "running", finished_at: null, delivery_status: "pending", deliveries: [] }),
+  );
+  show("/workflows/runs/run_1");
+  await waitFor(() => expect(FakeEventSource.last).not.toBeNull());
+  const calls = vi.mocked(workflowsApi.run).mock.calls.length;
+  vi.mocked(workflowsApi.run).mockResolvedValue(detail());
+  act(() => {
+    FakeEventSource.last!.readyState = FakeEventSource.CLOSED;
+    FakeEventSource.last!.emit("error", {});
+  });
+  await waitFor(() => expect(vi.mocked(workflowsApi.run).mock.calls.length).toBeGreaterThan(calls));
+  expect(await screen.findByText("succeeded")).toBeInTheDocument();
 });
 
 it("puts the start's parameter problems beside their fields", async () => {
@@ -339,6 +379,12 @@ it("shows what a run pinned and where it delivered, and runs it again", async ()
   await waitFor(() => expect(workflowsApi.run).toHaveBeenCalledWith("run_2"));
 });
 
+it("says Run again delivers where the file says now", async () => {
+  show("/workflows/runs/run_1");
+  const note = await screen.findByText(/on today's data: new results/);
+  await waitFor(() => expect(note.textContent).toContain("delivered to practice-folder if every check passes"));
+});
+
 it("shows the replay check's reasons and asks before an inexact replay, and again before it delivers", async () => {
   vi.mocked(workflowsApi.replayCheck).mockResolvedValue({
     exact: false,
@@ -357,11 +403,40 @@ it("shows the replay check's reasons and asks before an inexact replay, and agai
   expect(go).toBeEnabled();
 
   fireEvent.click(within(dialog).getByRole("checkbox", { name: /Deliver the replay's outputs too/ }));
-  fireEvent.click(within(dialog).getByRole("button", { name: "Replay and deliver…" }));
+  const ask = within(dialog).getByRole("button", { name: "Replay and deliver…" });
+  // A double-click (or a held Enter) on the first button can't answer the second question.
+  fireEvent.click(ask);
+  fireEvent.click(ask);
   expect(within(dialog).getByText("Deliver this replay?")).toBeInTheDocument();
+  expect(ask).toBeDisabled();
+  const yes = within(dialog).getByRole("button", { name: "Yes, deliver" });
+  expect(yes).toBeDisabled(); // for a moment after it appears
+  fireEvent.click(yes);
   expect(workflowsApi.replay).not.toHaveBeenCalled();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Yes, replay and deliver" }));
+  await waitFor(() => expect(yes).toBeEnabled(), { timeout: 2000 });
+  fireEvent.click(yes);
   await waitFor(() => expect(workflowsApi.replay).toHaveBeenCalledWith("run_1", { allow_inexact: true, deliver: true }));
+  expect(workflowsApi.replay).toHaveBeenCalledTimes(1);
+});
+
+it("never shows a custom check's text as its found or wanted value", async () => {
+  vi.mocked(workflowsApi.run).mockResolvedValue(
+    detail({
+      status: "failed", delivery_status: "skipped", deliveries: [],
+      steps: [
+        step("custom", "qc_custom", "failed", {
+          result: {
+            status: "failed", counts: { rows: 12, who: "SYN-CANARY-2" },
+            checks: [{ id: "who", status: "fail", observed: "SYN-CANARY-1", expected: "SYN-CANARY-0", message: "" }],
+          },
+        }),
+      ],
+    }), // prettier-ignore
+  );
+  show("/workflows/runs/run_1");
+  expect(await screen.findByText("who")).toBeInTheDocument();
+  expect(screen.getByText("12")).toBeInTheDocument();
+  expect(document.body.textContent).not.toContain("SYN-CANARY");
 });
 
 it("replays an exact run without delivering unless asked", async () => {
