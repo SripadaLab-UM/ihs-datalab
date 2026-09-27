@@ -45,12 +45,18 @@ TURN_TIMEOUT = 20 * 60
 
 
 def main() -> int:
+    global PORT
     parser = argparse.ArgumentParser()
     parser.add_argument("--only", nargs="*", help="task ids to run (default: all)")
     parser.add_argument("--repeat", type=int, default=1, help="runs of each task (default 1)")
     parser.add_argument("--effort", default="medium", choices=["low", "medium", "high"])
     parser.add_argument("--model", help="the model to evaluate (default: DataLab's default)")
+    parser.add_argument(
+        "--port", type=int, default=PORT, help=f"the eval DataLab's port (default {PORT})"
+    )
     args = parser.parse_args()
+    # Another eval run, or a DataLab, may be using the usual port.
+    PORT = args.port
     tasks = [t for t in TASKS if not args.only or t.id in args.only]
 
     expected = answer_key.compute()

@@ -46,7 +46,7 @@ uv run --project backend python evals/run.py --only mood_change
 ```
 
 Needs the synthetic database (`synthetic/db.sh start`), Docker, and a saved
-U-M GPT key. The runner starts its own DataLab, on port 8767 with a fresh
+U-M GPT key. The runner starts its own DataLab, on port 8767 (`--port` for another) with a fresh
 data folder (removed afterwards) and a catalog rebuilt from the synthetic
 database, so eval conversations never mix with yours. A practice DataLab can
 keep running alongside: each instance labels its containers with its data
