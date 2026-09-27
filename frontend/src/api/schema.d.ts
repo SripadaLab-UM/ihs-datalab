@@ -1138,7 +1138,8 @@ export interface paths {
         };
         /**
          * File Provenance
-         * @description How a workspace file (a path in /work, such as outputs/fig1.png) was made.
+         * @description How a workspace file (a path in /work, such as outputs/fig1.png) was made, as
+         *     `checkpoint` saved it (the latest if not given: what the viewer is showing).
          */
         get: operations["file_provenance_api_conversations__conversation_id__provenance__path__get"];
         put?: never;
@@ -1615,6 +1616,8 @@ export interface components {
              * @default false
              */
             turn_not_saved: boolean;
+            /** As Of */
+            as_of?: number | null;
             /**
              * Commands
              * @default []
@@ -4457,7 +4460,9 @@ export interface operations {
     };
     file_provenance_api_conversations__conversation_id__provenance__path__get: {
         parameters: {
-            query?: never;
+            query?: {
+                checkpoint?: number | null;
+            };
             header?: never;
             path: {
                 conversation_id: string;

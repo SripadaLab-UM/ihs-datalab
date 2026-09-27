@@ -285,7 +285,7 @@ The layout is the same for every mode:
     to how they were after a chosen turn. The conversation isn't rewound, and
     the agent is told its files were restored. Very large files aren't
     checkpointed; the screen lists any that can't be restored.
-  - **Data accessed**: every query the agent ran in this conversation (tables,
+  - **Queries** (the Data accessed log): every query the agent ran in this conversation (tables,
     time, rows, result file). Metadata only. See [SAFETY.md](SAFETY.md).
 - **Header:** session badge (🔒 or 🌐), mode, model and reasoning level,
   **Export conversation**, and an "Open research session" button in data

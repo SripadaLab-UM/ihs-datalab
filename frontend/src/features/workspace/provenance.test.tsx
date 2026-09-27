@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Conversation } from "@/api/client";
@@ -66,28 +66,70 @@ it("renders an answer's numbers with where they appear, and opens a query", asyn
     </OpenFileContext>,
   );
   fireEvent.click(screen.getByRole("button", { name: "81" }));
-  fireEvent.click(screen.getByRole("button", { name: "in Queries" }));
+  fireEvent.click(screen.getByRole("button", { name: "in the Queries tab" }));
   expect(shown).toHaveBeenCalledWith("q_0001");
   fireEvent.click(screen.getByRole("button", { name: "7.2" }));
   fireEvent.click(screen.getByRole("button", { name: "outputs/by_month.csv" }));
   expect(openFile).toHaveBeenCalledWith("outputs/by_month.csv");
-  expect(screen.getByRole("button", { name: "1.3" })).toHaveClass("text-attn");
+  expect(screen.getByRole("button", { name: "1.3, which appears in nothing this turn produced" })).toHaveClass("text-attn");
 });
 
-it("shows a query asked for in the Queries tab", async () => {
+it("shows a query asked for in the Queries tab, focused, and again when asked again", async () => {
   render(
     <QueryClientProvider client={client()}>
       <SidePanel conversation={conversation} onOpen={vi.fn()} />
     </QueryClientProvider>,
   );
-  showQuery("q_0001");
+  act(() => showQuery("q_0001"));
   const entry = await waitFor(() => {
     const found = document.getElementById("query-q_0001");
-    if (!found) throw new Error("not yet");
+    if (!found || !found.classList.contains("border-ink")) throw new Error("not yet");
     return found;
   });
-  expect(entry).toHaveClass("border-ink");
+  expect(entry).toHaveFocus();
   expect(screen.getByText("SELECT 1 FROM dual")).toBeInTheDocument();
+  // Moving on clears the outline; asking for it again shows it again.
+  act(() => entry.blur());
+  expect(entry).not.toHaveClass("border-ink");
+  act(() => showQuery("q_0001"));
+  await waitFor(() => expect(entry).toHaveClass("border-ink"));
+  expect(entry).toHaveFocus();
+});
+
+it("keeps a number's popover open when the answer re-renders", () => {
+  const numbers = () => ({
+    sources: new Map([["81", [{ kind: "query" as const, ref: "q_0001" }]]]),
+    links: { commandText: () => undefined },
+  });
+  const view = render(<Markdown text="There were 81 interns." numbers={numbers()} />);
+  fireEvent.click(screen.getByRole("button", { name: "81" }));
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  // The chat re-renders on every event: new objects, the same numbers.
+  view.rerender(<Markdown text="There were 81 interns." numbers={numbers()} />);
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.getByRole("button", { name: "81" })).toHaveFocus();
+});
+
+it("marks only whole numbers, as the backend reads them", () => {
+  const keys = ["226", "3", "12", "1,226", "\u22120.3", "12.5%", "2,226,000"];
+  const marked = (text: string, numbers = keys) => {
+    const { container, unmount } = render(
+      <Markdown text={text} numbers={{ sources: new Map(numbers.map((k) => [k, []])), links: { commandText: () => undefined } }} />,
+    );
+    const found = Array.from(container.querySelectorAll("button"), (b) => b.firstChild?.textContent);
+    unmount();
+    return found;
+  };
+  expect(marked("Of 1,226 interns, the change was \u22120.3 (12.5%); 2,226,000 steps.")).toEqual([
+    "1,226",
+    "\u22120.3",
+    "12.5%",
+    "2,226,000",
+  ]);
+  // Not a part of a longer number, even when that one isn't a key.
+  expect(marked("2,226,000 steps, \u22123 points, on 2024-12-01.", ["226", "3", "12"])).toEqual([]);
 });
 
 const made: FileProvenance = {
@@ -111,14 +153,13 @@ it("shows how a file in the viewer was made, and opens its script as it was then
   const openFile = vi.fn();
   render(
     <QueryClientProvider client={client()}>
-      <OpenFileContext value={openFile}>
-        <FileViewer conversationId="c1" file={{ root: "outputs", path: "fig1.png", kind: "image" }} onClose={vi.fn()} />
-      </OpenFileContext>
+      <FileViewer conversationId="c1" file={{ root: "outputs", path: "fig1.png", kind: "image" }} onOpen={openFile} onClose={vi.fn()} />
     </QueryClientProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: /How was this made\?/ }));
   expect(await screen.findByText(/first saved in the checkpoint after turn 2/)).toBeInTheDocument();
-  expect(provenanceApi.file).toHaveBeenCalledWith("c1", "outputs/fig1.png");
+  // About the version shown (the latest checkpoint here), not whatever is newest.
+  expect(provenanceApi.file).toHaveBeenCalledWith("c1", "outputs/fig1.png", 2);
   fireEvent.click(screen.getByRole("button", { name: "analysis.py" }));
   expect(openFile).toHaveBeenCalledWith({ root: "work", path: "analysis.py", kind: "text", checkpoint: 2 });
 });

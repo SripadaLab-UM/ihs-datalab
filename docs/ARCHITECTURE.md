@@ -243,7 +243,7 @@ own slot, and the shared modules offer extension points:
   a coincidental match passes, and a correct derived number is flagged.
 - **Provenance** (`sessions/provenance.py`, `api/provenance.py`). The runtime
   keeps, beside that evidence, where each piece came from (a command by its
-  event id, a query by its Data accessed id; in memory only, and not a
+  event id, a query by its access-log id, shown in the Queries tab; in memory only, and not a
   review's), read through `SessionManager.turn_sources`. An after-turn hook
   matches the answer's numbers against it and the turn checkpoint's output
   data files (`tracing.trace_sources`: one sorted list of values, so it's

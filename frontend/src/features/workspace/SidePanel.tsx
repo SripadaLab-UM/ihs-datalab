@@ -17,12 +17,13 @@ type Tab = "inputs" | "outputs" | "history" | "data";
 /** The Workspace's right-hand column: what the agent made, checkpoints, and data it read. */
 export function SidePanel({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
   const [tab, setTab] = useState<Tab>("outputs");
-  // A query to show, when a number's sources or "How was this made?" asks for one.
-  const [shown, setShown] = useState<string | null>(null);
+  // A query to show, when a number's sources or "How was this made?" asks for
+  // one: each ask is new (the same query again scrolls to it again).
+  const [shown, setShown] = useState<{ id: string } | null>(null);
   useEffect(() => {
     const show = (event: Event) => {
       setTab("data");
-      setShown(String((event as CustomEvent<{ id: string }>).detail?.id ?? ""));
+      setShown({ id: String((event as CustomEvent<{ id: string }>).detail?.id ?? "") });
     };
     window.addEventListener(SHOW_QUERY, show);
     return () => window.removeEventListener(SHOW_QUERY, show);
@@ -291,7 +292,7 @@ function DataAccessed({
 }: {
   conversationId: string;
   onOpen: (file: OpenFile) => void;
-  shown?: string | null;
+  shown?: { id: string } | null;
 }) {
   const queries = useQuery({
     queryKey: ["data-accessed", conversationId],
@@ -299,8 +300,16 @@ function DataAccessed({
     refetchInterval: 3000,
   });
   const loaded = queries.data !== undefined;
+  // The entry asked for: scrolled to, focused, and outlined for a few seconds.
+  const [lit, setLit] = useState<string | null>(null);
   useEffect(() => {
-    if (shown && loaded) document.getElementById(`query-${shown}`)?.scrollIntoView?.({ block: "center" });
+    if (!shown || !loaded) return;
+    const entry = document.getElementById(`query-${shown.id}`);
+    entry?.scrollIntoView?.({ block: "center" });
+    entry?.focus({ preventScroll: true });
+    setLit(shown.id);
+    const done = window.setTimeout(() => setLit(null), 4000);
+    return () => window.clearTimeout(done);
   }, [shown, loaded]);
   if (queries.data?.length === 0) {
     return (
@@ -319,7 +328,9 @@ function DataAccessed({
           <li
             key={q.id}
             id={`query-${q.id}`}
-            className={clsx("rounded-[4px] border bg-surface p-3 text-xs", q.id === shown ? "border-ink" : "border-line")}
+            tabIndex={-1}
+            onBlur={() => setLit(null)}
+            className={clsx("rounded-[4px] border bg-surface p-3 text-xs outline-none", q.id === lit ? "border-ink" : "border-line")}
           >
             <div className="flex items-center gap-2">
               <span

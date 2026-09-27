@@ -261,7 +261,8 @@ def file_chain(
     queries: list[Any],
     read: Callable[[Any, int], bytes],
 ) -> dict[str, Any]:
-    """How the file at `path` (in /work) came to be as it is in the latest checkpoint.
+    """How the file at `path` (in /work) came to be as it is in the last of `versions`
+    (the latest checkpoint, or the one the person is looking at).
 
     From the checkpoints (newest first, reading each one's files only while
     the content is the same): the one that first saved its current content,
@@ -298,6 +299,7 @@ def file_chain(
         "turn": made.turn,
         "in_review": in_review,
         "turn_not_saved": turn_not_saved,
+        "as_of": versions[-1].number,  # the checkpoint whose version of the file this is
         "commands": [],
         "more_commands": 0,
         "edited_directly": False,
@@ -436,7 +438,7 @@ def _summary(chain: dict[str, Any], named: int, through: int, seen: int, command
         said += " No commands ran then."
     return said + (
         " DataLab doesn't see which command writes a file inside the workspace, and this "
-        "describes the file as the latest checkpoint saved it, not as it may be now."
+        f"describes the file as checkpoint {chain['as_of']} saved it, not as it may be now."
     )
 
 

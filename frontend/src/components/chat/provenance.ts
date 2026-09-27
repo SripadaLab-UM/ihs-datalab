@@ -51,30 +51,38 @@ type HastNode = HastText | HastElement | { type: string; children?: HastNode[] }
 // Where a number isn't a claim, so it's never marked: code and links.
 const SKIP = new Set(["code", "pre", "a", "button"]);
 
+// A number and a date, as the backend reads them (sessions/tracing.py _NUMBER,
+// _DATE), so the answer marks exactly the tokens that were traced: never "226"
+// in "2,226,000", "3" in "\u22123", or "12" in "2024-12-01".
+const NUMBER = /(?<![\w.])[-\u2212]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?%?(?!\w)/g;
+const DATE = /\b\d{4}-\d{2}(?:-\d{2})?\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g;
+
 /**
  * A rehype plugin that wraps each of `numbers` (as written in the answer) in
  * `<span data-number="…">`, outside code and links, so the answer can render
- * it with its sources. A number is matched whole: "81" isn't in "181" or "8.1".
+ * it with its sources. Only a whole number token counts, read as the backend
+ * reads them, and never one inside a date.
  */
 export function markNumbers(numbers: string[]) {
-  const wanted = [...new Set(numbers)].sort((a, b) => b.length - a.length);
-  const escaped = wanted.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const pattern = wanted.length ? new RegExp(`(?<![\\w.])(${escaped.join("|")})(?![\\w]|\\.\\d)`, "g") : null;
+  const wanted = new Set(numbers);
 
   function split(text: HastText): HastNode[] {
-    if (!pattern) return [text];
+    if (!wanted.size) return [text];
+    const dates = Array.from(text.value.matchAll(DATE), (m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
     const parts: HastNode[] = [];
     let last = 0;
-    for (const match of text.value.matchAll(pattern)) {
+    for (const match of text.value.matchAll(NUMBER)) {
       const at = match.index ?? 0;
+      const end = at + match[0].length;
+      if (!wanted.has(match[0]) || dates.some(([from, to]) => at < to && end > from)) continue;
       if (at > last) parts.push({ type: "text", value: text.value.slice(last, at) });
       parts.push({
         type: "element",
         tagName: "span",
-        properties: { dataNumber: match[1] },
-        children: [{ type: "text", value: match[1] }],
+        properties: { dataNumber: match[0] },
+        children: [{ type: "text", value: match[0] }],
       });
-      last = at + match[0].length;
+      last = end;
     }
     if (!parts.length) return [text];
     if (last < text.value.length) parts.push({ type: "text", value: text.value.slice(last) });
@@ -92,9 +100,9 @@ export function markNumbers(numbers: string[]) {
   };
 }
 
-// --- Showing a query in the Data accessed log --------------------------------
+// --- Showing a query in the Queries tab ------------------------------------------
 
-/** Asks the workspace's side panel to show a query in its Data accessed log. */
+/** Asks the workspace's side panel to show a query in its Queries tab. */
 export const SHOW_QUERY = "datalab:show-query";
 
 export function showQuery(id: string): void {

@@ -67,7 +67,7 @@ it("shows where a number appears, and says it only appears there", () => {
   const dialog = screen.getByRole("dialog", { name: "Where 81 appears" });
   expect(dialog).toHaveTextContent("python analysis.py");
   expect(dialog).toHaveTextContent("which doesn't show it was computed there");
-  fireEvent.click(screen.getByRole("button", { name: "in Queries" }));
+  fireEvent.click(screen.getByRole("button", { name: "in the Queries tab" }));
   expect(links.openQuery).toHaveBeenCalledWith("q_0001");
   fireEvent.click(screen.getByRole("button", { name: "outputs/table.csv" }));
   expect(links.openFile).toHaveBeenCalledWith("outputs/table.csv");
@@ -77,7 +77,7 @@ it("shows where a number appears, and says it only appears there", () => {
 
 it("says plainly when a number appears nowhere", () => {
   render(<NumberSources text="1.3" sources={[]} links={links} />);
-  fireEvent.click(screen.getByRole("button", { name: "1.3" }));
+  fireEvent.click(screen.getByRole("button", { name: "1.3, which appears in nothing this turn produced" }));
   expect(screen.getByRole("dialog")).toHaveTextContent("doesn't appear in any command output, query result, or output data file");
 });
 

@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { api, type Conversation, type Mode } from "@/api/client";
 import { DockedChat } from "@/components/chat/DockedChat";
+import { SHOW_QUERY } from "@/components/chat/provenance";
 import { Button, Icon, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
@@ -41,13 +42,23 @@ export function WorkspacePage() {
   useEffect(() => {
     if (drawer) {
       const box = drawer === "rail" ? railBox.current : panelBox.current;
-      box?.querySelector<HTMLElement>("a[href], button")?.focus();
+      // Unless something in it already has focus (a query it was opened to show).
+      if (!box?.contains(document.activeElement)) box?.querySelector<HTMLElement>("a[href], button")?.focus();
     } else if (opener.current?.isConnected) {
       opener.current.focus();
       opener.current = null;
     }
   }, [drawer]);
   useEffect(() => setDrawer(null), [conversationId]);
+  // A query asked for (from a number's sources, or How was this made?): in a
+  // narrower window the side panel is a drawer, so open it to show the query.
+  useEffect(() => {
+    const show = () => {
+      if (!window.matchMedia?.("(min-width: 1280px)").matches) openDrawer("panel");
+    };
+    window.addEventListener(SHOW_QUERY, show);
+    return () => window.removeEventListener(SHOW_QUERY, show);
+  }, []);
   useEffect(() => {
     if (!railOpen && !panelOpen) return;
     const onKey = (event: KeyboardEvent) => {
@@ -219,7 +230,16 @@ export function WorkspacePage() {
       {current && exportingReport && (
         <ExportDialog conversation={current} withReport onClose={() => setExportingReport(false)} />
       )}
-      {current && open && <FileViewer conversationId={current.id} file={open} onClose={() => setOpen(null)} />}
+      {current && open && (
+        <FileViewer
+          // A new file, or another version, is a new viewer: nothing carries over.
+          key={`${open.root}:${open.path}:${open.checkpoint ?? ""}`}
+          conversationId={current.id}
+          file={open}
+          onOpen={setOpen}
+          onClose={() => setOpen(null)}
+        />
+      )}
 
       {creating && <NewConversation onClose={() => setCreating(false)} />}
       {deleting && (

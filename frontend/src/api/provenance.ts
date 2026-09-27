@@ -6,7 +6,10 @@ import type { components } from "./schema";
 export type FileProvenance = components["schemas"]["FileProvenanceOut"];
 
 export const provenanceApi = {
-  /** How a file in /work (such as "outputs/fig1.png") came to be as its latest checkpoint saved it. */
-  file: (id: string, path: string) =>
-    request<FileProvenance>(`/api/conversations/${id}/provenance/${path.split("/").map(encodeURIComponent).join("/")}`),
+  /** How a file in /work (such as "outputs/fig1.png") came to be as `checkpoint` (else the latest) saved it. */
+  file: (id: string, path: string, checkpoint?: number | null) =>
+    request<FileProvenance>(
+      `/api/conversations/${id}/provenance/${path.split("/").map(encodeURIComponent).join("/")}` +
+        (checkpoint != null ? `?checkpoint=${checkpoint}` : ""),
+    ),
 };

@@ -589,3 +589,28 @@ def test_an_older_checkpoint_without_the_flag_is_known_by_its_label(workspace):
 
     assert Version(2, 1, "After turn 1's review").after_review
     assert not Version(1, 1, "After turn 1").after_review
+
+
+def test_the_chain_describes_the_version_being_looked_at(app):
+    from fastapi.testclient import TestClient
+
+    services = app.state.services
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        services.conversations.append(cid, "user_message", {"text": "One."})
+        services.conversations.append(cid, "user_message", {"text": "Two."})
+        work = services.sessions.paths(cid).work
+        (work / "outputs").mkdir(parents=True, exist_ok=True)
+        checkpoints = services.sessions.checkpoints(cid)
+        (work / "outputs" / "t.csv").write_text("first")
+        checkpoints.take("After turn 1", turn=1)
+        (work / "outputs" / "t.csv").write_text("second")
+        checkpoints.take("After turn 2", turn=2)
+        url = f"/api/conversations/{cid}/provenance/outputs/t.csv"
+        latest = client.get(url).json()
+        older = client.get(url, params={"checkpoint": 1}).json()
+        missing = client.get(url, params={"checkpoint": 9})
+    assert (latest["turn"], latest["as_of"]) == (2, 2)
+    assert (older["turn"], older["as_of"]) == (1, 1)
+    assert "as checkpoint 1 saved it" in older["summary"]
+    assert missing.status_code == 404

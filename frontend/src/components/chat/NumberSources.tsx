@@ -23,23 +23,32 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
   const [open, setOpen] = useState(false);
   const panel = useId();
   const box = useRef<HTMLSpanElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!open) return;
     const away = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
-    const escape = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    // Escape closes this first, and goes no further: nothing else on the page
+    // (a drawer, the viewer) closes with it. Focus goes back to the number.
+    const escape = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+    };
     document.addEventListener("mousedown", away);
-    document.addEventListener("keydown", escape);
+    document.addEventListener("keydown", escape, true);
     return () => {
       document.removeEventListener("mousedown", away);
-      document.removeEventListener("keydown", escape);
+      document.removeEventListener("keydown", escape, true);
     };
   }, [open]);
   const traced = sources.length > 0;
   return (
     <span ref={box} className="relative inline">
       <button
+        ref={button}
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
@@ -51,6 +60,7 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
         )}
       >
         {text}
+        {!traced && <span className="sr-only">, which appears in nothing this turn produced</span>}
       </button>
       {open && (
         <span
@@ -92,7 +102,7 @@ function Place({ source, links }: { source: NumberSource; links: SourceLinks }) 
         {links.openQuery && (
           <>
             {" "}
-            <LinkButton onClick={() => links.openQuery?.(source.ref)}>in Queries</LinkButton>
+            <LinkButton onClick={() => links.openQuery?.(source.ref)}>in the Queries tab</LinkButton>
           </>
         )}
       </span>

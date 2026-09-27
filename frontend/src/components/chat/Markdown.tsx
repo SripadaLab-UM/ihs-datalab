@@ -1,4 +1,4 @@
-import { createContext, lazy, Suspense, use, useMemo } from "react";
+import { type ComponentProps, createContext, lazy, Suspense, use, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -27,21 +27,18 @@ const InBlock = createContext(false);
  */
 export function Markdown({ text, numbers }: { text: string; numbers?: AnswerNumbers }) {
   const openFile = use(OpenFileContext);
-  const marked = useMemo(() => (numbers ? [markNumbers([...numbers.sources.keys()])] : []), [numbers]);
+  // The same plugin while the numbers are the same, however often the chat re-renders.
+  const keys = numbers ? [...numbers.sources.keys()].join("\u0000") : "";
+  const marked = useMemo(() => (keys ? [markNumbers(keys.split("\u0000"))] : []), [keys]);
   return (
+    <NumbersContext value={numbers}>
     <div className="prose-datalab">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={marked}
         components={{
-          span({ node, ...props }) {
-            // A number the answer states, marked by markNumbers: shown with where it appears.
-            const number = (props as Record<string, unknown>)["data-number"];
-            if (numbers && typeof number === "string") {
-              return <NumberSources text={number} sources={numbers.sources.get(number) ?? []} links={numbers.links} />;
-            }
-            return <span {...props} />;
-          },
+          // One component for good (not one per render), so an open popover stays open.
+          span: NumberSpan,
           pre({ children }) {
             return (
               <InBlock value={true}>
@@ -105,5 +102,19 @@ export function Markdown({ text, numbers }: { text: string; numbers?: AnswerNumb
         {text}
       </ReactMarkdown>
     </div>
+    </NumbersContext>
   );
+}
+
+// The answer's numbers, for the spans markNumbers made.
+const NumbersContext = createContext<AnswerNumbers | undefined>(undefined);
+
+/** A span in an answer: a number the answer states is shown with where it appears. */
+function NumberSpan({ node: _node, ...props }: ComponentProps<"span"> & { node?: unknown }) {
+  const numbers = use(NumbersContext);
+  const number = (props as Record<string, unknown>)["data-number"];
+  if (numbers && typeof number === "string") {
+    return <NumberSources text={number} sources={numbers.sources.get(number) ?? []} links={numbers.links} />;
+  }
+  return <span {...props} />;
 }

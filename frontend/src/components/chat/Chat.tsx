@@ -628,6 +628,12 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
       <Markdown text={answer} numbers={numbers} />
+      {numbers && turn.provenance && turn.provenance.more_numbers > 0 && (
+        <p className="mt-3 font-sans text-[12.5px] text-muted">
+          {turn.provenance.more_numbers} more number{turn.provenance.more_numbers === 1 ? "" : "s"} in this answer
+          weren't checked for where {turn.provenance.more_numbers === 1 ? "it appears" : "they appear"}.
+        </p>
+      )}
       {trace && !streaming && (
         <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
           <TraceChip trace={trace} />

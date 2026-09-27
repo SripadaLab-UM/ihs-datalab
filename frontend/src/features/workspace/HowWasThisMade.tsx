@@ -7,7 +7,7 @@ import type { FileProvenance } from "@/components/chat/provenance";
  * as they were then, and the queries those read. DataLab says what it knows
  * and no more: it doesn't see which command writes a file, so the summary
  * says so. No query rows or command output are shown: a query opens in the
- * Data accessed log, and a script in the file viewer.
+ * Queries tab, and a script in the file viewer.
  */
 export function HowWasThisMade({
   provenance,
@@ -40,8 +40,8 @@ export function HowWasThisMade({
                     <code className="min-w-0 max-w-full truncate bg-sunken px-1.5 py-0.5 font-mono text-[12px]" title={command.command}>
                       {command.command}
                     </code>
-                    {command.names_file && <Chip tone="good">names this file</Chip>}
-                    {!command.names_file && command.via_script && <Chip tone="good">ran {command.via_script}, which names it</Chip>}
+                    {command.names_file && <Chip>names this file</Chip>}
+                    {!command.names_file && command.via_script && <Chip>ran {command.via_script}, which names it</Chip>}
                     {command.seen_in_output && <Chip>printed its name</Chip>}
                     {command.exit_code !== null && command.exit_code !== 0 && <Chip tone="bad">failed ({command.exit_code})</Chip>}
                   </li>
@@ -67,7 +67,7 @@ export function HowWasThisMade({
                     ) : (
                       <span className="font-mono text-[12.5px]">{script.path}</span>
                     )}
-                    {script.names_file && <Chip tone="good">names this file</Chip>}
+                    {script.names_file && <Chip>names this file</Chip>}
                   </li>
                 ))}
               </ul>
