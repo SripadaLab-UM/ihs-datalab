@@ -888,6 +888,230 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Workflows */
+        get: operations["list_workflows_api_workflows_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Validate */
+        post: operations["validate_api_workflows_validate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_workflows_runs_get"];
+        put?: never;
+        /** Start */
+        post: operations["start_api_workflows_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Run */
+        get: operations["get_run_api_workflows_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Steps */
+        get: operations["get_steps_api_workflows_runs__run_id__steps_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stop */
+        post: operations["stop_api_workflows_runs__run_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream
+         * @description Server-sent events: the run, with its steps, each time it changes, until it ends.
+         */
+        get: operations["stream_api_workflows_runs__run_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/again": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Again
+         * @description The current workflow file afresh: today's data, the same parameters and seed.
+         */
+        post: operations["run_again_api_workflows_runs__run_id__again_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Replay Check
+         * @description Whether a Replay would be exact, and if not, why.
+         */
+        get: operations["replay_check_api_workflows_runs__run_id__replay_get"];
+        put?: never;
+        /**
+         * Replay
+         * @description The original definition, extracts, image and seed, run again.
+         */
+        post: operations["replay_api_workflows_runs__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Delivery */
+        get: operations["delivery_api_workflows_runs__run_id__delivery_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/destinations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Destination Keys
+         * @description The destination keys workflow files name, and the folder each maps to here.
+         */
+        get: operations["destination_keys_api_workflows_destinations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/destinations/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Destination Key
+         * @description Map a destination key to one of this computer's export folders.
+         */
+        put: operations["set_destination_key_api_workflows_destinations__key__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/status": {
         parameters: {
             query?: never;
@@ -1204,6 +1428,61 @@ export interface components {
             rigor_review: boolean;
             /** Busy */
             busy: boolean;
+        };
+        /** DeliverOut */
+        DeliverOut: {
+            /** Destination */
+            destination: string;
+            /** Folder */
+            folder: string;
+            /** Files */
+            files: string[];
+        };
+        /** DeliveryOut */
+        DeliveryOut: {
+            /** Id */
+            id: string;
+            /** Destination Key */
+            destination_key: string;
+            /** Destination Path */
+            destination_path: string;
+            /** Folder */
+            folder: string;
+            /** Files */
+            files: {
+                [key: string]: unknown;
+            }[];
+            /** Manifest Sha256 */
+            manifest_sha256: string;
+            /** Delivered At */
+            delivered_at: string;
+        };
+        /** DeliveryStatusOut */
+        DeliveryStatusOut: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "pending" | "delivered" | "skipped" | "failed";
+            /** Message */
+            message: string | null;
+            /** Deliveries */
+            deliveries: components["schemas"]["DeliveryOut"][];
+        };
+        /** DestinationKeyOut */
+        DestinationKeyOut: {
+            /** Key */
+            key: string;
+            /** Used By */
+            used_by: string[];
+            /** Destination Id */
+            destination_id: string | null;
+            /** Name */
+            name: string | null;
+            /** Path */
+            path: string | null;
+            /** Available */
+            available: boolean;
         };
         /** DestinationOut */
         DestinationOut: {
@@ -1552,6 +1831,20 @@ export interface components {
             /** Checkpoint */
             checkpoint?: number | null;
         };
+        /** ParameterOut */
+        ParameterOut: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "date" | "string" | "integer" | "number" | "boolean";
+            /** Default */
+            default: boolean | number | string | null;
+            /** Description */
+            description: string;
+        };
         /** PipelinesStatus */
         PipelinesStatus: {
             /** Available */
@@ -1631,6 +1924,13 @@ export interface components {
             /** Checkpoint */
             checkpoint: number;
         };
+        /** ProblemOut */
+        ProblemOut: {
+            /** Path */
+            path: string;
+            /** Message */
+            message: string;
+        };
         /** ProposalDetail */
         ProposalDetail: {
             proposal: components["schemas"]["ProposalOut"];
@@ -1703,6 +2003,28 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ReplayCheckOut */
+        ReplayCheckOut: {
+            /** Exact */
+            exact: boolean;
+            /** Reasons */
+            reasons: string[];
+            /** Blocking */
+            blocking: string[];
+        };
+        /** ReplayIn */
+        ReplayIn: {
+            /**
+             * Allow Inexact
+             * @default false
+             */
+            allow_inexact: boolean;
+            /**
+             * Deliver
+             * @default false
+             */
+            deliver: boolean;
+        };
         /** ReportIn */
         ReportIn: {
             /** Html */
@@ -1741,6 +2063,93 @@ export interface components {
             /** Has More */
             has_more: boolean;
         };
+        /** RunDetailOut */
+        RunDetailOut: {
+            /** Id */
+            id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Workflow Path */
+            workflow_path: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "run" | "run_again" | "replay";
+            /** Of Run */
+            of_run: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Started By */
+            started_by: string;
+            /** Message */
+            message: string | null;
+            /**
+             * Delivery Status
+             * @enum {string}
+             */
+            delivery_status: "none" | "pending" | "delivered" | "skipped" | "failed";
+            /** Delivery Message */
+            delivery_message: string | null;
+            /** Replay Exact */
+            replay_exact: boolean | null;
+            /** Replay Notes */
+            replay_notes: string[];
+            /** Reproduced */
+            reproduced: boolean | null;
+            /**
+             * Workflow Source
+             * @enum {string}
+             */
+            workflow_source: "git" | "file";
+            /** Repo Commit */
+            repo_commit: string | null;
+            /** Workflow Blob */
+            workflow_blob: string;
+            /** Image Ref */
+            image_ref: string;
+            /** Image Digest */
+            image_digest: string;
+            /** Image Platform */
+            image_platform: string;
+            /** Host Platform */
+            host_platform: string;
+            /** R Packages Sha256 */
+            r_packages_sha256: string;
+            /** Runner Version */
+            runner_version: string;
+            /** Runtime */
+            runtime: {
+                [key: string]: unknown;
+            };
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Seed */
+            seed: number;
+            /** Reads */
+            reads: string[];
+            /** Pipelines */
+            pipelines: {
+                [key: string]: unknown;
+            }[];
+            /** Run Dir */
+            run_dir: string;
+            /** Inputs Kept */
+            inputs_kept: boolean;
+            /** Steps */
+            steps: components["schemas"]["StepOut"][];
+            /** Deliveries */
+            deliveries: components["schemas"]["DeliveryOut"][];
+        };
         /** RunIn */
         RunIn: {
             /** Sql */
@@ -1749,39 +2158,6 @@ export interface components {
             binds?: {
                 [key: string]: string | number | null;
             };
-        };
-        /** RunOut */
-        RunOut: {
-            /** Id */
-            id: string;
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "running" | "succeeded" | "failed" | "rejected" | "stopped";
-            /** Sql */
-            sql: string;
-            /** Started At */
-            started_at: string;
-            /** Finished At */
-            finished_at: string | null;
-            /** Message */
-            message: string | null;
-            diagnostic: components["schemas"]["DiagnosticOut"] | null;
-            /** Query Id */
-            query_id: string | null;
-            /** Row Count */
-            row_count: number | null;
-            /** Bytes Written */
-            bytes_written: number | null;
-            /** Elapsed Seconds */
-            elapsed_seconds: number | null;
-            /** Columns */
-            columns: components["schemas"]["ColumnOut"][];
-            /** Tables */
-            tables: string[];
-            /** Warnings */
-            warnings: string[];
         };
         /** SafetyReportOut */
         SafetyReportOut: {
@@ -1821,6 +2197,11 @@ export interface components {
              * @default false
              */
             after_rebase: boolean;
+        };
+        /** SetDestinationKey */
+        SetDestinationKey: {
+            /** Destination Id */
+            destination_id: string;
         };
         /** SettingsStatus */
         SettingsStatus: {
@@ -1875,6 +2256,105 @@ export interface components {
             /** Max Bytes */
             max_bytes: number;
         };
+        /** StartIn */
+        StartIn: {
+            /** Path */
+            path: string;
+            /** Params */
+            params?: {
+                [key: string]: boolean | number | string;
+            };
+            /** Seed */
+            seed?: number | null;
+        };
+        /** StepOut */
+        StepOut: {
+            /** Step Id */
+            step_id: string;
+            /** Position */
+            position: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sql" | "r" | "pipeline" | "qc_builtin" | "qc_custom";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed" | "skipped" | "cancelled";
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Seed */
+            seed: number | null;
+            /** Query Id */
+            query_id: string | null;
+            /** Sql Text */
+            sql_text: string | null;
+            /** Binds */
+            binds: {
+                [key: string]: unknown;
+            } | null;
+            /** Queries */
+            queries: {
+                [key: string]: unknown;
+            }[];
+            /** Exit Code */
+            exit_code: number | null;
+            /** Elapsed Ms */
+            elapsed_ms: number | null;
+            /** Inputs */
+            inputs: {
+                [key: string]: unknown;
+            };
+            /** Outputs */
+            outputs: {
+                [key: string]: unknown;
+            };
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            } | null;
+            /** Message */
+            message: string | null;
+        };
+        /** StepSummary */
+        StepSummary: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "sql" | "r" | "pipeline" | "qc_builtin" | "qc_custom";
+            /** Description */
+            description: string;
+            /** Inputs */
+            inputs: {
+                [key: string]: string;
+            };
+            /** Outputs */
+            outputs: {
+                [key: string]: string;
+            };
+        };
+        /** ValidateIn */
+        ValidateIn: {
+            /** Path */
+            path?: string | null;
+            /** Text */
+            text?: string | null;
+        };
+        /** ValidateOut */
+        ValidateOut: {
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            workflow: components["schemas"]["WorkflowOut"] | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1888,10 +2368,113 @@ export interface components {
             /** Context */
             ctx?: Record<string, never>;
         };
+        /** WorkflowOut */
+        WorkflowOut: {
+            /** Path */
+            path: string;
+            /** Name */
+            name: string | null;
+            /** Description */
+            description: string;
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Parameters */
+            parameters: components["schemas"]["ParameterOut"][];
+            /** Steps */
+            steps: components["schemas"]["StepSummary"][];
+            /** Reads */
+            reads: string[];
+            deliver: components["schemas"]["DeliverOut"] | null;
+            /** Source */
+            source: ("git" | "file") | null;
+            /** Blob */
+            blob: string | null;
+            /** Commit */
+            commit: string | null;
+        };
         /** WorkflowsStatus */
         WorkflowsStatus: {
             /** Available */
             available: boolean;
+            /** Folder */
+            folder: string;
+        };
+        /** RunOut */
+        datalab__api__sql__RunOut: {
+            /** Id */
+            id: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "running" | "succeeded" | "failed" | "rejected" | "stopped";
+            /** Sql */
+            sql: string;
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Message */
+            message: string | null;
+            diagnostic: components["schemas"]["DiagnosticOut"] | null;
+            /** Query Id */
+            query_id: string | null;
+            /** Row Count */
+            row_count: number | null;
+            /** Bytes Written */
+            bytes_written: number | null;
+            /** Elapsed Seconds */
+            elapsed_seconds: number | null;
+            /** Columns */
+            columns: components["schemas"]["ColumnOut"][];
+            /** Tables */
+            tables: string[];
+            /** Warnings */
+            warnings: string[];
+        };
+        /** RunOut */
+        datalab__api__workflows__RunOut: {
+            /** Id */
+            id: string;
+            /** Workflow Name */
+            workflow_name: string;
+            /** Workflow Path */
+            workflow_path: string;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "run" | "run_again" | "replay";
+            /** Of Run */
+            of_run: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at: string | null;
+            /** Started By */
+            started_by: string;
+            /** Message */
+            message: string | null;
+            /**
+             * Delivery Status
+             * @enum {string}
+             */
+            delivery_status: "none" | "pending" | "delivered" | "skipped" | "failed";
+            /** Delivery Message */
+            delivery_message: string | null;
+            /** Replay Exact */
+            replay_exact: boolean | null;
+            /** Replay Notes */
+            replay_notes: string[];
+            /** Reproduced */
+            reproduced: boolean | null;
         };
     };
     responses: never;
@@ -2870,7 +3453,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunOut"];
+                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -2903,7 +3486,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunOut"];
+                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -2934,7 +3517,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunOut"];
+                    "application/json": components["schemas"]["datalab__api__sql__RunOut"];
                 };
             };
             /** @description Validation Error */
@@ -3420,6 +4003,429 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowsStatus"];
+                };
+            };
+        };
+    };
+    list_workflows_api_workflows_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowOut"][];
+                };
+            };
+        };
+    };
+    validate_api_workflows_validate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidateOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_workflows_runs_get: {
+        parameters: {
+            query?: {
+                path?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_api_workflows_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_api_workflows_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_steps_api_workflows_runs__run_id__steps_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StepOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_api_workflows_runs__run_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_api_workflows_runs__run_id__stream_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_again_api_workflows_runs__run_id__again_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_check_api_workflows_runs__run_id__replay_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplayCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_api_workflows_runs__run_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReplayIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["datalab__api__workflows__RunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delivery_api_workflows_runs__run_id__delivery_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryStatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    destination_keys_api_workflows_destinations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationKeyOut"][];
+                };
+            };
+        };
+    };
+    set_destination_key_api_workflows_destinations__key__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetDestinationKey"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
