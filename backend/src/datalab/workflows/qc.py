@@ -325,6 +325,10 @@ def _small_cell_checks(
             message = "the margin check didn't settle, so hidden counts can't be checked"
         else:
             message = f"{recoverable} hidden counts in {columns} can be worked out from the totals"
+            if found.zeros:
+                # A hidden 0 the totals show gives no small count away.
+                zeros = len(found.zeros)
+                message += f"; {zeros} hidden count{' is' if zeros == 1 else 's are'} 0"
         checks.append(
             _check(
                 "small_cells_recoverable",

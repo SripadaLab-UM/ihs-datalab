@@ -4,7 +4,8 @@ A table's hidden (suppressed) counts are unknowns; every total it shows, of
 a row (`total_column`) or of a group of rows (`totals`), is a linear
 equation over them: the hidden cells it adds up, less a hidden total, equal
 what's left of the shown numbers. Each hidden cell starts with the interval
-[1, min - 1]: 0 may be shown, so a hidden cell is a small count.
+[0, min - 1]: a small count, 0 included, since the usual R suppression
+(`ifelse(n < 11, NA, n)`) hides zeros too.
 
 Two things are then worked out, over every equation together:
 
@@ -15,11 +16,14 @@ Two things are then worked out, over every equation together:
    intervals from the others' (`x = c - sum(others)`), round after round
    across all row and column equations, until nothing changes.
 
-A hidden cell is recoverable when either leaves it one value. If the small
-premise can't hold (the equations need some hidden cell to be 11 or more,
-as when a large cell is hidden to protect a small one), the propagation is
-repeated with [1, infinity), which is still sound. If even that fails, the
-shown totals don't add up, and nothing can be said: the check fails.
+A hidden cell is recoverable when either leaves it one value from 1 to
+min - 1. One left only 0 gives no small count away, so it passes (and is
+noted); one left a value of min or more isn't a small count either. If the
+small premise can't hold (the equations need some hidden cell to be 11 or
+more, as when a large cell is hidden to protect a small one), the
+propagation is repeated with only the top widened, [0, infinity), which is
+still sound. If even that fails, the shown totals don't add up, and nothing
+can be said: the check fails.
 
 Sound, not complete: a cell reported safe could still be narrowed by
 reasoning that combines bounds and equations more cleverly (integer
@@ -49,7 +53,8 @@ class Equation:
 
 @dataclass
 class Audit:
-    recoverable: set[int] = field(default_factory=set)
+    recoverable: set[int] = field(default_factory=set)  # pinned to a small count
+    zeros: set[int] = field(default_factory=set)  # pinned to 0: no small count shown
     inconsistent: bool = False
     unsettled: bool = False
 
@@ -62,6 +67,12 @@ def audit(variables: int, equations: list[Equation], minimum: float) -> Audit:
         return result
     high = math.ceil(minimum) - 1  # the largest small count
 
+    def pinned(var: int, value: float) -> None:
+        if value == 0:
+            result.zeros.add(var)
+        elif 0 < value <= high:
+            result.recoverable.add(var)
+
     # A shown total whose hidden cells add up to a small count gives that away.
     for equation in equations:
         positive = [v for v, a in equation.terms if a > 0]
@@ -69,26 +80,28 @@ def audit(variables: int, equations: list[Equation], minimum: float) -> Audit:
         if whole and 1 <= equation.constant < minimum:
             result.recoverable.update(positive)
 
-    fixed = _determined(variables, equations)
-    result.recoverable.update(fixed)
+    for var, value in _determined(variables, equations).items():
+        pinned(var, float(value))
 
+    # Hidden cells are small counts, 0 included (ifelse(n < 11, NA, n) hides
+    # zeros too); if that can't hold, some are large: widen only the top.
     for upper in (float(high), math.inf):
         intervals = _propagate(variables, equations, upper)
         if intervals is None:
-            continue  # the premise can't hold: widen it
-        if intervals == "unsettled":
+            continue
+        if isinstance(intervals, str):  # "unsettled"
             result.unsettled = True
             return result
         for var, (lo, hi) in enumerate(intervals):
             if lo == hi:
-                result.recoverable.add(var)
+                pinned(var, lo)
         return result
     result.inconsistent = True
     return result
 
 
-def _determined(variables: int, equations: list[Equation]) -> set[int]:
-    """Cells the equations alone fix: e_j is in the equations' row space."""
+def _determined(variables: int, equations: list[Equation]) -> dict[int, Fraction]:
+    """Cells the equations alone fix, and their values: e_j is in the row space."""
     parent = list(range(variables))
 
     def find(v: int) -> int:
@@ -104,7 +117,7 @@ def _determined(variables: int, equations: list[Equation]) -> set[int]:
     groups: dict[int, list[Equation]] = {}
     for equation in equations:
         groups.setdefault(find(equation.terms[0][0]), []).append(equation)
-    fixed: set[int] = set()
+    fixed: dict[int, Fraction] = {}
     for group in groups.values():
         names = sorted({v for e in group for v, _ in e.terms})
         if len(names) > MAX_EXACT:
@@ -112,22 +125,22 @@ def _determined(variables: int, equations: list[Equation]) -> set[int]:
         column = {v: i for i, v in enumerate(names)}
         rows = []
         for equation in group:
-            row = [Fraction(0)] * len(names)
+            row = [Fraction(0)] * (len(names) + 1)
             for var, coef in equation.terms:
                 row[column[var]] += coef
+            row[-1] = Fraction(equation.constant).limit_denominator(10**6)
             rows.append(row)
-        pivots = _reduce(rows)
-        for r, c in pivots:
-            if all(x == 0 for i, x in enumerate(rows[r]) if i != c):
-                fixed.add(names[c])
+        for r, c in _reduce(rows, len(names)):
+            if all(x == 0 for i, x in enumerate(rows[r][:-1]) if i != c):
+                fixed[names[c]] = rows[r][-1]
     return fixed
 
 
-def _reduce(rows: list[list[Fraction]]) -> list[tuple[int, int]]:
-    """Reduced row echelon form, in place; returns the (row, column) pivots."""
+def _reduce(rows: list[list[Fraction]], width: int) -> list[tuple[int, int]]:
+    """Reduced row echelon form, in place, pivoting on the first `width`
+    columns (the rest is the constants); returns the (row, column) pivots."""
     pivots = []
     r = 0
-    width = len(rows[0]) if rows else 0
     for c in range(width):
         pick = next((i for i in range(r, len(rows)) if rows[i][c] != 0), None)
         if pick is None:
@@ -154,7 +167,7 @@ def _propagate(
     None if the intervals become empty (the premise can't hold), "unsettled"
     if they keep changing past MAX_SWEEPS.
     """
-    lo = [1.0] * variables
+    lo = [0.0] * variables
     hi = [upper] * variables
     for _ in range(MAX_SWEEPS):
         changed = False

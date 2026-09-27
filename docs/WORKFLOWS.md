@@ -245,24 +245,29 @@ directly. Milestone 5 swaps in the synced repo.
     nothing), or a header that names a column twice;
   - a hidden count that the shown totals give away. Every row total and
     group total is an equation over the hidden cells, each of which starts
-    at 1 to `min - 1`. The check solves them together: exact elimination
-    finds cells the equations fix on their own, and interval propagation
-    tightens every cell's range across all rows and columns until nothing
-    changes. Any hidden cell left one possible value fails, as do hidden
-    cells under one total whose combined count is small. If the equations
-    need a hidden cell of `min` or more (a large cell hidden to protect a
-    small one), the ranges are widened to 1 and up; if the totals can't add
-    up at all, the check fails;
+    at 0 to `min - 1` (R's usual `ifelse(n < 11, NA, n)` hides zeros too).
+    The check solves them together: exact elimination finds cells the
+    equations fix on their own, and interval propagation tightens every
+    cell's range across all rows and columns until nothing changes. A
+    hidden cell left one value from 1 to `min - 1` fails, as do hidden cells
+    under one total whose combined count is small; one left only 0 passes,
+    and the check's message says so. If the equations need a hidden cell of
+    `min` or more (a large cell hidden to protect a small one), only the top
+    of the ranges is widened, to 0 and up; if the totals can't add up at
+    all, the check fails. A seeded random search checks it against brute
+    force over small tables;
   - a hidden count whose declared percentage is shown in the same row,
     whether or not the base is shown.
-- **What the small-cell check doesn't cover:** it is sound but not
-  complete, so a cell it passes could still be narrowed by cleverer
-  reasoning (it doesn't search integer solutions, and groups of more than
-  400 linked hidden cells get the propagation only); totals nested more than
-  one level, or across `within` groups; percentages not declared under
-  `percent_columns`, and means or rates that imply a count; and
-  differencing between delivered tables (two files whose counts give a
-  hidden one away). Those still need a person's review.
+- **What the small-cell check doesn't cover**, which needs a person's
+  review before delivery:
+  - totals across `within` groups, or nested more than one level;
+  - totals in another output: differencing between delivered tables, where
+    two files' counts give a hidden one away;
+  - percentages not declared under `percent_columns`, and means or rates
+    that imply a count;
+  - reasoning cleverer than elimination and propagation: the check is sound
+    but not complete (it doesn't search every whole-number solution, and a
+    group of more than 400 linked hidden cells gets the propagation only).
 - In the real profile, every delivered CSV needs a passing `small_cells`
   check over that exact output, and every other delivered file (TSV, Excel,
   …), which built-in checks can't read, needs a reason under

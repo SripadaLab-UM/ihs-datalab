@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import random
 from pathlib import Path
 
 from datalab.workflows.model import BuiltinQc
@@ -239,3 +240,107 @@ def test_a_percentage_beside_a_hidden_count_gives_it_away(tmp_path):
     assert found["status"] == "fail" and found["observed"] == 1
     hidden = write(tmp_path / "y.csv", header, [["a", "40", "80.0"], ["b", "<11", ""]])
     assert checks(hidden, small_cells=rule)["small_cells_percentages"]["status"] == "pass"
+
+
+GRID = {
+    "count_columns": ["c0", "c1", "c2", "c3"],
+    "total_column": "tot",
+    "totals": {"column": "g", "value": "Total"},
+}
+
+
+def test_hidden_zeros_dont_hide_what_the_totals_pin(tmp_path):
+    """ifelse(n < 11, NA, n) hides zeros too. Taking hidden cells to be 1 to 10
+    made this table look impossible, and the widened check passed it; a
+    reader who allows for zeros pins hidden 7s and 10s."""
+    rows = [
+        ["r0", "", "", "", "", "20"],
+        ["r1", "", "", "", "", "37"],
+        ["r2", "", "", "12", "", "29"],
+        ["r3", "", "25", "12", "", "54"],
+        ["Total", "37", "45", "44", "14", "140"],
+    ]
+    path = write(tmp_path / "x.csv", ["g", "c0", "c1", "c2", "c3", "tot"], rows)
+    found = checks(path, small_cells=GRID)["small_cells_recoverable"]
+    assert found["status"] == "fail" and found["observed"] >= 1
+
+
+def test_a_hidden_cell_the_totals_show_is_zero_passes(tmp_path):
+    rule = {"count_columns": ["n"], "totals": {"column": "DEVICE", "value": "All"}}
+    path = write(tmp_path / "x.csv", ["DEVICE", "n"], [["a", "30"], ["b", "<11"], ["All", "30"]])
+    found = checks(path, small_cells=rule)["small_cells_recoverable"]
+    assert found["status"] == "pass" and "1 hidden count is 0" in found["message"]
+
+
+def _possible_values(grid: list[list[int]], hidden: set[tuple[int, int]]) -> dict:
+    """Every value each hidden cell can take, by brute force over whole
+    numbers from 0 up, given the row, column and grand totals: what a reader
+    who allows for zeros can work out."""
+    rows, cols = len(grid), len(grid[0])
+    row_left = [sum(grid[i][j] for j in range(cols) if (i, j) in hidden) for i in range(rows)]
+    col_left = [sum(grid[i][j] for i in range(rows) if (i, j) in hidden) for j in range(cols)]
+    cells = sorted(hidden)
+    seen: dict = {c: set() for c in cells}
+    chosen: dict = {}
+
+    def place(k: int) -> None:
+        if k == len(cells):
+            if not any(row_left) and not any(col_left):
+                for c in cells:
+                    seen[c].add(chosen[c])
+            return
+        i, j = cells[k]
+        top = min(row_left[i], col_left[j])
+        values = range(top + 1)
+        if all(ci != i for ci, _ in cells[k + 1 :]):
+            values = [row_left[i]] if row_left[i] <= col_left[j] else []
+        for value in values:
+            chosen[(i, j)] = value
+            row_left[i] -= value
+            col_left[j] -= value
+            place(k + 1)
+            row_left[i] += value
+            col_left[j] += value
+
+    place(0)
+    return seen
+
+
+def test_a_table_that_passes_gives_no_small_count_away(tmp_path):
+    """Random small tables, suppressed as R usually does (n < 11 hidden, zeros
+    included) plus a few extra cells: any table QC passes must leave every
+    hidden cell more than one possible value, or 0, or 11 and up."""
+    rng = random.Random(20260927)
+    passed = 0
+    for number in range(400):
+        rows, cols = rng.choice((2, 3)), rng.choice((2, 3, 4))
+        grid = [
+            [rng.choice((0, rng.randint(1, 10), rng.randint(11, 25))) for _ in range(cols)]
+            for _ in range(rows)
+        ]
+        hidden = {(i, j) for i in range(rows) for j in range(cols) if grid[i][j] < 11}
+        hidden |= {(rng.randrange(rows), rng.randrange(cols)) for _ in range(rng.randint(0, 2))}
+        if not hidden:
+            continue
+        columns = [f"c{j}" for j in range(cols)]
+        table = [
+            [f"r{i}", *("" if (i, j) in hidden else grid[i][j] for j in range(cols)), sum(grid[i])]
+            for i in range(rows)
+        ]
+        table.append(
+            ["Total", *(sum(r[j] for r in grid) for j in range(cols)), sum(map(sum, grid))]
+        )
+        path = write(tmp_path / f"t{number}.csv", ["g", *columns, "tot"], table)
+        rule = {
+            "count_columns": columns,
+            "total_column": "tot",
+            "totals": {"column": "g", "value": "Total"},
+        }
+        found = checks(path, small_cells=rule)
+        if any(c["status"] == "fail" for k, c in found.items() if k != "small_cells"):
+            continue
+        passed += 1
+        for cell, values in _possible_values(grid, hidden).items():
+            only = next(iter(values)) if len(values) == 1 else None
+            assert only is None or not 1 <= only <= 10, (grid, sorted(hidden), cell, only)
+    assert passed > 20  # the search does reach tables that pass
