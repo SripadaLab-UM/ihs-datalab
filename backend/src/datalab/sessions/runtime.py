@@ -212,7 +212,10 @@ class SessionRuntime:
         if turn.done.done():
             return turn.done.result()
         await self._withdraw()
-        message = "The agent stopped unexpectedly. Send your message again to continue."
+        message = (
+            "The agent stopped unexpectedly. What it did so far is kept: "
+            "Continue picks up where it left off."
+        )
         await self._emit("turn_finished", {"status": "failed", "error": message})
         return TurnResult(turn.id or "", "failed", message)
 

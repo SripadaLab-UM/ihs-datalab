@@ -23,6 +23,7 @@ export const EVENT_TYPES = [
   "error",
   "stop_requested",
   "notice",
+  "model_status",
   "checkpoint",
   "files_restored",
   "input_attached",

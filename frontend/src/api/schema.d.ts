@@ -112,6 +112,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Turn
+         * @description Pick up the last turn where it left off, in the same thread (the chat
+         *     offers it after a turn fails, say when the model service stayed busy).
+         */
+        post: operations["continue_turn_api_conversations__conversation_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerun Review
+         * @description Run the last turn's rigor review again, after it couldn't finish.
+         */
+        post: operations["rerun_review_api_conversations__conversation_id__review_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/approvals/{approval_id}": {
         parameters: {
             query?: never;
@@ -1023,6 +1064,68 @@ export interface operations {
         };
     };
     stop_api_conversations__conversation_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_turn_api_conversations__conversation_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_review_api_conversations__conversation_id__review_post: {
         parameters: {
             query?: never;
             header?: never;

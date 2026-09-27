@@ -9,7 +9,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { activityRows, nowLine } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
-import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript";
+import { buildTranscript, canContinue, finalAnswer, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
 // Events that start or end a turn or its review: DataLab's busy flag changes.
@@ -69,13 +69,13 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }, [lastFilesEvent, conversation.id, queryClient]);
 
-  // A new conversation, or a new question, brings the view back to the bottom.
   // A title written from the first question, or a rename in another window.
   const lastTitleEvent = events.findLast((e) => e.type === "title_changed")?.seq;
   useEffect(() => {
     if (lastTitleEvent !== undefined) queryClient.invalidateQueries({ queryKey: ["conversations"] });
   }, [lastTitleEvent, queryClient]);
 
+  // A new conversation, or a new question, brings the view back to the bottom.
   useEffect(() => setFollowing(true), [conversation.id, turns.length]);
   useEffect(() => {
     if (following) bottom.current?.scrollIntoView({ block: "end" });
@@ -102,7 +102,13 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         <div className="mx-auto flex max-w-[42rem] flex-col gap-14">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
-            <TurnView key={index} turn={turn} conversationId={conversation.id} running={running} />
+            <TurnView
+              key={index}
+              turn={turn}
+              conversationId={conversation.id}
+              running={running}
+              last={index === turns.length - 1}
+            />
           ))}
           <div ref={bottom} />
         </div>
@@ -256,7 +262,17 @@ function EmptyState({ conversation, onPick }: { conversation: Conversation; onPi
   );
 }
 
-function TurnView({ turn, conversationId, running }: { turn: Turn; conversationId: string; running: boolean }) {
+function TurnView({
+  turn,
+  conversationId,
+  running,
+  last,
+}: {
+  turn: Turn;
+  conversationId: string;
+  running: boolean;
+  last: boolean;
+}) {
   const answer = finalAnswer(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
@@ -271,7 +287,7 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
   return (
     <article className="flex flex-col gap-5">
       {turn.userText && (
-        <Question text={turn.userText} />
+        <Question text={turn.userText} continues={turn.continues} />
       )}
       <Story
         rows={story}
@@ -303,16 +319,22 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
       />
       {live && !answer && (
         <NowCard
-          line={nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")}
+          line={
+            turn.model?.state === "retrying"
+              ? retryLine(turn.model)
+              : nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")
+          }
           waiting={waitingFor(rows)}
           onStop={() => stop.mutate()}
           stopping={stop.isPending}
         />
       )}
       {answer && <AnswerCard answer={answer} trace={turn.trace} streaming={live} />}
-      {reviews.map((review, i) => (
-        <ReviewBox key={`review-${i}`} review={review} conversationId={conversationId} running={running} />
+      {/* Only the latest review: one run again replaces one that didn't finish. */}
+      {reviews.slice(-1).map((review) => (
+        <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
       ))}
+      {last && !running && canContinue(turn) && <ContinueButton conversationId={conversationId} />}
       {turn.status === "interrupted" && (
         <p className="font-serif text-[16px] text-muted italic">Stopped. Anything it saved is in History.</p>
       )}
@@ -321,7 +343,8 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
 }
 
 /** The person's question, set large; a long, pasted one reads as text, not as a heading. */
-function Question({ text }: { text: string }) {
+function Question({ text, continues }: { text: string; continues?: boolean }) {
+  if (continues) return <p className="dl-label">Continued after an interruption</p>;
   if (text.length > 220) {
     return <p className="font-serif text-[19px] leading-relaxed break-words whitespace-pre-wrap text-ink">{text}</p>;
   }
@@ -329,6 +352,32 @@ function Question({ text }: { text: string }) {
     <h2 className="font-serif text-[28px] leading-[1.18] tracking-[-0.005em] break-words whitespace-pre-wrap text-balance text-ink">
       {text}
     </h2>
+  );
+}
+
+/** The live line while DataLab waits to retry a model request (relay/recovery.py). */
+function retryLine(model: ModelStatus): string {
+  const when = model.waitSeconds ? ` in about ${model.waitSeconds} s` : "";
+  return model.kind === "connection"
+    ? `Couldn't reach U-M GPT. DataLab will try again${when}.`
+    : `The model service is busy. DataLab will try again${when}.`;
+}
+
+/** Picks up a turn that stopped part-way, in the same thread: nothing is sent twice. */
+function ContinueButton({ conversationId }: { conversationId: string }) {
+  const queryClient = useQueryClient();
+  const go = useMutation({
+    mutationFn: () =>
+      api.continueTurn(conversationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  return (
+    <div className="flex items-center gap-3">
+      <Button variant="primary" onClick={() => go.mutate()} disabled={go.isPending || go.isSuccess}>
+        Continue
+      </Button>
+      {go.error && <span className="font-sans text-[13px] text-danger">{go.error.message}</span>}
+    </div>
   );
 }
 
@@ -386,10 +435,12 @@ function ReviewBox({
   review,
   conversationId,
   running,
+  last,
 }: {
   review: Extract<Item, { kind: "review" }>;
   conversationId: string;
   running: boolean;
+  last: boolean;
 }) {
   const queryClient = useQueryClient();
   const stop = useMutation({
@@ -401,8 +452,13 @@ function ReviewBox({
       api.send(conversationId, "Please address the problems the rigor review found, where you can, and say which you couldn't."),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
+  const again = useMutation({
+    mutationFn: () => api.rerunReview(conversationId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
   const [open, setOpen] = useState(true);
   const reviewing = review.status === "running" && running;
+  const unfinished = !reviewing && (review.status === "failed" || review.status === "stopped");
   return (
     <section className="border-y border-line">
       <div className="flex items-start gap-3 py-3">
@@ -417,7 +473,7 @@ function ReviewBox({
                 ? "The agent's check of its own work: a second opinion, not proof."
                 : review.status === "stopped"
                   ? "Stopped before it finished."
-                  : "Didn't finish."}
+                  : "Didn't finish (the model service may have been busy). The answer above is unaffected."}
           </span>
         </span>
       </button>
@@ -431,7 +487,18 @@ function ReviewBox({
             Stop the review
           </button>
         )}
+        {unfinished && last && (
+          <button
+            type="button"
+            onClick={() => again.mutate()}
+            disabled={running || again.isPending || again.isSuccess}
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink disabled:opacity-45"
+          >
+            Run the review again
+          </button>
+        )}
       </div>
+      {again.error && <p className="pb-3 font-sans text-[13px] text-danger">{again.error.message}</p>}
       {open && review.text && review.status === "done" && (
         <div className="pb-5 pl-[19px]">
           <Markdown text={review.text} />

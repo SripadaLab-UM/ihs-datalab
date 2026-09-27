@@ -31,18 +31,33 @@ export type Item =
   | { kind: "review"; text: string; status: "running" | "done" | "stopped" | "failed" }
   | { kind: "notice"; tone: "error" | "info"; text: string };
 
+/** How the turn's model requests are going, from DataLab's relay (relay/recovery.py). */
+export interface ModelStatus {
+  state: "retrying" | "recovered" | "failed";
+  kind: "busy" | "quota" | "model_unavailable" | "auth" | "request" | "connection" | null;
+  waitSeconds: number | null;
+  model: string;
+}
+
 export interface Turn {
   userText: string;
   items: Item[];
   status: "running" | "completed" | "interrupted" | "failed";
+  /** The latest model status in the turn, if anything went wrong with a request. */
+  model?: ModelStatus;
+  /** Started by Continue: it picks up the turn before, which failed or was stopped. */
+  continues?: boolean;
   /** Numbers in the answer that nothing the turn produced contains. */
   trace?: { numbers: number; untraced: string[] };
 }
 
 const MAX_COMMAND_OUTPUT = 20_000;
+const ACTIVITY = new Set(["answer_started", "answer_delta", "reasoning_delta", "command_started", "tool_call"]);
 const REVIEW_TURN_EVENTS = new Set([
   "answer_started", "answer_delta", "answer", "turn_started", "turn_finished", "reasoning_delta",
   "command_started", "command_output", "command_finished", "tool_call", "files_changed", "web_search",
+  // The review's own model trouble is the review's ("Didn't finish"), not the turn's.
+  "model_status", "error",
 ]);
 
 export function buildTranscript(events: ConversationEvent[]): Turn[] {
@@ -74,6 +89,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       }
       continue;
     }
+    // The agent doing anything means its model requests are going through again.
+    if (turn?.model && ACTIVITY.has(event.type)) turn.model = undefined;
     switch (event.type) {
       case "review_started":
         review = { kind: "review", text: "", status: "running" };
@@ -107,7 +124,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
-        turn = { userText: text(data.text), items: [], status: "running" };
+        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true };
         turns.push(turn);
         byId.clear();
         break;
@@ -180,11 +197,23 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         });
         break;
       case "error":
-        add({ kind: "notice", tone: "error", text: text(data.message) || "Something went wrong." });
+        addError(current(), text(data.message) || "Something went wrong.");
         break;
       case "notice":
         add({ kind: "notice", tone: data.tone === "error" ? "error" : "info", text: text(data.text) });
         break;
+      case "model_status": {
+        const state = text(data.state);
+        if (state !== "retrying" && state !== "recovered" && state !== "failed") break;
+        const kind = text(data.kind);
+        current().model = {
+          state,
+          kind: (["busy", "quota", "model_unavailable", "auth", "request", "connection"] as const).find((k) => k === kind) ?? null,
+          waitSeconds: typeof data.wait_seconds === "number" ? data.wait_seconds : null,
+          model: text(data.model),
+        };
+        break;
+      }
       case "approval_requested": {
         const item: Approval = {
           kind: "approval",
@@ -272,6 +301,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         add({ kind: "notice", tone: "info", text: "Stopping…" });
         break;
       case "turn_finished": {
+        // "Stopping…" was for while it stopped; a stopped turn says "Stopped" itself.
+        current().items = current().items.filter((i) => !(i.kind === "notice" && i.text === "Stopping…"));
         // A question still waiting when the turn ends can't be answered any more.
         for (const approval of approvals.values()) {
           if (approval.state === "pending") approval.state = "withdrawn";
@@ -283,12 +314,50 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         const status = text(data.status);
         current().status =
           status === "interrupted" || status === "failed" ? status : "completed";
-        if (data.error) add({ kind: "notice", tone: "error", text: text(data.error) });
+        if (data.error) addError(current(), text(data.error));
         break;
       }
     }
   }
   return turns;
+}
+
+/**
+ * An error, shown once per turn. When DataLab's relay reported a model
+ * request that failed for good, its plain explanation replaces Codex's own
+ * text ("exceeded retry limit, last status: 429 ..."), which arrives more than once.
+ */
+function addError(turn: Turn, message: string) {
+  const model = turn.model;
+  const shown = model?.state === "failed" && model.kind ? modelTrouble(model) : message;
+  if (!turn.items.some((i) => i.kind === "notice" && i.text === shown)) {
+    turn.items.push({ kind: "notice", tone: "error", text: shown });
+  }
+}
+
+/** What a failed model request means for the person, in plain words. */
+export function modelTrouble(model: ModelStatus): string {
+  switch (model.kind) {
+    case "busy":
+      return "The model service is still busy, so this turn paused. What the agent did so far is kept: Continue picks up where it left off.";
+    case "connection":
+      return "DataLab couldn't reach U-M GPT, so this turn paused. Check the network (and the VPN, if you use it), then Continue.";
+    case "quota":
+      return "The model connection needs attention: U-M GPT says this key's allowance is used up. Retrying won't help until it resets or is raised.";
+    case "auth":
+      return "The model connection needs attention: U-M GPT didn't accept DataLab's key. Check it with the DataLab maintainer.";
+    case "model_unavailable":
+      return `The model ${model.model || "this conversation uses"} isn't available on U-M GPT right now. Try Continue later, or start a new conversation with another model.`;
+    default:
+      return "U-M GPT couldn't take this request (it may be too long). Try a shorter follow-up, or start a new conversation.";
+  }
+}
+
+/** Whether Continue can help: the turn stopped for a reason that may pass. */
+export function canContinue(turn: Turn): boolean {
+  if (turn.status !== "failed") return false;
+  const kind = turn.model?.state === "failed" ? turn.model.kind : null;
+  return kind === null || kind === "busy" || kind === "connection" || kind === "model_unavailable";
 }
 
 /** The answer to show prominently: the final answer, or the last message so far. */

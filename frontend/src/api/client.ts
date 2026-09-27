@@ -67,6 +67,10 @@ export const api = {
     }),
   rename: (id: string, title: string) =>
     request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
+  // Picks up a turn that failed or was stopped, in the same thread.
+  continueTurn: (id: string) => request<Conversation>(`/api/conversations/${id}/continue`, { method: "POST" }),
+  // The last turn's rigor review, run again after it couldn't finish.
+  rerunReview: (id: string) => request<Conversation>(`/api/conversations/${id}/review`, { method: "POST" }),
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
   send: (id: string, text: string, effort?: Effort) =>

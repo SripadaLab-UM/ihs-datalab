@@ -78,7 +78,9 @@ def render(kind: SessionKind, *, model: str, tool_timeout_seconds: int) -> str:
         'base_url = "http://gateway/v1"',
         f'env_key = "{TOKEN_ENV}"',
         'wire_api = "responses"',
-        "request_max_retries = 2",
+        # DataLab's relay retries failed requests itself, honouring the
+        # server's wait (relay/recovery.py); one more round from here at most.
+        "request_max_retries = 1",
         "stream_max_retries = 2",
         "stream_idle_timeout_ms = 300000",
     ]

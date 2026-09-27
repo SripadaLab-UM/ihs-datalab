@@ -248,6 +248,19 @@ src/datalab/
     straight through a blind proxy got U-M to run web search, call a remote
     MCP server, and run code. Each of those is a way out for data.
   - Responses stream straight through. The relay adds no buffering.
+  - **When U-M GPT is busy** (429, or a 5xx before any of the answer has
+    streamed), the relay itself retries the same checked request, honouring
+    the server's `Retry-After`, up to three attempts within 60 seconds
+    (`relay/recovery.py`). It never retries a used-up allowance, a refused
+    key, a missing model or a bad request, and nothing after Stop. Codex's own
+    request retries are kept to one, so a request makes at most two rounds of
+    relay attempts (six upstream calls, about two minutes of waiting at most).
+    A failure mid-stream is Codex's to retry (up to twice), as before. Each failure is
+    recorded as metadata only (kind, status, provider code, wait), and the
+    conversation gets a `model_status` event, so the chat can say "busy,
+    trying again in 8 s" and, if it gives up, explain it plainly and offer
+    Continue (the same thread picks up, so nothing is sent twice). A rigor
+    review that couldn't finish can be run again on its own.
 - **Gateway (stock nginx).** It is a pure router with no secrets:
   - `/v1/*` goes to DataLab's relay;
   - `/mcp` goes to DataLab's agent tools;
