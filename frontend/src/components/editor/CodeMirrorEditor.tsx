@@ -15,6 +15,7 @@ import { useEffect, useId, useRef } from "react";
 
 import { toRanges } from "./diagnostics";
 import { loadLanguage } from "./languages";
+import { syncDoc } from "./sync";
 import { paper } from "./theme";
 import type { CodeEditorProps, EditorLanguage } from "./types";
 
@@ -31,9 +32,9 @@ export function baseExtensions(): Extension[] {
     indentOnInput(),
     bracketMatching(),
     highlightActiveLine(),
-    // Tab indents; Escape then Tab moves on, so the keyboard is never trapped
-    // (CodeMirror's tab-focus mode, told to screen readers by tabHint).
+    // Tab indents; Escape then Tab moves on, so the keyboard is never trapped.
     keymap.of([...defaultKeymap, ...historyKeymap, ...lintKeymap, indentWithTab]),
+    escapeThenTab(),
     paper,
   ];
 }
@@ -41,6 +42,36 @@ export function baseExtensions(): Extension[] {
 /** What Tab does, for screen readers. Read-only text doesn't take Tab, so it moves on as usual. */
 export const tabHint = (readOnly: boolean) =>
   readOnly ? "Read-only." : "Tab indents. To leave the editor, press Escape, then Tab.";
+
+const MODIFIERS = new Set(["Shift", "Control", "Alt", "Meta"]);
+
+/**
+ * Escape lets the next Tab leave the editor, with no time limit (CodeMirror's
+ * own lasts two seconds): any other key, or leaving, ends it. The editor keeps
+ * its Escape, so it doesn't also close a dialog or drawer the editor is in.
+ */
+function escapeThenTab(): Extension {
+  let escaped = false;
+  const end = (view: EditorView) => {
+    if (escaped) view.setTabFocusMode(false);
+    escaped = false;
+  };
+  // Observers see every key, even one a key binding has already handled.
+  return EditorView.domEventObservers({
+    keydown(event, view) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        escaped = true;
+        view.setTabFocusMode(true);
+      } else if (escaped && event.key !== "Tab" && !MODIFIERS.has(event.key)) {
+        end(view);
+      }
+    },
+    blur(_event, view) {
+      end(view);
+    },
+  });
+}
 
 export function accessibility(label: string, hintId: string, readOnly: boolean, invalid: boolean): Extension {
   return EditorView.contentAttributes.of({
@@ -81,6 +112,21 @@ export default function CodeMirrorEditor({
   const invalid = diagnostics?.some((d) => d.severity === "error") ?? false;
   const hintId = useId();
   const submit = onSubmit ? () => callbacks.current.onSubmit?.() : null;
+  // The latest `value`, and whether one arrived while an input method was composing.
+  const latest = useRef(value);
+  latest.current = value;
+  const waiting = useRef(false);
+  const sync = useRef(() => {
+    const editor = view.current;
+    if (!editor) return;
+    // Changing the text mid-composition breaks the input method: wait for it to finish.
+    if (editor.compositionStarted) {
+      waiting.current = true;
+      return;
+    }
+    waiting.current = false;
+    syncDoc(editor, latest.current, fromProps.of(true));
+  }).current;
 
   useEffect(() => {
     const editor = new EditorView({
@@ -103,20 +149,19 @@ export default function CodeMirrorEditor({
       }),
     });
     view.current = editor;
+    // After the composition's own change is in, and only if a value came meanwhile.
+    const afterComposing = () => waiting.current && setTimeout(sync);
+    editor.contentDOM.addEventListener("compositionend", afterComposing);
     return () => {
+      editor.contentDOM.removeEventListener("compositionend", afterComposing);
       editor.destroy();
       view.current = null;
     };
     // Built once; the effects below keep it up to date with the props.
   }, []);
 
-  useEffect(() => {
-    const editor = view.current!;
-    const current = editor.state.doc.toString();
-    if (current !== value) {
-      editor.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: fromProps.of(true) });
-    }
-  }, [value]);
+  // Only what differs is changed, so the cursor stays where it was.
+  useEffect(sync, [value, sync]);
 
   useEffect(() => {
     let cancelled = false;

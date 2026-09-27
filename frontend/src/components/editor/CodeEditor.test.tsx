@@ -1,5 +1,6 @@
 import { language } from "@codemirror/language";
 import { forEachDiagnostic } from "@codemirror/lint";
+import { getOriginalDoc } from "@codemirror/merge";
 import { Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -10,6 +11,7 @@ import { diffSummary } from "./CodeMirrorDiff";
 import { CodeEditor, type CodeEditorProps } from "./CodeEditor";
 import { toRanges } from "./diagnostics";
 import { DiffView } from "./DiffView";
+import { changedRange } from "./sync";
 
 // jsdom has no layout. CodeMirror measures text; give it empty boxes.
 for (const proto of [Range.prototype, Element.prototype]) {
@@ -60,6 +62,54 @@ it("reports what's typed, and takes a new value without reporting it back", asyn
   fireEvent.click(screen.getByText("Replace"));
   expect(view.state.doc.toString()).toBe("SELECT 2 FROM dual");
   expect(onValue).toHaveBeenCalledTimes(1);
+});
+
+it("keeps the cursor where it was when a new value arrives", async () => {
+  const { rerender } = render(<CodeEditor label="SQL query" value={"SELECT a\nFROM t\nWHERE x = 1"} />);
+  const { view } = await editor("SQL query");
+  act(() => view.dispatch({ selection: { anchor: 13 } })); // in "FROM t", after the t
+  rerender(<CodeEditor label="SQL query" value={"SELECT a, b\nFROM t\nWHERE x = 1"} />);
+  expect(view.state.doc.toString()).toBe("SELECT a, b\nFROM t\nWHERE x = 1");
+  expect(view.state.selection.main.head).toBe(16); // moved along by the ", b" before it
+});
+
+it("waits for an input method to finish before taking a new value", async () => {
+  const { rerender } = render(<CodeEditor label="Notes" value="sleep" />);
+  const { content, view } = await editor("Notes");
+  fireEvent.compositionStart(content);
+  rerender(<CodeEditor label="Notes" value="sleep and mood" />);
+  expect(view.state.doc.toString()).toBe("sleep");
+  fireEvent.compositionEnd(content);
+  await waitFor(() => expect(view.state.doc.toString()).toBe("sleep and mood"));
+});
+
+it("changes only what differs", () => {
+  expect(changedRange("SELECT a FROM t", "SELECT a FROM t")).toBeNull();
+  expect(changedRange("SELECT a FROM t", "SELECT a, b FROM t")).toEqual({ from: 8, to: 8, insert: ", b" });
+  expect(changedRange("aaa", "aa")).toEqual({ from: 2, to: 3, insert: "" });
+  expect(changedRange("", "x")).toEqual({ from: 0, to: 0, insert: "x" });
+  expect(changedRange("abc", "xyz")).toEqual({ from: 0, to: 3, insert: "xyz" });
+});
+
+it("indents with Tab, and lets Tab leave after Escape, without closing what's around it", async () => {
+  const closed = vi.fn();
+  const onWindowKey = (event: KeyboardEvent) => event.key === "Escape" && closed();
+  window.addEventListener("keydown", onWindowKey);
+  render(<CodeEditor label="Workflow" language="yaml" value="steps:" />);
+  const { content, view } = await editor("Workflow");
+  const tab = () => fireEvent.keyDown(content, { key: "Tab", code: "Tab", keyCode: 9 }); // false: the editor took it
+  act(() => view.dispatch({ selection: { anchor: 0 } }));
+  expect(tab()).toBe(false);
+  expect(view.state.doc.toString()).toBe("  steps:");
+  fireEvent.keyDown(content, { key: "Escape", code: "Escape", keyCode: 27 });
+  expect(closed).not.toHaveBeenCalled(); // the editor's Escape stops there
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(tab()).toBe(true); // left to the browser, which moves focus on
+  expect(tab()).toBe(true); // still, with no time limit
+  expect(view.state.doc.toString()).toBe("  steps:");
+  fireEvent.keyDown(content, { key: "ArrowRight", code: "ArrowRight", keyCode: 39 });
+  expect(tab()).toBe(false); // any other key ends it
+  window.removeEventListener("keydown", onWindowKey);
 });
 
 it("can be read-only", async () => {
@@ -149,8 +199,21 @@ it("shows a diff side by side, or in one column, read-only and labelled", async 
   const after = screen.getByRole("textbox", { name: "clean.R, after" });
   expect(EditorView.findFromDOM(before)!.state.doc.toString()).toBe("x <- 1\ny <- 2");
   expect(EditorView.findFromDOM(after)!.state.readOnly).toBe(true);
+  // The changed line is marked + and − as well as by colour.
+  const signs = [...document.querySelectorAll(".cm-diffSigns .cm-gutterElement")].map((e) => e.textContent).filter(Boolean);
+  expect(signs).toEqual(["−", "+"]);
+  // A new version updates the same editors: focus and scroll stay.
+  const view = EditorView.findFromDOM(after)!;
+  rerender(<DiffView label="clean.R" language="r" original={"x <- 1\ny <- 2"} modified={"x <- 1\ny <- 4\nz <- 5"} />);
+  expect(await screen.findByText("2 lines added · 1 line removed")).toBeTruthy();
+  expect(EditorView.findFromDOM(screen.getByRole("textbox", { name: "clean.R, after" }))).toBe(view);
+  expect(view.state.doc.toString()).toBe("x <- 1\ny <- 4\nz <- 5");
   rerender(<DiffView label="clean.R" language="r" original={"x <- 1\ny <- 2"} modified={"x <- 1\ny <- 3"} layout="unified" />);
   const unified = await screen.findByRole("textbox", { name: "clean.R, changes" });
-  expect(EditorView.findFromDOM(unified)!.state.doc.toString()).toBe("x <- 1\ny <- 3");
+  const one = EditorView.findFromDOM(unified)!;
+  expect(one.state.doc.toString()).toBe("x <- 1\ny <- 3");
+  rerender(<DiffView label="clean.R" language="r" original={"x <- 0\ny <- 2"} modified={"x <- 1\ny <- 3"} layout="unified" />);
+  expect(getOriginalDoc(one.state).toString()).toBe("x <- 0\ny <- 2");
+  expect(EditorView.findFromDOM(screen.getByRole("textbox", { name: "clean.R, changes" }))).toBe(one);
   expect(screen.queryByRole("textbox", { name: "clean.R, before" })).toBeNull();
 });

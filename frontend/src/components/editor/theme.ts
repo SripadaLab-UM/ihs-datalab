@@ -71,6 +71,19 @@ const theme = EditorView.theme({
   },
   ".cm-insertedLine": { backgroundColor: "var(--color-data-soft)" },
   ".cm-changeGutter": { width: "3px", paddingLeft: "0" },
+  ".cm-diffSigns .cm-gutterElement": { width: "1.1em", textAlign: "center", color: "var(--color-muted)" },
+  // Removed lines in one column are drawn, not text, so they carry their sign themselves.
+  // (Their padding matches the lines', so the text lines up.)
+  ".cm-deletedChunk": { paddingLeft: "12px" },
+  ".cm-deletedChunk .cm-deletedLine": { position: "relative" },
+  ".cm-deletedChunk .cm-deletedLine::before": {
+    content: '"−"',
+    position: "absolute",
+    left: "-12px",
+    width: "12px",
+    textAlign: "center",
+    color: "var(--color-muted)",
+  },
   "&.cm-merge-b .cm-changedLineGutter, .cm-insertedLineGutter": { backgroundColor: "var(--color-data)" },
   "&.cm-merge-a .cm-changedLineGutter, .cm-deletedLineGutter": { backgroundColor: "var(--color-danger)" },
   ".cm-collapsedLines": {
