@@ -77,18 +77,19 @@ export function asPlan(value: unknown): AnyPlan | undefined {
 
 // Greek letters that look like a Latin one, and Latin letters that aren't a–z
 // but look like one; the backend compares titles the same way (plan_schema.py).
-const LOOKALIKES: Record<string, string> = Object.fromEntries(
-  [...Array.from("αβγδεζηικμνοπρστυχωςϲ").map((c, i) => [c, "abydeznikuvonpotuxwcc"[i]])].concat(
-    Array.from("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢ").map((c, i) => [c, "aiiguiynbhlacdejkmoptuvwz"[i]]),
-  ),
-);
+const pairs = (from: string, to: string): Record<string, string> =>
+  Object.fromEntries(Array.from(from, (c, i) => [c, to[i]]));
+const GREEK = pairs("αβγδεζηικμνοπρστυχωςϲϹϳͿϒϱϐϰΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "abydeznikuvonpotuxwcccjjypbkabezhikmnoptyx");
+const LATIN = pairs("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢ", "aiiguiynbhlacdejkmoptuvwz");
 
 /** A section title as it reads, to match it across versions: accents, case,
- * punctuation, and look-alike letters don't count. */
+ * punctuation, and look-alike letters (and I, l, 1 or O, 0) don't count. */
 export function titleKey(title: string): string {
-  const bare = title.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
-  const letters = Array.from(bare, (c) => LOOKALIKES[c] ?? (/[\p{L}\p{N}]/u.test(c) ? c : " ")).join("");
-  return letters.split(/\s+/).filter(Boolean).join(" ");
+  // The table first: decomposing can turn a look-alike into another letter.
+  const looked = Array.from(title, (c) => GREEK[c] ?? c).join("");
+  const bare = looked.normalize("NFKD").replace(/\p{M}/gu, "");
+  const letters = Array.from(bare, (c) => GREEK[c] ?? LATIN[c] ?? (/[\p{L}\p{N}]/u.test(c) ? c.toLowerCase() : " "));
+  return letters.join("").replace(/[i1]/g, "l").replace(/0/g, "o").split(/\s+/).filter(Boolean).join(" ");
 }
 
 /** A comparison from an event, or undefined if there isn't one. */

@@ -85,7 +85,7 @@ def instructions(
     if len(plans) > MAX_PLANS:
         parts.append(
             f"This conversation has {len(plans)} approved plans; only {MAX_PLANS} are "
-            "shown: the current ones, then the latest versions they replaced."
+            "shown: the latest earlier versions first, then the current plans."
         )
     for plan in plans[-MAX_PLANS:]:
         parts.append(_fenced("approved_plan", plan[:MAX_PLAN_TEXT]))

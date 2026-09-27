@@ -71,7 +71,7 @@ def test_a_plan_too_long_to_show_says_so_and_older_plans_are_counted():
     from datalab.sessions.rigor import MAX_PLAN_TEXT
 
     body = instructions(answer="a", plans=["old"] * 4 + ["p" * (MAX_PLAN_TEXT + 4000)])
-    assert "has 5 approved plans; only 3 are shown: the current ones" in body
+    assert "has 5 approved plans; only 3 are shown: the latest earlier versions first" in body
     # DataLab's note is outside the plan's fence, so it can't be mistaken for the plan.
     fenced, after = body.rsplit("</approved_plan>", 1)
     assert "continues" not in fenced

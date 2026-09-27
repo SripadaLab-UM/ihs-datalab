@@ -349,6 +349,9 @@ def test_a_sections_text_cant_pass_for_another_section_in_the_review():
         "Type:",
         "Revises.",
         "Why it changed!",
+        "De\u0049iverables",  # capital I for l
+        "Deliverab1es",
+        "Questi0n and purpose",
     ],
 )
 def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):
@@ -368,3 +371,17 @@ def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):
 def test_greek_letters_are_fine_in_a_title(title):
     cleaned = clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
     assert cleaned["sections"][-1]["content"] == "x"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "\u03f9omparison groups",  # lunate sigma
+        "\u03f9HECKS AND LIMITATIONS",
+        "Method and ad\u03f3ustment",  # yot
+        "\u037fudge",  # capital yot
+    ],
+)
+def test_greeks_rarer_letters_arent_allowed_in_a_title(title):
+    with pytest.raises(PlanInvalid):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))

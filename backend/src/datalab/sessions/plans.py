@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import secrets
 import sqlite3
 import threading
@@ -34,6 +35,8 @@ from datalab.sessions.plan_schema import (
     type_change_note,
     type_label,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -209,7 +212,11 @@ class PlanDesk:
             if pending.decision.done() and not pending.decision.cancelled():
                 approved, value = pending.decision.result()
                 if approved:
-                    self._freeze(conversation_id, pending.id, json.loads(value))
+                    try:
+                        self._freeze(conversation_id, pending.id, json.loads(value))
+                    except Exception:
+                        # The Stop still goes through; this is only logged.
+                        log.exception("couldn't freeze a plan approved as the turn stopped")
             raise
         if not approved:
             return self._not_approved(conversation_id, content, value)

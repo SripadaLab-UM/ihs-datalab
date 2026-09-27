@@ -514,13 +514,14 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
         raise PlanInvalid("An additional section needs a title.")
     if "\n" in title or len(title) > MAX_TITLE:
         raise PlanInvalid(f"A section title must be one line of at most {MAX_TITLE} characters.")
-    if any(
-        c.isalpha() and not unicodedata.name(c, "").startswith(("LATIN", "GREEK")) for c in title
-    ):
-        # Letters from other scripts can look like Latin ones, and aren't needed here.
+    # Checked as typed too: normalizing turns some rare Greek letters into basic ones.
+    typed = label or ""
+    if any(c.isalpha() and not _title_letter(c) for c in title) or any(map(_rare_greek, typed)):
+        # Letters from other scripts, and Greek's rarer letters (yot looks like j),
+        # can look like Latin ones, and aren't needed here.
         raise PlanInvalid(
-            f"The section title {title!r} has letters from outside the Latin and Greek "
-            "alphabets. Write it in those letters (accents are fine)."
+            f"The section title {title!r} has letters from outside the Latin alphabet and "
+            "the basic Greek letters. Write it in those letters (accents are fine)."
         )
     taken = {_title_key(t) for t in (*(s.label for s in SECTIONS.values()), *RESERVED_TITLES)}
     taken |= {_title_key(s["label"]) for s in earlier}
@@ -539,16 +540,34 @@ def _title_key(title: str) -> str:
     dropped, case folded, and each letter that looks like a Latin letter (a
     Latin alpha, a dotless i, small capitals, Greek alpha or omicron) taken as
     that letter."""
-    bare = (c for c in unicodedata.normalize("NFKD", title) if not unicodedata.combining(c))
+    # The table first: decomposing can turn a look-alike into another letter.
+    looked = "".join(_GREEK_LOOKALIKES.get(c, c) for c in title)
+    bare = (c for c in unicodedata.normalize("NFKD", looked) if not unicodedata.combining(c))
     words = "".join(_skeleton(c) if c.isalnum() else " " for c in bare)
-    return " ".join(words.split())
+    # And the plain letters and digits that pass for each other: I, l, 1; O, 0.
+    return " ".join(words.translate(_ASCII_LOOKALIKES).split())
+
+
+_ASCII_LOOKALIKES = str.maketrans("i1|0", "lllo")
+
+
+def _title_letter(char: str) -> bool:
+    """Whether a title may use this letter: Latin, or basic Greek (U+0386 to U+03CE)."""
+    if unicodedata.name(char, "").startswith("LATIN"):
+        return True
+    return "\u0386" <= char <= "\u03ce"
+
+
+def _rare_greek(char: str) -> bool:
+    """Greek letters outside the basic ones: archaic, symbol, and Coptic-era forms."""
+    return "\u0370" <= char <= "\u0385" or "\u03cf" <= char <= "\u03ff"
 
 
 # Greek letters that look like a Latin one.
 _GREEK_LOOKALIKES = dict(
     zip(
-        "αβγδεζηικμνοπρστυχωςϲΑΒΕΖΗΙΚΜΝΟΡΤΥΧ",
-        "abydeznikuvonpotuxwccabezhikmnoptyx",
+        "αβγδεζηικμνοπρστυχωςϲϹϳͿϒϱϐϰΑΒΕΖΗΙΚΜΝΟΡΤΥΧ",
+        "abydeznikuvonpotuxwcccjjypbkabezhikmnoptyx",
         strict=True,
     )
 )

@@ -102,4 +102,9 @@ it("matches a person's own section across versions however its title is written"
     { label: "Pil\u03bft c\u00f3hort!", status: "changed", before: "50.", after: "100." },
   ]);
   expect(titleKey("Deliver\u0251bles:")).toBe(titleKey("deliverables"));
+  // As the backend compares them (plan_schema.py): capitals too, and I/l/1, O/0.
+  expect(titleKey("\u0397\u03a5")).toBe("hy");
+  expect(titleKey("\u03f9HECKS")).toBe(titleKey("checks"));
+  expect(titleKey("DeIiverab1es")).toBe(titleKey("Deliverables"));
+  expect(titleKey("Questi0n")).toBe(titleKey("question"));
 });

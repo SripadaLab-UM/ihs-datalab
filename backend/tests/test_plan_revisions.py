@@ -262,3 +262,25 @@ def _revise(desk, of, measures):
     raw["revises"] = desk.revision_link("c1", of.id)
     raw["revision_reason"] = f"Now {measures}."
     return clean_plan(raw)
+
+
+async def test_a_failure_freezing_as_the_turn_stops_doesnt_swallow_the_stop(desk, monkeypatch):
+    approved_now = asyncio.Event()
+
+    async def codex(approval_id):
+        desk._approvals.answer("c1", approval_id, True)
+        approved_now.set()
+        await asyncio.sleep(3600)
+
+    def broken(*args):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(desk, "_freeze", broken)
+    proposing = asyncio.ensure_future(
+        desk.propose("c1", clean_plan(plan("association", ASSOCIATION)), codex)
+    )
+    await approved_now.wait()
+    await asyncio.sleep(0)
+    proposing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await proposing
