@@ -303,9 +303,11 @@ Decided (2026-09-26), to pick up later:
         connection, and the Safety check verifies it.
       - This also affects the prototype, which is still in use and doesn't
         restrict roles.
-- [ ] **Before making this repo public,** decide whether the synthetic IHS
+- [x] **Before making this repo public,** decide whether the synthetic IHS
       schema stays here. It is derived from real table and column names,
-      which are internal metadata.
+      which are internal metadata. Decided 2026-09-27: it stays, and the repo
+      is public. The history was scanned first: no keys, tokens, passwords, or
+      database hosts.
 - [ ] **Per-person Oracle accounts (future).** Check with team members
       whether they have, or can get, individual read-only Oracle accounts. If
       so, DataLab should use each person's own account, so access follows

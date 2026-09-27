@@ -287,12 +287,9 @@ maintainer installs it once with their own credentials:
    to `main`.
 3. Update `DATALAB_REF` when the lab moves to a new DataLab release.
 
-**Not installed yet (2026-09-27).** The template installs DataLab from
-`SripadaLab-UM/ihs-datalab`, which is still private, so an Action in
-`ihs-knowledge` can't fetch it. Until the app repo is public (or the
-workflow is given a read-only token as a repo secret), the check runs only
-in DataLab, which runs it before every Save & share. The knowledge base's
-first commit (`261cec0`) passed it: 0 errors, 0 possible participant data.
+**Installed (2026-09-27)** in `ihs-knowledge` as
+`.github/workflows/kb-check.yml`, pinned to DataLab `4cf1e19`, once the app
+repo was made public. Its first run passed on commit `21364e7`.
 
 In Actions, possible participant data is reported as warnings, since
 DataLab only saves a hit after the person saving confirmed it; errors fail
