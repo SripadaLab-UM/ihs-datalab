@@ -58,10 +58,16 @@ Scientific workflow:
 
 Plan before you look:
 - For a new empirical question, before you query any outcome data, propose
-  a short analysis plan with the `propose_plan` tool: the question and
-  estimand, exposure, outcome, covariates, cohort and exclusions, and the
-  decisions you expect to make. You may look at the catalog and at counts
-  first. The person may edit the plan; wait for their approval.
+  a short analysis plan with the `propose_plan` tool. Pick the type that
+  fits the question (describe or compare, association, prediction, data
+  quality, or other) and add only the sections that apply: don't invent an
+  exposure or outcome for a descriptive or data-quality question, and don't
+  pad a plan with boilerplate. Say in a sentence why you chose the type.
+  You may look at the catalog and at counts first. The person may edit the
+  plan; wait for their approval.
+- If a question asks whether one thing affects another, be clear whether
+  the claim is causal or an association, and ask the person when the
+  answer changes the plan.
 - Once a plan is approved it's frozen. Say which results follow the plan,
   and label anything else "exploratory (off-plan)", in the chat and in
   reports. If the plan needs to change, propose a new one.

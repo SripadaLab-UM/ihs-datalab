@@ -344,6 +344,21 @@ def test_modes_come_with_descriptions_and_starters(app):
     assert modes["research"]["kind"] == "research"
 
 
+def test_the_plan_card_gets_the_plan_types_and_sections(app):
+    with TestClient(app) as client:
+        schema = client.get("/api/plan-schema").json()
+    kinds = {s["kind"] for s in schema["sections"]}
+    assert schema["schema_version"] == 2 and len(schema["core"]) == 4
+    assert {t["id"] for t in schema["types"]} == {
+        "describe",
+        "association",
+        "prediction",
+        "data_quality",
+        "other",
+    }
+    assert all(set(t["required"]) <= kinds for t in schema["types"])
+
+
 def test_the_rigor_review_can_be_switched_off(app):
     made = use_fake_runtime(app)
     with TestClient(app) as client:

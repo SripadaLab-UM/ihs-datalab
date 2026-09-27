@@ -14,6 +14,7 @@ from typing import Any
 from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
+from pydantic import BaseModel
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from datalab.data.catalog import Catalog, TableInfo
@@ -22,9 +23,11 @@ from datalab.data.helpers import join_keys
 from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
+from datalab.sessions import plan_schema
 from datalab.sessions.approvals import Unshowable, clean_question
 from datalab.sessions.helper import ResearchHelper
-from datalab.sessions.plans import Outcome, PlanDesk, PlanInvalid, clean_plan
+from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
+from datalab.sessions.plans import Outcome, PlanDesk
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
 
 # The kind of approval DataLab asks the person for, carried in the elicitation message.
@@ -39,6 +42,14 @@ and joins with join_paths, then run SELECT queries with query. Qualify
 every table with its schema. Results are saved as CSV files in /data/oracle;
 work with the file for anything beyond the preview.
 """
+
+
+class AdditionalSection(BaseModel):
+    """A plan section with its own title, for what the registered sections don't cover."""
+
+    title: str
+    content: str
+
 
 _READ_ONLY = ToolAnnotations(read_only_hint=True, destructive_hint=False, open_world_hint=False)
 
@@ -144,41 +155,39 @@ def build_agent_tools(
 
     if plans is not None:
 
-        @server.tool()
+        @server.tool(description=plan_schema.tool_description())
         async def propose_plan(
-            question: str,
+            analysis_type: str,
+            question_and_purpose: str,
+            data_and_scope: str,
+            checks_and_limitations: str,
+            deliverables: str,
             ctx: Context,
-            estimand: str = "",
-            exposure: str = "",
-            outcome: str = "",
-            covariates: str = "",
-            cohort: str = "",
-            decisions: str = "",
+            rationale: str = "",
+            sections: dict[str, str] | None = None,
+            additional_sections: list[AdditionalSection] | None = None,
         ) -> str:
-            """Propose an analysis plan for the person to approve, before touching outcome data.
-
-            question: the scientific question, in plain words.
-            estimand: exactly what will be estimated (e.g. the within-person
-              association between nightly sleep and next-day mood).
-            exposure / outcome: the measures, with tables and columns.
-            covariates: adjustment variables, and why.
-            cohort: cohorts, time window, inclusions and exclusions.
-            decisions: choices you expect to make along the way (missing days,
-              outliers, thresholds), and how you'll make them.
-            The person may edit the plan before approving it. Once approved it
-            is frozen: label any later work outside it as exploratory.
-            """
             access = _session(ctx, tokens)
+            core = {
+                "question_and_purpose": question_and_purpose,
+                "data_and_scope": data_and_scope,
+                "checks_and_limitations": checks_and_limitations,
+                "deliverables": deliverables,
+            }
             try:
                 content = clean_plan(
                     {
-                        "question": question,
-                        "estimand": estimand,
-                        "exposure": exposure,
-                        "outcome": outcome,
-                        "covariates": covariates,
-                        "cohort": cohort,
-                        "decisions": decisions,
+                        "schema_version": plan_schema.SCHEMA_VERSION,
+                        "analysis_type": analysis_type,
+                        "rationale": rationale,
+                        "sections": [
+                            *({"kind": k, "content": v} for k, v in core.items()),
+                            *({"kind": k, "content": v} for k, v in (sections or {}).items()),
+                            *(
+                                {"kind": ADDITIONAL, "label": a.title, "content": a.content}
+                                for a in additional_sections or []
+                            ),
+                        ],
                     }
                 )
             except PlanInvalid as error:

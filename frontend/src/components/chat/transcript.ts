@@ -1,5 +1,6 @@
 // Turns a conversation's event log into what the chat shows.
 import type { Approval } from "./ApprovalCard";
+import { asPlan } from "./plan";
 //
 // The event log (see backend sessions/runtime.py) is a flat, append-only list:
 // user messages, streamed answer text, reasoning, commands, tool calls, and
@@ -115,7 +116,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "plan_approved": {
         const item = approvals.get(text(data.approval));
         if (item) {
-          item.plan = (data.plan as Record<string, string>) ?? item.plan;
+          item.plan = asPlan(data.plan) ?? item.plan;
           item.frozen = { at: text(data.approved_at), sha256: text(data.sha256) };
         }
         break;
@@ -220,7 +221,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           id,
           approvalKind: data.kind === "analysis_plan" ? "analysis_plan" : "research_helper",
           question: text(data.question),
-          plan: (data.plan as Record<string, string> | undefined) ?? undefined,
+          plan: asPlan(data.plan),
           state: "pending",
         };
         approvals.set(id, item);
