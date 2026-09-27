@@ -148,7 +148,7 @@ def _serve(settings, *, open_browser: bool) -> int:
         print(recovery.message, flush=True)
     browser = BrowserSession(settings.port)
     try:
-        app = create_app(settings, browser=browser, web_dist=_web_dist())
+        app = create_app(settings, browser=browser, web_dist=_web_dist(), recovery=recovery)
     except db.DatabaseNewerThanApp as error:
         print(error)
         return 1

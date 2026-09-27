@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 
-from datalab import __version__, datalock, db
+from datalab import __version__, datalock, db, updates
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
@@ -80,6 +80,7 @@ def create_app(
     browser: BrowserSession | None = None,
     protect_api: bool = True,
     web_dist: Path | None = None,
+    recovery: updates.Recovery | None = None,
 ) -> FastAPI:
     require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
@@ -87,9 +88,11 @@ def create_app(
     if catalog is None:
         catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
-    data = DataService(
-        database or _LazyOracle(settings), access_log, settings.limits, allowed, catalog
-    )
+    # Connects on first use (and again after a new password is saved).
+    lazy: _LazyOracle | None = None
+    if database is None:
+        database = lazy = _LazyOracle(settings)
+    data = DataService(database, access_log, settings.limits, allowed, catalog)
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
@@ -229,7 +232,19 @@ def create_app(
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )
-    app.include_router(build_settings_router(SettingsServices(settings, connection)))
+    app.include_router(
+        build_settings_router(
+            SettingsServices(
+                settings,
+                connection,
+                turn_running=sessions.is_busy,
+                model_http=model_http,
+                model_key=model_key,
+                password_changed=lazy.reset if lazy else lambda: None,
+                recovery=recovery,
+            )
+        )
+    )
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
@@ -298,6 +313,11 @@ class _LazyOracle:
             preview_rows=preview_rows,
             cancel=cancel,
         )
+
+    def reset(self) -> None:
+        """Connect with the password saved now, from the next query on."""
+        with self._lock:
+            self._database = None
 
     def _get(self) -> OracleDatabase:
         with self._lock:

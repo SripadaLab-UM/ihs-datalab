@@ -6,17 +6,24 @@ from __future__ import annotations
 
 import contextlib
 import getpass
+import os
+import re
 import shutil
 import subprocess
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import keyring
 from keyring.errors import KeyringError, PasswordDeleteError
 
 from datalab.config import (
     PRACTICE_ORACLE,
+    OracleSettings,
     Profile,
+    QueryLimits,
+    Settings,
     data_dir_for,
     default_data_dir,
     load_settings,
@@ -54,24 +61,154 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
     print(f"Setting up DataLab ({profile}) in {data_dir}")
 
     if update or not _saved(model_api_key):
-        key = getpass.getpass("U-M GPT API key (input hidden): ").strip()
-        if key:
-            save_model_api_key(key)
-            print("Saved the U-M GPT key to this computer's keychain.")
+        key = getpass.getpass("U-M GPT API key (input hidden): ")
+        if key.strip():
+            try:
+                store_model_key(key)
+                print("Saved the U-M GPT key to this computer's keychain.")
+            except SecretRefused as refused:
+                print(f"{refused} Nothing was saved.")
 
-    oracle = settings.oracle
-    if oracle is not None and oracle is not PRACTICE_ORACLE:
+    oracle = asks_for_oracle_password(settings)
+    if oracle is not None:
         if update or not _saved(lambda: oracle_password(oracle)):
             password = getpass.getpass(f"Database password for {oracle.user} (input hidden): ")
             if password:
-                save_oracle_password(oracle, password)
-                print("Saved the database password to this computer's keychain.")
+                try:
+                    store_oracle_password(oracle, password)
+                    print("Saved the database password to this computer's keychain.")
+                except SecretRefused as refused:
+                    print(f"{refused} Nothing was saved.")
     elif profile == "real":
         print(
             "No database is configured yet. Ask the DataLab maintainer for the lab's "
             "settings file, then run: datalab setup --settings <file>"
         )
     return 0
+
+
+# ------------------------------------------------------------ connections
+#
+# What `datalab setup` asks for, shared with Settings → Connections, which
+# shows the same things and saves them the same way. Secrets only ever go
+# into the keychain: nothing here returns one.
+
+SecretSource = Literal["keychain", "environment", "missing"]
+# Development and CI overrides (credentials.py); never needed on a colleague's machine.
+MODEL_KEY_ENV = "DATALAB_MODEL_API_KEY"
+ORACLE_PASSWORD_ENV = "DATALAB_ORACLE_PASSWORD"
+_MAX_SECRET = 4096
+
+
+def asks_for_oracle_password(settings: Settings) -> OracleSettings | None:
+    """The database whose password DataLab asks for: the lab's, never the
+    practice one (its synthetic database's password is fixed)."""
+    oracle = settings.oracle
+    if settings.profile == "practice" or oracle is None or oracle is PRACTICE_ORACLE:
+        return None
+    return oracle
+
+
+def model_key_source() -> SecretSource:
+    """Where the U-M GPT key comes from, without returning it."""
+    if os.environ.get(MODEL_KEY_ENV):
+        return "environment"
+    return "keychain" if _saved(model_api_key) else "missing"
+
+
+def oracle_password_source(oracle: OracleSettings) -> SecretSource:
+    """Where the database password comes from, without returning it."""
+    if os.environ.get(ORACLE_PASSWORD_ENV):
+        return "environment"
+    return "keychain" if _saved(lambda: oracle_password(oracle)) else "missing"
+
+
+class SecretRefused(ValueError):
+    """A key or password that can't be saved. The message never contains it."""
+
+
+def store_model_key(key: str) -> None:
+    """Save the U-M GPT key to the keychain, replacing any saved before."""
+    key = key.strip()
+    _check_secret(key, "The U-M GPT key")
+    if any(c.isspace() for c in key):
+        raise SecretRefused("The U-M GPT key can't contain spaces or line breaks.")
+    save_model_api_key(key)
+
+
+def store_oracle_password(oracle: OracleSettings, password: str) -> None:
+    """Save the database password to the keychain, replacing any saved before."""
+    _check_secret(password, "The database password")
+    save_oracle_password(oracle, password)
+
+
+def _check_secret(value: str, what: str) -> None:
+    if not value:
+        raise SecretRefused(f"{what} is empty.")
+    if len(value) > _MAX_SECRET:
+        raise SecretRefused(f"{what} is too long.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise SecretRefused(f"{what} can't contain line breaks or control characters.")
+
+
+@dataclass(frozen=True)
+class DatabaseCheck:
+    ok: bool
+    message: str
+    enabled_roles: tuple[str, ...] = ()
+    read_only: bool | None = None
+
+
+def check_database(
+    oracle: OracleSettings, limits: QueryLimits, *, practice: bool, timeout: float = 15
+) -> DatabaseCheck:
+    """Connect as DataLab does (read-only roles only) and ask what the session may do.
+
+    The same question as `datalab db-check` and the Safety check's database
+    check. The message is safe to show: it never contains the password.
+    """
+    import oracledb
+
+    from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
+
+    try:
+        password = oracle_password(oracle)
+    except MissingCredential as missing:
+        return DatabaseCheck(False, str(missing))
+    try:
+        privileges = OracleDatabase(oracle, password, limits).session_privileges(timeout=timeout)
+    except NotSyntheticDatabase as error:
+        return DatabaseCheck(False, str(error))
+    except oracledb.Error as error:
+        return DatabaseCheck(False, _database_problem(error, practice=practice))
+    roles = tuple(sorted(privileges.enabled_roles))
+    if not privileges.is_read_only:
+        return DatabaseCheck(
+            False,
+            "Connected, but the session isn't read-only, so the Safety check will fail. "
+            "Tell the DataLab maintainer.",
+            roles,
+            False,
+        )
+    return DatabaseCheck(True, "Connected, read-only.", roles, True)
+
+
+def _database_problem(error: Exception, *, practice: bool) -> str:
+    # Only the error's code: its text can name the server.
+    found = re.match(r"\s*((?:ORA|DPY)-\d+)", str(error))
+    code = found.group(1) if found else type(error).__name__
+    if code in ("ORA-01017", "ORA-01005"):
+        return "The database refused the user name or password."
+    if code == "ORA-28000":
+        return "The database account is locked. Ask the DataLab maintainer."
+    if code in ("ORA-28001", "ORA-28002"):
+        return "The database password has expired. Ask the DataLab maintainer for a new one."
+    unreachable = found is None or code.startswith(("DPY-6", "DPY-4011", "ORA-12", "ORA-03"))
+    if not unreachable:
+        return f"The database refused the connection ({code}). Tell the DataLab maintainer."
+    if practice:
+        return f"Can't reach the practice database. Is the synthetic database running? ({code})"
+    return f"Can't reach the database — are you on the VPN? ({code})"
 
 
 def uninstall(*, delete_data: bool | None) -> int:

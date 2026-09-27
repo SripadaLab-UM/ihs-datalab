@@ -283,6 +283,25 @@ def _unreadable(data_dir: Path, database_file: Path, app_version: str, known: se
     )
 
 
+def history(data_dir: Path, limit: int = 10) -> list[dict]:
+    """The latest finished, abandoned, or undone updates, newest first
+    (`logs/updates.jsonl`: versions, states and times only)."""
+    path = data_dir / _HISTORY
+    entries: list[dict] = []
+    with contextlib.suppress(OSError):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            with contextlib.suppress(ValueError):
+                entry = json.loads(line)
+                if isinstance(entry, dict):
+                    entries.append(entry)
+    return entries[::-1][:limit]
+
+
+def set_aside_notes(data_dir: Path) -> list[str]:
+    """Update markers that couldn't be read, kept for the diagnostics."""
+    return sorted(p.name for p in data_dir.glob("update-unreadable-*.json"))
+
+
 @contextmanager
 def _holding_lock(data_dir: Path) -> Iterator[None]:
     """The data folder's lock for the duration, unless this process holds it already."""

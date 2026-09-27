@@ -1187,6 +1187,152 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Connections */
+        get: operations["connections_api_settings_connections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/database-password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Password
+         * @description Save or replace the database password, in the keychain only.
+         */
+        put: operations["save_password_api_settings_connections_database_password_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/model-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Model Key
+         * @description Save or replace the U-M GPT key, in the keychain only.
+         */
+        put: operations["save_model_key_api_settings_connections_model_key_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/connections/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Connections */
+        post: operations["test_connections_api_settings_connections_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Storage Usage */
+        get: operations["storage_usage_api_settings_storage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/storage/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Storage Remove
+         * @description Remove one item the person chose and confirmed. Refuses, changing nothing,
+         *     when it's in use or isn't something that can go.
+         */
+        post: operations["storage_remove_api_settings_storage_remove_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Updates Status */
+        get: operations["updates_status_api_settings_updates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Diagnostics Text */
+        get: operations["diagnostics_text_api_settings_diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -1268,6 +1414,27 @@ export interface components {
             kind: "file" | "folder";
             /** Available */
             available: boolean;
+        };
+        /** BackupInfoOut */
+        BackupInfoOut: {
+            /** Name */
+            name: string;
+            /** App Version */
+            app_version: string;
+            /** From Version */
+            from_version: string | null;
+            /** Reason */
+            reason: string;
+            /** Created At */
+            created_at: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Schema Version */
+            schema_version: string | null;
+            /** Usable */
+            usable: boolean;
+            /** Kept */
+            kept: boolean;
         };
         /** CatalogCohort */
         CatalogCohort: {
@@ -1419,6 +1586,32 @@ export interface components {
             /** Type */
             type: string | null;
         };
+        /** ConnectionCheckOut */
+        ConnectionCheckOut: {
+            /** Ok */
+            ok: boolean;
+            /** Message */
+            message: string;
+        };
+        /** ConnectionTestOut */
+        ConnectionTestOut: {
+            database: components["schemas"]["DatabaseCheckOut"];
+            model: components["schemas"]["ConnectionCheckOut"];
+        };
+        /** ConnectionsOut */
+        ConnectionsOut: {
+            /**
+             * Profile
+             * @enum {string}
+             */
+            profile: "real" | "practice";
+            /** Settings File */
+            settings_file: string;
+            oracle: components["schemas"]["OracleConnectionOut"];
+            model: components["schemas"]["ModelKeyOut"];
+            /** Read Only Because */
+            read_only_because: string | null;
+        };
         /** ConversationChange */
         ConversationChange: {
             /** Rigor Review */
@@ -1449,6 +1642,17 @@ export interface components {
             rigor_review: boolean;
             /** Busy */
             busy: boolean;
+        };
+        /** DatabaseCheckOut */
+        DatabaseCheckOut: {
+            /** Ok */
+            ok: boolean;
+            /** Message */
+            message: string;
+            /** Enabled Roles */
+            enabled_roles: string[];
+            /** Read Only */
+            read_only: boolean | null;
         };
         /** DeliverOut */
         DeliverOut: {
@@ -1526,6 +1730,11 @@ export interface components {
              */
             severity: "error" | "warning";
             position: components["schemas"]["PositionOut"] | null;
+        };
+        /** DiagnosticsOut */
+        DiagnosticsOut: {
+            /** Text */
+            text: string;
         };
         /** EditsIn */
         EditsIn: {
@@ -1793,6 +2002,26 @@ export interface components {
             /** Starters */
             starters: string[];
         };
+        /** ModelKeyIn */
+        ModelKeyIn: {
+            /**
+             * Key
+             * Format: password
+             */
+            key: string;
+        };
+        /** ModelKeyOut */
+        ModelKeyOut: {
+            /** Base Url */
+            base_url: string;
+            /**
+             * Key
+             * @enum {string}
+             */
+            key: "keychain" | "environment" | "missing";
+            /** Can Set Key */
+            can_set_key: boolean;
+        };
         /** ModelsOut */
         ModelsOut: {
             /** Default */
@@ -1858,6 +2087,33 @@ export interface components {
             path: string;
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** OracleConnectionOut */
+        OracleConnectionOut: {
+            /** Configured */
+            configured: boolean;
+            /** Practice */
+            practice: boolean;
+            /** Dsn */
+            dsn: string | null;
+            /** User */
+            user: string | null;
+            /** Read Only Roles */
+            read_only_roles: string[];
+            /** Allowed Schemas */
+            allowed_schemas: string[];
+            /** Password */
+            password: ("keychain" | "environment" | "missing") | null;
+            /** Can Set Password */
+            can_set_password: boolean;
+        };
+        /** OraclePasswordIn */
+        OraclePasswordIn: {
+            /**
+             * Password
+             * Format: password
+             */
+            password: string;
         };
         /** ParameterOut */
         ParameterOut: {
@@ -2020,6 +2276,13 @@ export interface components {
             result_file: string | null;
             /** Message */
             message: string | null;
+        };
+        /** RecoveryOut */
+        RecoveryOut: {
+            /** Outcome */
+            outcome: string;
+            /** Message */
+            message: string;
         };
         /** Refused */
         Refused: {
@@ -2404,6 +2667,130 @@ export interface components {
             outputs: {
                 [key: string]: string;
             };
+        };
+        /** StorageGroupOut */
+        StorageGroupOut: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** About */
+            about: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Items */
+            items: components["schemas"]["StorageItemOut"][];
+        };
+        /** StorageItemOut */
+        StorageItemOut: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Detail */
+            detail: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Modified At */
+            modified_at: string | null;
+            /** Removable */
+            removable: boolean;
+            /** Not Removable Because */
+            not_removable_because: string | null;
+            /** Kept */
+            kept: boolean;
+            /** Kept Because */
+            kept_because: string | null;
+            /** Removing Loses */
+            removing_loses: string | null;
+            /** Needs Confirmation */
+            needs_confirmation: boolean;
+        };
+        /** StorageOut */
+        StorageOut: {
+            /** Data Dir */
+            data_dir: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Free Bytes */
+            free_bytes: number | null;
+            /** Groups */
+            groups: components["schemas"]["StorageGroupOut"][];
+        };
+        /** StorageRemoveIn */
+        StorageRemoveIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "playground-result" | "run-files" | "backup";
+            /** Id */
+            id: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** StorageRemovedOut */
+        StorageRemovedOut: {
+            /** Kind */
+            kind: string;
+            /** Id */
+            id: string;
+            /** Freed Bytes */
+            freed_bytes: number;
+        };
+        /** UpdateHistoryOut */
+        UpdateHistoryOut: {
+            /** At */
+            at: string;
+            /** Outcome */
+            outcome: string;
+            /** From Version */
+            from_version: string | null;
+            /** To Version */
+            to_version: string | null;
+        };
+        /** UpdateMarkerOut */
+        UpdateMarkerOut: {
+            /** From Version */
+            from_version: string;
+            /** To Version */
+            to_version: string;
+            /** State */
+            state: string;
+            /** Started At */
+            started_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Backup */
+            backup: string | null;
+        };
+        /** UpdatesOut */
+        UpdatesOut: {
+            /** Version */
+            version: string;
+            /** Check Available */
+            check_available: boolean;
+            /** Check Message */
+            check_message: string;
+            marker: components["schemas"]["UpdateMarkerOut"] | null;
+            /** Marker Unreadable */
+            marker_unreadable: boolean;
+            recovery: components["schemas"]["RecoveryOut"] | null;
+            /** History */
+            history: components["schemas"]["UpdateHistoryOut"][];
+            /** Set Aside Notes */
+            set_aside_notes: string[];
+            /** Backups */
+            backups: components["schemas"]["BackupInfoOut"][];
+            /** Migrations Applied */
+            migrations_applied: number;
+            /** Latest Migration */
+            latest_migration: string | null;
         };
         /** ValidateIn */
         ValidateIn: {
@@ -4583,6 +4970,201 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsStatus"];
+                };
+            };
+        };
+    };
+    connections_api_settings_connections_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionsOut"];
+                };
+            };
+        };
+    };
+    save_password_api_settings_connections_database_password_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OraclePasswordIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_model_key_api_settings_connections_model_key_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelKeyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_connections_api_settings_connections_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestOut"];
+                };
+            };
+        };
+    };
+    storage_usage_api_settings_storage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageOut"];
+                };
+            };
+        };
+    };
+    storage_remove_api_settings_storage_remove_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageRemoveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageRemovedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    updates_status_api_settings_updates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatesOut"];
+                };
+            };
+        };
+    };
+    diagnostics_text_api_settings_diagnostics_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DiagnosticsOut"];
                 };
             };
         };
