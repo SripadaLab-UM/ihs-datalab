@@ -169,7 +169,9 @@ src/datalab/
   hashed): the plan it revises, or the version the person last sent back.
   Sending a plan back can ask for another type (`change_type`); the agent
   gets the person's draft, which may be unfinished, and what the new type
-  needs.
+  needs. When a plan is proposed, the tool adds `proposed_after` from the
+  access log (queries that returned data so far in the session, and their
+  tables); it's part of the hashed content and can't be edited on the card.
 - **Tracing** (`sessions/tracing.py`). After each completed turn, DataLab
   takes the numbers in the final answer (leaving out code, links, dates,
   years, small counts, and confidence levels) and looks for each, allowing

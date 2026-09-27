@@ -1,0 +1,109 @@
+{
+  "task": "plan_describe",
+  "mode": "analysis",
+  "prompt": "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, month by month.",
+  "tests": "plan type: a descriptive question gets a describe plan, not an invented exposure",
+  "passed": false,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Describe or compare (proposed describe)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": false,
+      "detail": "at most 2 (proposed: missing_data, repeated_observations, temporal_alignment)"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"describe\",\n  \"analysis_type_label\": \"Describe or compare\",\n  \"rationale\": \"This is a descriptive question about the distribution of Fitbit sleep duration over intern-year months, without an exposure, comparison group, or causal claim.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 IHS cohort, what does nightly Fitbit sleep duration look like month by month during the intern year?\\n\\nPurpose: Produce a concise descriptive summary of sleep duration over time, suitable for understanding cohort-level patterns and coverage. This will not estimate a causal effect or test whether sleep changed because of internship.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort/schema: IHS_2025.\\n\\nData source checked so far: catalog and column metadata only. The candidate Fitbit sleep source is IHS_2025.FITBITSLEEPLOGS, with participant identifier, STARTDATE and ENDDATE timestamps, MINUTESASLEEP, TIMEINBED, ISMAINSLEEP, TYPE, LOGTYPE, and related sleep-stage columns. I will use the raw table rather than VFITBITSLEEPLOGS because STARTDATE/ENDDATE are typed timestamps in the raw table.\\n\\nAssumed intern-year window unless the data indicate a reviewed cohort-specific convention: July 1, 2025 through June 30, 2026, grouped into calendar months by sleep STARTDATE. Unit of analysis: a participant-night Fitbit sleep log. Primary inclusion will be main sleep records where ISMAINSLEEP indicates true/main sleep, STARTDATE is in the intern-year window, and MINUTESASLEEP is non-missing and within plausible range. I will report the effect of exclusions and coverage by month.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Checks before interpretation: row counts and participant counts; date range; duplicate or multiple main sleep logs per participant-night; values outside plausible ranges; missing MINUTESASLEEP, STARTDATE, participant identifier, or ISMAINSLEEP; distribution of TYPE and LOGTYPE; and monthly coverage by participant.\\n\\nMain limitations: Fitbit availability and wear/sync behavior may vary by person and month, so monthly summaries may reflect both sleep and data coverage. Repeated nights from the same participants make participant-night summaries descriptive rather than independent observations. Small participant counts will be suppressed or combined according to DataLab rules.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"Deliverables: a static HTML report in /work/outputs with the question, assumptions, SQL provenance, sample flow, data-quality checks, a month-by-month table, and a month-by-month figure; plus the complete source code in /work. The report is done when it contains no participant identifiers or row-level records, states filters and sample sizes, and can be regenerated from the saved script and query result files.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Primary measure: nightly sleep duration from IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP, converted to hours for reporting. I will summarize each month using number of sleep logs, number of contributing participants, mean, standard deviation, median, interquartile range, and selected percentiles if cell-size rules allow. I will also include participant-level monthly means as a sensitivity/descriptive companion so months with many nights from a few participants do not dominate the story.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"The primary table describes participant-nights and explicitly reports both observations and participants. Because participants contribute repeated nights, I will avoid p-values and independence-based month comparisons. I will include a participant-weighted monthly summary based on each participant's monthly mean sleep duration as an additional descriptive view.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Month will be assigned using STARTDATE, interpreted as the date the sleep episode began. If the logs show many sleep episodes beginning before midnight or a date convention that looks inconsistent with nightly sleep, I will flag this in the pilot and ask before changing the alignment rule.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"Missing or implausible sleep duration and missing dates/identifiers will be counted and excluded from duration summaries. I will report monthly coverage so the reader can distinguish sleep-duration patterns from changing data availability.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 33.47255492210388,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_8ff037b39f0bfce5",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "This is a descriptive question about the distribution of Fitbit sleep duration over intern-year months, without an exposure, comparison group, or causal claim.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 IHS cohort, what does nightly Fitbit sleep duration look like month by month during the intern year?\n\nPurpose: Produce a concise descriptive summary of sleep duration over time, suitable for understanding cohort-level patterns and coverage. This will not estimate a causal effect or test whether sleep changed because of internship."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort/schema: IHS_2025.\n\nData source checked so far: catalog and column metadata only. The candidate Fitbit sleep source is IHS_2025.FITBITSLEEPLOGS, with participant identifier, STARTDATE and ENDDATE timestamps, MINUTESASLEEP, TIMEINBED, ISMAINSLEEP, TYPE, LOGTYPE, and related sleep-stage columns. I will use the raw table rather than VFITBITSLEEPLOGS because STARTDATE/ENDDATE are typed timestamps in the raw table.\n\nAssumed intern-year window unless the data indicate a reviewed cohort-specific convention: July 1, 2025 through June 30, 2026, grouped into calendar months by sleep STARTDATE. Unit of analysis: a participant-night Fitbit sleep log. Primary inclusion will be main sleep records where ISMAINSLEEP indicates true/main sleep, STARTDATE is in the intern-year window, and MINUTESASLEEP is non-missing and within plausible range. I will report the effect of exclusions and coverage by month."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Checks before interpretation: row counts and participant counts; date range; duplicate or multiple main sleep logs per participant-night; values outside plausible ranges; missing MINUTESASLEEP, STARTDATE, participant identifier, or ISMAINSLEEP; distribution of TYPE and LOGTYPE; and monthly coverage by participant.\n\nMain limitations: Fitbit availability and wear/sync behavior may vary by person and month, so monthly summaries may reflect both sleep and data coverage. Repeated nights from the same participants make participant-night summaries descriptive rather than independent observations. Small participant counts will be suppressed or combined according to DataLab rules."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "Deliverables: a static HTML report in /work/outputs with the question, assumptions, SQL provenance, sample flow, data-quality checks, a month-by-month table, and a month-by-month figure; plus the complete source code in /work. The report is done when it contains no participant identifiers or row-level records, states filters and sample sizes, and can be regenerated from the saved script and query result files."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Primary measure: nightly sleep duration from IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP, converted to hours for reporting. I will summarize each month using number of sleep logs, number of contributing participants, mean, standard deviation, median, interquartile range, and selected percentiles if cell-size rules allow. I will also include participant-level monthly means as a sensitivity/descriptive companion so months with many nights from a few participants do not dominate the story."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "The primary table describes participant-nights and explicitly reports both observations and participants. Because participants contribute repeated nights, I will avoid p-values and independence-based month comparisons. I will include a participant-weighted monthly summary based on each participant's monthly mean sleep duration as an additional descriptive view."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Month will be assigned using STARTDATE, interpreted as the date the sleep episode began. If the logs show many sleep episodes beginning before midnight or a date convention that looks inconsistent with nightly sleep, I will flag this in the pilot and ask before changing the alignment rule."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Missing or implausible sleep duration and missing dates/identifiers will be counted and excluded from duration summaries. I will report monthly coverage so the reader can distinguish sleep-duration patterns from changing data availability."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 73334,
+        "inputTokens": 71634,
+        "cachedInputTokens": 33792,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1700,
+        "reasoningOutputTokens": 168
+      },
+      "last": {
+        "totalTokens": 21278,
+        "inputTokens": 20275,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1003,
+        "reasoningOutputTokens": 105
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_3b841f58ca2fcb91",
+  "attempt": 1
+}

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
+import { clearAllDrafts } from "@/components/chat/plan";
 
 const TABS = [
   { to: "/workspace", label: "Workspace" },
@@ -18,7 +19,10 @@ export function Shell() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const [signedOut, setSignedOut] = useState(false);
   useEffect(() => {
-    const onSignedOut = () => setSignedOut(true);
+    const onSignedOut = () => {
+      setSignedOut(true);
+      clearAllDrafts(); // plan edits in this tab go with the sign-in
+    };
     window.addEventListener(SIGNED_OUT, onSignedOut);
     return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
   }, []);

@@ -117,7 +117,10 @@ def test_a_prediction_plan_needs_validation_and_available_information():
         (plan("describe", {"measures": "N/A"}), "says only 'N/A'"),
         (plan("describe", {"measures": "m​"}), "hidden"),
         (plan("describe", {"measures": "m" * (MAX_SECTION + 1)}), "longer than"),
-        (plan("describe", {"measures": "m"}, [("Deliverables", "x")]), "already has a section"),
+        (
+            plan("describe", {"measures": "m"}, [("Deliverables", "x")]),
+            "one of the plan's own sections",
+        ),
         (plan("describe", {"measures": "m"}, [("A\nB", "x")]), "one line"),
         (plan("describe", {"measures": "m"}, [("Empty", " ")]), "is empty"),
         (plan("describe", {"measures": "m"}, [("t", "x")] * 2), "already has a section"),
@@ -352,10 +355,14 @@ def test_a_sections_text_cant_pass_for_another_section_in_the_review():
         "De\u0049iverables",  # capital I for l
         "Deliverab1es",
         "Questi0n and purpose",
+        "Deliverab\u01c0es",  # a click letter
+        "Delivera\u0185les",  # tone six
+        "Typ\u0259",  # schwa
+        "R\u03b5\u03c5\u03b9s\u03b5s",  # Greek epsilon, upsilon, iota
     ],
 )
 def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):
-    with pytest.raises(PlanInvalid, match="already has a section"):
+    with pytest.raises(PlanInvalid, match=r"already has a section|one of the plan.s own sections"):
         clean_plan(plan("other", {"approach": "a"}, [(title, "x")]))
 
 
@@ -385,3 +392,15 @@ def test_greek_letters_are_fine_in_a_title(title):
 def test_greeks_rarer_letters_arent_allowed_in_a_title(title):
     with pytest.raises(PlanInvalid):
         clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
+
+
+def test_a_registered_section_given_as_an_additional_one_is_pointed_to_its_kind():
+    # The eval run's agent did this; the error says how to do it instead.
+    with pytest.raises(PlanInvalid, match="give it in `sections` as 'repeated_observations'"):
+        clean_plan(plan("describe", {"measures": "m"}, [("Repeated Observations", "x")]))
+
+
+@pytest.mark.parametrize("title", ["Proposed after", "Proposed After:", "When it was proposed"])
+def test_the_records_row_titles_are_reserved(title):
+    with pytest.raises(PlanInvalid, match="already has a section"):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "No queries had returned data.")]))

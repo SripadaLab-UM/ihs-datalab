@@ -1,0 +1,113 @@
+{
+  "task": "plan_describe",
+  "mode": "analysis",
+  "prompt": "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, month by month.",
+  "tests": "plan type: a descriptive question gets a describe plan, not an invented exposure",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Describe or compare (proposed describe)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, repeated_observations, temporal_alignment"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"describe\",\n  \"analysis_type_label\": \"Describe or compare\",\n  \"rationale\": \"This is a descriptive month-by-month summary of one Fitbit measure within one cohort, with no exposure, comparison group, or causal/associational estimand.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Describe nightly Fitbit sleep duration in the 2025 IHS cohort during the intern year, month by month. The goal is to show the typical amount of sleep and the amount of usable Fitbit sleep coverage in each month, so the cohort\\u2019s longitudinal sleep pattern can be interpreted with appropriate caution.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort/schema: IHS_2025. Candidate source checked in the catalog and table metadata: IHS_2025.FITBITSLEEPLOGS, with PARTICIPANTIDENTIFIER, STARTDATE, ENDDATE, MINUTESASLEEP, ISMAINSLEEP, LOGTYPE, TYPE, TIMEINBED, and related sleep fields. I also checked IHS_2025.VFITBITSLEEPLOGS and will prefer the base table because STARTDATE/ENDDATE are typed timestamps there. Assumed intern-year window: sleep starts on or after 2025-07-01 and before 2026-07-01. A bounded pre-plan coverage query found 16,934 sleep-log rows from 65 participants in that window, with no duration summaries inspected. Unit of analysis for the main summary: eligible sleep night/log; month is assigned from STARTDATE. I will exclude rows missing participant ID, STARTDATE, or MINUTESASLEEP, and will focus on main sleep logs (ISMAINSLEEP indicating true/main sleep) to avoid counting naps as nightly sleep.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before summarizing duration, I will check row counts, participant counts, date range, missingness in key fields, observed ISMAINSLEEP/TYPE/LOGTYPE values, duplicate or multiple main-sleep records per participant-night, impossible or implausible durations, and month-by-month coverage. These summaries can mislead if Fitbit use varies by participant or month, if missingness is related to sleep, if time zones or sleep-start dates place a night into a neighboring month, or if Fitbit\\u2019s sleep-stage algorithm changes or misclassifies sleep. Results will be descriptive and not interpreted as causal changes over time.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A static HTML report in /work/outputs plus the complete analysis source in /work. The report will include the question, data provenance and SQL, inclusion/exclusion flow, coverage by month, monthly sleep-duration summaries in hours (median and quartiles, plus mean/SD if useful), a month-by-month figure, and limitations. No participant identifiers or row-level records will appear in outputs; small participant counts will be suppressed as <11 if they arise.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Primary measure: nightly sleep duration = IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP divided by 60 to express hours, restricted to main sleep logs using ISMAINSLEEP after confirming observed coding. Summaries by calendar month of STARTDATE during 2025-07 through 2026-06: number of sleep logs/nights, number of contributing participants, median, IQR (25th and 75th percentiles), and mean/SD as descriptive complements. Coverage: sleep-log counts and participant counts by month, plus missingness/exclusion counts.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"Participants can contribute many nights, so monthly summaries will be descriptive at the sleep-log/night level and will separately report the number of contributing participants. I will also compute participant-month summaries (each participant\\u2019s median/mean sleep within a month, then summarize those participant-level values across people) as a sensitivity/coverage-aware check so heavy Fitbit users do not dominate the interpretation.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Month will be assigned from the sleep STARTDATE timestamp because the question is month-by-month nightly sleep and the source has a timestamp with time zone. I will report this choice and flag it as a limitation: sleep episodes crossing midnight or time-zone handling could shift some nights across month boundaries. The intern-year window is assumed to be 2025-07-01 through 2026-06-30 based on the 2025 cohort; if you prefer a different date rule, the plan should be edited before approval.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"Rows with missing participant ID, STARTDATE, or MINUTESASLEEP will be excluded from duration summaries and counted in the flow. Month-level coverage will be shown so low-use months are not overinterpreted. I will not impute missing nights.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 1,\n    \"tables\": [\n      \"IHS_2025.FITBITSLEEPLOGS\"\n    ],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 48.5423150062561,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_07d6066d6f5efe08",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "This is a descriptive month-by-month summary of one Fitbit measure within one cohort, with no exposure, comparison group, or causal/associational estimand.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Describe nightly Fitbit sleep duration in the 2025 IHS cohort during the intern year, month by month. The goal is to show the typical amount of sleep and the amount of usable Fitbit sleep coverage in each month, so the cohort\u2019s longitudinal sleep pattern can be interpreted with appropriate caution."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort/schema: IHS_2025. Candidate source checked in the catalog and table metadata: IHS_2025.FITBITSLEEPLOGS, with PARTICIPANTIDENTIFIER, STARTDATE, ENDDATE, MINUTESASLEEP, ISMAINSLEEP, LOGTYPE, TYPE, TIMEINBED, and related sleep fields. I also checked IHS_2025.VFITBITSLEEPLOGS and will prefer the base table because STARTDATE/ENDDATE are typed timestamps there. Assumed intern-year window: sleep starts on or after 2025-07-01 and before 2026-07-01. A bounded pre-plan coverage query found 16,934 sleep-log rows from 65 participants in that window, with no duration summaries inspected. Unit of analysis for the main summary: eligible sleep night/log; month is assigned from STARTDATE. I will exclude rows missing participant ID, STARTDATE, or MINUTESASLEEP, and will focus on main sleep logs (ISMAINSLEEP indicating true/main sleep) to avoid counting naps as nightly sleep."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before summarizing duration, I will check row counts, participant counts, date range, missingness in key fields, observed ISMAINSLEEP/TYPE/LOGTYPE values, duplicate or multiple main-sleep records per participant-night, impossible or implausible durations, and month-by-month coverage. These summaries can mislead if Fitbit use varies by participant or month, if missingness is related to sleep, if time zones or sleep-start dates place a night into a neighboring month, or if Fitbit\u2019s sleep-stage algorithm changes or misclassifies sleep. Results will be descriptive and not interpreted as causal changes over time."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A static HTML report in /work/outputs plus the complete analysis source in /work. The report will include the question, data provenance and SQL, inclusion/exclusion flow, coverage by month, monthly sleep-duration summaries in hours (median and quartiles, plus mean/SD if useful), a month-by-month figure, and limitations. No participant identifiers or row-level records will appear in outputs; small participant counts will be suppressed as <11 if they arise."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Primary measure: nightly sleep duration = IHS_2025.FITBITSLEEPLOGS.MINUTESASLEEP divided by 60 to express hours, restricted to main sleep logs using ISMAINSLEEP after confirming observed coding. Summaries by calendar month of STARTDATE during 2025-07 through 2026-06: number of sleep logs/nights, number of contributing participants, median, IQR (25th and 75th percentiles), and mean/SD as descriptive complements. Coverage: sleep-log counts and participant counts by month, plus missingness/exclusion counts."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "Participants can contribute many nights, so monthly summaries will be descriptive at the sleep-log/night level and will separately report the number of contributing participants. I will also compute participant-month summaries (each participant\u2019s median/mean sleep within a month, then summarize those participant-level values across people) as a sensitivity/coverage-aware check so heavy Fitbit users do not dominate the interpretation."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Month will be assigned from the sleep STARTDATE timestamp because the question is month-by-month nightly sleep and the source has a timestamp with time zone. I will report this choice and flag it as a limitation: sleep episodes crossing midnight or time-zone handling could shift some nights across month boundaries. The intern-year window is assumed to be 2025-07-01 through 2026-06-30 based on the 2025 cohort; if you prefer a different date rule, the plan should be edited before approval."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Rows with missing participant ID, STARTDATE, or MINUTESASLEEP will be excluded from duration summaries and counted in the flow. Month-level coverage will be shown so low-use months are not overinterpreted. I will not impute missing nights."
+          }
+        ],
+        "proposed_after": {
+          "queries": 1,
+          "tables": [
+            "IHS_2025.FITBITSLEEPLOGS"
+          ],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_sleep_log_rows,\n  COUNT(DISTINCT participantidentifier) AS participants_with_any_sleep_log,\n  MIN(CAST(startdate AS DATE)) AS earliest_startdate,\n  MAX(CAST(startdate AS DATE)) AS latest_startdate,\n  SUM(CASE WHEN startdate >= TO_TIMESTAMP_TZ(:start_date, 'YYYY-MM-DD TZH:TZM')\n            AND startdate < TO_TIMESTAMP_TZ(:end_date, 'YYYY-MM-DD TZH:TZM')\n           THEN 1 ELSE 0 END) AS rows_in_assumed_intern_year,\n  COUNT(DISTINCT CASE WHEN startdate >= TO_TIMESTAMP_TZ(:start_date, 'YYYY-MM-DD TZH:TZM')\n                       AND startdate < TO_TIMESTAMP_TZ(:end_date, 'YYYY-MM-DD TZH:TZM')\n                      THEN participantidentifier END) AS participants_in_assumed_intern_year\nFROM IHS_2025.FITBITSLEEPLOGS"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 93735,
+        "inputTokens": 90994,
+        "cachedInputTokens": 48128,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2741,
+        "reasoningOutputTokens": 725
+      },
+      "last": {
+        "totalTokens": 21784,
+        "inputTokens": 20387,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1397,
+        "reasoningOutputTokens": 367
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_b7d4e7408c15b1a9",
+  "attempt": 1
+}

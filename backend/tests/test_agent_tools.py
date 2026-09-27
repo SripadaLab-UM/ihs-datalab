@@ -250,3 +250,38 @@ async def test_a_revision_must_name_an_approved_plan(server, tmp_path):
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         result = await session.call_tool("propose_plan", args)
     assert result.is_error and "no approved plan to revise" in result.content[0].text
+
+
+async def test_an_approved_plan_carries_datalabs_record_of_what_ran_before_it(server, tmp_path):
+    """End to end through the tool: a query returns data, a plan is proposed
+    mid-turn and approved on the host, and the frozen plan says what ran."""
+    from mcp.types import ElicitResult
+
+    base_url, services, _ = server
+    conversation = services.conversations.create(kind="data", mode="analysis", title="t", model="m")
+
+    class Running:
+        def done(self):
+            return False
+
+    services.sessions._turns[conversation.id] = Running()  # as if mid-turn
+
+    async def person_approves(context, params):
+        approval = json.loads(params.message)["approval"]
+        services.sessions._approvals.get(approval, conversation.id).shown = True
+        services.sessions.answer_approval(conversation.id, approval, True)
+        return ElicitResult(action="accept", content={})
+
+    token = services.tokens.issue(
+        SessionAccess(session_id=conversation.id, kind="data", results_dir=tmp_path / "oracle")
+    )
+    async with mcp_session(base_url, token, elicitation_callback=person_approves) as session:
+        payload(await session.call_tool("query", {"sql": "SELECT * FROM IHS_2025.VW_DAILY_MOOD"}))
+        result = payload(await session.call_tool("propose_plan", PLAN_ARGS))
+    services.sessions._turns.pop(conversation.id)
+    assert result["status"] == "approved"
+    assert result["plan"]["proposed_after"] == {
+        "queries": 1,
+        "tables": ["IHS_2025.VW_DAILY_MOOD"],
+        "more_tables": 0,
+    }

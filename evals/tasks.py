@@ -21,6 +21,9 @@ import contextlib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
+
+from datalab.sessions.plan_schema import MODULES, TYPES_BY_ID
 
 
 @dataclass
@@ -36,7 +39,11 @@ class Task:
     mode: str
     prompt: str
     tests: str  # what the task is for
-    grade: Callable[[str, dict], list[Check]] = field(repr=False)
+    grade: Callable[[Any, dict], list[Check]] = field(repr=False)
+    # Graded on the plan the agent proposes, not an answer: `grade` gets
+    # {"plan": the first plan proposed, or None, "answer": the final answer}.
+    # The runner sends the plan back and stops the turn once it's proposed.
+    plan_only: bool = False
 
 
 # Numbers as written in answers: 7,443 · −0.69 · .69 · 4.93% · 7.4k.
@@ -466,6 +473,93 @@ def _small_cells(answer: str, e: dict) -> list[Check]:
     ]
 
 
+# Plans: does the agent pick the kind of analysis the question is, and add
+# only the sections it raises? Graded on the plan as proposed, before anyone
+# edits it.
+_ADD_ONS = {m.kind for m in MODULES}
+# Saying which claim is intended: that it isn't causal, that it is only an
+# association, or naming it as a causal claim or effect. Not just using the
+# word "association", and not a causal claim made in passing ("X causes Y").
+_CLAIM = (
+    r"\bnot (?:a |the |as a )?caus",
+    r"\bnon-?causal\b",
+    r"\bcausal (?:claim|effect|conclusion|interpretation|question|inference)s?\b",
+    r"\b(?:won't|will not|can't|cannot|can not|does not|doesn't|do not|don't)\s+"
+    r"(?:show|establish|prove|support|imply|tell us)\b[^.]{0,80}\bcaus",
+    r"\bassociation(?:al)?(?: claim)?,? (?:not|rather than)\b",
+    r"\bassociation (?:claim )?only\b",
+)
+# Asking the person which claim they mean.
+_ABOUT_THE_CLAIM = (r"\bcaus", r"\beffect\b", r"\bassociat", r"\bcorrelat")
+
+
+def _plan_text(plan: dict) -> str:
+    parts = [plan.get("rationale", "")] + [s.get("content", "") for s in plan.get("sections", [])]
+    return "\n".join(parts)
+
+
+# Add-ons that can apply to a question about one cohort's nightly device data:
+# not cross-cohort comparability, and not "Pilot, then full run", which in
+# Analysis mode would only restate the usual pilot-then-ask step.
+_ONE_COHORT = frozenset(
+    {"repeated_observations", "temporal_alignment", "missing_data", "sensitivity"}
+)
+
+
+def _plan_grader(
+    types: set[str],
+    *,
+    can_apply: frozenset[str] = _ONE_COHORT,
+    needs: tuple[str, ...] = (),
+    or_asks: bool = False,
+    claim: bool = False,
+) -> Callable[[dict, dict], list[Check]]:
+    """A grader for a plan: its type is one of `types`, its add-on sections
+    are ones that can apply to the question (`can_apply`) and include those
+    it `needs`, and (with `claim`) it says whether the claim is causal. With
+    `or_asks`, asking the person what they mean instead of proposing is also
+    right."""
+
+    def grade(result: dict, expected: dict) -> list[Check]:
+        plan, answer = result.get("plan"), result.get("answer", "")
+        if plan is None:
+            questions = [s for s in sentences(answer[-600:]) if s.rstrip().endswith("?")]
+            asked = or_asks and any(mentions(q, *_ABOUT_THE_CLAIM) for q in questions)
+            return [
+                Check(
+                    "proposed a plan",
+                    asked,
+                    "asked the person what they meant instead" if asked else "no plan was proposed",
+                )
+            ]
+        kind = plan.get("analysis_type")
+        add_ons = sorted(s["kind"] for s in plan.get("sections", []) if s.get("kind") in _ADD_ONS)
+        labels = " or ".join(TYPES_BY_ID[t].label for t in sorted(types))
+        stray = [k for k in add_ons if k not in can_apply]
+        missing = [k for k in needs if k not in add_ons]
+        checks = [
+            Check("type", kind in types, f"{labels} (proposed {kind})"),
+            Check(
+                "add-ons only where they apply",
+                not stray and not missing,
+                f"proposed: {', '.join(add_ons) or 'none'}"
+                + (f"; can't apply here: {', '.join(stray)}" if stray else "")
+                + (f"; needed: {', '.join(missing)}" if missing else ""),
+            ),
+        ]
+        if claim:
+            checks.append(
+                Check(
+                    "says what claim is intended",
+                    mentions(_plan_text(plan), *_CLAIM),
+                    "the plan says whether it's a causal claim or an association",
+                )
+            )
+        return checks
+
+    return grade
+
+
 TASKS = [
     Task("enrolled_count", "extraction",
          "How many participants are enrolled in the 2025 cohort?",
@@ -498,4 +592,28 @@ TASKS = [
          "Give me the distribution of answers to the PHQ-9 suicidal-thoughts item in the 2025 "
          "cohort's September survey.",
          "a small cell that must be suppressed", _small_cells),
+    Task("plan_describe", "analysis",
+         "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, "
+         "month by month.",
+         "plan type: a descriptive question gets a describe plan, not an invented exposure",
+         _plan_grader({"describe"}), plan_only=True),
+    Task("plan_coverage", "analysis",
+         "How complete is the 2025 cohort's Garmin daily data, month by month?",
+         "plan type: a coverage audit, with only the add-ons it needs",
+         _plan_grader({"data_quality"}), plan_only=True),
+    Task("plan_prediction", "analysis",
+         "Can Fitbit sleep in the first four weeks of the internship predict the September PHQ-9 "
+         "total in the 2025 cohort?",
+         "plan type: prediction, with validation and what's known at prediction time",
+         _plan_grader({"prediction"}), plan_only=True),
+    Task("plan_mixed", "analysis",
+         "Is a shorter night's sleep followed by lower mood the next day, within the same intern, "
+         "in the 2025 cohort?",
+         "plan type: association, with timing and repeated observations as add-ons",
+         _plan_grader({"association"}, needs=("repeated_observations", "temporal_alignment")),
+         plan_only=True),
+    Task("plan_affects", "analysis",
+         "Does sleeping less make interns' mood worse in the 2025 cohort?",
+         "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",
+         _plan_grader({"association"}, or_asks=True, claim=True), plan_only=True),
 ]  # fmt: skip

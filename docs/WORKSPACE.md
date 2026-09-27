@@ -141,6 +141,14 @@ the rigor review checks that it did.
   revision like any plan. It's frozen as a new version whose hash covers
   the one before it; the earlier version is kept as it was and marked as
   revised, and exports show both.
+- **What had already run:** each plan records, from DataLab's own query log,
+  how many queries had returned data in the conversation when it was
+  proposed, and from which tables. Approving a plan doesn't make it
+  prespecified: results seen before it aren't, and the card, the export,
+  and the rigor review say so. Plans from before this record say "not
+  recorded".
+- Unsaved edits to a plan waiting for you survive a page reload (kept in
+  that browser tab until you answer).
 - Plans approved before plan types existed keep their original seven parts,
   labels, and hash.
 - Later work is labelled **per plan** or **exploratory (off-plan)**, in the chat

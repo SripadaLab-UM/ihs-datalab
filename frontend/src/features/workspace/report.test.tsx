@@ -91,6 +91,7 @@ it("exports the approved plan whole, with its type, labels, and the person's own
   expect(html).toContain("Data quality or coverage. It asks how complete the data are.");
   expect(html).toContain("<em>Devices</em>: <span class=\"pre\">Garmin\nonly.</span>");
   expect(html).toContain("<em>Cohort, time window, and exclusions</em>");
+  expect(html).toContain("Not recorded (this plan is from an earlier version of DataLab).");
 });
 
 it("exports a revision with what it replaced and what changed", async () => {

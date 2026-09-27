@@ -1,0 +1,104 @@
+{
+  "task": "plan_prediction",
+  "mode": "analysis",
+  "prompt": "Can Fitbit sleep in the first four weeks of the internship predict the September PHQ-9 total in the 2025 cohort?",
+  "tests": "plan type: prediction, with validation and what's known at prediction time",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Prediction (proposed prediction)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: none"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"prediction\",\n  \"analysis_type_label\": \"Prediction\",\n  \"rationale\": \"The question asks whether early Fitbit sleep can predict a later September PHQ-9 total, so the primary claim is out-of-sample predictive performance rather than a causal effect.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 intern cohort, can Fitbit sleep recorded during the first four weeks of internship predict each participant's September PHQ-9 total score? Purpose: estimate whether early objective sleep summaries carry useful predictive signal for later depressive symptom burden, without implying that sleep causes later PHQ-9 scores.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025 only. Unit of analysis: participant. Predictor window: first four weeks of internship, assumed to be July 1-28, 2025 unless revised. Sleep source checked in metadata: IHS_2025.VFITBITSLEEPLOGS, with participant identifier, STARTDATE/ENDDATE strings, MINUTESASLEEP, TIMEINBED, EFFICIENCY, ISMAINSLEEP, TYPE, and sleep-stage columns. Outcome source checked in metadata: IHS_2025.VW_SEP_SURVEY, with PHQ-9 item columns interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, suic1, plus STARTDATE1/ENDDATE1. Join path checked: shared PARTICIPANTIDENTIFIER; sleep must be aggregated to participant level before joining to the September survey. Inclusion: participants with a September survey row and enough main-sleep Fitbit nights in the first four weeks to summarize sleep; the minimum nights threshold will be set before the full run after a pilot coverage check.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before modeling, check participant linkage, duplicate September survey rows, PHQ-9 item ranges and missingness, sleep date parsing, impossible sleep values, duplicate or overlapping sleep logs, main-sleep availability, first-four-week coverage, and whether outcome completion dates are after the predictor window. Results will be interpreted as prediction/association only. Limitations likely include selective Fitbit use, missing September survey response, a single cohort, and modest sample size relative to candidate predictors.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A static HTML report in /work/outputs plus complete source code in /work. The report will include sample flow, data-quality checks, chosen sleep summaries, model specification, validation approach, performance metrics with uncertainty, a compact table/figure of results, sensitivity analyses, and the exact SQL provenance. No participant identifiers or row-level records will be placed in /work/outputs.\"\n    },\n    {\n      \"kind\": \"prediction_target\",\n      \"label\": \"Prediction target and horizon\",\n      \"content\": \"Target: participant-level September PHQ-9 total score, computed as the sum of the nine September survey item columns if all items are present and in the expected 0-3 range. Prediction horizon: from Fitbit sleep during July 1-28, 2025 to PHQ-9 measured on the September survey.\"\n    },\n    {\n      \"kind\": \"available_information\",\n      \"label\": \"Information available at prediction time\",\n      \"content\": \"Candidate predictors available at prediction time: participant-level summaries from first-four-week Fitbit main-sleep records, initially mean minutes asleep, variability in minutes asleep, mean sleep efficiency, mean time in bed, and number/proportion of nights with valid sleep. Predictors will be kept few relative to sample size; coverage variables are included because missing wearable data can itself be informative but also risks reflecting device adherence rather than sleep physiology.\"\n    },\n    {\n      \"kind\": \"validation\",\n      \"label\": \"Validation and performance\",\n      \"content\": \"Because this is one cohort, use internal validation designed to avoid leakage: construct all predictors using only the July 1-28 window, then evaluate participant-level prediction with repeated cross-validation or bootstrap optimism correction depending on pilot sample size. Primary performance metrics: cross-validated RMSE/MAE and out-of-sample R-squared compared with an intercept-only model. Coefficients will be reported with caution as exploratory model interpretation, not as causal effects.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 34.02346873283386,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_fcf6e21577818315",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "prediction",
+        "analysis_type_label": "Prediction",
+        "rationale": "The question asks whether early Fitbit sleep can predict a later September PHQ-9 total, so the primary claim is out-of-sample predictive performance rather than a causal effect.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 intern cohort, can Fitbit sleep recorded during the first four weeks of internship predict each participant's September PHQ-9 total score? Purpose: estimate whether early objective sleep summaries carry useful predictive signal for later depressive symptom burden, without implying that sleep causes later PHQ-9 scores."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025 only. Unit of analysis: participant. Predictor window: first four weeks of internship, assumed to be July 1-28, 2025 unless revised. Sleep source checked in metadata: IHS_2025.VFITBITSLEEPLOGS, with participant identifier, STARTDATE/ENDDATE strings, MINUTESASLEEP, TIMEINBED, EFFICIENCY, ISMAINSLEEP, TYPE, and sleep-stage columns. Outcome source checked in metadata: IHS_2025.VW_SEP_SURVEY, with PHQ-9 item columns interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, suic1, plus STARTDATE1/ENDDATE1. Join path checked: shared PARTICIPANTIDENTIFIER; sleep must be aggregated to participant level before joining to the September survey. Inclusion: participants with a September survey row and enough main-sleep Fitbit nights in the first four weeks to summarize sleep; the minimum nights threshold will be set before the full run after a pilot coverage check."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before modeling, check participant linkage, duplicate September survey rows, PHQ-9 item ranges and missingness, sleep date parsing, impossible sleep values, duplicate or overlapping sleep logs, main-sleep availability, first-four-week coverage, and whether outcome completion dates are after the predictor window. Results will be interpreted as prediction/association only. Limitations likely include selective Fitbit use, missing September survey response, a single cohort, and modest sample size relative to candidate predictors."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A static HTML report in /work/outputs plus complete source code in /work. The report will include sample flow, data-quality checks, chosen sleep summaries, model specification, validation approach, performance metrics with uncertainty, a compact table/figure of results, sensitivity analyses, and the exact SQL provenance. No participant identifiers or row-level records will be placed in /work/outputs."
+          },
+          {
+            "kind": "prediction_target",
+            "label": "Prediction target and horizon",
+            "content": "Target: participant-level September PHQ-9 total score, computed as the sum of the nine September survey item columns if all items are present and in the expected 0-3 range. Prediction horizon: from Fitbit sleep during July 1-28, 2025 to PHQ-9 measured on the September survey."
+          },
+          {
+            "kind": "available_information",
+            "label": "Information available at prediction time",
+            "content": "Candidate predictors available at prediction time: participant-level summaries from first-four-week Fitbit main-sleep records, initially mean minutes asleep, variability in minutes asleep, mean sleep efficiency, mean time in bed, and number/proportion of nights with valid sleep. Predictors will be kept few relative to sample size; coverage variables are included because missing wearable data can itself be informative but also risks reflecting device adherence rather than sleep physiology."
+          },
+          {
+            "kind": "validation",
+            "label": "Validation and performance",
+            "content": "Because this is one cohort, use internal validation designed to avoid leakage: construct all predictors using only the July 1-28 window, then evaluate participant-level prediction with repeated cross-validation or bootstrap optimism correction depending on pilot sample size. Primary performance metrics: cross-validated RMSE/MAE and out-of-sample R-squared compared with an intercept-only model. Coefficients will be reported with caution as exploratory model interpretation, not as causal effects."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 72044,
+        "inputTokens": 69983,
+        "cachedInputTokens": 32256,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2061,
+        "reasoningOutputTokens": 278
+      },
+      "last": {
+        "totalTokens": 19992,
+        "inputTokens": 18874,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1118,
+        "reasoningOutputTokens": 181
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_dd8465d076a1e868",
+  "attempt": 2
+}
