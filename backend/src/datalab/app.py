@@ -19,6 +19,7 @@ from datalab import __version__, datalock, db, updates
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
+from datalab.api.github import GitHubServices, build_github_router
 from datalab.api.inputs import build_inputs_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
@@ -37,6 +38,7 @@ from datalab.data.service import Database, DataService
 from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
+from datalab.repos.github import GitHubAuth
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions import helper
@@ -222,13 +224,23 @@ def create_app(
     app.include_router(
         build_sql_router(SqlServices(settings, data, catalog, access_log, destinations))
     )
+    # One GitHub sign-in for both lab repos: only one object may refresh its
+    # tokens, since each refresh replaces the refresh token.
+    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
-        build_knowledge_router(KnowledgeServices(settings, connection, conversations, sessions))
+        build_knowledge_router(
+            KnowledgeServices(settings, connection, conversations, sessions, auth=github)
+        )
     )
     app.include_router(
         build_workflows_router(WorkflowServices(settings, connection, data, access_log))
     )
-    app.include_router(build_pipelines_router(PipelineServices(settings, conversations, sessions)))
+    app.include_router(
+        build_pipelines_router(
+            PipelineServices(settings, connection, conversations, sessions, auth=github)
+        )
+    )
     app.include_router(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )

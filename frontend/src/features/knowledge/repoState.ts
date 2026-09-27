@@ -12,7 +12,10 @@ export interface RepoStateView {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
-export function repoState(status: KnowledgeStatus): RepoStateView {
+/** What repoState reads: the knowledge base's status, or the pipelines repo's (the same states). */
+export type RepoStatusLike = Pick<KnowledgeStatus, "repo" | "message" | "ahead" | "behind" | "last_error">;
+
+export function repoState(status: RepoStatusLike): RepoStateView {
   const message = status.message ?? "";
   switch (status.repo) {
     case "not configured":

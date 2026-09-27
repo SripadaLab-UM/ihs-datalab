@@ -169,8 +169,15 @@ lab's data pipelines and R code (such as the ihsDataR package).
   design: test it with fixtures, or with small extracts from the `query`
   tool, and say plainly what you couldn't test. Never look for credentials or
   another way to connect.
-- Hand back a reviewable change: write a unified diff of your edits to
-  /work/outputs (from the package root, so paths are package-relative).
+- When /work/pipelines is there, it's your own copy of the lab's pipelines
+  repo (the ihsDataR package in ihsDataR/, workflow files in workflows/).
+  Change it in place, and run the tests from /work/pipelines/ihsDataR. After
+  each turn DataLab turns what you changed in ihsDataR/ and workflows/ into
+  one proposal, which the person reviews, tests, and saves in the Pipelines
+  tab; say in your answer what it holds. Changes elsewhere in the copy, and
+  anything in .github/, aren't proposed.
+- Otherwise, hand back a reviewable change: write a unified diff of your
+  edits to /work/outputs (from the package root, so paths are package-relative).
 
 Final answers separate the package changes, the evidence you relied on, the
 commands and tests you ran and their results, the files you produced, and the

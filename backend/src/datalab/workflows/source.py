@@ -1,13 +1,16 @@
-"""Where workflow files come from: a folder, for now.
+"""Where workflow files come from: the synced `ihs-pipelines` repo, or a folder.
 
-The folder is laid out like the lab's `ihs-pipelines` repo:
+`workflows_folder` picks it: `[workflows] folder` if set in settings.toml;
+else the clone of `repos.pipelines` (`<data folder>/repos/ihs-pipelines`,
+synced from the Pipelines tab), when that's set and has been synced; else
+`<data folder>/workflows-local/` (and it says why, until the first sync).
+Either way it's laid out like the lab's `ihs-pipelines` repo:
 
     workflows/*.yaml                          the workflow files
     ihsDataR/                                 the pipelines package
     ihsDataR/inst/pipelines/<name>/pipeline.yaml, run.R
 
-or simply holds the YAML files. Milestone 5 swaps in the synced repo
-(`repos/ihs-pipelines`) with the same layout.
+or simply holds the YAML files.
 
 For each file DataLab records where it came from: when the folder is a git
 checkout and the file is committed as it is, the commit and the file's git
@@ -16,6 +19,13 @@ working tree); otherwise `sha256:<hex>` of the file.
 
 DataLab never runs anything from the folder on the host: git is asked only
 for object ids, with hooks and fsmonitor turned off.
+
+**A run reads a snapshot, never the folder.** When a run starts, its
+workflow files and the package are copied into the run's own folder
+(`snapshot`): from the clone, GitHub's `main` as last synced, under the
+clone's lock, so a Sync or Save & share meanwhile can't mix commits; from
+any other folder, the files as they are then. The run reads only that copy,
+and records the commit it came from.
 """
 
 from __future__ import annotations
@@ -23,10 +33,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from datalab.config import Settings
+from datalab.repos.git import Clone, git_env
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
     Pipeline,
@@ -50,6 +63,21 @@ class SourceError(RuntimeError):
     pass
 
 
+def workflows_folder(settings: Settings) -> WorkflowFolder:
+    """Where workflow files and the pipelines package are read from (see the
+    module docstring). The default folder is made if it's missing; the
+    pipelines clone isn't, until its first sync."""
+    if settings.workflows.folder:
+        return WorkflowFolder(Path(settings.workflows.folder).expanduser())
+    local = settings.data_dir / "workflows-local"
+    local.mkdir(parents=True, exist_ok=True)
+    if settings.repos.pipelines and settings.profile != "practice":
+        path = settings.data_dir / "repos" / settings.repos.pipelines.split("/")[1]
+        # Only ever read here (never fetched): the Pipelines tab syncs it.
+        return WorkflowFolder(path, clone=Clone(path, ""), fallback=local)
+    return WorkflowFolder(local)
+
+
 @dataclass(frozen=True)
 class WorkflowFile:
     path: str  # relative to the folder, with "/"
@@ -68,9 +96,71 @@ class PackageTree:
     tree_sha256: str
 
 
+# What a snapshot of the pipelines clone copies: the rest is there to read.
+_RUN_PATHS = ("workflows/", f"{PACKAGE}/")
+
+
 class WorkflowFolder:
-    def __init__(self, root: Path) -> None:
-        self.root = root
+    def __init__(
+        self,
+        root: Path,
+        *,
+        clone: Clone | None = None,
+        fallback: Path | None = None,
+        commit: str | None = None,
+        ids: dict[str, tuple[str, str]] | None = None,
+    ) -> None:
+        self._root = root
+        # The pipelines clone (root is its checkout), and the folder read
+        # until it's been synced.
+        self._clone = clone
+        self._fallback = fallback
+        # A snapshot: every file is as in `commit`, or has the ids in `ids`.
+        self._commit = commit
+        self._ids = ids
+
+    @property
+    def root(self) -> Path:
+        if self._clone is not None and self._fallback is not None and not self._clone.exists():
+            return self._fallback
+        return self._root
+
+    @property
+    def note(self) -> str | None:
+        """Why the files come from somewhere other than expected, if they do."""
+        if self.root == self._fallback:
+            return (
+                "The pipelines repo hasn't been synced yet (Pipelines tab), so workflow files "
+                f"come from {self._fallback} until it is."
+            )
+        return None
+
+    def snapshot(self, dest: Path) -> WorkflowFolder:
+        """The workflow files and the package as they are now, copied into
+        `dest` (a new folder), for a run to read instead of this one."""
+        dest.mkdir(parents=True)
+        clone = self._clone
+        if clone is not None and self.root == self._root:
+            with clone.lock:
+                head = clone.remote_head()
+                if head is None:
+                    raise SourceError("The pipelines repo has no main branch yet: sync it first.")
+                clone.copy_tree(head, dest, skip=lambda path: not path.startswith(_RUN_PATHS))
+            return WorkflowFolder(dest, commit=head)
+        ids: dict[str, tuple[str, str]] = {}
+        for relative in self.paths():
+            data = _read_limited(self.root / relative, MAX_FILE_BYTES)
+            blob, commit = self._git_ids(self.root / relative, data)
+            if blob is not None and commit is not None:
+                ids[relative] = (blob, commit)
+            target = dest / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        package = self.package_dir
+        if package.is_dir() and not package.is_symlink():
+            # Links are copied as links; package() then refuses them, as here.
+            shutil.copytree(package, dest / PACKAGE, symlinks=True)
+        return WorkflowFolder(dest, ids=ids)
 
     @property
     def workflows_dir(self) -> Path:
@@ -177,6 +267,11 @@ class WorkflowFolder:
 
     def _git_ids(self, full: Path, data: bytes) -> tuple[str | None, str | None]:
         """(blob id, commit) if the file is committed exactly as it is, else (None, None)."""
+        if self._commit is not None:
+            return git_blob_id(data), self._commit  # copied from that commit, byte for byte
+        if self._ids is not None:
+            known = self._ids.get(full.relative_to(self.root).as_posix())
+            return known if known is not None and known[0] == git_blob_id(data) else (None, None)
         try:
             top = _git(self.root, "rev-parse", "--show-toplevel")
             commit = _git(self.root, "rev-parse", "--verify", "HEAD^{commit}")
@@ -238,7 +333,8 @@ def _git(root: Path, *args: str) -> str:
             capture_output=True,
             text=True,
             timeout=10,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"},
+            # Only the repo's own config (the synced clone's is DataLab's).
+            env=git_env({"GIT_OPTIONAL_LOCKS": "0"}),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SourceError(f"git isn't available: {error}") from error

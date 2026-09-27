@@ -2,7 +2,8 @@
 
 Status: **draft** for v1. The runner, run records, Run again, Replay and
 delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core)),
-and so is the Workflows tab, read-only for now; the Pipelines tab is not yet.
+and so are the Workflows tab, read-only for now, and the Pipelines tab
+([As built](#as-built-pipelines)).
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -218,10 +219,20 @@ The backend is in `backend/src/datalab/workflows/`, with its routes under
 `/api/workflows`. The design and its evidence are in the runner spike
 (`spikes/2026-09-27-workflow-runner/README.md`).
 
-**Where files come from.** For now, a folder: `[workflows] folder` in
-`settings.toml`, or `<data folder>/workflows-local/`. It is laid out like
-`ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds the YAML files
-directly. Milestone 5 swaps in the synced repo.
+**Where files come from.** The synced `ihs-pipelines` clone
+(`<data folder>/repos/ihs-pipelines`) when `[repos] pipelines` is set and
+it has been synced; `[workflows] folder` in `settings.toml` overrides it,
+and otherwise `<data folder>/workflows-local/` (`workflows_folder` in
+workflows/source.py). Until the clone's first sync, files come from
+`workflows-local`, and `GET /api/workflows/status` says so. The folder is
+laid out like `ihs-pipelines` (`workflows/*.yaml`, `ihsDataR/`), or holds
+the YAML files directly.
+
+**Each run is pinned.** When a run starts, its workflow files and the
+package are copied into its run folder (`source/`), and the run reads only
+that copy. From the clone, the copy is GitHub's `main` as last synced,
+taken under the clone's lock, so a Sync or Save & share during the run
+can't give it a package from another commit; the run records that commit.
 
 **What the file check adds to the example above:**
 
@@ -316,6 +327,58 @@ tab. Destination
 keys are listed read-only; folders are chosen in Settings. Editing waits for
 the `ihs-pipelines` Save & share. The docked chat opens in Data engineering
 until there is a Workflow authoring mode.
+
+## As built (Pipelines)
+
+The backend is in `backend/src/datalab/pipelines/`, with its routes under
+`/api/pipelines`; the tab is `frontend/src/features/pipelines/`.
+
+**The repo.** `[repos] pipelines` is cloned and synced like the knowledge
+base (`repos/sync.py`, with milestone 5's isolation: no global or system
+config, every filter and driver switched off, `--no-ext-diff`). There's one
+GitHub sign-in for both repos; signing in is in Settings → GitHub. The tab
+browses GitHub's `main` as last synced, read-only.
+
+**Changes.** Each new Data engineering conversation gets its own copy of
+the repo at `/work/pipelines` (without `.github/`, and with no repository
+metadata or credentials). After each turn, what the agent changed in
+`ihsDataR/` and `workflows/` becomes one proposal, replacing any earlier
+one still open; changes anywhere else in the copy, and anything in
+`.github/`, are listed as not proposed. Proposals are shown in the
+Pipelines tab only, for now (not as cards in the chat).
+
+**Tests.** The package's tests (`testthat::test_local`) run on the
+proposal's exact tree, in the workflow sandbox's container: no network, a
+read-only root, the agent image, and a working folder of their own where
+compiled code can run (the steps' `/tmp` stays noexec). Two run at a time
+at most. The counts, the failing tests, and the log are kept against that
+tree (migration 0010). They're a quality check, not a safety gate: the
+counts are written by the same R process as the code under test, which
+could write any counts it likes. What keeps a change safe is the sandbox
+and the person reading the diff.
+
+**The check** (pipelines/check.py) blocks on paths that can't be changed
+(anything outside `ihsDataR/` and `workflows/`, or in `.github/`), and asks
+the person to confirm, one by one, with the line shown:
+
+- possible participant data: the knowledge base's scan, plus every changed
+  data file (CSV and the like, fixtures included), column names that look
+  like identifiers (`id`, `mrn`, `dob`, `subject`…), and short numbers next
+  to dates, which the knowledge base's scan lets through;
+- code that runs outside the test container once shared: `.Rprofile`,
+  `configure`, `cleanup`, compiled code in `src/`, and `.onLoad`,
+  `.onAttach` and the like in `R/`.
+
+**Save & share** runs the check, requires the tests to have passed on the
+change (running them first if not), commits it as the person, rebases onto
+`main`, runs the tests again when the rebased package (the `ihsDataR` tree)
+isn't the one they passed on, and pushes exactly that commit, whose message
+names the test run that passed on it. A conflict shares nothing: discard the
+change and ask the agent to make it again. The change isn't edited in
+DataLab: ask the agent.
+
+Not built yet: the ad hoc run of a pipeline's workflow, and the converted
+`ihsDataR` itself (its pipelines have no `pipeline.yaml` yet).
 
 ## Open questions
 

@@ -145,12 +145,20 @@ class SessionManager:
         runtime = self._runtimes.get(conversation_id)
         return runtime.turn_sources() if runtime is not None else []
 
-    def register_workspace_seed(self, name: str, seed: WorkspaceSeed, *, into: str) -> None:
+    def register_workspace_seed(
+        self,
+        name: str,
+        seed: WorkspaceSeed,
+        *,
+        into: str,
+        modes: Sequence[str] | None = None,
+    ) -> None:
         """Before each new conversation's first turn, run `seed(conversation,
-        staging)` and move what it wrote to `/work/<into>`, once (seeds.py)."""
+        staging)` and move what it wrote to `/work/<into>`, once (seeds.py);
+        only in conversations of `modes`, if given."""
         if any(s.name == name or s.into == into for s in self._seeds):
             raise ValueError(f"A workspace seed for {name!r} or /work/{into} already exists.")
-        self._seeds.append(Seed(name, seed, into))
+        self._seeds.append(Seed(name, seed, into, tuple(modes) if modes is not None else None))
 
     def workspace_base(self, conversation_id: str, name: str) -> str | None:
         """What the seed `name` returned for this conversation, if it's in place."""

@@ -7,10 +7,8 @@ the conversation's base and proposes the edits (a `kb_proposal` event, then
 `kb_proposal_updated` as it's edited, saved, or discarded). See
 docs/KNOWLEDGE_BASE.md, "How edits happen", and knowledge/service.py.
 
-- Sign-in: `POST /sign-in` starts GitHub's device flow and returns the code
-  to enter; the page then calls `POST /sign-in/poll` every `interval`
-  seconds until it's signed in (or expired, denied); `POST /sign-in/cancel`
-  and `POST /sign-out`. After signing in, `POST /sync` downloads the repo.
+- Signing in to GitHub is `/api/github` (api/github.py): one sign-in for
+  both lab repos. After signing in, `POST /sync` downloads the repo.
 - Proposals: list and get; `PUT …/edits` for the person's own text;
   `POST …/accept` (Save & share) and `POST …/reject`.
 - Reading (the Knowledge tab): `GET /pages` lists the pages, lab skills, and
@@ -25,7 +23,6 @@ import asyncio
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query
@@ -42,7 +39,7 @@ from datalab.knowledge.service import (
     NotFound,
     text_digest,
 )
-from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignIn, SignInNeeded
+from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignInNeeded
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 
@@ -55,8 +52,11 @@ class KnowledgeServices:
     database: sqlite3.Connection  # for this area's own tables (migration 0007)
     conversations: ConversationStore  # proposed-edit cards are conversation events
     sessions: SessionManager  # the workspace seed and after-turn hook
-    # Tests only: a sign-in and a remote other than GitHub's.
+    # The app's one GitHub sign-in, shared with the pipelines repo (only one
+    # object may refresh its tokens); made here from `[repos] client_id` if
+    # not given.
     auth: GitHubAuth | None = None
+    # Tests only: a remote other than GitHub's.
     remote: str | None = None
 
 
@@ -84,17 +84,6 @@ class KnowledgeStatus(BaseModel):
     last_error: str | None = None
     ahead: int = 0
     behind: int = 0
-    message: str | None = None
-
-
-class SignInOut(BaseModel):
-    state: Literal["signed out", "waiting", "signed in", "expired", "denied", "failed"]
-    user_code: str | None = None
-    verification_uri: str | None = None
-    expires_at: str | None = None
-    # Seconds to wait between polls.
-    interval: int | None = None
-    account: AccountOut | None = None
     message: str | None = None
 
 
@@ -257,11 +246,6 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         except GitHubUnavailable as error:
             raise HTTPException(502, str(error)) from None
 
-    def auth() -> GitHubAuth:
-        if knowledge.auth is None or not knowledge.available:
-            raise NotAvailable(knowledge.unavailable)
-        return knowledge.auth
-
     @router.get("/status")
     async def status() -> KnowledgeStatus:
         return KnowledgeStatus(**_plain(await run(knowledge.status)))
@@ -269,26 +253,6 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     @router.post("/sync")
     async def sync() -> KnowledgeStatus:
         return KnowledgeStatus(**_plain(await run(knowledge.sync)))
-
-    @router.get("/sign-in")
-    async def sign_in_state() -> SignInOut:
-        return _sign_in(await run(lambda: auth().status()))
-
-    @router.post("/sign-in")
-    async def start_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().start()))
-
-    @router.post("/sign-in/poll")
-    async def poll_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().poll()))
-
-    @router.post("/sign-in/cancel")
-    async def cancel_sign_in() -> SignInOut:
-        return _sign_in(await run(lambda: auth().cancel()))
-
-    @router.post("/sign-out")
-    async def sign_out() -> SignInOut:
-        return _sign_in(await run(lambda: auth().sign_out()))
 
     @router.get("/pages")
     async def pages() -> KbPagesOut:
@@ -340,27 +304,6 @@ def _plain(status: dict[str, Any]) -> dict[str, Any]:
     if isinstance(account, Account):
         status = {**status, "account": {"login": account.login, "name": account.name}}
     return status
-
-
-def _account(account: Account | None) -> AccountOut | None:
-    return AccountOut(login=account.login, name=account.name) if account else None
-
-
-def _sign_in(state: SignIn) -> SignInOut:
-    expires = (
-        datetime.fromtimestamp(state.expires_at, UTC).isoformat(timespec="seconds")
-        if state.expires_at
-        else None
-    )
-    return SignInOut(
-        state=state.state,
-        user_code=state.user_code,
-        verification_uri=state.verification_uri,
-        expires_at=expires,
-        interval=state.interval,
-        account=_account(state.account),
-        message=state.message,
-    )
 
 
 def _summary(proposal: Proposal) -> ProposalOut:

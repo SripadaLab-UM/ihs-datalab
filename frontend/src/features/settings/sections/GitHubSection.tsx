@@ -2,25 +2,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
 import { api } from "@/api/client";
-import { knowledgeApi, type KnowledgeStatus, type SignIn } from "@/api/knowledge";
+import { type GitHubStatus, githubApi, type SignIn } from "@/api/github";
+import { knowledgeApi } from "@/api/knowledge";
+import { pipelinesApi } from "@/api/pipelines";
 import { Button, Chip, Icon } from "@/components/ui";
-import { ago, devicePage, repoState } from "@/features/knowledge/repoState";
+import { ago, devicePage, repoState, type RepoStatusLike } from "@/features/knowledge/repoState";
 
 import { Section } from "./Section";
 
 const SIGN_IN = ["github-sign-in"];
-const STATUS = ["knowledge-status"];
+const GITHUB = ["github-status"];
+const KNOWLEDGE = ["knowledge-status"];
+const PIPELINES = ["pipelines-status"];
 const ASK_TO_SIGN_IN = "Sign in to GitHub to use it.";
 
 /**
- * GitHub App sign-in, for syncing the lab knowledge and pipelines repos (milestone 5).
- * GitHub's device flow: DataLab shows a code, the person enters it on github.com,
- * and DataLab asks GitHub every few seconds until it's done.
+ * GitHub App sign-in, for syncing the lab knowledge and pipelines repos (milestones 5 and 6):
+ * one sign-in for whichever of them this DataLab has set up. GitHub's device flow:
+ * DataLab shows a code, the person enters it on github.com, and DataLab asks GitHub
+ * every few seconds until it's done.
  */
 export function GitHubSection() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
-  const status = useQuery({ queryKey: STATUS, queryFn: knowledgeApi.status, enabled: health.isSuccess && !practice });
+  const status = useQuery({ queryKey: GITHUB, queryFn: githubApi.status, enabled: health.isSuccess && !practice });
   let body;
   if (practice) {
     body = (
@@ -39,45 +44,61 @@ export function GitHubSection() {
       </p>
     );
   } else {
-    return <SignInOrOut status={status.data} />;
+    return <SignInOrOut github={status.data} />;
   }
   return <Section title="GitHub">{body}</Section>;
 }
 
-function SignInOrOut({ status }: { status: KnowledgeStatus }) {
+function SignInOrOut({ github }: { github: GitHubStatus }) {
   const queryClient = useQueryClient();
-  const signIn = useQuery({ queryKey: SIGN_IN, queryFn: knowledgeApi.signIn });
-  const sync = useMutation({ mutationFn: knowledgeApi.sync, onSuccess: (next) => queryClient.setQueryData(STATUS, next) });
+  const areas = new Set(github.repos.map((r) => r.area));
+  const signIn = useQuery({ queryKey: SIGN_IN, queryFn: githubApi.signIn });
+  // Each repo's own state, and its Sync.
+  const knowledge = useQuery({ queryKey: KNOWLEDGE, queryFn: knowledgeApi.status, enabled: areas.has("knowledge") });
+  const pipelines = useQuery({ queryKey: PIPELINES, queryFn: pipelinesApi.status, enabled: areas.has("pipelines") });
+  const syncKnowledge = useMutation({
+    mutationFn: knowledgeApi.sync,
+    onSuccess: (next) => queryClient.setQueryData(KNOWLEDGE, next),
+  });
+  const syncPipelines = useMutation({
+    mutationFn: pipelinesApi.sync,
+    onSuccess: (next) => queryClient.setQueryData(PIPELINES, next),
+  });
   const settle = (next: SignIn) => {
     queryClient.setQueryData(SIGN_IN, next);
-    queryClient.invalidateQueries({ queryKey: STATUS });
-    // Just signed in: download the knowledge base straight away.
-    if (next.state === "signed in") sync.mutate();
+    for (const key of [GITHUB, KNOWLEDGE, PIPELINES]) queryClient.invalidateQueries({ queryKey: key });
+    // Just signed in: download the repos straight away.
+    if (next.state === "signed in") {
+      if (areas.has("knowledge")) syncKnowledge.mutate();
+      if (areas.has("pipelines")) syncPipelines.mutate();
+    }
   };
-  const start = useMutation({ mutationFn: knowledgeApi.startSignIn, onSuccess: settle });
-  const cancel = useMutation({ mutationFn: knowledgeApi.cancelSignIn, onSuccess: settle });
-  const signOut = useMutation({ mutationFn: knowledgeApi.signOut, onSuccess: settle });
+  const start = useMutation({ mutationFn: githubApi.startSignIn, onSuccess: settle });
+  const cancel = useMutation({ mutationFn: githubApi.cancelSignIn, onSuccess: settle });
+  const signOut = useMutation({ mutationFn: githubApi.signOut, onSuccess: settle });
   const flow = signIn.data;
   usePolling(flow, settle);
-  const error = start.error ?? cancel.error ?? signOut.error ?? sync.error;
+  const error = start.error ?? cancel.error ?? signOut.error ?? syncKnowledge.error ?? syncPipelines.error;
+  const rows: RepoRowProps[] = [];
+  if (areas.has("knowledge"))
+    rows.push({ what: "the knowledge base", status: knowledge.data, onSync: () => syncKnowledge.mutate(), syncing: syncKnowledge.isPending });
+  if (areas.has("pipelines"))
+    rows.push({ what: "the pipelines repo", status: pipelines.data, onSync: () => syncPipelines.mutate(), syncing: syncPipelines.isPending });
+  const names = github.repos.map((r) => r.name);
+  const what = [areas.has("knowledge") && "knowledge base", areas.has("pipelines") && "pipelines repo"]
+    .filter(Boolean)
+    .join(" and ");
 
   let body;
   if (flow?.state === "waiting") {
     body = <Waiting flow={flow} onCancel={() => cancel.mutate()} cancelling={cancel.isPending} />;
-  } else if (status.signed_in) {
+  } else if (github.signed_in) {
     body = (
-      <SignedIn
-        status={status}
-        onSignOut={() => signOut.mutate()}
-        signingOut={signOut.isPending}
-        onSync={() => sync.mutate()}
-        syncing={sync.isPending}
-        note={flow?.message}
-      />
+      <SignedIn github={github} rows={rows} onSignOut={() => signOut.mutate()} signingOut={signOut.isPending} note={flow?.message} />
     );
   } else {
     // Why not, if there's a reason: the code expired, GitHub said no, or the sign-in ran out.
-    const why = (flow?.state !== "signed out" && flow?.message) || (status.message !== ASK_TO_SIGN_IN && status.message) || null;
+    const why = (flow?.message !== ASK_TO_SIGN_IN && flow?.message) || null;
     const again = Boolean(why);
     body = (
       <div className="mt-3 flex flex-col gap-3">
@@ -87,9 +108,9 @@ function SignInOrOut({ status }: { status: KnowledgeStatus }) {
           </p>
         )}
         <p className="text-sm text-muted">
-          Sign in with your GitHub account to read the lab's knowledge base (
-          <span className="font-mono text-[12.5px]">{status.name}</span>) and share the edits you save. The sign-in is
-          kept in this computer's keychain, and commits are made as you.
+          Sign in with your GitHub account to read the lab's {what} (
+          <span className="font-mono text-[12.5px]">{names.join(", ")}</span>) and share the changes you save. The
+          sign-in is kept in this computer's keychain, and commits are made as you.
         </p>
         <div>
           <Button variant="primary" onClick={() => start.mutate()} disabled={start.isPending}>
@@ -102,7 +123,7 @@ function SignInOrOut({ status }: { status: KnowledgeStatus }) {
 
   return (
     <Section title="GitHub">
-      <p className="mt-1 text-sm text-muted">For the lab's knowledge base: reading it, and sharing the edits you save.</p>
+      <p className="mt-1 text-sm text-muted">For the lab's {what}: reading it, and sharing the changes you save.</p>
       {body}
       {error && <p className="mt-2 text-sm text-danger">{error.message}</p>}
     </Section>
@@ -124,7 +145,7 @@ function usePolling(flow: SignIn | undefined, settle: (next: SignIn) => void) {
     const tick = () => {
       timer = setTimeout(async () => {
         try {
-          const next = await knowledgeApi.pollSignIn();
+          const next = await githubApi.pollSignIn();
           if (stopped) return;
           if (next.state === "waiting") tick();
           else onDone.current(next);
@@ -177,22 +198,26 @@ function Waiting({ flow, onCancel, cancelling }: { flow: SignIn; onCancel: () =>
   );
 }
 
-function SignedIn({
-  status,
-  onSignOut,
-  signingOut,
-  onSync,
-  syncing,
-  note,
-}: {
-  status: KnowledgeStatus;
-  onSignOut: () => void;
-  signingOut: boolean;
+interface RepoRowProps {
+  what: string;
+  status: (RepoStatusLike & { name?: string | null; last_sync?: string | null }) | undefined;
   onSync: () => void;
   syncing: boolean;
+}
+
+function SignedIn({
+  github,
+  rows,
+  onSignOut,
+  signingOut,
+  note,
+}: {
+  github: GitHubStatus;
+  rows: RepoRowProps[];
+  onSignOut: () => void;
+  signingOut: boolean;
   note?: string | null;
 }) {
-  const repo = repoState(status);
   return (
     <div className="mt-4 flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -200,15 +225,32 @@ function SignedIn({
           <Icon name="check" size={15} />
         </span>
         <p className="flex-1 text-sm">
-          Signed in as <span className="font-medium">{status.account?.name || status.account?.login}</span>
-          {status.account?.name && <span className="font-mono text-[12.5px] text-muted"> @{status.account.login}</span>}
+          Signed in as <span className="font-medium">{github.account?.name || github.account?.login}</span>
+          {github.account?.name && <span className="font-mono text-[12.5px] text-muted"> @{github.account.login}</span>}
         </p>
         <Button onClick={onSignOut} disabled={signingOut}>
           Sign out
         </Button>
       </div>
       {note && <p className="text-sm text-attn">{note}</p>}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-sm">
+      {rows.map((row) => (
+        <RepoRow key={row.what} {...row} />
+      ))}
+      <p className="text-xs text-muted">
+        Signing out forgets the sign-in on this computer. To revoke DataLab's access altogether, use GitHub's Settings →
+        Applications.
+      </p>
+    </div>
+  );
+}
+
+/** One repo's copy on this computer: its state, when it was synced, and Sync. */
+function RepoRow({ what, status, onSync, syncing }: RepoRowProps) {
+  if (!status) return <p className="border-t border-line pt-3 text-sm text-muted">Checking {what}…</p>;
+  const repo = repoState(status);
+  return (
+    <div className="flex flex-col gap-1 border-t border-line pt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <span className="font-mono text-[12.5px]">{status.name}</span>
         <Chip tone={repo.tone}>{repo.label}</Chip>
         {status.last_sync && (
@@ -217,16 +259,18 @@ function SignedIn({
           </span>
         )}
         {repo.canSync && (
-          <Button variant="ghost" className="ml-auto px-2 text-[12.5px]" onClick={onSync} disabled={syncing}>
+          <Button
+            variant="ghost"
+            className="ml-auto px-2 text-[12.5px]"
+            onClick={onSync}
+            disabled={syncing}
+            aria-label={`Sync ${what}`}
+          >
             {syncing ? "Syncing…" : "Sync"}
           </Button>
         )}
       </div>
       {status.repo !== "in sync" && <p className={repo.tone === "bad" ? "text-sm text-danger" : "text-sm text-muted"}>{repo.text}</p>}
-      <p className="text-xs text-muted">
-        Signing out forgets the sign-in on this computer. To revoke DataLab's access altogether, use GitHub's Settings →
-        Applications.
-      </p>
     </div>
   );
 }

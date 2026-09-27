@@ -683,6 +683,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/github/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status */
+        get: operations["status_api_github_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Sign In State */
+        get: operations["sign_in_state_api_github_sign_in_get"];
+        put?: never;
+        /** Start Sign In */
+        post: operations["start_sign_in_api_github_sign_in_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Poll Sign In */
+        post: operations["poll_sign_in_api_github_sign_in_poll_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-in/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Sign In */
+        post: operations["cancel_sign_in_api_github_sign_in_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/github/sign-out": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sign Out */
+        post: operations["sign_out_api_github_sign_out_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/knowledge/status": {
         parameters: {
             query?: never;
@@ -711,75 +797,6 @@ export interface paths {
         put?: never;
         /** Sync */
         post: operations["sync_api_knowledge_sync_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Sign In State */
-        get: operations["sign_in_state_api_knowledge_sign_in_get"];
-        put?: never;
-        /** Start Sign In */
-        post: operations["start_sign_in_api_knowledge_sign_in_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in/poll": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Poll Sign In */
-        post: operations["poll_sign_in_api_knowledge_sign_in_poll_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-in/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Cancel Sign In */
-        post: operations["cancel_sign_in_api_knowledge_sign_in_cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/knowledge/sign-out": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Sign Out */
-        post: operations["sign_out_api_knowledge_sign_out_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1192,6 +1209,159 @@ export interface paths {
         };
         /** Status */
         get: operations["status_api_pipelines_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync */
+        post: operations["sync_api_pipelines_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Files */
+        get: operations["files_api_pipelines_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** File */
+        get: operations["file_api_pipelines_files__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposals */
+        get: operations["proposals_api_pipelines_proposals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proposal */
+        get: operations["proposal_api_pipelines_proposals__proposal_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test */
+        post: operations["test_api_pipelines_proposals__proposal_id__tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept */
+        post: operations["accept_api_pipelines_proposals__proposal_id__accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject */
+        post: operations["reject_api_pipelines_proposals__proposal_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/tests/{test_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Test Log */
+        get: operations["test_log_api_pipelines_tests__test_id__log_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1984,6 +2154,60 @@ export interface components {
             /** Line */
             line?: number | null;
         };
+        /** GitHubAccountOut */
+        GitHubAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** GitHubRepoOut */
+        GitHubRepoOut: {
+            /**
+             * Area
+             * @enum {string}
+             */
+            area: "knowledge" | "pipelines";
+            /** Name */
+            name: string;
+        };
+        /** GitHubSignInOut */
+        GitHubSignInOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
+            /** User Code */
+            user_code?: string | null;
+            /** Verification Uri */
+            verification_uri?: string | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Interval */
+            interval?: number | null;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /** Message */
+            message?: string | null;
+        };
+        /** GitHubStatusOut */
+        GitHubStatusOut: {
+            /** Available */
+            available: boolean;
+            /** Message */
+            message?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["GitHubAccountOut"] | null;
+            /**
+             * Repos
+             * @default []
+             */
+            repos: components["schemas"]["GitHubRepoOut"][];
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2251,10 +2475,314 @@ export interface components {
             /** Description */
             description: string;
         };
+        /** PipelineAcceptIn */
+        PipelineAcceptIn: {
+            /**
+             * Confirmed
+             * @default []
+             */
+            confirmed: string[];
+        };
+        /** PipelineAccountOut */
+        PipelineAccountOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+        };
+        /** PipelineFileChange */
+        PipelineFileChange: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+        };
+        /** PipelineFileDiff */
+        PipelineFileDiff: {
+            /** Path */
+            path: string;
+            /**
+             * Change
+             * @enum {string}
+             */
+            change: "added" | "modified" | "deleted";
+            /** Before */
+            before: string | null;
+            /** After */
+            after: string | null;
+            /** Binary */
+            binary: boolean;
+            /** Diff */
+            diff: string;
+        };
+        /** PipelineFileOut */
+        PipelineFileOut: {
+            /** Path */
+            path: string;
+            /** Head */
+            head: string;
+            /** Size */
+            size: number;
+            /** Text */
+            text: string | null;
+            /**
+             * Too Large
+             * @default false
+             */
+            too_large: boolean;
+        };
+        /** PipelineFindingOut */
+        PipelineFindingOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Rule */
+            rule: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "data" | "code";
+            /** Message */
+            message: string;
+            /** Line */
+            line?: number | null;
+            /**
+             * Text
+             * @default
+             */
+            text: string;
+        };
+        /** PipelineProposalDetail */
+        PipelineProposalDetail: {
+            proposal: components["schemas"]["PipelineProposalOut"];
+            /** Files */
+            files: components["schemas"]["PipelineFileDiff"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** PipelineProposalOut */
+        PipelineProposalOut: {
+            /** Id */
+            id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "superseded" | "withdrawn" | "rejected" | "saving" | "saved" | "conflict" | "check_failed" | "tests_failed" | "failed";
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Turn */
+            turn: number;
+            /** Base */
+            base: string;
+            /** Files */
+            files: components["schemas"]["PipelineFileChange"][];
+            /** Refused */
+            refused: components["schemas"]["PipelineRefusedOut"][];
+            result?: components["schemas"]["PipelineSaveResultOut"] | null;
+            /** Commit */
+            commit?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            test?: components["schemas"]["PipelineTestOut"] | null;
+        };
+        /** PipelineRefusedOut */
+        PipelineRefusedOut: {
+            /** Path */
+            path: string;
+            /** Reason */
+            reason: string;
+        };
+        /** PipelineSaveResultOut */
+        PipelineSaveResultOut: {
+            /** State */
+            state: string;
+            /** Message */
+            message: string;
+            /** Commit */
+            commit?: string | null;
+            /** Upstream */
+            upstream?: string | null;
+            /**
+             * Findings
+             * @default []
+             */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /**
+             * Conflicts
+             * @default []
+             */
+            conflicts: string[];
+            /**
+             * After Rebase
+             * @default false
+             */
+            after_rebase: boolean;
+            /** Test */
+            test?: string | null;
+        };
+        /** PipelineTestFailureOut */
+        PipelineTestFailureOut: {
+            /** File */
+            file: string;
+            /** Test */
+            test: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "failure" | "error";
+        };
+        /** PipelineTestFileOut */
+        PipelineTestFileOut: {
+            /** File */
+            file: string;
+            /** Tests */
+            tests: number;
+            /** Failed */
+            failed: number;
+            /** Skipped */
+            skipped: number;
+            /** Errors */
+            errors: number;
+        };
+        /** PipelineTestLogOut */
+        PipelineTestLogOut: {
+            /** Id */
+            id: string;
+            /** Text */
+            text: string;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** PipelineTestOut */
+        PipelineTestOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "passed" | "failed" | "error";
+            /** Started At */
+            started_at: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Commit */
+            commit?: string | null;
+            /** Message */
+            message?: string | null;
+            /**
+             * Tests
+             * @default 0
+             */
+            tests: number;
+            /**
+             * Passed
+             * @default 0
+             */
+            passed: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Skipped
+             * @default 0
+             */
+            skipped: number;
+            /**
+             * Errors
+             * @default 0
+             */
+            errors: number;
+            /**
+             * Warnings
+             * @default 0
+             */
+            warnings: number;
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["PipelineTestFileOut"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+            /**
+             * Failures
+             * @default []
+             */
+            failures: components["schemas"]["PipelineTestFailureOut"][];
+        };
+        /** PipelineTreeFile */
+        PipelineTreeFile: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /** PipelineTreeOut */
+        PipelineTreeOut: {
+            /** Head */
+            head: string | null;
+            /** Files */
+            files: components["schemas"]["PipelineTreeFile"][];
+            /**
+             * More Files
+             * @default 0
+             */
+            more_files: number;
+        };
         /** PipelinesStatus */
         PipelinesStatus: {
             /** Available */
             available: boolean;
+            /**
+             * Repo
+             * @enum {string}
+             */
+            repo: "not configured" | "signed out" | "no access" | "not cloned" | "in sync" | "behind" | "diverged" | "sync failed";
+            /** Name */
+            name?: string | null;
+            /**
+             * Signed In
+             * @default false
+             */
+            signed_in: boolean;
+            account?: components["schemas"]["PipelineAccountOut"] | null;
+            /** Head */
+            head?: string | null;
+            /** Last Sync */
+            last_sync?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Ahead
+             * @default 0
+             */
+            ahead: number;
+            /**
+             * Behind
+             * @default 0
+             */
+            behind: number;
+            /** Message */
+            message?: string | null;
         };
         /** PlanLimitsOut */
         PlanLimitsOut: {
@@ -2658,25 +3186,6 @@ export interface components {
             /** Available */
             available: boolean;
         };
-        /** SignInOut */
-        SignInOut: {
-            /**
-             * State
-             * @enum {string}
-             */
-            state: "signed out" | "waiting" | "signed in" | "expired" | "denied" | "failed";
-            /** User Code */
-            user_code?: string | null;
-            /** Verification Uri */
-            verification_uri?: string | null;
-            /** Expires At */
-            expires_at?: string | null;
-            /** Interval */
-            interval?: number | null;
-            account?: components["schemas"]["AccountOut"] | null;
-            /** Message */
-            message?: string | null;
-        };
         /** SkippedOut */
         SkippedOut: {
             /** Path */
@@ -3036,6 +3545,8 @@ export interface components {
             available: boolean;
             /** Folder */
             folder: string;
+            /** Message */
+            message?: string | null;
         };
     };
     responses: never;
@@ -4245,6 +4756,126 @@ export interface operations {
             };
         };
     };
+    status_api_github_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubStatusOut"];
+                };
+            };
+        };
+    };
+    sign_in_state_api_github_sign_in_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    start_sign_in_api_github_sign_in_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    poll_sign_in_api_github_sign_in_poll_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    cancel_sign_in_api_github_sign_in_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
+    sign_out_api_github_sign_out_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitHubSignInOut"];
+                };
+            };
+        };
+    };
     status_api_knowledge_status_get: {
         parameters: {
             query?: never;
@@ -4281,106 +4912,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KnowledgeStatus"];
-                };
-            };
-        };
-    };
-    sign_in_state_api_knowledge_sign_in_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    start_sign_in_api_knowledge_sign_in_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    poll_sign_in_api_knowledge_sign_in_poll_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    cancel_sign_in_api_knowledge_sign_in_cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
-                };
-            };
-        };
-    };
-    sign_out_api_knowledge_sign_out_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SignInOut"];
                 };
             };
         };
@@ -5120,6 +5651,267 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    sync_api_pipelines_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelinesStatus"];
+                };
+            };
+        };
+    };
+    files_api_pipelines_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTreeOut"];
+                };
+            };
+        };
+    };
+    file_api_pipelines_files__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineFileOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_pipelines_proposals_get: {
+        parameters: {
+            query?: {
+                conversation_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposal_api_pipelines_proposals__proposal_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_api_pipelines_proposals__proposal_id__tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    accept_api_pipelines_proposals__proposal_id__accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineAcceptIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_api_pipelines_proposals__proposal_id__reject_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_log_api_pipelines_tests__test_id__log_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                test_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineTestLogOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
