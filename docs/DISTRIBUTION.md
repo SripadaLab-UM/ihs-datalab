@@ -1,7 +1,9 @@
 # Installing, updating, and running DataLab
 
-Status: **draft** for v1. This is a proposal under discussion and has not been
-implemented.
+Status: **draft** for v1. This is a proposal under discussion. Implemented so
+far: the installers' first version, and the data side of updating (database
+backups, `datalab rollback`, and recovering from an interrupted update; see
+"How updating keeps the database safe" below).
 
 Goal: a colleague with no technical background can install DataLab in about
 15 minutes, and after that never needs a terminal.
@@ -78,6 +80,88 @@ This replaces the prototype's approach of fast-forwarding a git checkout,
 which needed seven safety gates. There is no checkout on users' machines to
 protect.
 
+### How updating keeps the database safe
+
+This part is built (milestone 7); the updater that calls it, the **Update
+available** pill, and the Storage view come later.
+
+**Backups.** Before any migration runs on a database that has data, and
+before an update switches versions, DataLab backs up `datalab.sqlite`:
+
+```
+backups/0.2.0/
+  datalab.sqlite    the database just before 0.2.0 first changed it
+  manifest.json     app_version, from_version, migrations and schema_version,
+                    created_at, sha256, size_bytes, reason
+```
+
+- The folder is named for the version about to change the database. A second
+  backup for the same version gets `-2`, `-3`, and so on.
+- The copy uses SQLite's online backup API, so changes still in the
+  write-ahead log are included, and it's saved as one self-contained file.
+  It's built in a hidden `.incoming-…` folder and renamed into place when
+  complete, so a folder with a manifest is always a whole backup.
+- If the backup fails (for example, the disk is full), no migration runs and
+  DataLab says so instead of starting.
+- The newest 3 backups are kept. Only folders with a DataLab manifest are ever
+  removed; anything else in `backups/` is left alone.
+- `datalab backup` takes one by hand.
+
+**Rolling back.** A DataLab that finds migrations it doesn't have won't open
+the database: a newer version changed it. `datalab rollback` then restores the
+newest backup this version can read.
+
+- It only runs when the installed DataLab is older than the database.
+- It only restores a backup whose migrations this DataLab has, and whose
+  checksum still matches. `--list` shows the backups; `--backup NAME` picks
+  one.
+- It first lists what the restore drops: rows recorded or changed since the
+  backup, per table, naming new conversations. If there are any, it refuses
+  unless given `--yes`.
+- It backs up the database it replaces (reason "restore"), so a rollback can
+  itself be undone.
+
+**Only the database is rolled back.** Conversation workspaces, runs, query
+results, and repos stay as they are. They are the person's work, and putting
+back an older copy would destroy what was done since; they are also far larger
+than the database. Rolling back only DataLab's record of them is safe because
+each conversation's files live in their own folder (`sessions/<id>/`), which a
+newer version adds to but doesn't reorganise. After a rollback, a
+conversation made since the update keeps its folder, but the older DataLab no
+longer lists it. A rule for releases follows from this: a new version must
+not change the layout of files the previous version reads.
+
+**The update marker.** Whatever runs an update records its progress in
+`update-in-progress.json` (`datalab/updates.py`):
+
+1. `begin` once conversations have stopped: writes the marker ("started"),
+   backs up the database for the new version, and records the backup
+   ("backed-up").
+2. `advance` to "installed" once the new version is installed beside the old
+   one, and to "switched" once the launcher opens it.
+3. The new version starts. Its migrations reuse the update's backup if the
+   database hasn't changed since, and otherwise take a fresh one. Once it has
+   started, the marker is removed, and a line goes in `logs/updates.jsonl`
+   (versions and times only).
+
+If the marker is still there at a start, the update was interrupted:
+
+- **The new version is starting:** it carries on and finishes the update.
+- **The old version is starting and the database is unchanged:** the update
+  is abandoned, the marker cleared, and the person told they can try again.
+- **The old version is starting, but the new one had already migrated the
+  database:** if nothing has been recorded since the backup, the backup is put
+  back automatically, keeping the changed database as a backup. Otherwise
+  nothing is changed, and DataLab tells the person to reopen the newer
+  version or run `datalab rollback`.
+- **The marker can't be read:** if the database is one this version can use,
+  the marker is set aside (kept for diagnostics) and DataLab starts.
+
+CI checks all of this on every change (`scripts/upgrade-rollback-test.py`): a
+data folder made by the previous release's own code is upgraded by the
+current code, checked row by row, rolled back, and checked again. It also
+fails if a released migration was changed or removed.
+
 ## Where DataLab keeps things
 
 **One data folder** holds everything DataLab owns. On Mac it is
@@ -133,10 +217,15 @@ It never touches export destinations.
 ## For the maintainer: releasing
 
 - Tagging a release makes GitHub Actions:
-  - run all checks;
+  - run all checks, including the upgrade-and-rollback test;
   - build the app with the frontend included;
-  - build and push the agent and gateway images;
-  - publish a release that lists the exact image digests.
+  - build and push the agent image (the gateway and research proxy are
+    upstream images, pinned by digest in the code);
+  - publish a release that lists the exact image digests (also in
+    `images.json`), with the installers and a `SHA256SUMS` file.
+- Not automated yet: signing the Windows scripts and anything macOS runs
+  directly (they need the lab's signing identities), and the Windows test on a
+  real managed machine. `release.yml` marks each as a TODO.
 - Everything is pinned: Python dependencies (`uv.lock`), npm
   (`package-lock.json`), base images, and the Codex CLI version.
 - **Diagnostics instead of bug-report uploads.** "Copy diagnostics" in

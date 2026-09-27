@@ -31,6 +31,15 @@ def main(argv: list[str] | None = None) -> int:
     choice.add_argument("--delete-data", action="store_true", default=None)
     choice.add_argument("--keep-data", dest="delete_data", action="store_false")
     commands.add_parser("pull-images", help="download the pinned container images")
+    commands.add_parser("backup", help="back up DataLab's database now")
+    back = commands.add_parser(
+        "rollback", help="restore the database from a backup, for an older DataLab"
+    )
+    back.add_argument("--list", action="store_true", help="list the backups and stop")
+    back.add_argument("--backup", metavar="NAME", help="the backup to restore (default: newest)")
+    back.add_argument(
+        "--yes", action="store_true", help="restore even though it drops what was recorded since"
+    )
     commands.add_parser("db-check", help="connect and report what the session may do")
     safety = commands.add_parser("safety-check", help="run the Safety check and print the results")
     safety.add_argument(
@@ -69,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pull-images":
         return _pull_images(settings)
 
+    if args.command == "backup":
+        return _backup(settings)
+
+    if args.command == "rollback":
+        return _rollback(settings, args)
+
     if args.command == "db-check":
         return _db_check(settings)
 
@@ -93,11 +108,35 @@ def _serve(settings, *, open_browser: bool) -> int:
 
     import uvicorn
 
+    from datalab import __version__, db, updates
     from datalab.app import create_app
+    from datalab.db.backups import BackupFailed
     from datalab.web import BrowserSession
 
+    # An update that didn't finish is sorted out before anything opens the database.
+    recovery = updates.recover(
+        settings.data_dir,
+        settings.database_file,
+        app_version=__version__,
+        known=db.known_migrations(),
+    )
+    if recovery is not None:
+        print(recovery.message, flush=True)
     browser = BrowserSession(settings.port)
-    app = create_app(settings, browser=browser, web_dist=_web_dist())
+    try:
+        app = create_app(settings, browser=browser, web_dist=_web_dist())
+    except db.DatabaseNewerThanApp as error:
+        print(error)
+        return 1
+    except BackupFailed as error:
+        print(
+            f"DataLab couldn't back up its database before updating it ({error}), "
+            "so it didn't change anything. If the disk is full, free up some space, then "
+            "start it again."
+        )
+        return 1
+    # The new version is up, with its migrations applied: the update is done.
+    updates.finish(settings.data_dir, __version__)
     url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
     print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
     if open_browser:
@@ -129,6 +168,85 @@ def _pull_images(settings) -> int:
         if subprocess.run(["docker", "pull", "-q", image]).returncode != 0:
             print(f"Couldn't download {image}. Is Docker Desktop running?")
             return 1
+    return 0
+
+
+def _backup(settings) -> int:
+    import sqlite3
+
+    from datalab import __version__
+    from datalab.db.backups import backups_dir, take_backup
+
+    if not settings.database_file.exists():
+        print("There's no DataLab database yet, so there's nothing to back up.")
+        return 1
+    source = sqlite3.connect(settings.database_file, isolation_level=None)
+    try:
+        backup = take_backup(
+            source, backups_dir(settings.database_file), app_version=__version__, reason="manual"
+        )
+    finally:
+        source.close()
+    print(f"Backed up the database to {backup.folder}")
+    return 0
+
+
+def _rollback(settings, args) -> int:
+    from datalab import __version__, db
+    from datalab.db import rollback
+    from datalab.db.backups import BackupFailed, backups_dir, list_backups
+
+    known = db.known_migrations()
+    if args.list:
+        found = list_backups(backups_dir(settings.database_file))
+        if not found:
+            print(f"No backups in {backups_dir(settings.database_file)}")
+        for backup in reversed(found):
+            usable = "" if set(backup.migrations) <= known else "  (for a newer DataLab)"
+            print(
+                f"{backup.name:<16} {backup.created_at[:16].replace('T', ' ')}  "
+                f"{backup.reason:<8} schema {backup.schema_version}{usable}"
+            )
+        return 0
+
+    from datalab.trial import refuse_if_running
+
+    refuse_if_running(settings)
+    try:
+        plan = rollback.plan(settings.database_file, known, choose=args.backup)
+    except rollback.RollbackRefused as refused:
+        print(refused)
+        return 1
+    backup = plan.backup
+    print(
+        f"This DataLab ({__version__}) is older than your database, which a newer DataLab "
+        f"changed ({', '.join(plan.undone)})."
+    )
+    print(
+        f"Rolling back puts back the backup {backup.name!r}, taken "
+        f"{backup.created_at[:16].replace('T', ' ')} before DataLab {backup.app_version} "
+        "changed the database."
+    )
+    if plan.loses_data:
+        print("\nThat drops what was recorded in DataLab since then:")
+        for line in rollback.describe(plan.losses):
+            print(f"  {line}")
+        print(
+            "\nThe files themselves (conversation workspaces, query results, and exports) "
+            "stay on disk; only DataLab's record of them goes."
+        )
+        if not args.yes:
+            print("Nothing was changed. To roll back anyway, run: datalab rollback --yes")
+            return 1
+    try:
+        kept = rollback.restore(settings.database_file, backup, app_version=__version__)
+    except (rollback.RollbackRefused, BackupFailed) as refused:
+        print(f"Nothing was changed: {refused}")
+        return 1
+    print(
+        f"Rolled back. The database as it was a moment ago is kept in {kept.folder}, "
+        "in case you need it."
+    )
     return 0
 
 

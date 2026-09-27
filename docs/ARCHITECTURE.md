@@ -741,6 +741,12 @@ something we can use end to end ourselves.
 7. **Distribution polish.** Complete the installers, updates and rollback
    with database backup, the uninstaller, and the release pipeline. Test on
    the Windows machine.
+   - Data side done 2026-09-27: backups before migrating, `datalab rollback`,
+     the update marker and recovery from an interrupted update, the CI
+     upgrade-and-rollback test, and `images.json` and `SHA256SUMS` in each
+     release (docs/DISTRIBUTION.md, "How updating keeps the database safe").
+     Still to do: the updater itself, the Updates pill, the Storage view,
+     "Copy diagnostics", signing, and the Windows test.
 8. **Finish.** Evals (growing from 3h's set), full claim-to-evidence
    provenance (each number linked to its query, script, and output, and the
    "How was this made?" view; milestone 3 only checks that numbers appear in
