@@ -118,7 +118,7 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if manage_containers:
             # Containers from a previous run that didn't shut down cleanly.
-            await remove_all_session_containers(settings.profile)
+            await remove_all_session_containers(settings.profile, settings.data_dir)
             await helper.remove_leftovers(settings)
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
@@ -132,9 +132,22 @@ def create_app(
     app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
     app.state.services = services
     app.router.routes.extend(agent_tools_app.routes)
+
+    def model_status(session_id: str, data: dict) -> None:
+        # Conversations show how their model requests are going; helpers and
+        # safety-check sessions only log it.
+        if conversations.get(session_id) is not None:
+            conversations.append(session_id, "model_status", data)
+
     app.include_router(
         build_relay_router(
-            tokens, model_key, settings.model_base_url, model_http, settings.allowed_models
+            tokens,
+            model_key,
+            settings.model_base_url,
+            model_http,
+            settings.allowed_models,
+            on_status=model_status,
+            stopped=sessions.stopping,
         )
     )
 

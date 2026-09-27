@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datalab.relay.policy import model_allowed
 from datalab.sessions.approvals import Unshowable
-from datalab.sessions.manager import Busy, SessionManager
+from datalab.sessions.manager import CONTINUE_TEXT, Busy, NothingToReview, SessionManager
 from datalab.sessions.modes import MODES
 from datalab.sessions.plans import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
@@ -215,6 +215,31 @@ def build_conversations_router(
     async def stop(conversation_id: str) -> ConversationOut:
         conversation = get_or_404(conversation_id)
         await sessions.stop(conversation_id)
+        return out(conversation)
+
+    @router.post("/conversations/{conversation_id}/continue", status_code=202)
+    async def continue_turn(conversation_id: str) -> ConversationOut:
+        """Pick up the last turn where it left off, in the same thread (the chat
+        offers it after a turn fails, say when the model service stayed busy)."""
+        conversation = get_or_404(conversation_id)
+        if not model_allowed(conversation.model, allowed_models):
+            raise HTTPException(
+                409, "This conversation's model isn't approved for DataLab any more."
+            )
+        try:
+            await sessions.send(conversation, CONTINUE_TEXT, None, continues=True)
+        except Busy as error:
+            raise HTTPException(409, str(error)) from error
+        return out(conversation)
+
+    @router.post("/conversations/{conversation_id}/review", status_code=202)
+    async def rerun_review(conversation_id: str) -> ConversationOut:
+        """Run the last turn's rigor review again, after it couldn't finish."""
+        conversation = get_or_404(conversation_id)
+        try:
+            await sessions.rerun_review(conversation)
+        except (Busy, NothingToReview) as error:
+            raise HTTPException(409, str(error)) from error
         return out(conversation)
 
     @router.post("/conversations/{conversation_id}/approvals/{approval_id}", status_code=204)

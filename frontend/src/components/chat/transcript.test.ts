@@ -37,13 +37,16 @@ describe("buildTranscript", () => {
   });
 
   it("records a stopped turn", () => {
+    const stopping = buildTranscript([e("user_message", { text: "run it" }), e("stop_requested")])[0];
+    expect(stopping.items).toContainEqual({ kind: "notice", tone: "info", text: "Stopping…" });
     const [turn] = buildTranscript([
       e("user_message", { text: "run it" }),
       e("stop_requested"),
       e("turn_finished", { status: "interrupted" }),
     ]);
     expect(turn.status).toBe("interrupted");
-    expect(turn.items).toContainEqual({ kind: "notice", tone: "info", text: "Stopping…" });
+    // Once stopped, the turn says so itself: no "Stopping…" left behind.
+    expect(turn.items).not.toContainEqual({ kind: "notice", tone: "info", text: "Stopping…" });
   });
 
   it("starts a new turn for each user message", () => {

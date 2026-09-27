@@ -335,3 +335,79 @@ def test_numbers_in_an_answer_are_traced(app):
     asyncio.run(manager._trace(conversation.id, 0, ['{"row_count": 20592} at 12:45:00']))
     [traced] = store.events_of_types_after(conversation.id, 0, ("trace",))
     assert traced.data == {"answer": "m1", "numbers": 2, "untraced": ["81"]}
+
+
+def test_a_review_that_couldnt_finish_can_be_run_again_without_redoing_the_turn(app):
+    made = use_fake_runtime(app)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        # Nothing to run again yet.
+        assert client.post(f"/api/conversations/{cid}/review").status_code == 409
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "review_finished")
+        wait_for(client, cid, "turn_done")
+        runtime = made[0]
+        first = runtime.reviews[0]
+
+        # Say the model service was busy: the review failed.
+        store = app.state.services.conversations
+        store.append(cid, "review_started", {})
+        store.append(cid, "review", {"id": "r2", "text": "partial"})
+        store.append(cid, "review_finished", {"status": "failed"})
+
+        assert client.post(f"/api/conversations/{cid}/review").status_code == 202
+        deadline = time.time() + 5
+        events: list[dict] = []
+        while time.time() < deadline:
+            events = client.get(f"/api/conversations/{cid}/events").json()
+            if sum(e["type"] == "turn_done" for e in events) == 2:
+                break
+            time.sleep(0.02)
+        rerun = made[-1]
+        # The same answer and question, not the failed review's text; the turn
+        # itself wasn't sent again.
+        assert rerun.reviews == [first]
+        assert len(runtime.sent) == 1 and (rerun is runtime or rerun.sent == [])
+        assert [e["data"].get("status") for e in events if e["type"] == "review_finished"][-1] == (
+            "completed"
+        )
+        # Finished now: nothing left to run again.
+        assert client.post(f"/api/conversations/{cid}/review").status_code == 409
+
+
+def test_continue_picks_up_in_the_same_thread_and_the_review_reads_the_original_question(app):
+    from datalab.sessions.manager import CONTINUE_TEXT
+
+    made = use_fake_runtime(app)
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "turn_done")
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 202
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            events = client.get(f"/api/conversations/{cid}/events").json()
+            if sum(e["type"] == "turn_done" for e in events) == 2:
+                break
+            time.sleep(0.02)
+        asked = [e for e in events if e["type"] == "user_message"]
+        assert asked[-1]["data"] == {"text": CONTINUE_TEXT, "continues": True}
+        assert CONTINUE_TEXT in made[-1].sent[-1]
+        # The continued turn's review reads the question it picks up, not "please continue".
+        last = store.last(cid, "user_message")
+        assert manager._work_began(cid, last).data["text"] == "how many?"
+        assert "<question>\nhow many?\n</question>" in made[-1].reviews[-1]
+
+
+def test_a_review_cut_short_by_a_restart_can_be_run_again(app):
+    use_fake_runtime(app)
+    store = app.state.services.conversations
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "how many?"})
+        wait_for(client, cid, "turn_done")
+        # DataLab stopped mid-review: a start, and no finish.
+        store.append(cid, "review_started", {})
+        assert client.post(f"/api/conversations/{cid}/review").status_code == 202

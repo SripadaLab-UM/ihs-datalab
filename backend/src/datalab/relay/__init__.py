@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from datalab.credentials import MissingCredential
+from datalab.relay import recovery
 from datalab.relay.policy import Refused, check_responses_request, model_allowed, parse_request
 from datalab.sessions.tokens import SessionTokens, bearer_token
 
@@ -30,7 +31,20 @@ log = logging.getLogger(__name__)
 
 # Response headers passed back to Codex. Everything else (cookies, upstream
 # infrastructure headers) stays here.
-_PASS_BACK = ("content-type", "x-request-id", "openai-processing-ms")
+_PASS_BACK = (
+    "content-type",
+    "x-request-id",
+    "openai-processing-ms",
+    "retry-after",
+    "retry-after-ms",
+)
+
+# Tells a session how its model requests are going (session ID, event data):
+# the chat shows "busy, retrying in 20 s" instead of a raw error.
+StatusCallback = Callable[[str, dict], None]
+# Whether a session's turn was stopped: then nothing is retried, even if
+# Codex's connection is still open (it may stay open through the gateway).
+StoppedCheck = Callable[[str], bool]
 
 
 def build_relay_router(
@@ -39,6 +53,8 @@ def build_relay_router(
     base_url: str,
     client: httpx.AsyncClient,
     allowed_models: tuple[str, ...] | None = None,
+    on_status: StatusCallback | None = None,
+    stopped: StoppedCheck | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/relay/v1", include_in_schema=False)
     base_url = base_url.rstrip("/")
@@ -85,7 +101,23 @@ def build_relay_router(
             return _refused(503, "no U-M GPT key is saved in DataLab")
         # Exactly what was checked goes upstream, not the original bytes.
         checked = json.dumps(body, ensure_ascii=False).encode()
-        return await _forward(client, "POST", f"{base_url}/responses", checked, key)
+
+        def status(data: dict) -> None:
+            if on_status is not None:
+                on_status(access.session_id, {**data, "model": body.get("model")})
+
+        def gone() -> bool:
+            return stopped is not None and stopped(access.session_id)
+
+        return await _forward(
+            client,
+            f"{base_url}/responses",
+            checked,
+            key,
+            request=request,
+            status=status,
+            gone=gone,
+        )
 
     @router.api_route("/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
     async def everything_else(path: str) -> Response:
@@ -95,27 +127,89 @@ def build_relay_router(
 
 
 async def _forward(
-    client: httpx.AsyncClient, method: str, url: str, body: bytes | None, key: str
+    client: httpx.AsyncClient,
+    url: str,
+    body: bytes,
+    key: str,
+    *,
+    request: Request,
+    status: Callable[[dict], None],
+    gone: Callable[[], bool] = lambda: False,
 ) -> Response:
+    """Send the request upstream and stream the answer back.
+
+    A failure before any of the answer has streamed is retried here, within
+    recovery's bounds, honouring the server's wait. The same checked bytes are
+    sent each time. Nothing is retried once Codex has stopped waiting.
+    """
     headers = {
         "authorization": f"Bearer {key}",
         "accept-encoding": "identity",
+        "content-type": "application/json",
     }
-    if body is not None:
-        headers["content-type"] = "application/json"
+    waited = 0.0
+    attempt = 0
+    trouble: recovery.Trouble | None = None
+    while True:
+        attempt += 1
+        try:
+            upstream = await client.send(
+                client.build_request("POST", url, content=body, headers=headers), stream=True
+            )
+        except httpx.HTTPError as error:
+            trouble = recovery.connection_trouble(error)
+            failure: Response = _refused(502, f"couldn't reach U-M GPT ({type(error).__name__})")
+        else:
+            if upstream.status_code < 400:
+                if trouble is not None:
+                    status({"state": "recovered", "attempt": attempt})
+                passed = {k: v for k, v in upstream.headers.items() if k.lower() in _PASS_BACK}
+                return StreamingResponse(
+                    upstream.aiter_bytes(),
+                    status_code=upstream.status_code,
+                    headers=passed,
+                    background=BackgroundTask(upstream.aclose),
+                )
+            content = await _read_bounded(upstream)
+            trouble = recovery.classify(upstream.status_code, upstream.headers, content)
+            passed = {k: v for k, v in upstream.headers.items() if k.lower() in _PASS_BACK}
+            failure = Response(content, status_code=upstream.status_code, headers=passed)
+        log.warning("model request failed (attempt %d): %s", attempt, trouble.record())
+        delay = recovery.next_delay(trouble, attempt, waited)
+        if delay is None:
+            status({"state": "failed", "attempt": attempt, **trouble.record()})
+            return failure
+        wait = round(delay)
+        status({"state": "retrying", "attempt": attempt, "wait_seconds": wait, **trouble.record()})
+        if not await _wait_unless_gone(request, delay, gone):
+            return failure  # stopped: nothing to report as failed
+        waited += delay
+
+
+async def _read_bounded(upstream: httpx.Response, limit: int = 65_536) -> bytes:
+    content = b""
     try:
-        upstream = await client.send(
-            client.build_request(method, url, content=body, headers=headers), stream=True
-        )
-    except httpx.HTTPError as error:
-        return _refused(502, f"couldn't reach U-M GPT ({type(error).__name__})")
-    passed = {k: v for k, v in upstream.headers.items() if k.lower() in _PASS_BACK}
-    return StreamingResponse(
-        upstream.aiter_bytes(),
-        status_code=upstream.status_code,
-        headers=passed,
-        background=BackgroundTask(upstream.aclose),
-    )
+        async for chunk in upstream.aiter_bytes():
+            content += chunk
+            if len(content) >= limit:
+                break
+    finally:
+        await upstream.aclose()
+    return content[:limit]
+
+
+async def _wait_unless_gone(
+    request: Request, seconds: float, stopped: Callable[[], bool] = lambda: False
+) -> bool:
+    """Wait, checking every second that Codex is still waiting and the person
+    hasn't pressed Stop. False if either: then nothing is sent again."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + seconds
+    while (left := deadline - loop.time()) > 0:
+        if stopped() or await request.is_disconnected():
+            return False
+        await asyncio.sleep(min(1.0, left))
+    return not (stopped() or await request.is_disconnected())
 
 
 def _key_or_none(api_key: Callable[[], str]) -> str | None:

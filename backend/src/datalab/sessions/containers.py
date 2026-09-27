@@ -8,6 +8,7 @@ model relay and the agent tools in DataLab on the host. See docs/SAFETY.md.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import shutil
@@ -31,6 +32,15 @@ _LABEL = "datalab.session"
 # Which DataLab profile owns a container, so a practice instance's cleanup
 # never touches a real instance's sessions (or the other way round).
 _PROFILE_LABEL = "datalab.profile"
+# Which DataLab instance (data folder) owns it, so a second instance of the
+# same profile (the evaluation server, say) never removes another's sessions.
+_INSTANCE_LABEL = "datalab.instance"
+
+
+def instance_of(data_dir: Path) -> str:
+    """A short, stable name for the DataLab instance using this data folder."""
+    return hashlib.sha256(str(Path(data_dir).resolve()).encode()).hexdigest()[:16]
+
 
 # Stops commands a turn left running after an interrupt. Codex 0.157.1 ends
 # the turn but not the shell commands it started (found in the spike).
@@ -120,6 +130,7 @@ class SessionContainers:
         agent_image: str,
         host_port: int,
         profile: str,
+        instance: str = "",
         limits: ContainerLimits | None = None,
         # More `docker run` mount arguments, read when the agent starts: the
         # conversation's attached inputs, all read-only (see inputs.py).
@@ -135,6 +146,7 @@ class SessionContainers:
         self._labels = [
             "--label", f"{_LABEL}={session_id}",
             "--label", f"{_PROFILE_LABEL}={profile}",
+            "--label", f"{_INSTANCE_LABEL}={instance}",
         ]  # fmt: skip
         short = session_id.replace("_", "-")[-24:]
         self.network = f"datalab-{short}"
@@ -358,12 +370,40 @@ async def docker(*args: str, check: bool = True) -> str:
     return out.decode(errors="replace")
 
 
-async def remove_all_session_containers(profile: str) -> None:
-    """Clean up this profile's containers and networks left by a previous run."""
+async def remove_all_session_containers(profile: str, data_dir: Path) -> None:
+    """Clean up this instance's containers and networks left by a previous run.
+
+    Only this instance's: another DataLab with the same profile (an
+    evaluation server, say) may be running now. A container from before
+    instances were labelled counts as this one's only if its session's folder
+    is in this data folder.
+    """
+    instance = instance_of(data_dir)
     owned = f"label={_PROFILE_LABEL}={profile}"
-    ids = (await docker("ps", "-aq", "--filter", owned, check=False)).split()
-    if ids:
+    fields = f'{{{{.ID}}}}|{{{{.Label "{_INSTANCE_LABEL}"}}}}|{{{{.Label "{_LABEL}"}}}}'
+    listed = await docker("ps", "-a", "--filter", owned, "--format", fields, check=False)
+    if ids := _owned(listed, instance, data_dir):
         await docker("rm", "-f", *ids, check=False)
-    networks = (await docker("network", "ls", "-q", "--filter", owned, check=False)).split()
-    if networks:
+    listed = await docker("network", "ls", "--filter", owned, "--format", fields, check=False)
+    if networks := _owned(listed, instance, data_dir):
         await docker("network", "rm", *networks, check=False)
+
+
+def _owned(listing: str, instance: str, data_dir: Path) -> list[str]:
+    """IDs from `ID|INSTANCE|SESSION` lines that belong to this instance."""
+    ids = []
+    for line in listing.splitlines():
+        object_id, label, session = ([*line.split("|"), "", ""])[:3]
+        if not object_id.strip():
+            continue
+        label, session = label.strip(), session.strip()
+        ours = label == instance or (
+            not label
+            and bool(session)
+            and any(
+                (data_dir / kind / session).exists() for kind in ("sessions", "helpers", "safety")
+            )
+        )
+        if ours:
+            ids.append(object_id.strip())
+    return ids

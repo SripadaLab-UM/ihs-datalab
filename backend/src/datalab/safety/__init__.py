@@ -42,7 +42,7 @@ from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
 from datalab.safety import policy
 from datalab.safety.canary import Canaries
 from datalab.sessions.checkpoints import Checkpoints
-from datalab.sessions.containers import SessionContainers, SessionPaths, docker
+from datalab.sessions.containers import SessionContainers, SessionPaths, docker, instance_of
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
 
 if TYPE_CHECKING:
@@ -142,6 +142,7 @@ class SafetyCheck:
             agent_image=self._settings.agent_image,
             host_port=self._port,
             profile=self._settings.profile,
+            instance=instance_of(self._settings.data_dir),
         )
         token = self._tokens.issue(SessionAccess(session_id, kind, paths.oracle_results))
         paths.create()

@@ -21,7 +21,7 @@ from datalab.config import Settings, default_data_dir
 from datalab.sessions import modes, rigor
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
-from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths
+from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths, instance_of
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import (
     AttachmentStore,
@@ -37,6 +37,16 @@ from datalab.sessions.tokens import SessionTokens
 from datalab.sessions.tracing import trace
 
 log = logging.getLogger(__name__)
+
+
+# What Continue sends: the same thread picks up where a turn stopped part-way.
+CONTINUE_TEXT = (
+    "Please continue where you left off: the last turn was interrupted before it finished."
+)
+
+
+class NothingToReview(RuntimeError):
+    """There's no unfinished rigor review to run again."""
 
 
 class Busy(RuntimeError):
@@ -88,7 +98,11 @@ class SessionManager:
         task = self._turns.get(conversation_id)
         return task is not None and not task.done()
 
-    async def send(self, conversation: Conversation, text: str, effort: str | None) -> None:
+    async def send(
+        self, conversation: Conversation, text: str, effort: str | None, *, continues: bool = False
+    ) -> None:
+        """Start a turn. `continues`: it picks up a turn that failed or was stopped
+        (Continue), so its review reads that turn's question and work too."""
         if self.is_busy(conversation.id):
             raise Busy("The agent is still working on the previous message.")
         # Reserved before the first await, so nothing else starts meanwhile.
@@ -99,13 +113,81 @@ class SessionManager:
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
             note = self._workspace_note(conversation.id)
-            self._store.append(conversation.id, "user_message", {"text": text})
+            self._store.append(
+                conversation.id,
+                "user_message",
+                {"text": text, **({"continues": True} if continues else {})},
+            )
             turn = self._store.count(conversation.id, "user_message")
             self._turns[conversation.id] = asyncio.create_task(
                 self._run_turn(conversation.id, runtime, note + text, effort, turn)
             )
         finally:
             self._starting.discard(conversation.id)
+
+    async def rerun_review(self, conversation: Conversation) -> None:
+        """Run the last turn's rigor review again after it couldn't finish (the
+        model service was busy, say, or it was stopped). The analysis isn't
+        redone: the review reads the same answer, plans and queries."""
+        if self.is_busy(conversation.id):
+            raise Busy("The agent is still working.")
+        asked = self._store.last(conversation.id, "user_message")
+        started = self._store.last(conversation.id, "review_started")
+        finished = self._store.last(conversation.id, "review_finished")
+        # Anchored on the review's start: one cut short by a restart never finished.
+        if (
+            asked is None
+            or started is None
+            or started.seq < asked.seq
+            or (
+                finished is not None
+                and finished.seq > started.seq
+                and finished.data.get("status") == "completed"
+            )
+        ):
+            raise NothingToReview("There's no unfinished review to run again.")
+        self._starting.add(conversation.id)
+        try:
+            await self._make_room(keep=conversation.id)
+            runtime = self._runtime(conversation)
+            runtime.begin_turn()
+            self._last_used[conversation.id] = time.monotonic()
+            turn = self._store.count(conversation.id, "user_message")
+            self._turns[conversation.id] = asyncio.create_task(
+                self._rerun_review(conversation.id, runtime, asked, turn)
+            )
+        finally:
+            self._starting.discard(conversation.id)
+
+    async def _rerun_review(
+        self, conversation_id: str, runtime: SessionRuntime, asked: Event, turn: int
+    ) -> None:
+        try:
+            began = self._work_began(conversation_id, asked)
+            await self._review(conversation_id, runtime, began.seq, str(began.data.get("text", "")))
+            runtime.take_evidence()
+            if runtime.ran_commands():
+                label = f"After turn {turn}'s review"
+                await self._checkpoint(conversation_id, runtime, turn, label)
+        finally:
+            if self._turns.get(conversation_id) is asyncio.current_task():
+                del self._turns[conversation_id]
+            self._store.append(conversation_id, "turn_done", {})
+
+    def _work_began(self, conversation_id: str, asked: Event) -> Event:
+        """The question a turn answers: a turn that Continue started picks up the
+        one before it (which failed or was stopped), and so on back."""
+        messages = [
+            e
+            for e in self._store.events_of_types_after(conversation_id, 0, ("user_message",))
+            if e.seq <= asked.seq
+        ]
+        began = asked
+        for earlier in reversed(messages[:-1]):
+            if not began.data.get("continues"):
+                break
+            began = earlier
+        return began
 
     async def restore(self, conversation: Conversation, number: int) -> RestoreResult:
         """Put the workspace files back as they were at a checkpoint.
@@ -205,6 +287,12 @@ class SessionManager:
             answered["question"] = value
         self._store.append(conversation_id, "approval_answered", answered)
 
+    def stopping(self, session_id: str) -> bool:
+        """Whether the person stopped this conversation's current turn (the
+        relay checks this before retrying a model request)."""
+        runtime = self._runtimes.get(session_id)
+        return runtime is not None and runtime.stop_requested
+
     async def stop(self, conversation_id: str) -> None:
         if self.helper is not None:
             self.helper.cancel(conversation_id)
@@ -249,6 +337,7 @@ class SessionManager:
             agent_image=self._settings.agent_image,
             host_port=self._settings.port,
             profile=self._settings.profile,
+            instance=instance_of(self._settings.data_dir),
             extra_mounts=(lambda: self._input_mounts(conversation_id))
             if self._attachments
             else None,
@@ -401,8 +490,9 @@ class SessionManager:
             # the answer states numbers), and not if the person pressed Stop.
             wanted = conversation is not None and conversation.rigor_review
             if wanted and (ran_commands or evidence or claims) and not runtime.stop_requested:
-                question = str(started.data.get("text", "")) if started else ""
-                await self._review(conversation_id, runtime, since, question)
+                began = self._work_began(conversation_id, started) if started else None
+                question = str(began.data.get("text", "")) if began else ""
+                await self._review(conversation_id, runtime, began.seq if began else 0, question)
                 runtime.take_evidence()
                 if runtime.ran_commands():
                     # The review ran commands, which could have changed files.
@@ -415,8 +505,12 @@ class SessionManager:
                 del self._turns[conversation_id]
             self._store.append(conversation_id, "turn_done", {})
 
-    def _final_answer(self, conversation_id: str, since: int) -> Event | None:
+    def _final_answer(
+        self, conversation_id: str, since: int, until: int | None = None
+    ) -> Event | None:
         events = self._store.all_events_after(conversation_id, since)
+        if until is not None:
+            events = [e for e in events if e.seq < until]
         answers = [e for e in events if e.type == "answer" and e.data.get("text")]
         final = [e for e in answers if e.data.get("phase") == "final_answer"] or answers
         return final[-1] if final else None
@@ -479,8 +573,12 @@ class SessionManager:
         needs is given to it: the question, the approved plans, the queries
         run, and the answer.
         """
+        # The turn's own work: not an earlier review of it (when run again).
         events = self._store.all_events_after(conversation_id, since)
-        answer = self._final_answer(conversation_id, since)
+        first_review = next((e.seq for e in events if e.type == "review_started"), None)
+        if first_review is not None:
+            events = [e for e in events if e.seq < first_review]
+        answer = self._final_answer(conversation_id, since, until=first_review)
         queries = [
             str((e.data.get("arguments") or {}).get("sql", ""))
             for e in events

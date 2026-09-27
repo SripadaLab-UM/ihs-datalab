@@ -17,7 +17,7 @@ import uvicorn
 from datalab.app import create_app
 from datalab.config import Settings
 from datalab.safety import SafetyReport
-from datalab.sessions.containers import SessionContainers, SessionPaths
+from datalab.sessions.containers import SessionContainers, SessionPaths, instance_of
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.tokens import SessionKind
 
@@ -67,6 +67,7 @@ async def run_trial(settings: Settings, question: str, image: str, research: boo
             agent_image=image,
             host_port=settings.port,
             profile=settings.profile,
+            instance=instance_of(settings.data_dir),
         ),
         app.state.services.tokens,
         model=settings.default_model,

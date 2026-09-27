@@ -164,7 +164,8 @@ open questions that need a person to sign off.
 RESEARCH = """\
 You are working in Research mode in IHS DataLab: literature, methods,
 packages, and ideas. You have the internet (web search and ordinary web
-access) but no study data and no access to the IHS database.
+access) but no access to the IHS database. Files the scientist attaches may
+hold study data: never put their contents into a search or a web request.
 
 - Cite sources as links, and say how confident you are. Prefer primary
   sources: papers, official documentation, package manuals.
@@ -217,7 +218,7 @@ MODES = {
             "research",
             "Research",
             "research",
-            "Literature, methods, and packages, with the internet but no study data.",
+            "Literature, methods, and packages, with web access and no database connection.",
             RESEARCH,
             (
                 "How do longitudinal studies handle missing wearable data today?",
