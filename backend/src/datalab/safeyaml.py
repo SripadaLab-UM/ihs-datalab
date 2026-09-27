@@ -26,10 +26,20 @@ from typing import Any
 
 import yaml
 from yaml.constructor import SafeConstructor
+from yaml.resolver import Resolver
 
 from datalab.textcheck import lone_surrogate, size_text
 
 MAX_DEPTH = 32
+# Integers: Python won't turn one of more than 4,300 decimal digits into text
+# (and a long sexagesimal 1:2:3... takes quadratic time to build), so an
+# integer written longer, or bigger than 14,000 bits (0x and 3,500 digits),
+# is refused.
+MAX_INT_CHARS = 4300
+MAX_INT_BITS = 14_000
+_INT_TAG = "tag:yaml.org,2002:int"
+_RESOLVER = Resolver()
+_TOO_LONG = "A number in it is too long to read."
 
 
 class YamlRefused(ValueError):
@@ -54,6 +64,10 @@ def load(text: str, *, max_bytes: int, max_depth: int = MAX_DEPTH) -> Any:
             and (not_text := lone_surrogate(event.value)) is not None
         ):
             raise YamlRefused(not_text.message, _line(event))
+        if isinstance(event, yaml.ScalarEvent) and len(event.value) > MAX_INT_CHARS:
+            tag = event.tag or _RESOLVER.resolve(yaml.ScalarNode, event.value, event.implicit)
+            if tag == _INT_TAG:
+                raise YamlRefused(_TOO_LONG, _line(event))
         if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None:
             raise YamlRefused(
                 "Don't use YAML anchors or aliases (& and *): write each value out.",
@@ -69,15 +83,33 @@ def load(text: str, *, max_bytes: int, max_depth: int = MAX_DEPTH) -> Any:
         for document in yaml.compose_all(text, Loader=yaml.SafeLoader):
             if document is not None:
                 _check_keys(document)
-        return yaml.safe_load(text)
+        data = yaml.safe_load(text)
     except YamlRefused:
         raise
     except ValueError as error:
-        # What PyYAML doesn't catch: Python's limit on an integer's digits,
-        # or a date that doesn't exist (2025-13-45).
-        if "digits" in str(error):
-            raise YamlRefused("A number in it is too long to read.") from None
-        raise YamlRefused(f"A value in it can't be read ({error}).") from None
+        # What PyYAML doesn't catch: a date that doesn't exist (2025-13-45),
+        # or a value its tag can't be (`!!float x`), shown shortened.
+        raise YamlRefused(f"A value in it can't be read ({_shown(str(error))}).") from None
+    _check_ints(data)
+    return data
+
+
+def _check_ints(data: Any) -> None:
+    stack = [data]
+    while stack:
+        value = stack.pop()
+        if isinstance(value, int) and value.bit_length() > MAX_INT_BITS:
+            raise YamlRefused(_TOO_LONG)
+        if isinstance(value, dict):
+            stack.extend(value.keys())
+            stack.extend(value.values())
+        elif isinstance(value, list):
+            stack.extend(value)
+
+
+def _shown(text: str, most: int = 80) -> str:
+    """Text from the file, in a message: at most `most` characters of it."""
+    return text if len(text) <= most else text[: most - 1] + "…"
 
 
 def _check_keys(root: yaml.Node) -> None:
@@ -96,8 +128,9 @@ def _check_keys(root: yaml.Node) -> None:
                 resolved = constructor.construct_object(key, deep=True)
                 if resolved in seen:
                     first = seen[resolved]
-                    same = "" if first == key.value else f" (as {first!r} too: both mean the same)"
-                    raise YamlRefused(f"{key.value!r} is given twice{same}.", _line(key))
+                    same = f" (as {_shown(first)!r} too: both mean the same)"
+                    same = "" if first == key.value else same
+                    raise YamlRefused(f"{_shown(key.value)!r} is given twice{same}.", _line(key))
                 seen[resolved] = key.value
                 stack.append(value)
         elif isinstance(node, yaml.SequenceNode):

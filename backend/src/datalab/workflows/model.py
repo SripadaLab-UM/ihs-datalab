@@ -930,13 +930,14 @@ def coerce_param(param: Parameter, value: Any) -> Scalar:
     if kind == "integer":
         if isinstance(value, bool):
             raise ValueError("Give a whole number.")
-        if isinstance(value, int):
+        # At most 18 digits, however it's given (as text, 0x.. in the YAML, 1e30).
+        if isinstance(value, int) and abs(value) < 10**18:
             return value
         if isinstance(value, str) and re.fullmatch(r"-?\d{1,18}", value.strip()):
             return int(value)
-        if isinstance(value, float) and value.is_integer():
+        if isinstance(value, float) and value.is_integer() and abs(value) < 1e18:
             return int(value)
-        raise ValueError("Give a whole number.")
+        raise ValueError("Give a whole number (at most 18 digits).")
     if kind == "number":
         if isinstance(value, bool):
             raise ValueError("Give a number.")

@@ -634,6 +634,24 @@ def test_save_as_workflow_refuses_an_alias_bomb(api):
     assert not (h.folder / "bomb.yaml").exists()
 
 
+def test_an_integer_default_too_big_for_a_parameter_is_a_problem(api):
+    from tests.test_workflow_runner import WEEKLY
+
+    client, _ = api
+    for default, said in (
+        ("0x" + "f" * 20_000, "too long to read"),  # was valid, then str() raised
+        ("0x" + "f" * 16, "at most 18 digits"),
+        ("1.0e+30", "at most 18 digits"),
+    ):
+        text = WEEKLY.replace("default: 11 }", f"default: {default} }}")
+        assert text != WEEKLY
+        checked = client.post("/api/workflows/validate", json={"text": text})
+        assert checked.status_code == 200 and checked.json()["valid"] is False, default[:10]
+        assert said in str(checked.json()["problems"]), checked.json()["problems"]
+    fine = WEEKLY.replace("default: 11 }", "default: 0x11 }")
+    assert client.post("/api/workflows/validate", json={"text": fine}).json()["valid"] is True
+
+
 def test_a_yaml_escape_that_isnt_text_is_refused_by_the_file_check(api):
     # Written raw in the JSON, /api refuses it first (test_textguard.py); as a
     # YAML escape the request is plain ASCII and the file check refuses it.

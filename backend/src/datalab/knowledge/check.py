@@ -44,6 +44,7 @@ import yaml
 
 from datalab import safeyaml
 from datalab.repos.git import name_problem
+from datalab.textcheck import size_text
 
 Severity = Literal["error", "data", "warning"]
 
@@ -462,8 +463,8 @@ def check(
             continue
         if len(content) > size_limit(path):
             if wanted(path):
-                limit = size_limit(path) // 1024
-                findings.append(_error(path, "too_large", f"Over the {limit} KB limit."))
+                limit = size_text(size_limit(path))
+                findings.append(_error(path, "too_large", f"Over the {limit} limit."))
             continue
         texts[path] = text
 

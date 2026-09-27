@@ -70,6 +70,12 @@ class BrowserSession:
         return bool(cookie) and hmac.compare_digest(cookie or "", self._cookie)
 
 
+# Set in the request's scope state once ApiProtection has let it through its
+# sign-in check (the api's routes, not /api/health): middleware inside that
+# reads bodies (api/textguard.py) reads only these.
+SIGNED_IN = "datalab.signed_in"
+
+
 class ApiProtection:
     """Require the session cookie on /api (except /api/health), and add security headers."""
 
@@ -83,14 +89,17 @@ class ApiProtection:
             await self._app(scope, receive, send)
             return
         path: str = scope["path"]
-        if self._enforce and path.startswith("/api/") and path != "/api/health":
-            cookie = Request(scope).cookies.get(self._session.cookie_name)
-            if not self._session.valid(cookie):
+        if path.startswith("/api/") and path != "/api/health":
+            if self._enforce and not self._session.valid(
+                Request(scope).cookies.get(self._session.cookie_name)
+            ):
                 response = JSONResponse(
                     {"detail": "Open DataLab from its launcher to sign in."}, status_code=401
                 )
                 await response(scope, receive, _with_headers(send))
                 return
+            # Past the sign-in check: what runs inside may read the body.
+            scope.setdefault("state", {})[SIGNED_IN] = True
         await self._app(scope, receive, _with_headers(send))
 
 

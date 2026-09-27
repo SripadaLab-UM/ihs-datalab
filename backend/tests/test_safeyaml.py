@@ -119,3 +119,39 @@ def test_characters_beyond_the_bmp_are_fine_written_or_escaped():
 def test_a_value_python_wont_build_is_refused_not_an_error():
     assert refused("a: " + "1" * 5000 + "\n").message == "A number in it is too long to read."
     assert "can't be read" in refused("2025-13-45: a\n").message
+
+
+@pytest.mark.parametrize(
+    "number",
+    [
+        "0x" + "f" * 20_000,  # 80,000 bits: loads, then str() and repr() raise
+        "0b" + "1" * 14_001,
+        "0" + "7" * 5_000,  # octal
+        "1" + ":59" * 2_000,  # sexagesimal, quadratic to build when long
+        "1" + "_0" * 4_400,
+    ],
+)
+def test_an_integer_too_big_to_show_is_refused_before_its_built(number):
+    started = time.monotonic()
+    problem = refused(f"a: 1\nb: {number}\n")
+    assert time.monotonic() - started < 0.5
+    assert problem.message == "A number in it is too long to read." and problem.line == 2
+    assert refused(f"a: !!int '{number}'\n").line == 1  # tagged as one, too
+
+
+def test_an_integer_under_the_limit_in_characters_but_over_it_in_bits_is_refused():
+    assert len("0x" + "f" * 3_600) < safeyaml.MAX_INT_CHARS
+    problem = refused("m: {k: [0x" + "f" * 3_600 + "]}\n")
+    assert problem.message == "A number in it is too long to read." and problem.line is None
+    assert refused("? 0x" + "f" * 3_600 + "\n: a\n").message == problem.message  # as a key
+    big_but_fine = safeyaml.load("a: 0x" + "f" * 3_000 + "\n", max_bytes=10_000)
+    assert big_but_fine["a"].bit_length() == 12_000 and str(big_but_fine["a"])
+
+
+def test_what_cant_be_read_isnt_repeated_back_in_full():
+    problem = refused("a: !!float " + "x" * 60_000 + "\n")
+    assert problem.message.startswith("A value in it can't be read (could not convert")
+    assert len(problem.message) < 120
+    long_key = "k" * 1000
+    twice = refused(f"{long_key}: 1\n{long_key}: 2\n")
+    assert "is given twice" in twice.message and len(twice.message) < 120

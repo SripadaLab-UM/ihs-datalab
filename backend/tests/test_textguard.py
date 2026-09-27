@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 from fastapi.testclient import TestClient
 
+from datalab.api.textguard import MAX_BODY_BYTES, RefuseNonText
 from datalab.app import create_app
 from tests.conftest import FakeDatabase
 from tests.test_workflow_runner import WEEKLY
@@ -76,4 +78,50 @@ def test_signing_in_is_checked_first(settings, catalog):
     app = create_app(settings, database=FakeDatabase(), catalog=catalog, manage_containers=False)
     with TestClient(app) as client:
         refused = send(client, "POST", "/api/workflows/validate", json.dumps({"text": "\ud800"}))
+        # /api/health needs no sign-in, so its body is never read here: a
+        # POST (as a cross-origin form can send, with no content type) is
+        # the route's own 405, however large or odd the body.
+        big = b'{"a": "\\ud800", "b": "' + b"x" * (MAX_BODY_BYTES + 1) + b'"}'
+        health = client.post("/api/health", content=big)
     assert refused.status_code == 401
+    assert health.status_code == 405
+
+
+def test_the_body_guard_reads_only_signed_in_requests():
+    # Not the flag ApiProtection sets: passed through unread.
+    seen: list[str] = []
+
+    async def app(scope, receive, send):
+        seen.append(scope["path"])
+        await send({"type": "http.response.start", "status": 204, "headers": []})
+        await send({"type": "http.response.body", "body": b""})
+
+    async def receive():
+        raise AssertionError("the body was read")
+
+    async def send(message):
+        pass
+
+    guard = RefuseNonText(app)
+    scope = {"type": "http", "path": "/api/x", "method": "POST", "headers": [], "state": {}}
+    asyncio.run(guard(scope, receive, send))
+    assert seen == ["/api/x"]
+
+
+def test_a_body_over_the_limit_is_refused_unread(client):
+    big = b'{"text": "' + b"x" * MAX_BODY_BYTES + b'"}'
+    declared = send(client, "POST", "/api/workflows/validate", big)
+    assert declared.status_code == 413
+    assert declared.json() == {"detail": "The request is larger than 16 MB."}
+
+    def chunks():  # no content-length: the count is kept as it's read
+        yield b'{"text": "'
+        for _ in range(17):
+            yield b"x" * 1024**2
+        yield b'"}'
+
+    streamed = send(client, "POST", "/api/workflows/validate", chunks())  # type: ignore[arg-type]
+    assert streamed.status_code == 413
+    # Under the limit it's read as usual.
+    under = send(client, "POST", "/api/workflows/validate", b'{"text": "' + b"x" * 1000 + b'"}')
+    assert under.status_code == 200
