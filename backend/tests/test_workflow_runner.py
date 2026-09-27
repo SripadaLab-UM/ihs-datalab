@@ -333,11 +333,27 @@ async def test_the_dated_delivery_folder_is_named_after_the_workflow(tmp_path):
     assert " export " not in name
 
 
-def test_the_delivery_title_still_loses_an_identifier(tmp_path):
-    folder = exports._new_folder(
-        tmp_path, runner_module.delivery_title("p0001_steps_2025"), "run_x"
-    )
-    assert folder.name.endswith(" steps 2025 run_x"), folder.name
+@pytest.mark.parametrize(
+    ("name", "title"),
+    [
+        ("fitbit_daily_2025", "fitbit daily 2025"),
+        ("p0001_steps_2025", "steps 2025"),
+        # Digits that aren't a year go, however the name is split.
+        ("steps_0001", "steps"),
+        ("steps-0001", "steps"),
+        ("user_0042_sleep", "user sleep"),
+        # Split up, an ID mustn't come back together ("syn 25 0001").
+        ("steps_syn_25_0001", "steps syn"),
+        ("subject_12_34", "subject"),
+        # If the scrub would still change the words, nothing of the name is used.
+        ("participant_2025", "export"),
+        ("0001", "export"),
+    ],
+)
+def test_the_delivery_title_still_loses_an_identifier(tmp_path, name, title):
+    assert runner_module.delivery_title(name) == title
+    folder = exports._new_folder(tmp_path, runner_module.delivery_title(name), "run_x")
+    assert folder.name.endswith(f" {title} run_x"), folder.name
 
 
 async def test_real_profile_delivers_to_the_folder_its_key_names(tmp_path, monkeypatch):

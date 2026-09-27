@@ -33,6 +33,8 @@ jobs:
         run: uv run ruff check ../evals && uv run ruff format --check ../evals && uv run pytest -q ../evals/test_graders.py
       - name: Spine conversion
         run: uv run ruff check ../scripts/convert-spine && uv run ruff format --check ../scripts/convert-spine && uv run pytest -q ../scripts/convert-spine
+      - name: Release parity check (comparison logic)
+        run: uv run ruff check ../scripts/parity && uv run ruff format --check ../scripts/parity && uv run pytest -q ../scripts/parity
 
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with

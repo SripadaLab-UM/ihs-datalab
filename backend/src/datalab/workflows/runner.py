@@ -57,6 +57,7 @@ from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
 from datalab.exports import DestinationStore, ExportError, ExportSource
 from datalab.sessions.inputs import NotAttachable, check_attachable
+from datalab.sessions.titles import scrub_title
 from datalab.workflows.model import (
     ORACLE_INPUT,
     BuiltinQc,
@@ -167,16 +168,36 @@ class _Plan:
     libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
+_YEAR = re.compile(r"(19|20)\d\d")
+
+
 def delivery_title(name: str) -> str:
     """The workflow's name as words, for its dated delivery folder.
 
     The export scrubs the title of anything shaped like a study identifier,
     and read as one word, `fitbit_daily_2025` mixes letters and digits the
     way IDs do, so the whole name went and the folder was called "export".
-    Split at the underscores, the year is kept as a year, while a real
-    identifier in a name (`p0001_steps`) is still taken out.
+    So the name is split at `_` and `-`, and each piece kept only if it
+    can't be part of an identifier:
+
+    - a piece of digits only if it is a year, so `steps_0001` and
+      `steps_syn_25_0001` can't come out as "steps 0001" or rebuild
+      "syn 25 0001";
+    - a piece mixing letters and digits (`p0001`) only if the scrub keeps it;
+    - and if the scrub would still change the joined words (`participant
+      2025`), none of it: the folder is called "export".
     """
-    return name.replace("_", " ")
+    kept = []
+    for piece in re.split(r"[_-]+", name):
+        if not piece:
+            continue
+        if piece.isdigit():
+            if _YEAR.fullmatch(piece):
+                kept.append(piece)
+        elif scrub_title(piece) == piece:
+            kept.append(piece)
+    title = " ".join(kept)
+    return title if title and scrub_title(title) == title else "export"
 
 
 def wrapper_bytes() -> bytes:

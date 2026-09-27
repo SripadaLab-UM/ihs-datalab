@@ -115,9 +115,13 @@ objects first, then runs the pipeline.
 
 - **`sql`**: a read-only query through DataLab's data service. The full result
   is saved as a CSV. Dates and times are written `YYYY-MM-DD HH:MM:SS`, which
-  R's `as.POSIXct` reads, and a column whose every value is at midnight as
-  plain dates (`YYYY-MM-DD`), as R itself writes one; RAW is upper-case hex,
-  as `RAWTOHEX` gives it.
+  R's `as.POSIXct` reads, and a DATE column whose every value is at midnight
+  as plain dates (`YYYY-MM-DD`), as R itself writes one. A TIMESTAMP keeps its
+  time; one WITH TIME ZONE is written as its local time, without the offset
+  (python-oracledb doesn't return it).
+  RAW is written as upper-case hex, as `RAWTOHEX` gives it. A hex key made of
+  digits and one `E` (`12E4`) looks like a number to Excel, which changes it
+  when the file is opened there: read keys as text.
 - **`r`**: a short inline R script.
 - **`pipeline`**: runs a pipeline from `ihsDataR`.
 - **`qc`**: built-in checks, which run as DataLab's own code: row counts,

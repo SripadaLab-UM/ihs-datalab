@@ -131,7 +131,7 @@ class V1Server:
         if _listening(V1_PORT):
             raise SystemExit(f"Port {V1_PORT} is in use; stop whatever holds it first.")
         env = {
-            **os.environ,
+            **_clean_environ(),
             "DATALAB_PROFILE": "practice",
             "DATALAB_DATA_DIR": str(self.data_dir),
             "DATALAB_ORACLE_PASSWORD": practice_password(),
@@ -326,7 +326,7 @@ def run_prototype(args: argparse.Namespace, clone: Path, mode: str, names: list[
                 for p in sorted((v1 / PIPELINE / "extract").glob("IHS_2025.*.csv"))
             }
         }
-    env = dict(os.environ)
+    env = _clean_environ()
     if mode == "live":
         if _listening(BROKER_PORT):
             raise SystemExit(f"Port {BROKER_PORT} is in use; stop whatever holds it first.")
@@ -360,8 +360,19 @@ def _container_names() -> set[str]:
     return set(listed.stdout.split())
 
 
+def _clean_environ() -> dict[str, str]:
+    """This shell's environment without DATALAB_* and LAB_AI_* settings.
+
+    Each side gets only the settings the harness sets, so a variable left in
+    the shell (another data folder, a real database, a token) can't change
+    which database or folder a run uses.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith(("DATALAB_", "LAB_AI_"))}
+
+
 def _listening(port: int) -> bool:
-    assert port not in FORBIDDEN_PORTS
+    if port in FORBIDDEN_PORTS:
+        raise SystemExit(f"Port {port} belongs to another DataLab; the harness never uses it.")
     found = subprocess.run(
         ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"], capture_output=True, text=True
     )

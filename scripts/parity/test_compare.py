@@ -96,11 +96,15 @@ def test_summaries_hold_no_cell_values(tmp_path):
     text = repr(result.to_dict())
     for value in (SECRET, "alpha", "gamma", "beta", "q-2"):
         assert value not in text
-    numeric = result.detail["columns_differing"]["n"]["v1"]["numeric"]
-    assert numeric == {"count": 2, "sum": 4.0, "mean": 2.0}
-    assert set(result.detail["columns_differing"]["n"]["v1"]) == {
-        "missing", "distinct", "shapes", "numeric",
-    }  # fmt: skip
+    # No mean or sum either: for a column of one value, that is the value.
+    for side in ("prototype", "v1"):
+        assert set(result.detail["columns_differing"]["n"][side]) == {
+            "missing",
+            "distinct",
+            "shapes",
+        }
+    one = run(tmp_path, "id,n\n1,7731\n", "id,n\n1,7732\n").to_dict()
+    assert "7731" not in repr(one) and "7732" not in repr(one)
 
 
 def test_the_report_holds_no_cell_values(tmp_path):
@@ -115,11 +119,17 @@ def test_the_report_holds_no_cell_values(tmp_path):
     entry = {
         "name": "w",
         "prototype_status": {"status": "succeeded"},
-        "v1_status": {"status": "succeeded"},
+        "v1_status": {
+            "side": "v1",
+            "status": "failed",
+            "error": f"R said: value {SECRET} is odd",
+            "steps": [{"id": "process", "state": "failed", "message": f"saw {SECRET}"}],
+        },
         "files": [result.to_dict()],
     }
     text = write_report(meta, {"live": [entry], "extracts": [entry]})
     assert SECRET not in text and "differs" in text and "`v`: value 1" in text
+    assert "- v1 step `process` failed" in text
 
 
 def test_shapes():

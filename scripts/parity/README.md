@@ -25,8 +25,8 @@ sandbox), and a catalog folder for v1.
 cd backend
 uv run python ../scripts/parity/parity.py all \
   --work <scratch folder> \
-  --prototype ~/work/srijan-knowledge-graph/um-gpt-local-proxy \
-  --pipelines ~/work/ihs-pipelines-w3 --commit <sha> \
+  --prototype <prototype checkout> \
+  --pipelines <ihs-pipelines checkout> --commit <sha> \
   --catalog <catalog folder> \
   --report ../docs/acceptance/<date>-parity.md
 ```
@@ -34,6 +34,8 @@ uv run python ../scripts/parity/parity.py all \
 `all` runs v1, then the prototype twice, then compares. `v1`, `prototype`
 and `compare` run one part. `--only` limits it to some workflows.
 
+- **Only the harness's settings reach each side.** `DATALAB_*` and
+  `LAB_AI_*` variables in the shell are dropped before either side starts.
 - **The prototype is only read.** A `--no-local` clone of it goes in
   `<work>/proto`, with its own virtualenv. `proto_driver.py` runs with that
   clone's Python and imports its code.
@@ -95,10 +97,12 @@ that agree as a whole (dates compared as instants), and the report says
 whether that key was unique.
 
 **No row-level values.** The report holds column names, row and column
-counts, value *shapes* (such as `YYYY-MM-DD HH:MM:SS`), missing and distinct
-counts, and for numeric columns the mean and sum. Never a row, a cell, a
-minimum or a maximum. The run folders under `<work>` do hold the synthetic
-rows, and stay there.
+counts, value *shapes* (such as `YYYY-MM-DD HH:MM:SS`), and missing and
+distinct counts. Never a row, a cell, a minimum or a maximum, nor a mean or
+sum (for a column of one value, that is the value), nor error text, which
+can quote a value: a failed step shows only its id and state. The run
+folders and status files under `<work>` hold the rest, including the
+synthetic rows, and stay there.
 
 ## What it doesn't cover
 

@@ -1,7 +1,9 @@
 """The parity report as Markdown: verdicts first, then what differs, per column.
 
-It holds only what compare.py returns: names, counts, value shapes, and
-numeric means and sums. No rows or cells.
+It holds only names, statuses, counts and value shapes, from compare.py and
+the drivers' status files. No rows, cells, or error text (a message from R
+or the database can quote a value): a failed step shows its id and state,
+and the run folders hold the rest.
 """
 
 from __future__ import annotations
@@ -18,18 +20,9 @@ def _status(entry: dict[str, Any]) -> str:
     return str(entry.get("status", "?"))
 
 
-def _fmt(value: Any) -> str:
-    if isinstance(value, float):
-        return f"{value:.6g}"
-    return str(value)
-
-
 def _shapes(summary: dict[str, Any]) -> str:
     shapes = ", ".join(f"`{k}` {v}" for k, v in summary.get("shapes", {}).items())
     extra = f"; missing {summary.get('missing', 0)}; distinct {summary.get('distinct', 0)}"
-    numeric = summary.get("numeric")
-    if numeric:
-        extra += f"; mean {_fmt(numeric['mean'])}, sum {_fmt(numeric['sum'])}"
     return (shapes or "none") + extra
 
 
@@ -71,12 +64,11 @@ def write_report(meta: dict[str, Any], results: dict[str, list[dict[str, Any]]])
 def _details(entry: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for status in (entry["prototype_status"], entry["v1_status"]):
-        if status.get("status") not in {"succeeded", None} and status.get("error"):
-            out.append(f"- {status.get('side', '?')} {status['status']}: {status['error']}")
+        if status.get("status") not in {"succeeded", None}:
+            out.append(f"- {status.get('side', '?')} {status['status']}")
         for step in status.get("steps", []):
             if step.get("state") not in {"succeeded", "skipped"}:
-                message = f": {step['message']}" if step.get("message") else ""
-                out.append(f"- {status.get('side')} step `{step['id']}` {step['state']}{message}")
+                out.append(f"- {status.get('side')} step `{step['id']}` {step['state']}")
     for file in entry["files"]:
         if file["verdict"] == "identical":
             continue

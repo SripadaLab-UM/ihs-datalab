@@ -2,9 +2,10 @@
 
 Everything this module returns is structural or aggregate: column names,
 row counts, per-column value *shapes* (such as `YYYY-MM-DD HH:MM:SS`),
-missing and distinct counts, and for numeric columns the count, mean and
-sum. It never returns a row, a cell, a minimum or a maximum, even for
-synthetic data, so a report built from it can be pasted anywhere.
+missing and distinct counts. It never returns a row, a cell, a minimum, a
+maximum, or a mean or sum (which, for a column of one value, would be the
+value), even for synthetic data, so a report built from it can be pasted
+anywhere.
 
 Verdicts, strictest first:
 
@@ -123,10 +124,6 @@ def column_summary(values: list[str]) -> dict[str, Any]:
         "distinct": len(set(values)),
         "shapes": dict(sorted(shapes.items())),
     }
-    numbers = [f for v in values if (f := _as_float(v)) is not None]
-    if numbers and len(numbers) == len(values) - out["missing"]:
-        total = math.fsum(numbers)
-        out["numeric"] = {"count": len(numbers), "sum": total, "mean": total / len(numbers)}
     return out
 
 

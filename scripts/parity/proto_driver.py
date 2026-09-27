@@ -32,7 +32,6 @@ import shutil
 import sys
 import threading
 import time
-import traceback
 import uuid
 from pathlib import Path
 from typing import Any
@@ -241,8 +240,10 @@ def run_pipelines() -> None:
                 csv_path = RESULTS / source["export_id"] / "result.csv"
                 shutil.copyfile(csv_path, target / "extract" / f"IHS_2025.{source['object']}.csv")
         except Exception as error:
+            # The type only: a message can quote a value. status.json keeps it,
+            # in the run's own folder, and the report doesn't show it.
             status.update(status="failed", error=f"{type(error).__name__}: {str(error)[:300]}")
-            traceback.print_exc()
+            print(f"prototype {name}: {type(error).__name__}", file=sys.stderr, flush=True)
         status["seconds"] = round(time.monotonic() - started, 1)
         (target / "status.json").write_text(json.dumps(status, indent=2))
         print(f"prototype {name}: {status['status']}", flush=True)
