@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createContext, type ReactNode, use, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createContext, type ReactNode, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 
 import { api } from "@/api/client";
@@ -147,7 +147,11 @@ function focusNear(stepId: string) {
   if (target) return target.focus();
   const main = document.querySelector<HTMLElement>("main");
   if (!main) return;
-  if (!main.hasAttribute("tabindex")) main.setAttribute("tabindex", "-1");
+  // Focusable just for this, and not after: the tabindex goes once focus moves on.
+  if (!main.hasAttribute("tabindex")) {
+    main.setAttribute("tabindex", "-1");
+    main.addEventListener("blur", () => main.removeAttribute("tabindex"), { once: true });
+  }
   main.focus();
 }
 
@@ -176,7 +180,7 @@ export function TourCard({
   // the step changes; not when the card is back after Help, where the person
   // may be using a link.
   const focused = useRef<number | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (focused.current === index) return; // StrictMode's second run
     const first = focused.current === null;
     focused.current = index;
@@ -188,7 +192,7 @@ export function TourCard({
   // page changes as the person follows along (a conversation opens, an answer
   // arrives), so it's looked for again every moment; it's scrolled to only
   // when the step changes.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!step) return;
     let shown: HTMLElement | null = null;
     const mark = (scroll: boolean) => {

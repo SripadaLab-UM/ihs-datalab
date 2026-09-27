@@ -37,11 +37,13 @@ all 12 that were checked:
 - whole numbers from -10 to 10 ("two tables", "step 3");
 - whole numbers from 1900 to 2100, which are treated as years, even when
   they're a count;
-- dates, list numbering, numbers inside code and links, and the volume and
-  pages of a citation.
+- dates, list numbering, and numbers in code and in link addresses (a link's
+  visible text is still checked);
+- citation details: volume and pages, PMIDs, arXiv numbers, and DOIs such as
+  `10.1038/s41746-021-00400-z`, even though a DOI has a decimal point.
 
-A number with a decimal point, a thousands comma or a % sign is always
-checked. Numbers from the research helper's web answer are flagged on
+Otherwise, a number with a decimal point, a thousands comma or a % sign is
+always checked. Numbers from the research helper's web answer are flagged on
 purpose: web content isn't evidence.
 
 ## Where a number came from

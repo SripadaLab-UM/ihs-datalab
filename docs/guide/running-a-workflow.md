@@ -10,9 +10,9 @@ keywords: workflow, run, parameters, delivery, deliver, destination, qc, checks,
 
 A [workflow](glossary.md#workflow) is a recipe saved to the lab's
 `ihs-pipelines` repository after review: pull these data, run these steps,
-check these things, deliver here. It runs when a person presses **Run**. DataLab runs
-it the same way every time, with no AI involved, so a workflow run never
-sends data to a model.
+check these things, deliver here. It runs when a person presses **Run**.
+DataLab runs it the same way every time, with no AI involved, so a workflow
+run never sends data to a model.
 
 ## Run one
 

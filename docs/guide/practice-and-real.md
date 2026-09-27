@@ -38,7 +38,8 @@ used only with the practice DataLab, to try and test DataLab.
 
 The real DataLab connects to the IHS study database, read-only, over the
 Michigan Medicine VPN. Everything in [What DataLab will and won't do](safety.md)
-applies. Outside AI tools aren't used with it.
+applies. Outside AI tools must not be used with it. Nothing technical stops
+a tool that controls your terminal or browser, so this is a rule for people.
 
 ## Opening the practice DataLab
 

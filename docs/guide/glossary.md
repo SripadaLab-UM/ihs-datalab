@@ -180,15 +180,16 @@ for byte. A replay doesn't deliver unless you ask it to. See
 
 Counts of fewer than 11 participants, which mustn't appear in shared results.
 A workflow's `small_cells` check reads the count columns it's told about and
-stops delivery on a count from 1 to 10 (or up to a higher threshold). It
-can't see everything; a person still reviews.
+stops delivery on a count from 1 to 10 (or below a higher threshold, if the
+workflow sets one). It can't see everything; a person still reviews.
 
 It works out hidden counts only from the totals it's told about (a total row
 or a total column): without them it checks only the counts shown. The
 threshold is 11 by default and can't be set lower. It can't see columns it
 wasn't told are counts, differencing between two delivered files,
-percentages it wasn't told about, or means that imply a count. In the real DataLab, every delivered CSV needs
-a passing `small_cells` check or a written reason.
+percentages it wasn't told about, or means that imply a count. In the real
+DataLab, every delivered CSV needs a passing `small_cells` check or a written
+reason.
 
 ## Data accessed
 

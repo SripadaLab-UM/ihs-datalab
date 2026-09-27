@@ -102,7 +102,7 @@ it("starts once on the practice DataLab, can be skipped, and isn't shown again",
   const tour = await screen.findByRole("dialog", { name: "Ask a question" });
   expect(tour).toHaveTextContent("1 of 5");
   // It points at the step's place on screen.
-  expect(document.querySelector("[data-tour=composer]")).toHaveAttribute("data-tour-on");
+  await waitFor(() => expect(document.querySelector("[data-tour=composer]")).toHaveAttribute("data-tour-on"));
 
   fireEvent.click(within(tour).getByRole("button", { name: "Next" }));
   expect(screen.getByRole("dialog", { name: "Watch the steps" })).toHaveTextContent("2 of 5");
@@ -139,6 +139,8 @@ it("is replayed from Help, all five steps", async () => {
   app("/help/tour");
   fireEvent.click(await screen.findByRole("button", { name: "Take the tour" }));
   const tour = await screen.findByRole("dialog", { name: "Ask a question" });
+  // A tour just started takes focus, so its first step is read out.
+  await waitFor(() => expect(within(tour).getByRole("heading", { name: "Ask a question" })).toHaveFocus());
   for (let step = 1; step < 5; step++) fireEvent.click(within(tour).getByRole("button", { name: "Next" }));
   expect(tour).toHaveAccessibleName("Find the outputs and export");
   expect(within(tour).queryByRole("button", { name: "Skip the tour" })).toBeNull();
@@ -171,7 +173,7 @@ it("gives focus back where it was when the tour closes", async () => {
   const box = screen.getByRole("textbox", { name: "Your question" });
   box.focus(); // before the tour opens, which waits for the profile
   const tour = await screen.findByRole("dialog", { name: "Ask a question" });
-  expect(within(tour).getByRole("heading", { name: "Ask a question" })).toHaveFocus();
+  await waitFor(() => expect(within(tour).getByRole("heading", { name: "Ask a question" })).toHaveFocus());
   fireEvent.click(within(tour).getByRole("button", { name: "Skip the tour" }));
   expect(box).toHaveFocus();
 });

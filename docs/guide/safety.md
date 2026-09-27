@@ -70,4 +70,6 @@ Until you do, it says "Not run yet".
 
 Other AI tools, such as Claude, aren't approved for study data, so they're
 used only with the [practice](glossary.md#practice) DataLab, which holds
-made-up data. See [Practice and real data](practice-and-real.md).
+made-up data. They must not be used with a real-data DataLab: nothing
+technical stops a tool that controls your terminal or browser, so this is a
+rule for people. See [Practice and real data](practice-and-real.md).

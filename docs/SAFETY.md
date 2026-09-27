@@ -1,8 +1,9 @@
 # DataLab safety promises
 
-Status: **implemented** for v1, except the outside-AI connectors (the MCP
-server, and the connector tokens and per-route scopes described under
-"Outside AI connectors"), which aren't built yet. Implemented isn't accepted:
+Status: **implemented** for v1, except the connectors for outside AI tools
+(the outside-tool MCP server, and the connector tokens and per-route scopes
+described under "Outside AI connectors"), which aren't built yet. The agent's
+own tool server (`/mcp`, used by Codex inside DataLab) is built. Implemented isn't accepted:
 acceptance is tracked in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 DataLab lets you use an AI agent (OpenAI Codex on U-M GPT) with sensitive IHS
@@ -77,12 +78,13 @@ returns an answer and is then deleted.
 ## Outside AI tools
 
 Other AI tools, such as Claude, are used to try and test DataLab. They are
-**not** approved for study data, so what they may use depends on which
-DataLab it is (the connectors for them aren't built yet):
+**not** approved for study data:
 
 - The **practice** DataLab has only synthetic data, and you can't attach
-  your own files to it. Outside tools can do everything there.
-- A **real-data** DataLab doesn't accept outside tools at all in v1.
+  your own files to it. Outside tools may be used with it.
+- Outside AI tools must not be used with a **real-data** DataLab. Nothing
+  technical stops a tool that controls your terminal or browser, so this is a
+  rule for people. Connectors, once built, will refuse the real profile.
 
 ## What DataLab does *not* promise
 
@@ -345,12 +347,12 @@ access. It never gains it.
 
 ### Outside AI connectors
 
-Not built yet: this is the design.
-
-- DataLab exposes its features to outside tools through an MCP server and a
-  `datalab` CLI. Both use the same API as the UI, and every request carries a
-  connector token whose scope the host app enforces on every route.
-- **v1: practice profile only.**
+- **Not built yet (the design):** DataLab exposes its features to outside
+  tools through an MCP server and a `datalab` CLI. Both use the same API as
+  the UI, and every request carries a connector token whose scope the host
+  app enforces on every route.
+- **v1: practice profile only.** The practice profile's limits below are
+  built; the connectors that would rely on them aren't yet.
   - The practice profile has its own data folder and uses only the synthetic
     backend.
   - It can't attach host files. It can't use real export destinations, only a
@@ -366,7 +368,7 @@ Not built yet: this is the design.
   bound to `127.0.0.1`, since its dev passwords are public. Its setup scripts
   refuse to run against anything that isn't the local Oracle Database Free
   container.
-- **Real-profile connectors are deferred** until the exact permitted fields,
+- **Not built yet: real-profile connectors are deferred** until the exact permitted fields,
   operations, and error handling are specified. Even "metadata" can leak
   through error messages or SQL in workflow files.
 
