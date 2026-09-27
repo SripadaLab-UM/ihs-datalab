@@ -237,12 +237,31 @@ directly. Milestone 5 swaps in the synced repo.
 - Every SQL bind (`:start_date`) must be a declared parameter.
 - `small_cells` takes `count_columns` (or `count_column`), `min` (11 by
   default, or `$param`), and optionally `totals: {column, value, within}`
-  (total rows) or `total_column`, so a hidden count that a shown total gives
-  away fails too.
+  (total rows) or `total_column`. `min` can't be below 11 in either profile,
+  so a parameter can't turn the rule off. A hidden count fails when a shown
+  total pins it down: one hidden cell in a margin, hidden cells that must all
+  be 10 (two `<11` under a rest of 20), or hidden cells whose combined count
+  is itself small. A CSV whose header names a column twice fails QC.
+- **Not checked yet:** differencing between delivered tables (two files
+  whose counts give a hidden one away), and totals nested more than one
+  level. Those still need a person's review.
+- In the real profile, every delivered CSV needs a passing `small_cells`
+  check over that exact output, or a reason under
+  `deliver.without_small_cells: {<output>: <why>}`; the reason is recorded
+  in the delivery manifest.
 - A pipeline's `inst/pipelines/<name>/pipeline.yaml` has `reads:` with
   `columns` and `where:` (or `whole_table: true`), `parameters`, and
   `outputs`. DataLab extracts those objects into `/run/in/oracle/` before
   the step, and builds the package once per source tree in the sandbox.
+
+**Step containers.** `/run/out` and `/run/result` are writable bind mounts
+without `noexec`, so a step can write a program there and run it; that is no
+more than its R code can do anyway, with no network and no capabilities. The
+disk cap covers the whole step folder.
+
+**Stop** is refused once a run's delivery has started: `export()` runs in a
+thread, so files may already be in the destination. A shutdown waits for the
+delivery to finish, and it is recorded either way.
 
 **Destinations.** `deliver: destination:` is a key each computer maps to one
 of its export folders (`export_destinations.key`, set with `PUT

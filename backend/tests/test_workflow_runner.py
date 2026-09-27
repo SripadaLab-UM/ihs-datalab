@@ -8,14 +8,22 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
 
+from datalab import exports
+from datalab.workflows import runner as runner_module
 from datalab.workflows.model import WorkflowInvalid
 from datalab.workflows.runner import ReplayNotExact, RunRefused
 from datalab.workflows.source import git_blob_id
-from tests.workflow_fakes import FakeRun, FakeSandbox, Harness, weekly_summary
+from tests.workflow_fakes import FakeRun, FakeSandbox, Harness, copy_input, weekly_summary
+
+
+def copy_input_and_result(run: FakeRun) -> int:
+    return copy_input(run)
+
 
 WEEKLY = """\
 name: weekly_steps
@@ -195,12 +203,12 @@ async def test_replay_refuses_when_the_kept_extract_changed(tmp_path):
 
 async def test_run_again_uses_todays_file_and_data(tmp_path):
     h = harness(tmp_path)
-    first = await h.run("weekly_steps.yaml", {"min_cell": 5}, seed=3)
+    first = await h.run("weekly_steps.yaml", {"min_cell": 12}, seed=3)
     h.write("weekly_steps.yaml", WEEKLY.replace("Weekly steps by device", "Weekly steps"))
     again = await h.finish(await h.runner.run_again(first["id"]))
     assert again["mode"] == "run_again" and again["of_run"] == first["id"]
     assert "Weekly steps, small" in again["workflow_text"]
-    assert again["params"]["min_cell"] == 5 and again["seed"] == 3
+    assert again["params"]["min_cell"] == 12 and again["seed"] == 3
     assert len(h.database.calls) == 2  # extracted again
     assert again["delivery_status"] == "delivered"
 
@@ -337,3 +345,79 @@ async def test_container_steps_need_the_image(tmp_path):
     h.sandbox.images = {}
     with pytest.raises(RunRefused):
         await h.runner.start("weekly_steps.yaml")
+
+
+async def test_stop_is_refused_once_delivery_starts_and_a_cancel_waits_for_it(
+    tmp_path, monkeypatch
+):
+    """export() runs in a thread a cancel can't stop, so what it writes must
+    always be recorded: its delivery row and the audit log's export entry."""
+    h = harness(tmp_path)
+    go, entered = threading.Event(), threading.Event()
+    real_export = exports.export
+
+    def slow_export(*args, **kwargs):
+        entered.set()
+        go.wait(10)
+        return real_export(*args, **kwargs)
+
+    monkeypatch.setattr(runner_module.exports, "export", slow_export)
+    run_id = await h.runner.start("weekly_steps.yaml")
+    await asyncio.to_thread(entered.wait, 10)
+    with pytest.raises(RunRefused, match="Delivery has started"):
+        await h.runner.stop(run_id)
+    asyncio.get_running_loop().call_later(0.2, go.set)
+    await h.runner.close()  # DataLab shutting down: cancels the run's task
+    run = h.runner.detail(run_id)
+    assert run is not None and run["delivery_status"] == "delivered"
+    assert run["status"] == "succeeded" and "asked to stop" in run["delivery_message"]
+    [delivery] = run["deliveries"]
+    assert (Path(delivery["folder"]) / "datalab-export.json").is_file()
+    audit = (h.settings.data_dir / "logs/audit.jsonl").read_text().splitlines()
+    assert json.loads(audit[-1])["session_id"] == run_id
+
+
+async def test_the_manifest_keeps_only_numbers_from_checks(tmp_path):
+    def custom(run: FakeRun) -> int:
+        run.result(checks=[{"id": "who", "status": "pass", "observed": "SYN-0001", "message": ""}])
+        return 0
+
+    text = WEEKLY.replace(
+        "deliver:",
+        "  - id: custom\n    qc:\n      r: x\n      inputs: { s: summary }\ndeliver:",
+    )
+    h = Harness(tmp_path, sandbox=FakeSandbox({"summary": weekly_summary, "custom": custom}))
+    h.write("weekly_steps.yaml", text)
+    run = await h.run("weekly_steps.yaml")
+    assert run["status"] == "succeeded", [s["message"] for s in run["steps"]]
+    manifest = (Path(run["deliveries"][0]["folder"]) / "datalab-export.json").read_text()
+    assert "SYN-0001" not in manifest
+    qc = {q["step"]: q for q in json.loads(manifest)["qc"]}
+    assert qc["custom"]["checks"] == [{"id": "who", "status": "pass", "observed": None}]
+    assert isinstance(qc["check_raw"]["checks"][0]["observed"], int)  # row counts stay
+
+
+async def test_the_result_folder_counts_against_the_cap(tmp_path):
+    seen = []
+
+    def fills_result(run: FakeRun) -> int:
+        seen.append((run.step.watch, run.step.max_bytes))
+        return copy_input_and_result(run)
+
+    h = Harness(tmp_path, sandbox=FakeSandbox({"summary": fills_result}))
+    h.write("weekly_steps.yaml", WEEKLY)
+    run = await h.run("weekly_steps.yaml")
+    [(watched, cap)] = seen
+    assert watched == h.run_dir(run) / "steps" / "summary"  # /run/out and /run/result both
+    assert 0 < cap <= h.settings.workflows.max_run_bytes
+
+
+async def test_replay_checks_the_kept_text_against_its_blob(tmp_path):
+    h = harness(tmp_path)
+    first = await h.run("weekly_steps.yaml")
+    h.connection.execute(
+        "UPDATE workflow_runs SET workflow_text = workflow_text || '# edited' WHERE id = ?",
+        (first["id"],),
+    )
+    check = await h.runner.replay_check(first["id"])
+    assert any("blob" in reason for reason in check.blocking)

@@ -131,7 +131,12 @@ async def test_queries_are_listed_by_origin_and_owner(tmp_path, log):
     )
     with pytest.raises(SqlRejected):
         await svc.run_query(
-            session_id="run_1", sql="DELETE FROM X", binds=None, results_dir=tmp_path, origin="run"
+            session_id="run_1",
+            sql="DELETE FROM X",
+            binds=None,
+            results_dir=tmp_path,
+            origin="run",
+            allowed_tables=frozenset(),
         )
     # The conversation's panel shows only its own queries, as before.
     [mine] = log.for_session("c_1")

@@ -11,7 +11,7 @@ CREATE TABLE workflow_runs (
     id                 TEXT PRIMARY KEY,        -- run_20260927T110059_4c7e20, as queries.origin = 'run' expects
     workflow_name      TEXT NOT NULL,
     mode               TEXT NOT NULL CHECK (mode IN ('run', 'run_again', 'replay')),
-    of_run             TEXT REFERENCES workflow_runs (id),  -- run_again, replay
+    of_run             TEXT REFERENCES workflow_runs (id) ON DELETE SET NULL,  -- run_again, replay
     set_id             TEXT,                    -- "Run a set": runs started together
     status             TEXT NOT NULL CHECK (status IN
                            ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),

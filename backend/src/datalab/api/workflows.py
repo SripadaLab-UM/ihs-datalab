@@ -349,7 +349,10 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
     @router.post("/runs/{run_id}/stop", status_code=202)
     async def stop(run_id: str) -> RunOut:
         run_or_404(run_id)
-        await runner.stop(run_id)
+        try:
+            await runner.stop(run_id)
+        except RunRefused as error:
+            raise HTTPException(409, str(error)) from error
         return RunOut.model_validate(_run_fields(run_or_404(run_id)))
 
     @router.get("/runs/{run_id}/stream")

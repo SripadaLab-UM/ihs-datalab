@@ -93,6 +93,8 @@ class DataService:
         """
         # Before anything is logged or run: a wrong owner is a bug in DataLab.
         check_owner(origin, session_id)
+        if origin == "run" and allowed_tables is None:
+            raise ValueError("A workflow run's query needs the workflow's declared tables.")
         query_id = _new_query_id()
         binds = dict(binds or {})
         try:

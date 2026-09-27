@@ -23,7 +23,9 @@ The rules:
 - Only the database is restored. Conversation workspaces, runs, and repos are
   the person's files and stay as they are: a conversation made after the
   update keeps its folder under `sessions/`, though the older DataLab no
-  longer lists it.
+  longer lists it. Workflow runs (0008) are listed as dropped like anything
+  else, with a note that each run's folder keeps a copy of its record
+  (`runs/<id>/record.json`), and each delivery its manifest.
 """
 
 from __future__ import annotations
@@ -48,6 +50,16 @@ _BOOKKEEPING = {"schema_migrations"}
 CARRIED = ("queries",)
 # How many new conversations to name when listing what a rollback drops.
 _EXAMPLES = 5
+# Tables whose rows are also kept in files a rollback leaves alone: said
+# beside them in the list of what's dropped.
+_KEPT_IN_FILES = {
+    "workflow_runs": "Each run's folder keeps a copy of its record: runs/<id>/record.json.",
+    "workflow_run_steps": "Each run's folder keeps a copy of its steps: runs/<id>/record.json.",
+    "workflow_run_deliveries": (
+        "Each run's record.json keeps its deliveries, and each delivered folder "
+        "its datalab-export.json manifest."
+    ),
+}
 
 
 class RollbackRefused(RuntimeError):
@@ -289,7 +301,11 @@ def compare(database_file: Path, backup_file: Path) -> tuple[list[Loss], list[Lo
                     note = "(values in columns the older DataLab doesn't have)"
                     dropped.append(Loss(table, 0, new_values, (note,)))
             elif added or changed:
-                examples = _new_conversations(connection, then) if table == "conversations" else ()
+                examples: tuple[str, ...] = ()
+                if table == "conversations":
+                    examples = _new_conversations(connection, then)
+                elif table in _KEPT_IN_FILES:
+                    examples = (_KEPT_IN_FILES[table],)
                 dropped.append(Loss(table, added, changed, examples))
     return dropped, carried
 

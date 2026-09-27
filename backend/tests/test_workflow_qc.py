@@ -96,12 +96,13 @@ def test_a_hidden_cell_mustnt_be_recoverable_from_a_total(tmp_path):
         ],
     )
     assert checks(pair, small_cells=rule)["small_cells_recoverable"]["observed"] == 2
-    # Complementary suppression: two hidden cells adding up to 11 or more is fine.
+    # Complementary suppression: two hidden cells adding up to 11 or more,
+    # that could be split more than one way, is fine.
     safe = write(
         tmp_path / "safe.csv",
         header,
         [
-            ["W1", "fitbit", "40"],
+            ["W1", "fitbit", "41"],
             ["W1", "garmin", ""],
             ["W1", "apple", ""],
             ["W1", "All", "60"],
@@ -126,3 +127,43 @@ def test_a_total_column_counts_too(tmp_path):
     found = checks(path, {"min": 11}, small_cells=rule)
     assert found["small_cells_recoverable"]["observed"] == 1
     assert "20" not in found["small_cells_recoverable"]["message"]
+
+
+def test_hidden_cells_the_upper_bound_pins_down_fail(tmp_path):
+    """Hidden cells are each at most 10: two under a rest of 20 must both be 10."""
+    rule = {"count_columns": ["n"], "totals": {"column": "DEVICE", "value": "All"}}
+    header = ["DEVICE", "n"]
+
+    def recoverable(total: int, hidden: int, shown: tuple[int, ...] = ()) -> int:
+        rows = [[f"d{i}", str(v)] for i, v in enumerate(shown)]
+        rows += [[f"h{i}", "<11"] for i in range(hidden)]
+        path = write(tmp_path / f"m{total}-{hidden}.csv", header, [*rows, ["All", str(total)]])
+        return checks(path, small_cells=rule)["small_cells_recoverable"]["observed"]
+
+    assert recoverable(20, 2) == 2  # both 10
+    assert recoverable(19, 2) == 0  # 9 and 10, either way round
+    assert recoverable(30, 3) == 3  # all 10
+    assert recoverable(29, 3) == 0
+    assert recoverable(50, 3, (20,)) == 3  # 50 - 20 = 30: all 10
+    assert recoverable(51, 3, (20,)) == 0  # more than three small cells can hold
+    assert recoverable(12, 2, (1,)) == 0  # 11 left: 1 to 10 each, many ways
+    assert recoverable(12, 2, (2,)) == 2  # 10 left: a small combined count
+    assert recoverable(15, 3, (10,)) == 3  # 5 left: a small combined count
+
+
+def test_the_small_cell_minimum_has_a_floor(tmp_path):
+    path = write(tmp_path / "x.csv", ["DEVICE", "n"], [["fitbit", "40"], ["apple", "3"]])
+    for low in (10, 1, 0, -5):
+        small = checks(path, {"m": low}, small_cells={"count_columns": ["n"], "min": "$m"})
+        assert small["small_cells"]["status"] == "fail", low
+        assert "can't be below 11" in small["small_cells"]["message"]
+    raised = checks(path, {"m": 20}, small_cells={"count_columns": ["n"], "min": "$m"})
+    assert raised["small_cells"]["observed"] == 1
+
+
+def test_a_column_named_twice_fails(tmp_path):
+    """Checks read one column of a name; a small count in the other mustn't hide."""
+    path = write(tmp_path / "x.csv", ["DEVICE", "n", "n"], [["apple", "3", "40"]])
+    found = checks(path, small_cells={"count_columns": ["n"]})
+    assert found["unique_columns"]["status"] == "fail"
+    assert found["unique_columns"]["message"].endswith(": n")

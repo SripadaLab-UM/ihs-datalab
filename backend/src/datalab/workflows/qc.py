@@ -6,10 +6,18 @@ column names only, never values or keys**: they go into the run record, the
 Workflows tab and the delivery manifest.
 
 The small-cell rule: a count from 1 to `min - 1` (10, with the usual 11)
-mustn't be shown; 0 may be. A hidden count (empty, NA, or text such as
-"<11") mustn't be recoverable either: when a total is shown, a single
-hidden cell among the cells it adds up could be worked out by subtraction,
-and so could several hidden cells whose combined count is itself small.
+mustn't be shown; 0 may be. `min` can't be set below SMALL_CELL_FLOOR (11),
+in either profile, so a parameter can't turn the rule off. A hidden count
+(empty, NA, or text such as "<11") mustn't be recoverable either. Given a
+shown total, the hidden cells it adds up share what's left of it (the rest),
+each between 0 and `min - 1`; a margin fails when that leaves any hidden
+cell only one possible value (one hidden cell, or a rest of exactly
+`hidden * (min - 1)`), or when the hidden cells' combined count is itself
+small. Only one level of totals is checked: differencing between delivered
+tables, or across nested totals, isn't.
+
+A header that names a column twice fails too: which of the two a check
+read would be anyone's guess.
 """
 
 from __future__ import annotations
@@ -22,7 +30,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from datalab.workflows.model import BuiltinQc, Scalar, SmallCells, param_value
+from datalab.workflows.model import (
+    SMALL_CELL_FLOOR,
+    BuiltinQc,
+    Scalar,
+    SmallCells,
+    param_value,
+)
 
 MISSING = frozenset({"", "NA", "NaN", "NULL"})
 
@@ -64,13 +78,25 @@ class _Margin:
             self.shown += value
 
     def recoverable(self, minimum: float) -> int:
-        """How many hidden cells a shown total gives away."""
+        """How many hidden cells a shown total gives away.
+
+        Each hidden cell is taken to be a suppressed small count, from 0 to
+        `minimum - 1`, and together they make up the rest of the total. A
+        cell is given away when those bounds leave it one possible value;
+        the combined count gives something away when it is itself small.
+        """
         if not self.total_seen or self.total is None or self.hidden == 0:
             return 0
         if self.hidden == 1:
             return 1
         rest = self.total - self.shown
-        return self.hidden if 1 <= rest < minimum else 0
+        if 1 <= rest < minimum:
+            return self.hidden
+        high = math.ceil(minimum) - 1  # the largest small count
+        # Each cell lies between rest - (hidden - 1) * high and min(high, rest).
+        low_bound = max(0.0, rest - (self.hidden - 1) * high)
+        high_bound = min(float(high), rest)
+        return self.hidden if low_bound == high_bound and rest > 0 else 0
 
 
 def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[dict]:
@@ -80,6 +106,17 @@ def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[
         reader = csv.reader(handle)
         header = next(reader, [])
         index = {name: i for i, name in enumerate(header)}
+        twice = sorted({name for name in header if header.count(name) > 1})
+        if twice:
+            checks.append(
+                _check(
+                    "unique_columns",
+                    False,
+                    len(twice),
+                    0,
+                    f"the header names these columns more than once: {', '.join(twice)}",
+                )
+            )
 
         def cell(row: list[str], column: str) -> str:
             i = index.get(column)
@@ -240,6 +277,16 @@ def _small_cell_checks(
         return [_check("small_cells", False, None, 0, f"not in the file: {', '.join(gone)}")]
     columns = ", ".join(rule.count_columns)
     shown_min = int(minimum) if minimum.is_integer() else minimum
+    if minimum < SMALL_CELL_FLOOR:
+        return [
+            _check(
+                "small_cells",
+                False,
+                shown_min,
+                f">= {SMALL_CELL_FLOOR}",
+                f"the small-cell minimum is {shown_min}; it can't be below {SMALL_CELL_FLOOR}",
+            )
+        ]
     checks = [
         _check(
             "small_cells",

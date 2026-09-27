@@ -8,6 +8,11 @@ privileges, an init process (so Stop takes 0.1 s, not 10), pids and memory
 limits, `--pull never`, and `--mount` for every folder, read-only except the
 step's own output and result folders.
 
+`/run/out` and `/run/result` are bind mounts, not the noexec /tmp, so a
+step can write a program there and run it. That is no more than its R code
+can do already; the container has no network and no capabilities, and only
+declared outputs (regular files) come back.
+
 Containers carry `datalab.run`, `datalab.profile` and `datalab.instance`
 labels. DataLab's startup cleanup (`remove_all_session_containers`) removes
 this instance's leftovers by the last two; Stop removes a run's by the first.
@@ -312,8 +317,9 @@ def folder_bytes(root: Path) -> int:
 def _user() -> str:
     """Who steps run as. On native Linux Docker (CI), files a step writes are
     owned by that user on the host, so it's the host's own user there."""
-    if sys.platform.startswith("linux") and hasattr(os, "getuid"):
+    if sys.platform.startswith("linux") and hasattr(os, "getuid") and os.getuid() != 0:
         return f"{os.getuid()}:{os.getgid()}"
+    # Never root, even when DataLab itself runs as root.
     return STEP_USER
 
 

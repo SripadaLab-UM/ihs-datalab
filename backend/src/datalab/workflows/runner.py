@@ -98,6 +98,7 @@ from datalab.workflows.source import (
     SourceError,
     WorkflowFile,
     WorkflowFolder,
+    git_blob_id,
     tree_sha256,
 )
 
@@ -208,6 +209,9 @@ class WorkflowRunner:
         self.cache_dir = settings.data_dir / "workflow-cache"
         self._slots = asyncio.Semaphore(settings.workflows.max_concurrent_runs)
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        # Runs whose delivery has started: Stop is refused, and a cancel
+        # (DataLab shutting down) waits for it to finish and be recorded.
+        self._delivering: set[str] = set()
         self._changed = asyncio.Event()
         # Runs a previous DataLab left going can't be resumed.
         self.store.mark_interrupted()
@@ -226,7 +230,12 @@ class WorkflowRunner:
     def check_text(self, text: str, pipelines: PipelineLookup | None = None) -> Workflow:
         lookup = pipelines or self.folder.pipeline
         try:
-            return load_workflow(text, pipelines=lookup, allowed_schemas=self.allowed_schemas)
+            return load_workflow(
+                text,
+                pipelines=lookup,
+                allowed_schemas=self.allowed_schemas,
+                require_small_cells=self.settings.profile == "real",
+            )
         except WorkflowInvalid as error:
             raise WorkflowInvalid(self._explain_pipelines(error.problems, text)) from None
 
@@ -328,18 +337,30 @@ class WorkflowRunner:
         return self._launch(plan)
 
     async def stop(self, run_id: str) -> bool:
+        """Stop a run. Refused (RunRefused) once its delivery has started:
+        files may already be in the destination, and must be recorded."""
         task = self._tasks.get(run_id)
         if task is None or task.done():
             return False
+        if run_id in self._delivering:
+            raise RunRefused(
+                "Delivery has started, so this run can't be stopped now. It finishes in a "
+                "moment, and what was delivered is recorded."
+            )
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await asyncio.wait_for(asyncio.shield(task), timeout=30)
         return True
 
     async def close(self) -> None:
-        """Stop every run (DataLab is shutting down)."""
-        for run_id in list(self._tasks):
-            await self.stop(run_id)
+        """Stop every run (DataLab is shutting down). A delivery already
+        under way finishes and is recorded first."""
+        tasks = [t for t in self._tasks.values() if not t.done()]
+        for task in tasks:
+            task.cancel()
+        for task in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await asyncio.wait_for(asyncio.shield(task), timeout=60)
 
     def running(self, run_id: str) -> bool:
         task = self._tasks.get(run_id)
@@ -531,13 +552,13 @@ class WorkflowRunner:
 
     def _finish_cancelled(self, plan: _Plan) -> None:
         self._skip_rest(plan.run_id, "cancelled")
+        run = self.store.get_run(plan.run_id) or {}
+        fields: dict[str, Any] = {}
+        # Never overwrite a delivery that happened (or failed) with "skipped".
+        if run.get("delivery_status") == "pending":
+            fields = {"delivery_status": "skipped", "delivery_message": "The run was stopped."}
         self.store.update_run(
-            plan.run_id,
-            status="cancelled",
-            finished_at=now(),
-            message="Stopped.",
-            delivery_status="skipped" if plan.workflow.deliver else "none",
-            delivery_message="The run was stopped." if plan.workflow.deliver else None,
+            plan.run_id, status="cancelled", finished_at=now(), message="Stopped.", **fields
         )
 
     def _skip_rest(self, run_id: str, running_as: str) -> None:
@@ -592,8 +613,42 @@ class WorkflowRunner:
             self.store.update_run(
                 plan.run_id, reproduced=same, replay_notes=[*plan.replay_notes, *notes]
             )
-        await self._deliver(plan, done, failed)
+        await self._deliver_shielded(plan, done, failed)
         self.store.update_run(plan.run_id, finished_at=now())
+
+    async def _deliver_shielded(
+        self, plan: _Plan, done: dict[str, dict[str, _Output]], failed: str | None
+    ) -> None:
+        """Deliver, and don't let a cancel cut it short.
+
+        `export()` runs in a thread that cancelling can't stop, so files may
+        already be in the destination: the delivery always runs to its end
+        and is recorded (its row, and the audit log's export entry).
+        """
+        self._delivering.add(plan.run_id)
+        delivery = asyncio.ensure_future(self._deliver(plan, done, failed))
+        interrupted = False
+        try:
+            while not delivery.done():
+                try:
+                    await asyncio.shield(delivery)
+                except asyncio.CancelledError:
+                    interrupted = True
+                    task = asyncio.current_task()
+                    if task is not None:
+                        task.uncancel()
+            delivery.result()
+        finally:
+            self._delivering.discard(plan.run_id)
+        if interrupted:
+            run = self.store.get_run(plan.run_id) or {}
+            self.store.update_run(
+                plan.run_id,
+                delivery_message=(
+                    f"{run.get('delivery_message') or ''} DataLab was asked to stop during "
+                    "delivery, which finished first."
+                ).strip(),
+            )
 
     def _disk_problem(self, plan: _Plan) -> str | None:
         free = shutil.disk_usage(plan.run_dir).free
@@ -772,8 +827,9 @@ class WorkflowRunner:
                 name=step.id,
                 image=plan.image.digest,
                 binds=binds,
-                watch=scratch,
-                max_bytes=max(budget, 0),
+                # The whole step folder: /run/out and /run/result are both writable.
+                watch=step_dir,
+                max_bytes=max(budget, 0) + folder_bytes(step_dir),
                 env=env,
             )
         )
@@ -1078,7 +1134,8 @@ class WorkflowRunner:
                         {
                             "id": c.get("id"),
                             "status": c.get("status"),
-                            "observed": c.get("observed"),
+                            # Numbers only: a custom check's text could carry values.
+                            "observed": _number_or_none(c.get("observed")),
                         }
                         for c in ((s.get("result") or {}).get("checks") or [])
                     ],
@@ -1089,6 +1146,10 @@ class WorkflowRunner:
             "outputs": [
                 {"step": o.step, "file": o.file, "sha256": o.facts.get("sha256")} for o in chosen
             ],
+            # Delivered CSVs no small_cells check covered, and why (from the workflow file).
+            "without_small_cells": dict(
+                plan.workflow.deliver.without_small_cells if plan.workflow.deliver else {}
+            ),
         }
 
     # Replay --------------------------------------------------------------
@@ -1114,10 +1175,12 @@ class WorkflowRunner:
                     ):
                         blocking.append(f"The kept extract {obj} for {step['step_id']} is missing.")
         text_blob = original["workflow_text"].encode()
-        if original["workflow_source"] == "file" and original["workflow_blob"] != (
-            "sha256:" + hashlib.sha256(text_blob).hexdigest()
-        ):
-            blocking.append("The kept workflow file doesn't match its record.")
+        if original["workflow_source"] == "file":
+            kept = {"sha256:" + hashlib.sha256(text_blob).hexdigest()}
+        else:
+            kept = {git_blob_id(text_blob), git_blob_id(text_blob.replace(b"\r\n", b"\n"))}
+        if original["workflow_blob"] not in kept:
+            blocking.append("The kept workflow file doesn't match its recorded blob id.")
         uses_containers = any(
             s["kind"] in ("r", "pipeline", "qc_custom") for s in original["steps"]
         )
@@ -1220,6 +1283,10 @@ def _input_ref(output: _Output) -> dict[str, Any]:
         "file": output.file,
         "sha256": output.facts.get("sha256"),
     }
+
+
+def _number_or_none(value: Any) -> int | float | bool | None:
+    return value if isinstance(value, int | float | bool) else None
 
 
 def _spec_facts(facts: Mapping[str, Any]) -> dict[str, Any]:

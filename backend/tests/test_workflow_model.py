@@ -194,3 +194,40 @@ def test_the_folder_reads_workflows_and_pipelines(tmp_path: Path):
 
 def test_git_blob_ids_match_git():
     assert git_blob_id(b"hello\n") == "ce013625030ba8dba906f756967f9e9ca394464a"
+
+
+def test_the_small_cell_minimum_cant_go_below_11():
+    found = problems(WEEKLY.replace("min: $min_cell", "min: 5"))
+    assert any(p.startswith("steps[3].qc.small_cells.min: At least 11") for p in found)
+
+
+def test_real_profile_deliveries_need_a_small_cell_check():
+    unchecked = WEEKLY.replace(
+        "      small_cells: { count_column: n_participants, min: $min_cell }\n",
+        "      min_rows: 1\n",
+    )
+    assert load_workflow(unchecked, allowed_schemas=COHORTS)  # practice: not required
+    found = problems(unchecked, require_small_cells=True)
+    assert any(p.startswith("deliver.files[0]: A delivered CSV needs a small_cells") for p in found)
+    opted_out = unchecked + "  without_small_cells:\n    summary: weekly means only, no counts\n"
+    assert load_workflow(opted_out, allowed_schemas=COHORTS, require_small_cells=True)
+    too_short = unchecked + "  without_small_cells: { summary: ok }\n"
+    assert any("Say why" in p for p in problems(too_short, require_small_cells=True))
+    # The check covers exactly the delivered output, not an earlier one.
+    assert load_workflow(WEEKLY, allowed_schemas=COHORTS, require_small_cells=True)
+
+
+def test_a_pipelines_where_is_checked_as_sql():
+    def lookup_for(where: str):
+        spec = load_pipeline_file(
+            PIPELINE.replace("RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')", where)
+        )
+        return {"daily_metrics": Pipeline("daily_metrics", spec, "")}.get
+
+    for where, message in (
+        ("RECORD_DATE >= UTL_HTTP.REQUEST('x')", "reads[0]"),
+        ("STEPS IN (SELECT STEPS FROM IHS_2025.PARTICIPANTS)", "may read only"),
+        ("RECORD_DATE >= :since", ":since isn't one of the pipeline's parameters"),
+    ):
+        found = problems(USES_PIPELINE, pipelines=lookup_for(where))
+        assert any(message in p for p in found), (where, found)

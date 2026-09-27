@@ -92,7 +92,8 @@ def test_rows_in_tables_the_backup_lacks_count_as_dropped(updated):
     path, older = updated
     connection = sqlite3.connect(path, isolation_level=None)
     connection.execute(
-        "INSERT INTO export_destinations VALUES ('d1', 'Dropbox', '/tmp/x', '2026-09-20')"
+        "INSERT INTO export_destinations (id, name, path, added_at) "
+        "VALUES ('d1', 'Dropbox', '/tmp/x', '2026-09-20')"
     )
     connection.close()
     losses = {loss.table: loss for loss in rollback.plan(path, older).losses}

@@ -37,6 +37,8 @@ from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.exports import effective_name, safe_name
 
 SCHEMA_VERSION = 1
+# The smallest `small_cells: min` DataLab accepts: counts of 1 to 10 are small.
+SMALL_CELL_FLOOR = 11
 MAX_FILE_BYTES = 256 * 1024
 
 # Step ids and output files are lower case: NTFS ignores case, and they end
@@ -223,6 +225,9 @@ class Deliver(_Strict):
     destination: str
     folder: str
     files: tuple[str, ...]
+    # Delivered CSVs a `small_cells` check doesn't cover, each with the reason
+    # (the real profile requires one or the other). Recorded in the manifest.
+    without_small_cells: dict[str, str] = Field(default_factory=dict)
 
 
 class Workflow(_Strict):
@@ -297,11 +302,14 @@ def load_workflow(
     *,
     pipelines: PipelineLookup | None = None,
     allowed_schemas: frozenset[str] | None = None,
+    require_small_cells: bool = False,
 ) -> Workflow:
     """Parse and check a workflow file. Raises WorkflowInvalid with every problem.
 
     `allowed_schemas` are the cohort schemas this DataLab may read (None:
     any). `pipelines` finds a pipeline by name in the pipelines package.
+    `require_small_cells` (the real profile): every delivered CSV needs a
+    `small_cells` check, or a reason under `deliver.without_small_cells`.
     """
     raw = parse_yaml(text)
     if not isinstance(raw, dict):
@@ -321,7 +329,12 @@ def load_workflow(
         workflow = Workflow.model_validate(raw)
     except ValidationError as error:
         raise WorkflowInvalid(_problems(error)) from None
-    problems = check_workflow(workflow, pipelines=pipelines, allowed_schemas=allowed_schemas)
+    problems = check_workflow(
+        workflow,
+        pipelines=pipelines,
+        allowed_schemas=allowed_schemas,
+        require_small_cells=require_small_cells,
+    )
     if problems:
         raise WorkflowInvalid(problems)
     return workflow
@@ -443,6 +456,7 @@ def check_workflow(
     *,
     pipelines: PipelineLookup | None = None,
     allowed_schemas: frozenset[str] | None = None,
+    require_small_cells: bool = False,
 ) -> list[Problem]:
     problems: list[Problem] = []
 
@@ -479,6 +493,7 @@ def check_workflow(
     csv_outputs: dict[str, set[str]] = {}
     seen: set[str] = set()
     pipeline_reads: dict[str, set[str]] = {}
+    small_checked: set[tuple[str, str]] = set()
     for index, step in enumerate(workflow.steps):
         where = f"steps[{index}]"
         if not _ID.fullmatch(step.id):
@@ -508,6 +523,7 @@ def check_workflow(
                         )
                 if ORACLE_INPUT in step.inputs:
                     problem(f"{where}.inputs.{ORACLE_INPUT}", "This name is the extracts' own.")
+                problems += _check_extracts(found, f"{where}.pipeline", workflow, allowed_schemas)
 
         for name, ref in step_inputs(step).items():
             path = f"{where}{'.qc' if isinstance(step, QcStep) else ''}.inputs.{name}"
@@ -524,6 +540,8 @@ def check_workflow(
                 problem(f"{where}.qc.file", resolved)
             elif resolved[1] not in csv_outputs.get(resolved[0], set()):
                 problem(f"{where}.qc.file", "Built-in checks read a .csv output.")
+            elif qc.small_cells is not None:
+                small_checked.add(resolved)
             for key in ("min_rows", "max_rows"):
                 param_ref(f"{where}.qc.{key}", getattr(qc, key))
             for column, share in qc.max_missing.items():
@@ -533,8 +551,11 @@ def check_workflow(
             if qc.small_cells is not None:
                 rule = qc.small_cells
                 param_ref(f"{where}.qc.small_cells.min", rule.min)
-                if isinstance(rule.min, int) and rule.min < 1:
-                    problem(f"{where}.qc.small_cells.min", "At least 1.")
+                if isinstance(rule.min, int) and rule.min < SMALL_CELL_FLOOR:
+                    problem(
+                        f"{where}.qc.small_cells.min",
+                        f"At least {SMALL_CELL_FLOOR}: counts from 1 to 10 are small.",
+                    )
                 if not rule.count_columns:
                     problem(f"{where}.qc.small_cells.count_columns", "Name the count columns.")
             columns = [
@@ -594,6 +615,54 @@ def check_workflow(
         names = [outputs[s][n] for s, n in chosen]
         if len(names) != len(set(names)):
             problem("deliver.files", "Two delivered outputs have the same file name.")
+        opted_out: set[tuple[str, str]] = set()
+        for ref, reason in deliver.without_small_cells.items():
+            path = f"deliver.without_small_cells.{ref}"
+            resolved = resolve_ref(ref, outputs)
+            if isinstance(resolved, str) or resolved not in chosen:
+                problem(path, "Name one of the delivered files.")
+                continue
+            if len(reason.strip()) < 10:
+                problem(path, "Say why this file needn't be checked for small cells.")
+            opted_out.add(resolved)
+        if require_small_cells:
+            for index, ref in enumerate(deliver.files):
+                resolved = resolve_ref(ref, outputs)
+                if isinstance(resolved, str) or not outputs[resolved[0]][resolved[1]].endswith(
+                    ".csv"
+                ):
+                    continue
+                if resolved not in small_checked and resolved not in opted_out:
+                    problem(
+                        f"deliver.files[{index}]",
+                        "A delivered CSV needs a small_cells check first (or a reason under "
+                        "deliver.without_small_cells).",
+                    )
+    return problems
+
+
+def _check_extracts(
+    pipeline: Pipeline, where: str, workflow: Workflow, allowed: frozenset[str] | None
+) -> list[Problem]:
+    """A pipeline's extraction queries, checked as SQL when the workflow is loaded."""
+    problems = []
+    declared = {name.lower() for name in workflow.parameters}
+    uses = {name.lower() for name in pipeline.spec.parameters}
+    for index, entry in enumerate(pipeline.spec.reads):
+        label = f"Pipeline {pipeline.name!r} reads[{index}]"
+        sql = extract_sql(entry)
+        try:
+            checked = check_sql(sql, allowed_schemas=allowed or _schemas_named(sql), columns=None)
+        except SqlRejected as error:
+            problems.append(Problem(where, f"{label}: {error}"))
+            continue
+        if set(checked.tables) and {str(t) for t in checked.tables} != {entry.object}:
+            problems.append(Problem(where, f"{label}: where: may read only {entry.object}."))
+        for bind in checked.binds:
+            if bind.lower() not in declared or bind.lower() not in uses:
+                problems.append(
+                    Problem(where, f"{label}: :{bind} isn't one of the pipeline's parameters.")
+                )
     return problems
 
 
