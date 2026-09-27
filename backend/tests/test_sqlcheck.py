@@ -337,6 +337,40 @@ class TestColumns:
         with pytest.raises(SqlRejected):
             check_sql("SELECT a FROM IHS_2025.T", allowed_schemas=COHORTS, columns={})
 
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 'x' FROM DUAL ORDER BY 1",
+            "SELECT 1 FROM DUAL ORDER BY 1",
+            "SELECT a, 'x' FROM IHS_2025.T ORDER BY 2",
+            "SELECT a, 'BOOM' FROM IHS_2025.T ORDER BY 2 DESC, 1",
+            "SELECT a + 1, b FROM IHS_2025.T ORDER BY 1",
+            "SELECT COUNT(*) FROM IHS_2025.T ORDER BY 1",
+            "SELECT b, COUNT(*) FROM IHS_2025.T GROUP BY b ORDER BY 2 DESC NULLS LAST",
+            "SELECT 'x' FROM DUAL UNION SELECT 'y' FROM DUAL ORDER BY 1",
+            "SELECT a, 'T' FROM IHS_2025.T UNION ALL SELECT a, 'U' FROM IHS_2025.U ORDER BY 2, 1",
+            "SELECT * FROM (SELECT 'x' FROM DUAL ORDER BY 1)",
+        ],
+    )
+    def test_order_by_position(self, sql):
+        # qualify names SELECT 'x' after its value, X, so ORDER BY 1 would
+        # otherwise reach the resolved-column check as a bare X.
+        ok_with_catalog(sql)
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT 'x' FROM DUAL ORDER BY boom",
+            "SELECT 'x' FROM DUAL ORDER BY x",
+            "SELECT 'x', 1 FROM DUAL ORDER BY 2, boom",
+            "SELECT 'x' FROM DUAL UNION SELECT 'y' FROM DUAL ORDER BY x",
+            "SELECT 'x' FROM DUAL UNION SELECT 'y' FROM DUAL ORDER BY 1, y",
+            "SELECT COUNT(*) FROM IHS_2025.T ORDER BY 1, secret_fn",
+        ],
+    )
+    def test_order_by_an_unknown_bare_name(self, sql):
+        rejected_with_catalog(sql)
+
 
 class TestSecondReview:
     """From the second security review."""

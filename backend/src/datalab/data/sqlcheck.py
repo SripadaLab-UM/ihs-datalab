@@ -386,6 +386,13 @@ def _check_columns(
         bare = not column.table and not column.this.args.get("quoted")
         if bare and column.name.upper() in PSEUDO_COLUMNS:
             column.replace(exp.null())
+    for order in list(tree.find_all(exp.Order)):
+        for ordered in order.expressions:
+            # ORDER BY 1 is a position, which Oracle never runs as a call. Left
+            # in, qualify turns it into a bare column named after the output it
+            # points to, which for SELECT 'x' is X: not a name ORDER BY may use.
+            if isinstance(ordered, exp.Ordered) and _is_position(ordered.this):
+                ordered.this.replace(exp.null())
     schema = MappingSchema({**_DUAL, **columns}, dialect="oracle", normalize=False)
     try:
         tree = qualify(
@@ -416,8 +423,9 @@ def _require_resolved_columns(tree: exp.Expr, *, generated_names: bool) -> None:
     column list) and leaves it unqualified. Oracle doesn't read those names
     as aliases; it runs them as functions. The one unqualified name allowed
     is an ORDER BY reference to an alias of the same query, which Oracle does
-    resolve. qualify also rewrites `ORDER BY COUNT(*)` (or `ORDER BY 1`) for an
-    unaliased expression to its own name for it, _COL_<n>: allowed when
+    resolve. (ORDER BY positions never get here: _check_columns takes them
+    out first.) qualify also rewrites `ORDER BY COUNT(*)` for an unaliased
+    expression to its own name for it, _COL_<n>: allowed when
     `generated_names` says the SQL itself never used such a name.
     """
     for scope in traverse_scope(tree):
@@ -440,6 +448,11 @@ def _require_resolved_columns(tree: exp.Expr, *, generated_names: bool) -> None:
                     "query reads (Oracle would run it as a function). Use the table's "
                     "column, or repeat the expression instead of an alias."
                 )
+
+
+def _is_position(node: exp.Expr) -> bool:
+    """An unsigned whole number, as in ORDER BY 2."""
+    return isinstance(node, exp.Literal) and not node.is_string and node.this.isdigit()
 
 
 def _visible(scope: Scope | None, table: str) -> bool:
