@@ -32,7 +32,9 @@ place it doesn't.
 2. Plan: if there is an approved analysis plan, did the work follow it? Is
    anything off-plan clearly labelled exploratory? If a plan was revised,
    work done before the revision followed the version then approved: check
-   each result against the version it was made under.
+   each result against the version it was made under. Each plan records
+   what had already returned data when it was proposed; results seen before
+   a plan aren't prespecified by it, so check none is presented as if it were.
 3. Causal language: does the answer imply cause and effect ("leads to",
    "improves", "because of") that an observational design can't support?
 4. Sample sizes: are the numbers of participants and observations reported

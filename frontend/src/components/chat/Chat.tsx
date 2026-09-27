@@ -8,6 +8,7 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
+import { planStatus } from "./plan";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
@@ -459,23 +460,13 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
   const errors =
     steps.filter((step) => step.tone === "error").length +
     rows.filter((row) => row.type === "notice" && row.tone === "error").length;
-  const plan = rows.find((row) => row.type === "approval" && row.approval.approvalKind === "analysis_plan");
   const facts = [
     steps.length > 0 && `${steps.length} step${steps.length === 1 ? "" : "s"}`,
     count("db") && `${count("db")} quer${count("db") === 1 ? "y" : "ies"}`,
     count("book") && `${count("book")} lab guide${count("book") === 1 ? "" : "s"} read`,
     files && `${files} file${files === 1 ? "" : "s"} changed`,
   ].filter(Boolean) as string[];
-  const planChip =
-    plan?.type !== "approval"
-      ? null
-      : plan.approval.frozen
-        ? { text: "plan approved and frozen", tone: "you" as const }
-        : plan.approval.state === "declined"
-          ? { text: "plan not approved", tone: "attn" as const }
-          : plan.approval.state === "withdrawn"
-            ? { text: "plan withdrawn", tone: "attn" as const }
-            : null;
+  const planChip = planStatus(rows.flatMap((row) => (row.type === "approval" ? [row.approval] : [])));
   return (
     <section className="border-y border-line">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">

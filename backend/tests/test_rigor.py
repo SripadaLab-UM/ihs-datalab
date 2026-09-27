@@ -40,6 +40,12 @@ def largest_plans(pattern: str = "y\n"):
             "rationale": lines(ps.MAX_RATIONALE, pattern),
             "revises": {"plan_id": "pl_" + "a" * 12, "sha256": "b" * 64},
             "revision_reason": lines(ps.MAX_REASON, pattern),
+            # The longest record of what ran before it, too.
+            "proposed_after": {
+                "queries": 10**6,
+                "tables": ["T" * 128] * ps.MAX_RECORDED_TABLES,
+                "more_tables": 10**6,
+            },
             "sections": [
                 *({"kind": k, "content": lines(each, pattern)} for k in kinds),
                 *(

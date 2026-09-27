@@ -8,7 +8,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { Conversation, QueryRecord } from "@/api/client";
-import { isV2, planChanges, planSections, planTypeLabel, type PlanComparison, type PlanV2 } from "@/components/chat/plan";
+import {
+  isV2,
+  planChanges,
+  planSections,
+  planTypeLabel,
+  proposedAfterText,
+  type PlanComparison,
+  type PlanV2,
+} from "@/components/chat/plan";
 import { buildTranscript, finalAnswer, type ConversationEvent, type Turn } from "@/components/chat/transcript";
 
 export interface ReportOptions {
@@ -141,6 +149,9 @@ function Report({
                 )}
                 {isV2(item.plan) && item.plan.revises && <Revision plan={item.plan} compareTo={item.compareTo} />}
                 <ul>
+                  <li>
+                    <em>Proposed after</em>: {proposedAfterText(item.plan)}
+                  </li>
                   {planTypeLabel(item.plan) && (
                     <li>
                       <em>Type</em>: {planTypeLabel(item.plan)}

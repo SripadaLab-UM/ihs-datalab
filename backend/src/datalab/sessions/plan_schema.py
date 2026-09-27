@@ -284,7 +284,10 @@ _TOP_FIELDS = {
     "sections",
     "revises",
     "revision_reason",
+    "proposed_after",
 }
+# How many of the tables queried before a plan it names (the rest are counted).
+MAX_RECORDED_TABLES = 30
 _SECTION_FIELDS = {"kind", "label", "content"}
 # Row titles the card, the export, and the review's text use for a plan's own
 # parts, so no section of the agent's or person's can take them.
@@ -339,6 +342,7 @@ def clean_plan(raw: Any, *, draft: bool = False) -> dict[str, Any]:
     if len(rationale) > MAX_RATIONALE:
         raise PlanInvalid(f"The plan's rationale is longer than {MAX_RATIONALE} characters.")
     revises, reason = _revision(raw, draft)
+    proposed_after = _proposed_after(raw.get("proposed_after"))
 
     sections = raw.get("sections", [])
     if not isinstance(sections, list):
@@ -394,6 +398,8 @@ def clean_plan(raw: Any, *, draft: bool = False) -> dict[str, Any]:
     if revises:
         plan["revises"] = revises
         plan["revision_reason"] = reason
+    if proposed_after is not None:
+        plan["proposed_after"] = proposed_after
     size = len(rationale) + len(reason)
     size += sum(len(s["label"]) + len(s["content"]) for s in plan["sections"])
     if size > MAX_PLAN:
@@ -402,6 +408,46 @@ def clean_plan(raw: Any, *, draft: bool = False) -> dict[str, Any]:
             "each section to what the person needs to review."
         )
     return plan
+
+
+def _proposed_after(record: Any) -> dict[str, Any] | None:
+    """What had run in the conversation when the plan was proposed, as DataLab
+    recorded it: {queries, tables, more_tables}, or None if it wasn't recorded."""
+    if record is None:
+        return None
+    fields = {"queries", "tables", "more_tables"}
+    counts = [record.get(k) for k in ("queries", "more_tables")] if isinstance(record, dict) else []
+    if (
+        not isinstance(record, dict)
+        or set(record) != fields
+        or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts)
+        or not isinstance(record["tables"], list)
+        or len(record["tables"]) > MAX_RECORDED_TABLES
+        or not all(isinstance(t, str) and 0 < len(t) <= 128 for t in record["tables"])
+    ):
+        raise PlanInvalid("A plan's record of what ran before it isn't in the expected form.")
+    return {
+        "queries": record["queries"],
+        "tables": list(record["tables"]),
+        "more_tables": record["more_tables"],
+    }
+
+
+def proposed_after_text(content: dict[str, Any]) -> str:
+    """What had run when the plan was proposed, in a sentence."""
+    record = content.get("proposed_after")
+    if not isinstance(record, dict):
+        return "Not recorded (this plan is from an earlier version of DataLab)."
+    queries = record["queries"]
+    if not queries:
+        return "No queries had returned data in this conversation."
+    tables = ", ".join(record["tables"]) or "no tables"
+    if record["more_tables"]:
+        tables += f", and {record['more_tables']} more"
+    return (
+        f"{queries} {'query' if queries == 1 else 'queries'} had already returned data in this "
+        f"conversation, from {tables}. Results seen before a plan aren't prespecified by it."
+    )
 
 
 def _revision(raw: dict[str, Any], draft: bool) -> tuple[dict[str, str] | None, str]:
@@ -448,6 +494,8 @@ def plan_answer(
         plan = clean_plan(edits if edits is not None else proposed)
         if revision_of(plan) != revision_of(proposed):
             raise PlanInvalid("Which approved plan this revises can't be changed here.")
+        if plan.get("proposed_after") != proposed.get("proposed_after"):
+            raise PlanInvalid("The record of what ran before the plan can't be changed.")
         if revises_plan is not None and same_plan(revises_plan, plan):
             raise PlanInvalid(
                 "This revision doesn't change anything in the approved plan. Change what needs "
@@ -459,7 +507,9 @@ def plan_answer(
         with contextlib.suppress(PlanInvalid):
             draft = clean_plan(edits, draft=True)
             nothing_new = draft == proposed or not draft["sections"]
-            if not nothing_new and revision_of(draft) == revision_of(proposed):
+            same_links = revision_of(draft) == revision_of(proposed)
+            same_record = draft.get("proposed_after") == proposed.get("proposed_after")
+            if not nothing_new and same_links and same_record:
                 edited = draft
     if change_type not in TYPES_BY_ID or change_type == proposed.get("analysis_type"):
         change_type = None
@@ -544,11 +594,12 @@ def _title_key(title: str) -> str:
     looked = "".join(_GREEK_LOOKALIKES.get(c, c) for c in title)
     bare = (c for c in unicodedata.normalize("NFKD", looked) if not unicodedata.combining(c))
     words = "".join(_skeleton(c) if c.isalnum() else " " for c in bare)
-    # And the plain letters and digits that pass for each other: I, l, 1; O, 0.
+    # And the plain letters and digits that pass for each other.
     return " ".join(words.translate(_ASCII_LOOKALIKES).split())
 
 
-_ASCII_LOOKALIKES = str.maketrans("i1|0", "lllo")
+# Plain letters and digits that pass for each other: I, l, 1; O, 0; u, v.
+_ASCII_LOOKALIKES = str.maketrans("i1|0v", "lllou")
 
 
 def _title_letter(char: str) -> bool:
@@ -575,12 +626,19 @@ _GREEK_LOOKALIKES = dict(
 _GREEK_NAMES = {"ALPHA": "a", "IOTA": "i", "UPSILON": "u", "OMEGA": "w", "GAMMA": "y"}
 
 
+# Latin letters whose names don't say which letter they look like (a click,
+# tone six, schwa).
+_LATIN_LOOKALIKES = {"\u01c0": "l", "\u0185": "b", "\u0184": "b", "\u0259": "e", "\u018f": "e"}
+
+
 def _skeleton(char: str) -> str:
     """The plain lower-case Latin letter a letter looks like, or the letter itself."""
     if char.isascii():
         return char.lower()
     if char in _GREEK_LOOKALIKES:
         return _GREEK_LOOKALIKES[char]
+    if char in _LATIN_LOOKALIKES:
+        return _LATIN_LOOKALIKES[char]
     name = unicodedata.name(char, "")
     if name.startswith("LATIN"):
         # "LATIN SMALL LETTER DOTLESS I", "LATIN LETTER SMALL CAPITAL A",

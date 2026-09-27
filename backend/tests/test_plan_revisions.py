@@ -284,3 +284,47 @@ async def test_a_failure_freezing_as_the_turn_stops_doesnt_swallow_the_stop(desk
     proposing.cancel()
     with pytest.raises(asyncio.CancelledError):
         await proposing
+
+
+class Query:
+    def __init__(self, status, tables):
+        self.status, self.tables = status, tables
+
+
+async def test_a_plan_records_what_had_returned_data_when_it_was_proposed(desk, store):
+    assert desk.planning_record("c1") == {"queries": 0, "tables": [], "more_tables": 0}
+    desk.queries_so_far = lambda cid: [
+        Query("succeeded", ["IHS_2025.VW_DAILY_MOOD"]),
+        Query("succeeded", ["IHS_2025.VW_DAILY_MOOD", "IHS_2025.STUDYPARTICIPANTS"]),
+        Query("rejected", ["IHS_2025.SECRET"]),  # never returned anything
+    ]
+    record = desk.planning_record("c1")
+    assert record == {
+        "queries": 2,
+        "tables": ["IHS_2025.STUDYPARTICIPANTS", "IHS_2025.VW_DAILY_MOOD"],
+        "more_tables": 0,
+    }
+    proposed = clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})
+    frozen = await desk.propose("c1", proposed, answering(desk))
+    # Part of what was approved and hashed, and of what the review reads.
+    assert frozen.content["proposed_after"] == record
+    assert "2 queries had already returned data" in as_text(frozen)
+    assert "aren't prespecified" in as_text(frozen)
+
+
+def test_the_record_of_what_ran_before_cant_be_edited_or_malformed():
+    record = {"queries": 2, "tables": ["IHS_2025.X"], "more_tables": 0}
+    proposed = clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})
+    hidden = {**proposed, "proposed_after": {**record, "queries": 0}}
+    with pytest.raises(PlanInvalid, match="can't be changed"):
+        plan_answer(proposed, True, hidden, None)
+    # Edits sent back that change it aren't passed on.
+    assert plan_answer(proposed, False, {**hidden, "rationale": "x"}, None) == ""
+    for bad in ({"queries": -1, "tables": [], "more_tables": 0}, {"queries": 1}, "3 queries"):
+        with pytest.raises(PlanInvalid, match="expected form"):
+            clean_plan({**plan("association", ASSOCIATION), "proposed_after": bad})
+
+
+def test_a_plan_from_before_the_record_says_it_wasnt_recorded():
+    old = Plan("pl_1", "c1", "2026-09-01T00:00:00+00:00", {"question": "Sleep?"}, "0" * 64)
+    assert "- Proposed after: Not recorded" in as_text(old)

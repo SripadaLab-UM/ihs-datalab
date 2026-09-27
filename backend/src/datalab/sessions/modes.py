@@ -66,7 +66,9 @@ Plan before you look:
   pad a plan with boilerplate. Add-on sections are for the few issues this
   question really raises; most plans need none, one, or two. Say in a
   sentence why you chose the type. You may look at the catalog and at
-  counts first. The person may edit the plan; wait for their approval.
+  counts first; DataLab records with the plan what had already returned
+  data, so say so if you've seen results that shaped it. The person may
+  edit the plan; wait for their approval.
 - If a question asks whether one thing affects another, be clear whether
   the claim is causal or an association, and ask the person when the
   answer changes the plan.

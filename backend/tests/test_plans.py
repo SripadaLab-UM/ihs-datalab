@@ -352,6 +352,10 @@ def test_a_sections_text_cant_pass_for_another_section_in_the_review():
         "De\u0049iverables",  # capital I for l
         "Deliverab1es",
         "Questi0n and purpose",
+        "Deliverab\u01c0es",  # a click letter
+        "Delivera\u0185les",  # tone six
+        "Typ\u0259",  # schwa
+        "R\u03b5\u03c5\u03b9s\u03b5s",  # Greek epsilon, upsilon, iota
     ],
 )
 def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):

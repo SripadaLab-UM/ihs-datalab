@@ -13,12 +13,16 @@ import {
   type PlanSection,
   type PlanV2,
   addableKinds,
+  clearDraft,
   isV2,
+  loadDraft,
   planChanges,
   planSections,
   planSummary,
   planTypeLabel,
+  proposedAfterText,
   requiredKinds,
+  saveDraft,
   withSection,
 } from "./plan";
 
@@ -142,6 +146,10 @@ function PlanText({ plan }: { plan: AnyPlan | undefined }) {
           <dd className="whitespace-pre-wrap leading-relaxed">{reason}</dd>
         </div>
       )}
+      <div className="contents">
+        <dt className="dl-label sm:pt-1.5">Proposed after</dt>
+        <dd className="leading-relaxed">{proposedAfterText(plan)}</dd>
+      </div>
       {planTypeLabel(plan) && (
         <div className="contents">
           <dt className="dl-label sm:pt-1.5">Type</dt>
@@ -286,19 +294,29 @@ function Field({
  * a round trip for the obvious.
  */
 function PlanEditor({ conversationId, approval, proposed }: { conversationId: string; approval: Approval; proposed: PlanV2 }) {
-  const [plan, setPlan] = useState<PlanV2>(proposed);
+  // Edits made before the page reloaded come back.
+  const [restored] = useState(() => loadDraft(approval.id, proposed));
+  const [plan, setPlan] = useState<PlanV2>(restored ?? proposed);
   const schema = useQuery({ queryKey: ["plan-schema"], queryFn: api.planSchema, staleTime: Infinity });
   const answer = useMutation({
     mutationFn: ({ approve, changeType }: { approve: boolean; changeType?: string }) =>
       api.answerApproval(conversationId, approval.id, approve, "", plan, changeType),
+    onSuccess: () => clearDraft(approval.id),
   });
   // Answered: wait for the chat to catch up rather than offer the buttons again.
   const decided = answer.isPending || answer.isSuccess;
+  useEffect(() => {
+    if (!decided) saveDraft(approval.id, proposed, plan);
+  }, [approval.id, proposed, plan, decided]);
   const intro = (
     <p className="mt-1 max-w-[58ch] font-serif text-[16px] leading-relaxed text-muted italic">
       {plan.revises
         ? "The agent wants to change the approved plan. Check what changed, edit anything, then approve the revision: it's frozen as a new version, and later work follows it."
-        : "Before looking at outcome data, the agent writes down what it will do. Edit anything, add or remove optional sections, then approve it: it's frozen, and later work is labelled as following it or exploratory."}
+        : "The agent writes down what it will do. Edit anything, add or remove optional sections, then approve it: it's frozen, and later work is labelled as following it or exploratory."}
+      {restored && <span className="mt-1 block font-sans text-[13px] not-italic">Your edits from before the page reloaded are back.</span>}
+      <span className="mt-1 block font-sans text-[13px] not-italic">
+        When it was proposed: {proposedAfterText(plan)}
+      </span>
     </p>
   );
   if (!schema.data) {

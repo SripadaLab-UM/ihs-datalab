@@ -26,8 +26,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from datalab.sessions.plan_schema import (
+    MAX_RECORDED_TABLES,
     TYPES_BY_ID,
     PlanInvalid,
+    proposed_after_text,
     review_checks,
     revision_of,
     same_plan,
@@ -75,6 +77,7 @@ def as_text(plan: Plan, superseded_by: Plan | None = None) -> str:
             f"- Revises: {revises['plan_id']} (sha256 {revises['sha256'][:12]}). "
             f"Why: {_indented(str(plan.content.get('revision_reason', '')))}"
         )
+    lines.append(f"- Proposed after: {proposed_after_text(plan.content)}")
     if kind := type_label(plan.content):
         rationale = plan.content.get("rationale")
         lines.append(f"- Type: {kind}" + (f" ({_indented(rationale)})" if rationale else ""))
@@ -161,6 +164,8 @@ class PlanDesk:
         self.turn_running: Any = lambda conversation_id: True
         # Which turn is running (any value that's the same only within one turn).
         self.current_turn: Any = lambda conversation_id: None
+        # The conversation's queries so far (access_log.AccessLog.for_session).
+        self.queries_so_far: Any = lambda conversation_id: []
         # The version of a plan the person last sent back, per conversation,
         # and the turn it was sent back in, so the agent's next proposal in
         # that turn can be shown against it. For display only.
@@ -179,6 +184,18 @@ class PlanDesk:
             raise PlanInvalid("There's no approved plan to revise: propose a new plan instead.")
         listed = "; ".join(f"{p.id} ({_summary(p)})" for p in current)
         raise PlanInvalid(f"There's no approved plan {plan_id!r} to revise. Current: {listed}.")
+
+    def planning_record(self, conversation_id: str) -> dict[str, Any]:
+        """What had run in the conversation so far, for a plan proposed now:
+        the queries that returned data, and the tables they read. Recorded by
+        DataLab, not said by the agent, so it holds whatever the plan says."""
+        ran = [q for q in self.queries_so_far(conversation_id) if q.status == "succeeded"]
+        tables = sorted({t for q in ran for t in q.tables})
+        return {
+            "queries": len(ran),
+            "tables": tables[:MAX_RECORDED_TABLES],
+            "more_tables": max(0, len(tables) - MAX_RECORDED_TABLES),
+        }
 
     def check_revision(self, conversation_id: str, content: dict[str, Any]) -> None:
         """PlanInvalid if a revision changes nothing in the plan it revises."""

@@ -58,6 +58,7 @@ function show(approval: Approval) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   vi.mocked(api.planSchema).mockResolvedValue(schema);
   vi.mocked(api.answerApproval).mockReset().mockResolvedValue(undefined);
 });
@@ -260,4 +261,40 @@ it("moves focus into the type choice, and keeps the buttons still when a type is
   fireEvent.click(screen.getByRole("button", { name: "Send back" }));
   // Once answered, the panel goes.
   await waitFor(() => expect(screen.queryByRole("button", { name: "Send back" })).toBeNull());
+});
+
+it("keeps the person's edits across a reload, until the plan is answered", async () => {
+  const first = show(pending);
+  fireEvent.change(await screen.findByDisplayValue("A table."), { target: { value: "A table and a figure." } });
+  first.unmount(); // the page reloads
+  show(pending);
+  expect(await screen.findByDisplayValue("A table and a figure.")).toBeInTheDocument();
+  expect(screen.getByText("Your edits from before the page reloaded are back.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
+  await waitFor(() => expect(sessionStorage.length).toBe(0));
+});
+
+it("ignores saved edits that don't fit the plan, or storage that isn't there", async () => {
+  sessionStorage.setItem("datalab:plan-draft:ap1", JSON.stringify({ ...proposed, analysis_type: "prediction" }));
+  const first = show(pending);
+  expect(await screen.findByDisplayValue("A table.")).toBeInTheDocument();
+  first.unmount();
+  const broken = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+    throw new Error("blocked");
+  });
+  show(pending);
+  expect(await screen.findByDisplayValue("A table.")).toBeInTheDocument();
+  broken.mockRestore();
+});
+
+it("says what had returned data when the plan was proposed, and when that wasn't recorded", async () => {
+  const recorded = { ...proposed, proposed_after: { queries: 2, tables: ["IHS_2025.VW_DAILY_MOOD"], more_tables: 0 } };
+  const view = show({ ...pending, plan: recorded });
+  expect(
+    await screen.findByText(/When it was proposed: 2 queries had already returned data in this conversation, from IHS_2025.VW_DAILY_MOOD/),
+  ).toBeInTheDocument();
+  view.unmount();
+  show({ ...pending, state: "approved", plan: { question: "Sleep?" }, frozen: { at: "2026-09-01T12:00:00Z", sha256: "0123456789" } });
+  fireEvent.click(screen.getByRole("button", { name: "Show the frozen plan" }));
+  expect(screen.getByText("Not recorded (this plan is from an earlier version of DataLab).")).toBeInTheDocument();
 });

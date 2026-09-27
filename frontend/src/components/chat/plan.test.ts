@@ -6,6 +6,7 @@ import {
   addableKinds,
   planChanges,
   planSections,
+  planStatus,
   planSummary,
   planTypeLabel,
   requiredKinds,
@@ -107,4 +108,19 @@ it("matches a person's own section across versions however its title is written"
   expect(titleKey("\u03f9HECKS")).toBe(titleKey("checks"));
   expect(titleKey("DeIiverab1es")).toBe(titleKey("Deliverables"));
   expect(titleKey("Questi0n")).toBe(titleKey("question"));
+  expect(titleKey("R\u03b5\u03c5\u03b9s\u03b5s")).toBe(titleKey("Revises"));
+  expect(titleKey("Typ\u0259 Deliverab\u01c0es")).toBe(titleKey("Type deliverables"));
+});
+
+it("names what became of a turn's last plan", () => {
+  const declined = { approvalKind: "analysis_plan", state: "declined" };
+  const frozen = { approvalKind: "analysis_plan", state: "approved", frozen: { at: "", sha256: "" }, plan };
+  const helper = { approvalKind: "research_helper", state: "declined" };
+  expect(planStatus([declined, frozen, helper])).toEqual({ text: "plan approved and frozen", tone: "you" });
+  expect(planStatus([frozen, declined])).toEqual({ text: "plan not approved", tone: "attn" });
+  const revision = { ...frozen, plan: { ...plan, revises: { plan_id: "pl_1", sha256: "a" }, revision_reason: "x" } };
+  expect(planStatus([revision])?.text).toBe("plan revised and frozen");
+  expect(planStatus([{ ...declined, changeTypeLabel: "Prediction" }])?.text).toBe("plan sent back");
+  expect(planStatus([{ approvalKind: "analysis_plan", state: "approved", notFrozen: "x" }])?.text).toBe("plan approved, not frozen");
+  expect(planStatus([helper])).toBeNull();
 });

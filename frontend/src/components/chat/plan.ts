@@ -20,6 +20,8 @@ export interface PlanV2 {
   /** A revision: the approved plan it replaces, and why. */
   revises?: { plan_id: string; sha256: string };
   revision_reason?: string;
+  /** What had returned data in the conversation when it was proposed, recorded by DataLab. */
+  proposed_after?: { queries: number; tables: string[]; more_tables: number };
 }
 
 /** What a plan is shown against: the approved plan it revises, or the version the person sent back. */
@@ -80,16 +82,16 @@ export function asPlan(value: unknown): AnyPlan | undefined {
 const pairs = (from: string, to: string): Record<string, string> =>
   Object.fromEntries(Array.from(from, (c, i) => [c, to[i]]));
 const GREEK = pairs("αβγδεζηικμνοπρστυχωςϲϹϳͿϒϱϐϰΑΒΕΖΗΙΚΜΝΟΡΤΥΧ", "abydeznikuvonpotuxwcccjjypbkabezhikmnoptyx");
-const LATIN = pairs("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢ", "aiiguiynbhlacdejkmoptuvwz");
+const LATIN = pairs("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢǀƅƄəƏǝɛ", "aiiguiynbhlacdejkmoptuvwzlbbeeee");
 
 /** A section title as it reads, to match it across versions: accents, case,
- * punctuation, and look-alike letters (and I, l, 1 or O, 0) don't count. */
+ * punctuation, and look-alike letters (and I, l, 1; O, 0; u, v) don't count. */
 export function titleKey(title: string): string {
   // The table first: decomposing can turn a look-alike into another letter.
   const looked = Array.from(title, (c) => GREEK[c] ?? c).join("");
   const bare = looked.normalize("NFKD").replace(/\p{M}/gu, "");
   const letters = Array.from(bare, (c) => GREEK[c] ?? LATIN[c] ?? (/[\p{L}\p{N}]/u.test(c) ? c.toLowerCase() : " "));
-  return letters.join("").replace(/[i1]/g, "l").replace(/0/g, "o").split(/\s+/).filter(Boolean).join(" ");
+  return letters.join("").replace(/[i1]/g, "l").replace(/0/g, "o").replace(/v/g, "u").split(/\s+/).filter(Boolean).join(" ");
 }
 
 /** A comparison from an event, or undefined if there isn't one. */
@@ -176,4 +178,68 @@ export function withSection(plan: PlanV2, kind: string, schema: PlanSchema): Pla
   const sections = [...plan.sections, { kind, label, content: "" }];
   // A stable sort keeps additional sections in the order they were added.
   return { ...plan, sections: sections.sort((a, b) => rank(a.kind) - rank(b.kind)) };
+}
+
+/** What became of a turn's plan, for the row its work folds into: its last plan counts. */
+export function planStatus(
+  approvals: {
+    approvalKind: string;
+    plan?: AnyPlan;
+    state: string;
+    frozen?: unknown;
+    notFrozen?: string;
+    changeTypeLabel?: string;
+  }[],
+): { text: string; tone: "you" | "attn" } | null {
+  const plan = approvals.filter((a) => a.approvalKind === "analysis_plan").at(-1);
+  if (!plan) return null;
+  if (plan.frozen) return { text: isV2(plan.plan) && plan.plan.revises ? "plan revised and frozen" : "plan approved and frozen", tone: "you" };
+  if (plan.notFrozen) return { text: "plan approved, not frozen", tone: "attn" };
+  if (plan.state === "declined") return { text: plan.changeTypeLabel ? "plan sent back" : "plan not approved", tone: "attn" };
+  if (plan.state === "withdrawn") return { text: "plan withdrawn", tone: "attn" };
+  return null;
+}
+
+// The person's unsaved edits to a pending plan, kept in this tab so a reload
+// doesn't lose them. Only a convenience: storage can be unavailable, and the
+// server holds the plan itself.
+const draftKey = (approvalId: string) => `datalab:plan-draft:${approvalId}`;
+
+/** Edits saved for this pending plan, if they still fit it (same type, same plan revised). */
+export function loadDraft(approvalId: string, proposed: PlanV2): PlanV2 | undefined {
+  try {
+    const saved: unknown = JSON.parse(sessionStorage.getItem(draftKey(approvalId)) ?? "null");
+    const draft = asPlan(saved);
+    if (!isV2(draft) || draft.analysis_type !== proposed.analysis_type) return undefined;
+    if (draft.revises?.plan_id !== proposed.revises?.plan_id) return undefined;
+    return draft;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveDraft(approvalId: string, proposed: PlanV2, plan: PlanV2): void {
+  try {
+    if (JSON.stringify(plan) === JSON.stringify(proposed)) sessionStorage.removeItem(draftKey(approvalId));
+    else sessionStorage.setItem(draftKey(approvalId), JSON.stringify(plan));
+  } catch {
+    // Not kept: the edits live only on the page.
+  }
+}
+
+export function clearDraft(approvalId: string): void {
+  try {
+    sessionStorage.removeItem(draftKey(approvalId));
+  } catch {
+    // Nothing to clear.
+  }
+}
+
+/** What had run when a plan was proposed, in a sentence (as the backend says it, plan_schema.py). */
+export function proposedAfterText(plan: AnyPlan | undefined): string {
+  const record = isV2(plan) ? plan.proposed_after : undefined;
+  if (!record) return "Not recorded (this plan is from an earlier version of DataLab).";
+  if (!record.queries) return "No queries had returned data in this conversation.";
+  const tables = (record.tables.join(", ") || "no tables") + (record.more_tables ? `, and ${record.more_tables} more` : "");
+  return `${record.queries} ${record.queries === 1 ? "query" : "queries"} had already returned data in this conversation, from ${tables}. Results seen before a plan aren't prespecified by it.`;
 }
