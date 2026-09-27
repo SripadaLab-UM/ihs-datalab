@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
 import { Button, Chip, Icon, SessionBadge } from "@/components/ui";
@@ -284,8 +284,10 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 /** The answer, set apart from the work behind it. */
 function AnswerCard({ answer, trace, streaming }: { answer: string; trace: Turn["trace"]; streaming: boolean }) {
   return (
-    <section className="mt-4 border-t border-ink pt-5">
-      <h3 className="dl-label mb-3">{streaming ? "Writing the answer…" : "The answer"}</h3>
+    <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
+      <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
+        {streaming ? "Writing the answer…" : "Answer"}
+      </h3>
       <Markdown text={answer} />
       {trace && !streaming && (
         <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
@@ -402,6 +404,14 @@ function Composer({
   suggestion: { text: string } | null;
 }) {
   const [text, setText] = useState("");
+  // The box grows with what's typed (wrapped lines too), up to about eight lines.
+  const box = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    element.style.height = "auto";
+    element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
+  }, [text]);
   // A starter prompt the person picked goes into the box, for them to edit and send.
   useEffect(() => {
     // Never over what the person has already typed.
@@ -429,8 +439,11 @@ function Composer({
     <footer className="px-8 pt-2 pb-6">
       <div className="mx-auto max-w-[42rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
-        <div className="flex items-end gap-3 border-b border-line pb-2 focus-within:border-ink">
+        {/* The hint sits under the box, so the box itself asks a plain question. */}
+        <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
           <textarea
+            ref={box}
+            rows={1}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -439,15 +452,15 @@ function Composer({
                 submit();
               }
             }}
-            rows={Math.min(8, Math.max(1, text.split("\n").length))}
-            placeholder={running ? "The agent is working…" : "Ask a question… (Shift+Enter for a new line)"}
-            title="Enter sends; Shift+Enter starts a new line"
-            className="min-h-10 flex-1 resize-none bg-transparent py-2 font-serif text-[18px] leading-snug outline-none placeholder:text-faint placeholder:italic"
+            aria-label="Your question or instruction"
+            placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : "Ask a question, or say what to do next"}
+            className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
           />
           <select
             value={effort}
             onChange={(e) => setEffort(e.target.value as Effort)}
-            className="bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
+            aria-label="How hard the agent thinks"
+            className="self-center bg-transparent py-1.5 font-sans text-[12.5px] text-muted hover:text-ink"
             title="How hard the agent thinks"
           >
             <option value="low">Quick</option>
@@ -455,7 +468,7 @@ function Composer({
             <option value="high">Thorough</option>
           </select>
           {running ? (
-            <Button variant="danger" onClick={() => stop.mutate()} disabled={stop.isPending}>
+            <Button variant="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
               <Icon name="stop" size={14} /> Stop
             </Button>
           ) : (
@@ -464,6 +477,9 @@ function Composer({
             </Button>
           )}
         </div>
+        <p className="mt-1.5 px-1 font-sans text-[11.5px] text-faint">
+          Enter to send · Shift+Enter for a new line · the agent shows its steps as it works
+        </p>
       </div>
     </footer>
   );

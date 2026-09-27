@@ -78,6 +78,11 @@ describe("activityRows", () => {
     const live = activityRows([{ kind: "command", id: "c", command: "python a.py", output: "", exitCode: null, status: "running" }], true);
     expect(live[0].type === "step" && live[0].step.tone).toBe("now");
     expect(nowLine(live, "")).toBe("Ran a.py…");
+    // From the design review: the live line repeated the narration above it.
+    const talking = activityRows([{ kind: "message", id: "m", phase: "commentary", text: "I'll check the catalog first." }], true);
+    expect(nowLine(talking, "")).toBe("Thinking about the next step…");
+    expect(nowLine(talking, "**Planning the query**\n\nI should look at the sleep tables.")).toBe("Planning the query…");
+    expect(nowLine([], "")).toBe("Getting started…");
     // A turn that was stopped doesn't leave a step working forever.
     const stopped = activityRows([{ kind: "command", id: "c", command: "python a.py", output: "", exitCode: null, status: "running" }], false);
     expect(stopped[0].type === "step" && stopped[0].step.tone).toBe("done");

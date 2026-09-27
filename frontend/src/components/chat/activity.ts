@@ -321,12 +321,19 @@ export function activityRows(items: Item[], running: boolean): Row[] {
   return fold(rows);
 }
 
-/** What the agent is doing right now, for the live card: the running step, or its latest words. */
+/**
+ * The live line: the step that's running, else the model's own short heading
+ * for what it's thinking about. Never a repeat of the narration above it, and
+ * never more specific than the events say.
+ */
 export function nowLine(rows: Row[], reasoning: string): string {
   const last = rows.at(-1);
   if (last?.type === "step" && last.step.tone === "now") return `${last.step.title}…`;
-  const said = [...rows].reverse().find((r) => r.type === "say");
-  const thought = reasoning.trim().split("\n").filter(Boolean).at(-1);
-  if (thought && (!said || rows.at(-1)?.type !== "say")) return thought.replace(/^\*\*|\*\*$/g, "");
-  return said?.type === "say" ? said.text.split("\n")[0] : "Getting started…";
+  const heading = reasoning
+    .split("\n")
+    .reverse()
+    .map((line) => /^\s*\*\*(.+?)\*\*\s*$/.exec(line)?.[1])
+    .find(Boolean);
+  if (heading) return `${heading}…`;
+  return rows.length ? "Thinking about the next step…" : "Getting started…";
 }

@@ -100,19 +100,19 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
           {figures.length > 0 && (
             <h3 className="dl-label mb-2">Files</h3>
           )}
-          <ul className="flex flex-col border-t border-line">
+          <ul className="flex flex-col gap-0.5">
             {others.map((file) => {
               const { dir, name } = splitPath(file.path);
               return (
-                <li key={file.path} className="border-b border-line">
+                <li key={file.path}>
                   <button
                     onClick={() => open(file)}
-                    className="group flex w-full items-center gap-3 py-2.5 text-left"
+                    className="group flex w-full items-center gap-3 rounded-[3px] px-1.5 py-2 text-left hover:bg-surface"
                     title={file.path}
                   >
                     <FileGlyph kind={file.kind} size={26} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-serif text-[15px] group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
+                      <span className="block truncate font-sans text-[13.5px] font-medium group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
                         {name}
                       </span>
                       <span className="block truncate font-mono text-[11px] text-faint">
@@ -146,7 +146,7 @@ function History({ conversation }: { conversation: Conversation }) {
   }
   return (
     <>
-      <p className="mb-4 font-serif text-[15px] leading-relaxed text-muted italic">
+      <p className="mb-4 font-sans text-[13px] leading-relaxed text-muted">
         A copy of the files after each turn. Restoring never loses the current ones.
       </p>
       <ol className="relative flex flex-col gap-3 before:absolute before:bottom-2 before:left-[7px] before:top-2 before:w-px before:bg-line">
@@ -161,7 +161,7 @@ function History({ conversation }: { conversation: Conversation }) {
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-serif text-[15px]">{checkpoint.label}</span>
+                <span className="font-sans text-[13.5px] font-medium">{checkpoint.label}</span>
                 <Button
                   variant="ghost"
                   className="shrink-0 px-2 py-0.5 text-xs"
@@ -257,9 +257,9 @@ function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOp
       <p className="dl-label mb-2 flex items-center gap-1.5 !text-data">
         <Icon name="lock" size={11} /> Read-only · every query, newest last
       </p>
-      <ol className="flex flex-col border-t border-line">
+      <ol className="flex flex-col gap-2">
         {queries.data?.map((q) => (
-          <li key={q.id} className="border-b border-line py-3 text-xs">
+          <li key={q.id} className="rounded-[4px] border border-line bg-surface p-3 text-xs">
             <div className="flex items-center gap-2">
               <span
                 aria-hidden
@@ -268,7 +268,7 @@ function DataAccessed({ conversationId, onOpen }: { conversationId: string; onOp
                   q.status === "succeeded" ? "bg-data" : q.status === "running" ? "dl-breathe bg-attn" : "bg-danger",
                 )}
               />
-              <span className="min-w-0 flex-1 truncate font-serif text-[15px]">
+              <span className="min-w-0 flex-1 truncate font-sans text-[13.5px] font-medium">
                 {q.tables.map(shortTable).join(", ") || (q.status === "rejected" ? "Stopped before it ran" : "No tables named")}
               </span>
               <span className="shrink-0 text-muted">

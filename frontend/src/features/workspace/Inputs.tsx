@@ -35,7 +35,7 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex gap-2.5 font-serif text-[15px] leading-relaxed text-muted italic">
+      <div className="flex gap-2.5 font-sans text-[13px] leading-relaxed text-muted">
         <p>
           The agent can read these at <code className="font-mono text-ink">/inputs</code> but can't change them. An
           attached folder is shared whole, including anything added to it later.

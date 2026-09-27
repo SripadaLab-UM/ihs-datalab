@@ -200,7 +200,10 @@ export function SayRow({ text }: { text: string }) {
   );
 }
 
-/** What the agent is doing this moment: one line, with Stop beside it. */
+/**
+ * What the agent is doing this moment, or what it's waiting for you to do.
+ * A block of its own, set apart from the story, with Stop always beside it.
+ */
 export function NowCard({
   line,
   waiting,
@@ -213,21 +216,27 @@ export function NowCard({
   stopping: boolean;
 }) {
   return (
-    <div className="flex items-baseline gap-3 border-b border-line py-3" role="status" aria-live="polite">
+    <div
+      className={clsx(
+        "flex items-start gap-3 rounded-[4px] border px-4 py-3",
+        waiting ? "border-you bg-you-soft" : "border-line bg-field",
+      )}
+      role="status"
+      aria-live="polite"
+    >
       <span
         aria-hidden
-        className={clsx("size-[7px] shrink-0 -translate-y-[2px] rounded-full", waiting ? "bg-you" : "dl-breathe bg-ink")}
+        className={clsx("mt-[7px] size-2 shrink-0 rounded-full", waiting ? "bg-you" : "dl-breathe bg-ink")}
       />
-      <span className={clsx("dl-label shrink-0", waiting ? "!text-you" : "!text-ink")}>{waiting ? "Waiting for you" : "Working"}</span>
-      <span className="min-w-0 flex-1 truncate font-serif text-[16.5px] text-muted italic">{waiting ?? line}</span>
-      <button
-        type="button"
-        onClick={onStop}
-        disabled={stopping}
-        className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger hover:decoration-danger disabled:opacity-45"
-      >
-        Stop
-      </button>
+      <span className="min-w-0 flex-1">
+        <span className={clsx("block font-sans text-[12px] font-semibold tracking-[0.08em] uppercase", waiting ? "text-you" : "text-ink")}>
+          {waiting ? "Waiting for you" : "Working"}
+        </span>
+        <span className="mt-0.5 line-clamp-2 block font-sans text-[15px] leading-snug text-ink">{waiting ?? line}</span>
+      </span>
+      <Button variant="danger" onClick={onStop} disabled={stopping} className="shrink-0 self-center px-2.5 py-1 text-[13px]">
+        <Icon name="stop" size={12} /> Stop
+      </Button>
     </div>
   );
 }
