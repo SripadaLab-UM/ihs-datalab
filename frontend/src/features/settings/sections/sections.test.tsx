@@ -265,3 +265,13 @@ it("formats sizes the way people read them", () => {
   expect(formatBytes(1536)).toBe("1.5 KB");
   expect(formatBytes(250 * 1024 ** 2)).toBe("250 MB");
 });
+
+it("warns that saving won't take effect while an environment variable sets the secret", async () => {
+  mocked.connections.mockResolvedValue({ ...REAL, oracle: { ...REAL.oracle, password: "environment" } });
+  wrap(<ConnectionsSection />);
+  expect(await screen.findByText(/saving here won't take effect/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Replace the password…" }));
+  const field = screen.getByLabelText("Database password for SVC_READER") as HTMLInputElement;
+  expect(field.autocomplete).toBe("new-password");
+  expect(screen.getByText(/saving here won't take effect/)).toBeTruthy();
+});

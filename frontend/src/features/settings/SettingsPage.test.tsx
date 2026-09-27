@@ -49,3 +49,14 @@ it("shows each built section, in order, and nothing for the ones still to come",
   // Other screens link here: /settings#destination-keys.
   expect(document.getElementById("destination-keys")).toBeTruthy();
 });
+
+it("ignores a malformed link to a section", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/settings#%E0%A4%A"]}>
+        <SettingsPage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("1,234 tables and views")).toBeTruthy();
+});

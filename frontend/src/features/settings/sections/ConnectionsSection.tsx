@@ -166,9 +166,16 @@ function SecretLine({
       setValue("");
       setEditing(false);
       setSaved(true);
+      mutation.reset();
       queryClient.invalidateQueries({ queryKey: ["settings-connections"] });
     },
   });
+  const overridden = source === "environment" && canSet && (
+    <span className="text-xs text-attn">
+      An environment variable sets this {what}, so DataLab uses that one: saving here won't take effect until
+      it's removed.
+    </span>
+  );
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (value) mutation.mutate(value);
@@ -182,6 +189,7 @@ function SecretLine({
   if (!editing) {
     return (
       <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {overridden && <span className="w-full">{overridden}</span>}
         <span>{SOURCE[source]}</span>
         {saved && (
           <span className="inline-flex items-center gap-1 text-data" role="status">
@@ -209,7 +217,7 @@ function SecretLine({
         <input
           type="password"
           aria-label={label}
-          autoComplete="off"
+          autoComplete="new-password"
           spellCheck={false}
           autoFocus
           value={value}
@@ -223,6 +231,7 @@ function SecretLine({
           Cancel
         </Button>
       </span>
+      {overridden}
       <span className="text-xs text-muted">
         It goes straight to this computer's keychain. DataLab never shows it again, here or anywhere.
       </span>

@@ -144,7 +144,7 @@ function Row({ item, onRemove }: { item: StorageItem; onRemove: () => void }) {
         {item.kind === "backup" && item.kept_because && (
           <div className="mt-0.5 text-xs text-muted">{item.kept_because}</div>
         )}
-        {!removable && item.not_removable_because && REMOVABLE.includes(item.kind as RemovableKind) && (
+        {!removable && item.not_removable_because && (
           <div className="mt-0.5 text-xs text-muted">{item.not_removable_because}</div>
         )}
       </div>
@@ -155,9 +155,7 @@ function Row({ item, onRemove }: { item: StorageItem; onRemove: () => void }) {
             Remove…
           </Button>
         ) : (
-          <span className="text-xs text-faint" title={item.not_removable_because ?? undefined}>
-            kept
-          </span>
+          <span className="text-xs text-faint">kept</span>
         )}
       </span>
     </li>

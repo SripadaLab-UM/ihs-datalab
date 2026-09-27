@@ -22,7 +22,14 @@ export function SettingsPage() {
   // Other screens link to a section by its id (`/settings#destination-keys`).
   const { hash } = useLocation();
   useEffect(() => {
-    if (hash) document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+    if (!hash) return;
+    let id: string;
+    try {
+      id = decodeURIComponent(hash.slice(1));
+    } catch {
+      return; // a malformed link: stay at the top
+    }
+    document.getElementById(id)?.scrollIntoView({ block: "start" });
   }, [hash, health.isSuccess]);
   return (
     <div className="h-full overflow-y-auto">
