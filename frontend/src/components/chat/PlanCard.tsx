@@ -192,7 +192,7 @@ function PlanChanges({ before, after }: { before: PlanComparison; after: PlanV2 
       </details>
     );
   }
-  const none = !diff.type && !diff.rationale && diff.changes.length === 0;
+  const none = !diff.type && !diff.rationale && !diff.record && diff.changes.length === 0;
   return (
     <div className="mt-3 border border-line px-3 py-2.5">
       <p className="dl-label">{heading}</p>
@@ -203,6 +203,7 @@ function PlanChanges({ before, after }: { before: PlanComparison; after: PlanV2 
             <Chip tone="attn">type changed</Chip> {diff.type.before} → {diff.type.after}
           </li>
         )}
+        {diff.record && <Change label="Proposed after" status="changed" before={diff.record.before} after={diff.record.after} />}
         {diff.rationale && <Change label="Why this kind of analysis" status="changed" before={diff.rationale.before} after={diff.rationale.after} />}
         {diff.changes.map((change, i) => (
           <Change key={i} {...change} />

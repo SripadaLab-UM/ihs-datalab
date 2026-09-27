@@ -106,6 +106,18 @@ async def test_two_revisions_of_one_plan_cant_both_be_frozen(desk, store):
     # The chat is told, so the late one's card doesn't wait to be frozen.
     kind, data = desk.events[-1]
     assert kind == "plan_not_frozen" and "wasn't frozen" in data["reason"]
+    # And what the person approved goes back to the agent, to carry over.
+    assert late.suggested == two and "carrying over what still applies" in late.note
+
+
+def test_one_running_query_is_worded_in_the_singular():
+    from datalab.sessions.plan_schema import proposed_after_text
+
+    record = {"queries": 1, "tables": ["IHS_2025.VW_DAILY_MOOD"], "more_tables": 0}
+    assert proposed_after_text({"proposed_after": record}).startswith(
+        "1 query in this conversation had returned data or was still running, reading "
+        "IHS_2025.VW_DAILY_MOOD."
+    )
 
 
 @pytest.mark.parametrize(

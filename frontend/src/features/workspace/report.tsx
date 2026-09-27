@@ -222,6 +222,7 @@ function Revision({ plan, compareTo }: { plan: PlanV2; compareTo?: PlanCompariso
       {named("changed") && ` Changed: ${named("changed")}.`}
       {named("added") && ` Added: ${named("added")}.`}
       {named("removed") && ` Removed: ${named("removed")}.`}
+      {diff?.record && ` What had run before it: ${diff.record.after}`}
     </p>
   );
 }

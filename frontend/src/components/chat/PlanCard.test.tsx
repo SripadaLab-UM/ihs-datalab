@@ -307,3 +307,12 @@ it("drops saved edits once the plan isn't waiting any more, however it ended", a
   show({ ...pending, state: "withdrawn" }); // the turn stopped, or it timed out, or another tab answered
   expect(sessionStorage.getItem("datalab:plan-draft:ap1")).toBeNull();
 });
+
+it("names a changed record of what had run among a plan's changes", async () => {
+  const stale = { ...proposed, proposed_after: { queries: 0, tables: [], more_tables: 0 } };
+  const again = { ...proposed, proposed_after: { queries: 1, tables: ["IHS_2025.VW_DAILY_MOOD"], more_tables: 0 } };
+  show({ ...pending, plan: again, compareTo: { label: "The version you approved", plan: stale } });
+  expect(await screen.findByText("Changes from the version you approved")).toBeInTheDocument();
+  expect(screen.getByText(/^No queries had returned data/)).toBeInTheDocument(); // what it was
+  expect(screen.queryByText("No changes.")).toBeNull();
+});
