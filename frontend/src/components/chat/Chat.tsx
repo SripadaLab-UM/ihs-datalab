@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
-import { Button, Chip, Icon, SessionBadge } from "@/components/ui";
+import { Button, Chip, FileGlyph, Icon, SessionBadge } from "@/components/ui";
+import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
-import { activityRows, nowLine } from "./activity";
+import { activityRows, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, finalAnswer, type Item, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
@@ -200,7 +201,7 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
   const answer = finalAnswer(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
-  const story = rows.filter((row) => row.type !== "review");
+  const storyRows = rows.filter((row) => row.type !== "review");
   const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
   const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
   const queryClient = useQueryClient();
@@ -208,39 +209,43 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
     mutationFn: () => api.stop(conversationId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
+  const story = (
+    <Story
+      rows={storyRows}
+      renderRow={(row) => {
+        switch (row.type) {
+          case "step":
+            return <StepRow step={row.step} />;
+          case "group":
+            return <GroupRow row={row} />;
+          case "say":
+            return <SayRow text={row.text} />;
+          case "approval":
+            return (
+              <div className="py-2">
+                <ApprovalCard conversationId={conversationId} approval={row.approval} />
+              </div>
+            );
+          case "notice":
+            return (
+              <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
+                <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
+                {row.text}
+              </p>
+            );
+          default:
+            return null;
+        }
+      }}
+    />
+  );
+  // Completed with an answer: the answer leads, the work behind it folds away.
+  // A failed or stopped turn keeps its whole story in view.
+  const finished = Boolean(answer) && turn.status === "completed" && !live;
   return (
     <article className="flex flex-col gap-5">
-      {turn.userText && (
-        <Question text={turn.userText} />
-      )}
-      <Story
-        rows={story}
-        renderRow={(row) => {
-          switch (row.type) {
-            case "step":
-              return <StepRow step={row.step} />;
-            case "group":
-              return <GroupRow row={row} />;
-            case "say":
-              return <SayRow text={row.text} />;
-            case "approval":
-              return (
-                <div className="py-2">
-                  <ApprovalCard conversationId={conversationId} approval={row.approval} />
-                </div>
-              );
-            case "notice":
-              return (
-                <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
-                  <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
-                  {row.text}
-                </p>
-              );
-            default:
-              return null;
-          }
-        }}
-      />
+      {turn.userText && <Question text={turn.userText} />}
+      {!finished && story}
       {live && !answer && (
         <NowCard
           line={nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")}
@@ -253,11 +258,117 @@ function TurnView({ turn, conversationId, running }: { turn: Turn; conversationI
       {reviews.map((review, i) => (
         <ReviewBox key={`review-${i}`} review={review} conversationId={conversationId} running={running} />
       ))}
+      {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
+      {finished && <HowItWasMade rows={storyRows}>{story}</HowItWasMade>}
       {turn.status === "interrupted" && (
         <p className="font-serif text-[16px] text-muted italic">Stopped. Anything it saved is in History.</p>
       )}
+      {turn.status === "failed" && (
+        <p className="font-sans text-[14px] text-danger">
+          This turn ended with an error (shown above). Anything it saved is in History.
+        </p>
+      )}
     </article>
   );
+}
+
+/** The output files this turn changed that still exist, to open straight from the answer. */
+function MadeHere({ items, conversationId }: { items: Item[]; conversationId: string }) {
+  const openFile = use(OpenFileContext);
+  const outputs = useQuery({ queryKey: ["files", conversationId], queryFn: () => api.files(conversationId) });
+  const existing = new Set(outputs.data?.map((file) => `/work/outputs/${file.path}`));
+  const paths = [
+    ...new Set(items.flatMap((item) => (item.kind === "files" ? item.paths : [])).filter((p) => existing.has(p))),
+  ];
+  if (paths.length === 0 || !openFile) return null;
+  return (
+    <section>
+      <h3 className="dl-label mb-2">Made in this turn</h3>
+      <ul className="flex flex-wrap gap-2">
+        {paths.map((path) => {
+          const file = workspaceFile(path);
+          if (!file) return null;
+          return (
+            <li key={path}>
+              <button
+                type="button"
+                onClick={() => openFile(file)}
+                title={path}
+                className="inline-flex max-w-[22rem] items-center gap-2 rounded-[3px] border border-line bg-surface px-2.5 py-1.5 font-sans text-[13px] hover:border-ink"
+              >
+                <FileGlyph kind={file.kind} size={20} />
+                <span className="truncate">{path.replace(/^\/work\/outputs\//, "")}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * The work behind a finished answer, folded into one row that says what it
+ * amounted to. Failed steps and the plan are named on the row itself, so
+ * folding never hides them.
+ */
+function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (rows.length === 0) return null;
+  const steps = rows.flatMap((row) => (row.type === "step" ? [row.step] : row.type === "group" ? row.steps : []));
+  const count = (icon: string) => steps.filter((step) => step.icon === icon).length;
+  const files = new Set(
+    steps.flatMap((step) => (step.detail?.kind === "files" ? step.detail.paths : [])),
+  ).size;
+  // Failed steps and error notices are named on the row, so folding never hides them.
+  const errors =
+    steps.filter((step) => step.tone === "error").length +
+    rows.filter((row) => row.type === "notice" && row.tone === "error").length;
+  const plan = rows.find((row) => row.type === "approval" && row.approval.approvalKind === "analysis_plan");
+  const facts = [
+    steps.length > 0 && `${steps.length} step${steps.length === 1 ? "" : "s"}`,
+    count("db") && `${count("db")} quer${count("db") === 1 ? "y" : "ies"}`,
+    count("book") && `${count("book")} lab guide${count("book") === 1 ? "" : "s"} read`,
+    files && `${files} file${files === 1 ? "" : "s"} changed`,
+  ].filter(Boolean) as string[];
+  const planChip =
+    plan?.type !== "approval"
+      ? null
+      : plan.approval.frozen
+        ? { text: "plan approved and frozen", tone: "you" as const }
+        : plan.approval.state === "declined"
+          ? { text: "plan not approved", tone: "attn" as const }
+          : plan.approval.state === "withdrawn"
+            ? { text: "plan withdrawn", tone: "attn" as const }
+            : null;
+  return (
+    <section className="border-y border-line">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
+        <Marker tone="done" open={open} />
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
+          <span className="flex flex-wrap gap-1.5">
+            {facts.map((fact) => (
+              <Chip key={fact}>{fact}</Chip>
+            ))}
+            {planChip && <Chip tone={planChip.tone}>{planChip.text}</Chip>}
+            {errors > 0 && (
+              <Chip tone="bad">
+                {errors} error{errors === 1 ? "" : "s"} along the way
+              </Chip>
+            )}
+          </span>
+        </span>
+      </button>
+      {open && <div className="pb-4 pl-[19px]">{children}</div>}
+    </section>
+  );
+}
+
+/** The first line of Markdown text, without its markup. */
+function firstLine(text: string): string {
+  const line = text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  return line.replace(/^#+\s*|^[-*]\s+|^\d+\.\s+/, "").replace(/\*\*|`/g, "");
 }
 
 /** The person's question, set large; a long, pasted one reads as text, not as a heading. */
@@ -344,7 +455,8 @@ function ReviewBox({
       api.send(conversationId, "Please address the problems the rigor review found, where you can, and say which you couldn't."),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
-  const [open, setOpen] = useState(true);
+  // Collapsed once done: its header says what it is; the checklist is one click away.
+  const [open, setOpen] = useState(false);
   const reviewing = review.status === "running" && running;
   return (
     <section className="border-y border-line">
@@ -362,6 +474,10 @@ function ReviewBox({
                   ? "Stopped before it finished."
                   : "Didn't finish."}
           </span>
+          {!open && review.status === "done" && review.text && (
+            // Its opening line, as written: the review's own words, not a verdict made from them.
+            <span className="mt-1 line-clamp-1 font-sans text-[13px] text-ink">{firstLine(review.text)}</span>
+          )}
         </span>
       </button>
         {reviewing && (
