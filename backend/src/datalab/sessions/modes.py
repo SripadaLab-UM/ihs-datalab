@@ -236,6 +236,46 @@ Where the files are:
 - Change R code in ihsDataR/ only when the workflow can't be written
   without it, and then keep the change small and add a test for it.
 
+The shape of a file (DataLab refuses keys it doesn't know):
+
+```yaml
+name: weekly_steps_2025
+description: Weekly steps per device for the 2025 cohort, small cells suppressed.
+reads:
+  - IHS_2025.VFITBITDAILYDATA
+parameters:
+  start_date: { type: date, default: 2025-04-01 }
+  end_date:   { type: date, default: 2025-05-01 }
+steps:
+  - id: extract                   # sql: one SELECT; its whole result is the CSV
+    sql: |
+      SELECT ... FROM IHS_2025.VFITBITDAILYDATA
+      WHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+        AND RECORD_DATE <  TO_DATE(:end_date, 'YYYY-MM-DD')
+    output: daily.csv
+  - id: check_raw                 # qc: built-in checks on an earlier step's file
+    qc:
+      file: extract
+      min_rows: 1
+      required_columns: [STUDY_PARTICIPANT_ID, RECORD_DATE]
+      unique_by: [STUDY_PARTICIPANT_ID, RECORD_DATE]
+  - id: summary                   # r: reads inputs$raw, writes outputs$final
+    r: |
+      x <- read.csv(inputs$raw)
+      ...
+      write.csv(out, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: weekly.csv
+  - id: check_summary
+    qc:
+      file: summary
+      small_cells: { count_columns: [n_participants], min: 11 }
+deliver:
+  destination: dropbox-ihs-2025   # a destination key, never a path
+  folder: weekly_steps_2025
+  files: [summary]                # step ids
+```
+
 What every workflow file needs:
 - `reads:` lists every Oracle object the workflow reads, as
   `SCHEMA.OBJECT`: every table or view a SQL step names (joins and
@@ -248,10 +288,11 @@ What every workflow file needs:
 - Step ids and output file names are lower case. References point at
   earlier steps.
 - QC before delivery: at least `min_rows`, `required_columns` and
-  `unique_by` where the grain is known. Every delivered CSV needs a passing
-  `small_cells` check over that exact output (`count_columns`, `min` at
-  least 11, and `totals` or `percent_columns` when the file has them); any
-  other delivered file needs a short reason under
+  `unique_by` where the grain is known. Every delivered CSV of counts needs
+  a passing `small_cells` check over that exact output (`count_columns`,
+  `min` at least 11, and `totals` or `percent_columns` when the file has
+  them). A delivered file with no counts to check (a row-level file the
+  person asked for, or a TSV or Excel file) needs a short reason under
   `deliver.without_small_cells` instead. Rows of participant data are
   delivered only when the person asks for exactly that.
 - `deliver: destination:` is a destination key (such as
@@ -297,6 +338,9 @@ skill for the layout and the page format.
   DataLab shows the person what you changed as proposed knowledge edits,
   and they edit, discard, or Save & share them. You never save anything
   yourself; say in your answer which files you changed and why.
+- If /work/kb isn't there, or holds only a note that the knowledge base
+  isn't set up, write the draft to /work/outputs/ instead, and say it
+  can't be proposed from here yet.
 - Put each page in its kind's folder, with the file name matching its
   `id`. Lab skills are `skills/<name>/SKILL.md`, with `name` and
   `description`. Don't edit `index.md` or `generated/`.

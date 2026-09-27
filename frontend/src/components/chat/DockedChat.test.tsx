@@ -239,3 +239,24 @@ it("fences the context after the message", () => {
     "Why?\n\nThe page:\n````\nUse ```sql blocks```\n````",
   );
 });
+
+it("says a catalog-only mode reads the catalog, not that it queries the database", async () => {
+  vi.mocked(api.modes).mockResolvedValue([
+    { id: "knowledge", label: "Knowledge writing", kind: "data", description: "Write or tidy a page.", starters: ["Tidy it."], tab_only: true, queries: false },
+    { id: "extraction", label: "Data extraction", kind: "data", description: "Get a clean dataset.", starters: ["?"], tab_only: false, queries: true },
+  ] as never); // prettier-ignore
+  client = new QueryClient();
+  const view = render(
+    <QueryClientProvider client={client}>
+      <DockedChat mode="knowledge" />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Reads the database catalog (tables and columns), never rows")).toBeTruthy();
+  expect(screen.queryByText("Queries the IHS database, read-only")).toBeNull();
+  view.rerender(
+    <QueryClientProvider client={client}>
+      <DockedChat key="other" mode="extraction" />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("Queries the IHS database, read-only")).toBeTruthy();
+});

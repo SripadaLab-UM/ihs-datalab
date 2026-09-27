@@ -6,6 +6,7 @@ import tomllib
 
 from datalab.sessions import codex_config, modes
 from datalab.sessions.modes import MODES
+from datalab.workflows.model import load_workflow
 
 
 def config(mode_id: str) -> dict:
@@ -60,7 +61,7 @@ def test_workflow_authorings_instructions():
     # WORKFLOWS.md's rules.
     assert "`reads:` lists every Oracle object" in text
     assert "small_cells" in text and "deliver.without_small_cells" in text
-    assert "min` at\n  least 11" in text
+    assert "`min` at least 11" in text
     assert "destination key" in text and "never a\n  path" in text
     assert "every bind (`:start_date`)\n  must be a declared parameter" in text
     # It checks its own drafts, and says what DataLab checks again.
@@ -89,6 +90,18 @@ def test_knowledge_writings_instructions():
     assert "Never change a page's `status`" in text
     assert "proposed knowledge edits" in text and "You never save anything" in text
     assert "can't query the database in this mode" in text
+    assert "write the draft to /work/outputs/ instead" in text  # no knowledge base here
     assert "No participant-level data" in text
     for tool in ("search_catalog", "describe_table", "join_paths", "find_concept"):
         assert tool in text
+
+
+def test_workflow_authorings_example_passes_the_real_profiles_check():
+    """The file shape in the instructions, its two elisions filled in, is a
+    file DataLab would run: they can't drift apart."""
+    text = MODES["workflows"].instructions
+    example = text.split("```yaml\n")[1].split("```")[0]
+    example = example.replace("SELECT ... FROM", "SELECT STUDY_PARTICIPANT_ID, RECORD_DATE FROM")
+    example = example.replace("      ...\n", "      out <- x\n")
+    workflow = load_workflow(example, allowed_schemas=None, require_small_cells=True)
+    assert workflow.read_objects == {"IHS_2025.VFITBITDAILYDATA"}

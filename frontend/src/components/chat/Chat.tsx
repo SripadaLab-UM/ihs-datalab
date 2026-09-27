@@ -334,7 +334,10 @@ export function EmptyState({
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
         {(data
           ? [
-              ["db", "Queries the IHS database, read-only"],
+              // Knowledge writing has the catalog tools only.
+              mode?.queries === false
+                ? ["db", "Reads the database catalog (tables and columns), never rows"]
+                : ["db", "Queries the IHS database, read-only"],
               ["eye", "Shows you everything it reads and runs"],
               ["lock", "Websites blocked; the model is U-M's approved GPT service"],
             ]
