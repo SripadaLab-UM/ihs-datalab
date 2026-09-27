@@ -203,7 +203,6 @@ export function SqlPage() {
             running={runner.running}
             elapsed={elapsed}
             previewRows={previewRows}
-            maxRows={status.data?.max_rows}
             practice={practice}
           />
         </div>
@@ -283,7 +282,6 @@ function ResultsArea({
   running,
   elapsed,
   previewRows,
-  maxRows,
   practice,
 }: {
   opened: HistoryItem | null;
@@ -292,7 +290,6 @@ function ResultsArea({
   running: boolean;
   elapsed: number | null;
   previewRows: number;
-  maxRows?: number;
   practice: boolean;
 }) {
   if (opened) {
@@ -346,9 +343,6 @@ function ResultsArea({
       return (
         <ResultNote tone="bad" title="The query failed.">
           {run.message}
-          {maxRows !== undefined && run.message?.includes("rows") && (
-            <> Queries here can return up to {maxRows.toLocaleString()} rows.</>
-          )}
         </ResultNote>
       );
   }

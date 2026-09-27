@@ -7,6 +7,8 @@ import { Button, Chip, EmptyNote, Icon } from "@/components/ui";
 import { ExportResult } from "./ExportResult";
 
 export const PAGE_ROWS = 50;
+// Values longer than this may be cut short in the grid.
+const LONG_CELL = 40;
 
 /** A finished result to show: from the run just now, or opened from history. */
 export interface ShownResult {
@@ -56,7 +58,13 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
           {warning}
         </p>
       ))}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Focusable, so the rows can be scrolled with the keyboard too. */}
+      <div
+        tabIndex={0}
+        role="region"
+        aria-label="Result rows"
+        className="min-h-0 flex-1 overflow-auto focus-visible:outline-offset-[-2px]"
+      >
         {page.isError && <p className="px-5 py-3 font-sans text-[13px] text-danger">{page.error.message}</p>}
         {data && data.columns.length > 0 && (
           <table className="min-w-full border-separate border-spacing-0 font-mono text-[12px]">
@@ -80,8 +88,10 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
                   {row.map((cell, c) => (
                     <td
                       key={c}
-                      title={cell.length > 40 ? cell : undefined}
-                      className="max-w-[28rem] truncate border-b border-line/70 px-3 py-1 whitespace-nowrap text-ink"
+                      // A long value is cut short: hover or focus it to see all of it.
+                      title={cell.length > LONG_CELL ? cell : undefined}
+                      tabIndex={cell.length > LONG_CELL ? 0 : undefined}
+                      className="max-w-[28rem] truncate border-b border-line/70 px-3 py-1 whitespace-nowrap text-ink focus:max-w-[40rem] focus:overflow-visible focus:bg-sunken focus:whitespace-pre-wrap focus:[overflow-wrap:anywhere] focus-visible:outline-offset-[-2px]"
                     >
                       {cell === "" ? <span className="text-faint">·</span> : cell}
                     </td>

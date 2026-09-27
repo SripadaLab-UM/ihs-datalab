@@ -214,3 +214,18 @@ it("exports a result to the chosen folder", async () => {
   await waitFor(() => expect(sqlApi.export).toHaveBeenCalledWith(done.query_id, "practice"));
   expect(await within(dialog).findByText("/x/2026-09-27 SQL Playground")).toBeInTheDocument();
 });
+
+it("lets the keyboard scroll the rows and read a value that's cut short", async () => {
+  const long = "x".repeat(120);
+  vi.mocked(sqlApi.results).mockResolvedValue({
+    query_id: done.query_id!, columns: done.columns, row_count: 2, offset: 0,
+    rows: [["SYN001"], [long]], preview_limit: 200, has_more: false,
+  }); // prettier-ignore
+  show("SELECT 1 FROM DUAL");
+  fireEvent.click(await screen.findByRole("button", { name: /^Run/ }));
+  const rows = await screen.findByRole("region", { name: "Result rows" });
+  expect(rows).toHaveAttribute("tabindex", "0");
+  const cell = await within(rows).findByText(long);
+  expect(cell).toHaveAttribute("tabindex", "0");
+  expect(within(rows).getByText("SYN001")).not.toHaveAttribute("tabindex");
+});
