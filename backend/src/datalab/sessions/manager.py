@@ -67,10 +67,11 @@ _REVIEW_TURN_EVENTS = frozenset(
 _ACTIVITY = frozenset(
     {"answer_started", "answer_delta", "reasoning_delta", "command_started", "tool_call"}
 )
-# Shown by the chat as a turn of their own, after the one that failed. An
-# export is too, but only between turns: one made while the turn is going
-# (exporting doesn't wait for the agent) is part of it.
+# Shown by the chat as a turn of their own, after the one that failed. (An
+# export is shown in the turn it follows, or the one it was made during.)
 _OWN_TURN_EVENTS = frozenset({"files_restored", "input_attached", "input_removed"})
+# What starts work that ends with turn_done: a question, or a review run again.
+_TURN_STARTS = frozenset({"user_message", "review_started", "turn_started"})
 # Model trouble that picking up again won't fix.
 _NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
 
@@ -215,17 +216,14 @@ class SessionManager:
         status = None
         trouble = None
         reviewing = False
-        done = False
         for event in self._store.all_events_after(conversation_id, asked.seq):
             if reviewing and event.type in _REVIEW_TURN_EVENTS:
                 reviewing = event.type != "turn_finished"
                 continue
             if event.type in _ACTIVITY:
                 trouble = None
-            if event.type in _OWN_TURN_EVENTS or (event.type == "exported" and done):
+            if event.type in _OWN_TURN_EVENTS:
                 return False
-            if event.type == "turn_done":
-                done = True
             if event.type == "review_started":
                 reviewing = True
             elif event.type == "review_finished":
@@ -409,6 +407,13 @@ class SessionManager:
                 if idle > self._idle_seconds and not self.is_busy(conversation_id):
                     await self._shutdown(conversation_id)
 
+    def end_cut_off_turns(self) -> None:
+        """At startup: end the turns DataLab stopped in the middle of (it
+        crashed, or its computer did), so the chat doesn't show them running."""
+        for conversation in self._store.list():
+            if self._end_cut_off_turn(conversation.id):
+                log.info("ended a turn cut off by a restart in %s", conversation.id)
+
     async def close_all(self) -> None:
         for task in self._turns.values():
             task.cancel()
@@ -559,6 +564,10 @@ class SessionManager:
             if not completed and result.error:
                 self._store.append(conversation_id, "error", {"message": result.error})
         except asyncio.CancelledError:
+            # DataLab is closing: the turn ends here, and the log says so.
+            if self._turns.get(conversation_id) is asyncio.current_task():
+                del self._turns[conversation_id]
+            self._end_cut_off_turn(conversation_id)
             raise
         except Exception as error:
             log.exception("turn failed in %s", conversation_id)
@@ -595,6 +604,38 @@ class SessionManager:
             if self._turns.get(conversation_id) is asyncio.current_task():
                 del self._turns[conversation_id]
             self._store.append(conversation_id, "turn_done", {})
+
+    def _end_cut_off_turn(self, conversation_id: str) -> bool:
+        """End a turn the log shows still going: what was running (the agent's
+        turn, or its review) is marked stopped, and the turn done. Nothing is
+        written twice: a turn Stop already ended keeps its own end. Whether
+        there was a turn to end."""
+        done = self._store.last(conversation_id, "turn_done")
+        events = self._store.all_events_after(conversation_id, done.seq if done else 0)
+        if not any(event.type in _TURN_STARTS for event in events):
+            return False
+        # Whether the agent's turn, or the review's own turn, is still to finish.
+        answering = reviewing = review_running = False
+        for event in events:
+            if event.type == "user_message":
+                answering = True
+            elif event.type == "review_started":
+                reviewing = review_running = True
+            elif event.type == "review_finished":
+                reviewing = review_running = False
+            elif event.type == "turn_finished":
+                if reviewing:
+                    review_running = False
+                else:
+                    answering = False
+        if answering and not reviewing:
+            self._store.append(
+                conversation_id, "notice", {"text": "DataLab closed while the agent was working."}
+            )
+        if review_running if reviewing else answering:
+            self._store.append(conversation_id, "turn_finished", {"status": "interrupted"})
+        self._store.append(conversation_id, "turn_done", {})
+        return True
 
     def _final_answer(
         self, conversation_id: str, since: int, until: int | None = None

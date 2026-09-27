@@ -159,18 +159,65 @@ describe("exports", () => {
     expect(answerOf(turn)).toBe("The mean was 7.2.");
   });
 
-  it("shows an export between turns on its own, and a failed turn before it offers no Continue", () => {
+  it("adds an export between turns to the turn before, which keeps its Continue", () => {
     const turns = buildTranscript([
       e("user_message", { text: "q" }),
       e("turn_finished", { status: "failed", error: "stopped" }),
       e("turn_done", {}),
       exported,
-      e("user_message", { text: "next" }),
     ]);
-    expect(turns.map((t) => t.userText)).toEqual(["q", "", "next"]);
-    expect(turns[1]).toEqual({ userText: "", items: [notice], status: "completed" });
-    // Continue is offered on the last entry only: the export's, here.
-    expect(canContinue(turns[1])).toBe(false);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].items.at(-1)).toEqual(notice);
+    expect(canContinue(turns[0])).toBe(true);
+  });
+
+  it("keeps a review run again after an export with its turn", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "q" }),
+      e("answer", { id: "m1", phase: "final_answer", text: "The mean was 7.2." }),
+      e("turn_finished", { status: "completed" }),
+      e("review_started", {}),
+      e("review_finished", { status: "failed" }),
+      e("turn_done", {}),
+      exported,
+      // Run the review again.
+      e("review_started", {}),
+      e("review", { text: "1. Traced claims: yes." }),
+      e("review_finished", { status: "completed" }),
+      e("turn_done", {}),
+    ]);
+    expect(turns).toHaveLength(1);
+    const reviews = turns[0].items.filter((i) => i.kind === "review");
+    expect(reviews.map((r) => r.status)).toEqual(["failed", "done"]);
+    expect(answerOf(turns[0])).toBe("The mean was 7.2.");
+  });
+
+  it("shows an export on its own only when there's no turn before it", () => {
+    expect(buildTranscript([exported])).toEqual([{ userText: "", items: [notice], status: "completed" }]);
+  });
+
+  it("adds an export after a turn with no end to that turn", () => {
+    const turns = buildTranscript([e("user_message", { text: "q" }), e("command_started", { id: "c1", command: "Rscript a.R" }), exported]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].items.map((i) => i.kind)).toEqual(["command", "notice"]);
+  });
+
+  it("shows a turn cut off by a restart as stopped, with a later export in it", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "q" }),
+      e("command_started", { id: "c1", command: "Rscript a.R" }),
+      // What DataLab writes at startup for a turn it stopped in the middle of.
+      e("notice", { text: "DataLab closed while the agent was working." }),
+      e("turn_finished", { status: "interrupted" }),
+      e("turn_done", {}),
+      exported,
+    ]);
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    expect(turn.status).toBe("interrupted");
+    expect(turn.items.map((i) => i.kind)).toEqual(["command", "notice", "notice"]);
+    expect(turn.items.at(-1)).toEqual(notice);
+    expect(canContinue(turn)).toBe(false); // as after Stop
   });
 });
 

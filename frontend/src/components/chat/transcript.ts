@@ -68,9 +68,6 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   const approvals = new Map<string, Approval>();
   // During a rigor review, Codex's messages are the review, not the answer.
   let review: Extract<Item, { kind: "review" }> | undefined;
-  // DataLab is still on the turn, from the question to turn_done (its
-  // checkpoint, trace, and review come after the agent finishes).
-  let busy = false;
 
   const current = (): Turn => {
     if (!turn) {
@@ -97,8 +94,6 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
     if (turn?.model && ACTIVITY.has(event.type)) turn.model = undefined;
     switch (event.type) {
       case "review_started":
-        // A review run again is DataLab's work too, until its turn_done.
-        busy = true;
         review = { kind: "review", text: "", status: "running" };
         add(review);
         break;
@@ -141,7 +136,6 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
-        busy = true;
         turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true };
         turns.push(turn);
         byId.clear();
@@ -275,9 +269,11 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         break;
       case "exported": {
         const notice: Item = { kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` };
-        // Exporting doesn't wait for the agent. While a turn is going, the
-        // notice is part of it, so what the turn does next stays with it.
-        if (busy) add(notice);
+        // Exporting doesn't wait for the agent, and changes nothing it works
+        // on: the notice goes in the turn it was made during, or follows, so
+        // what that turn does next (or its Continue, or its review run again)
+        // stays with it.
+        if (turn) turn.items.push(notice);
         else {
           turn = { userText: "", items: [notice], status: "completed" };
           turns.push(turn);
@@ -320,7 +316,6 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       }
       case "turn_done":
         // DataLab has finished the turn, with its checkpoint and review.
-        busy = false;
         if (review?.status === "running") review.status = "failed";
         if (turn?.status === "running") turn.status = "completed";
         break;
