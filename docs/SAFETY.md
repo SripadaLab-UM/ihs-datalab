@@ -393,6 +393,20 @@ access. It never gains it.
     goes into its own dated subfolder with a manifest recording what it is,
     when it was
     made, and which session or workflow produced it.
+  - **Export folder names carry no study identifiers.** A folder is named
+    for the date, the conversation's title, and the conversation's ID. The
+    model that writes titles is told to leave out participant IDs, names,
+    email addresses and dates, and every title (the model's, or the
+    question's first words when there's no model) is scrubbed before it's
+    stored: long digit runs, ID-shaped words such as `P-0001` or
+    `IHS2025_00123`, phone-like digit groups, numbers labelled as someone's
+    ("participant 0001", "#1234"), email addresses and dates are removed,
+    and a title with nothing meaningful left stays "New conversation". The folder
+    name, the manifest and the report's page title are scrubbed again at
+    export, so a title typed by the person can't name a participant there
+    either. Names can't be recognised reliably; that part rests on the
+    model's instructions. Every title, typed or written, is one line with
+    no control characters or bidi overrides, so it can't disguise itself.
 - Nothing is deleted automatically. A Storage view in Settings shows disk
   use and offers one-click cleanup of old conversations and runs.
 - PHI is permitted on these machines, which are PHI-approved. Cleanup exists

@@ -139,13 +139,28 @@ export function Chat({
   );
 }
 
+// What DataLab calls a conversation until its first question names it.
+const DEFAULT_TITLE = "New conversation";
+
+/** What an edit that ended with this draft renames the conversation to, if anything.
+ *  A draft left as it was when editing began is no rename: the model's title may
+ *  have arrived meanwhile, and sending the old one back would wipe it. */
+export function titleToSend(draft: string, began: string, current: string): string | null {
+  const oneLine = (text: string) => text.split(/\s+/).filter(Boolean).join(" ");
+  const title = oneLine(draft);
+  if (!title || title === oneLine(began) || title === oneLine(current) || title === DEFAULT_TITLE) return null;
+  return title;
+}
+
 /** The conversation's title: written from the first question, renamed by clicking it. */
-function Title({ conversation }: { conversation: Conversation }) {
+export function Title({ conversation }: { conversation: Conversation }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   // Enter, Escape and blur can all end one edit: only the first one counts.
   const ended = useRef(false);
+  // The title as it was when this edit began.
+  const began = useRef("");
   const rename = useMutation({
     mutationFn: (title: string) => api.rename(conversation.id, title),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
@@ -153,9 +168,9 @@ function Title({ conversation }: { conversation: Conversation }) {
   const finish = (keep: boolean) => {
     if (ended.current) return;
     ended.current = true;
-    const title = (editing ?? "").trim();
+    const title = titleToSend(editing ?? "", began.current, conversation.title);
     setEditing(null);
-    if (keep && title && title !== conversation.title) rename.mutate(title);
+    if (keep && title) rename.mutate(title);
     requestAnimationFrame(() => button.current?.focus());
   };
   if (editing !== null) {
@@ -182,6 +197,7 @@ function Title({ conversation }: { conversation: Conversation }) {
         type="button"
         onClick={() => {
           ended.current = false;
+          began.current = conversation.title;
           setEditing(conversation.title);
         }}
         aria-label={`${conversation.title} (rename)`}

@@ -48,6 +48,23 @@ def test_export_makes_a_dated_folder_with_a_manifest(tmp_path, outputs):
     assert len(manifest["files"][0]["sha256"]) == 64
 
 
+def test_export_folders_are_named_without_study_identifiers(tmp_path, outputs):
+    destination = tmp_path / "out"
+    destination.mkdir()
+    result = export(
+        destination,
+        title="Sleep for P-0001 on 2025-03-14",
+        tag="c_0123456789abcdef",
+        sources=[source(outputs, "table.csv")],
+        about={},
+    )
+    assert result.folder.name.endswith(" Sleep c_0123456789abcdef")
+    assert "P-0001" not in result.folder.name and "03-14" not in result.folder.name
+    # A title with nothing left still makes a folder that says whose it is.
+    bare = export(destination, title="P-0001", tag="c_1", sources=[], about={})
+    assert bare.folder.name.endswith(" export c_1")
+
+
 def test_exports_never_overwrite(tmp_path, outputs):
     destination = tmp_path / "out"
     destination.mkdir()
