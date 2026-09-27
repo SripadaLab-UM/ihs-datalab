@@ -43,7 +43,7 @@ papers:
     year: 2021
     cohorts: [2018]
     cohorts_from: Methods, "Participants" (interns entering residency in 2018; genotyped 2018-cohort subjects)
-    verified: [https://doi.org/10.1038/s41598-021-94459-z, https://pubmed.ncbi.nlm.nih.gov/34285228/]
+    verified: [https://doi.org/10.1038/s41598-021-94459-z, https://pubmed.ncbi.nlm.nih.gov/34285349/]
     summary: >-
       Fitbit sleep around the 2019 daylight-saving change, split by a polygenic
       score for sleep midpoint: evening-type interns adjusted more slowly and
@@ -196,6 +196,12 @@ entries:
       - field: description
         old: '; the current recipe models only the Apple Watch branch (Fitbit/Garmin pending port).'
         new: ', and the recipe and ihsDataR port all three branches.'
+      - field: description
+        old: 'one value per participant-day.'
+        new: 'one value per participant-day per device.'
+      - field: granularity
+        old: participant-day
+        new: participant-day-device
     release_hold: true
     source: >-
       Prototype commit um-gpt-local-proxy@04e5c2b ("Add combined daily resting heart rate
@@ -206,10 +212,31 @@ entries:
     question: 8
     set:
       implemented_in: r/ihsDataR/R/feature_resting_heart_rate_day.R
+    replace:
+      - field: aggregation_window
+        old: participant-day
+        new: participant-day-device
     source: >-
       ihsDataR/R/feature_resting_heart_rate_day.R (#L87-101,
       build_resting_heart_rate_day) combines the three branches exactly as the
       recipe's cleaning rules say; added in um-gpt-local-proxy@04e5c2b with its runner and tests.
+  - entry: canonical_features/osm_pgs
+    question: 3
+    replace:
+      - field: description
+        old: UK Biobank chronotype GWAS
+        new: UK Biobank accelerometer-based sleep-midpoint GWAS
+    source: 'DST genomics paper (10.1038/s41598-021-94459-z), methods: OSM-PGS was computed with PRSice from the GWAS of accelerometer-based sleep midpoint in UK Biobank'
+  - entry: qc_rules/mood_summary_min_observations
+    question: 3
+    replace:
+      - field: condition
+        old: otherwise the summary is omitted.
+        new: with fewer, the paper assigned the training data's median value of that statistic.
+      - field: on_fail
+        old: set_missing
+        new: impute_training_median
+    source: 'ML intensive longitudinal paper (10.1017/S0033291722003014), methods: summaries needed at least two observations (means) or three (standard deviations); otherwise the training data median was assigned'
   - entry: data_sources/garmin
     question: 7
     replace:
@@ -252,6 +279,13 @@ pages:
     source: 'AggregateDailyMetrics_2024.R#L108-179 (2024 cohort, Fitbit, Garmin and Apple Watch); ihsDataR build_resting_heart_rate_day is the 2025 build'
     limitations:
       - "ihsDataR's code doesn't apply the >100 bpm exclusion (qc/rhr_plausible, from MoodDriver) or decode HEALTHKITSAMPLEKEY (qc/healthkit_hexkey_decode); neither does AggregateDailyMetrics_2024.R."
+  - page: features/resting_heart_rate_day
+    question: 8
+    source: ihsDataR/R/feature_resting_heart_rate_day.R has neither step; the recipe's cleaning rules list both
+    hold: >-
+      its recipe lists a hex-key decode and a >100 bpm exclusion that the code
+      doesn't do: the decode rests only on the unseen ODBC_connect_IHS2024-25.R,
+      and whether the pipeline should apply the >100 bpm filter is still open
   - page: qc/steps_positive
     question: 1
     evidence:
@@ -274,10 +308,11 @@ pages:
     question: 1
     evidence:
       - code: ihsDataR/R/feature_resting_heart_rate_day.R#L56
-    cohorts: [2024, 2025]
-    source: 'ihsDataR feature_resting_heart_rate_day.R#L56, in build_resting_heart_rate_healthkit (2025); for 2024, AggregateDailyMetrics_2024.R#L122 reads an Apple-Watch-only export made by ODBC_connect_IHS2024-25.R'
+    cohorts: [2025]
+    source: 'ihsDataR feature_resting_heart_rate_day.R#L56, in build_resting_heart_rate_healthkit (2025). For 2024 the filter rests only on the unseen ODBC_connect_IHS2024-25.R (question 5), so 2024 is not listed'
     limitations:
-      - In ihsDataR only the resting-heart-rate branch filters on SOURCEPRODUCTTYPE. For 2024 the filter was applied when the data were exported (ODBC_connect_IHS2024-25.R, not yet in a repo).
+      - In ihsDataR only the resting-heart-rate branch filters on SOURCEPRODUCTTYPE.
+      - For 2024 the filter was applied, if at all, when the data were exported (ODBC_connect_IHS2024-25.R, not yet seen in a repo); AggregateDailyMetrics_2024.R#L122 only reads a file named as Apple-Watch-only.
   - page: qc/garmin_sleep_validation_filter_legacy_2024
     question: 1
     cohorts: [2024, 2025]
@@ -299,6 +334,30 @@ pages:
       the rest (iPhone only, opt-in per sensor, no public sharing)
     source: pone.0329707 (methods, data availability statement); the Social Smartphone draft's limitations
   # Question 2 and 3: limitations found while checking pages against papers.
+  - page: features/daily_mood
+    question: 3
+    evidence:
+      - schema: IHS_2026.VW_DAILY_MOOD
+    cohorts: [2025, 2026]
+    hold: >-
+      its only schema evidence, VW_DAILY_MOOD, is in IHS_2025 and IHS_2026 only,
+      and the link from this feature to that view comes from the unpublished
+      Social Smartphone manuscript; MoodDriver used the same 1-10 item in the
+      2018-2023 cohorts, but not from this view
+    source: 'generated/schema: VW_DAILY_MOOD is in IHS_2025 and IHS_2026 only; the Spine source_anchor cites it only under the Social Smartphone Manuscript'
+    limitations:
+      - MoodDriver (2018 to 2023 cohorts) used the same single 1-10 daily mood item, but the Spine doesn't say where those years' answers are in Oracle.
+  - page: qc/rhr_plausible
+    question: 8
+    limitations:
+      - ihsDataR doesn't apply the >100 bpm filter (R/feature_resting_heart_rate_day.R); whether it should is still open.
+  - page: qc/mood_summary_min_observations
+    question: 3
+    hold: >-
+      the Spine's text said a summary with too few observations is left
+      missing, but the paper assigned the training data's median; the text is
+      corrected to the paper, and a person should confirm the corrected rule
+    source: 10.1017/S0033291722003014, methods (the ML models' handling of sparse summaries)
   - page: qc/active_minutes_plausible
     question: 2
     limitations:
@@ -323,7 +382,8 @@ answers:
       Confirmed [2024, 2025] on the reviewed feature and QC pages that have
       code or a checked legacy script: the 2024 legacy script covers 2024 and
       ihsDataR (the 2025 build) covers 2025. garmin_sleep_validation_filter_legacy_2024
-      goes from [2025] to [2024, 2025]. The four features and one QC rule whose
+      goes from [2025] to [2024, 2025]; qc/apple_watch_source_filter lists
+      [2025] only, since for 2024 it rests on the unseen ODBC script. The four features and one QC rule whose
       only evidence is the unseen ODBC script lose their review (question 5),
       so their cohorts stay unconfirmed.
     evidence: AggregateDailyMetrics_2024.R lines cited per page in review_decisions.yaml; ihsDataR at ihs-pipelines@d25b712
@@ -331,7 +391,8 @@ answers:
     answer: >-
       MoodDriver is the medRxiv preprint 10.64898/2026.03.03.26347299, verified;
       its methods match the rules the Spine cites it for, so those pages get
-      `paper` evidence. The Social Smartphone manuscript and Sleep & Step ETT
+      `paper` evidence, with a note that it's the lab's own preprint, not yet
+      peer reviewed (the user accepted it on 2026-09-27). The Social Smartphone manuscript and Sleep & Step ETT
       aren't published or preprinted, and no lab code computes their features,
       so pages that cite only them stay drafts. Two SensorKit rules stay drafts
       because part of each comes only from the unpublished manuscript.
@@ -341,6 +402,10 @@ answers:
       Each paper's cohorts are now recorded, from its methods, and a page whose
       only evidence of method is a paper lists the cohorts that paper analysed.
       Paper pages get the title, cohorts and a short summary, and stay drafts.
+      An independent check corrected three pages: daily_mood (its view is only
+      in 2025 and 2026, and the link to it is unpublished) and
+      mood_summary_min_observations (the paper imputes the training median)
+      stay drafts, and osm_pgs names the right GWAS.
     evidence: the `papers` list in review_decisions.yaml (section of each paper's methods)
   - question: 4
     answer: >-
@@ -372,8 +437,11 @@ answers:
     evidence: generated/schema IHS_2025/VGARMINACTIVITYSUMMARY.yml and VW_IHS_PARTICIPANT_SUMMARY.yml (type VIEW)
   - question: 8
     answer: >-
-      The recipe is right and the description was stale. Fixed the description
-      and linked the code; the page is now reviewed. The three HealthKit
+      The recipe is right about the three branches and the description was
+      stale. Fixed the description (including one value per participant-day
+      per device, as the code gives) and linked the code. The page stays a
+      draft: the recipe also lists a hex-key decode and a >100 bpm exclusion
+      the code doesn't do. The three HealthKit
       resting-heart-rate columns still say their deduplication rule is
       unreviewed and name a removed runner; that note predates the combined
       runner by 18 minutes, but the table page stays a draft until someone
@@ -406,5 +474,5 @@ still_open:
   - 'Push ihs-pipelines before ihs-knowledge, so the pinned commit d25b712 exists on GitHub.'
   - "Social Smartphone and Sleep & Step ETT: add their DOIs when they're out; the drafts that cite only them list what would change."
   - 'The study ID column (tables/IHS_2025.STUDYPARTICIPANTS): SECONDARYIDENTIFIER as STUDY_PARTICIPANT_ID needs the lab to confirm (open decision 3 in PRODUCT.md is related).'
-  - "Rewrite the HealthKit resting-heart-rate column notes (question 8) and decide whether ihsDataR should apply the >100 bpm exclusion."
-  - 'MoodDriver is a preprint. If the lab wants peer-reviewed papers only, the pages that rest on it go back to draft.'
+  - "Rewrite the HealthKit resting-heart-rate column notes (question 8) and decide whether ihsDataR should apply the >100 bpm exclusion; then resting_heart_rate_day can be reviewed."
+  - 'Confirm the corrected rule on qc/mood_summary_min_observations (the training-median imputation), and where the 2018-2023 daily mood answers are in Oracle (features/daily_mood).'

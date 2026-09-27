@@ -581,6 +581,14 @@ def open_pipelines(folder: Path | None, decisions: Decisions, spine: Spine) -> P
     return Pipelines(str(repin["repo"]), commit, prefix, from_prefix, set(listing.splitlines()))
 
 
+# Limitations the conversion writes, which later steps look for.
+PUBLISHED_METHOD = (
+    "Taken from a published paper's methods; check it matches how the lab's pipelines apply "
+    "it before relying on it for another analysis."
+)
+PAPER_COHORTS = "Its cohorts are the ones the cited"
+
+
 def years_text(years: Iterable[int]) -> str:
     """Years as runs ("2012 to 2015; 2018"), never a long list of numbers."""
     runs: list[list[int]] = []
@@ -1554,10 +1562,7 @@ class Converter:
                 "Stated as the Spine recorded it; the code that applies it is authoritative."
             )
         elif "paper" in kinds:
-            page.limitations.append(
-                "Taken from a published paper's methods; check it matches how the lab's "
-                "pipelines apply it before relying on it for another analysis."
-            )
+            page.limitations.append(PUBLISHED_METHOD)
         page.body += ["", "## Where this came from", "", *provenance(rule, self.clean)]
         self.add(page)
 
@@ -1693,15 +1698,23 @@ class Converter:
             page.cohorts = (page.cohorts - guessed) | years
             page.cohort_basis["paper"] = years
             page.limitations.append(
-                f"Its cohorts are the ones the cited paper{'s' if len(known) > 1 else ''} "
+                f"{PAPER_COHORTS} paper{'s' if len(known) > 1 else ''} "
                 f"analysed ({years_text(years)}); whether it holds for other years isn't recorded."
             )
-            for paper in known:
-                if paper.preprint:
-                    page.limitations.append(
-                        f"{paper.label or paper.doi} ({paper.doi}) is a preprint, "
-                        "not peer reviewed."
+            preprints = [p for p in known if p.preprint]
+            if preprints and len(preprints) == len(known) and PUBLISHED_METHOD in page.limitations:
+                page.limitations.remove(PUBLISHED_METHOD)  # it isn't published yet
+            for paper in preprints:
+                page.limitations.append(
+                    f"Method from the lab's own preprint ({paper.label or paper.doi}, "
+                    f"{paper.venue.split(' (', 1)[0]} {paper.doi}, not yet peer-reviewed)"
+                    + (
+                        "; check it matches how the lab's pipelines apply it before relying on "
+                        "it for another analysis."
+                        if page.folder == "qc"
+                        else "."
                     )
+                )
             self.touched[3].add(page.ref)
         for page in self.pages.values():
             if any(k == "paper" and self.decisions.alias_target(r) for k, r in page.evidence.typed):
@@ -1721,6 +1734,8 @@ class Converter:
                 [(kind, ref)] = evidence.items()
                 if kind == "code":
                     page.evidence.typed.add(self.resolve.pipeline_code(str(ref)))
+                elif kind == "schema" and self.schema.exists(str(ref)):
+                    page.evidence.typed.add(("schema", str(ref)))
                 elif kind == "paper" and ref in self.decisions.papers:
                     page.evidence.typed.add(("paper", str(ref)))
                 elif kind == "legacy" and kb._LEGACY_REF.fullmatch(str(ref)):
@@ -1732,6 +1747,7 @@ class Converter:
                 page.cohorts = years
                 page.cohort_basis = {"reviewer": years}
                 page.cohort_source = one_line(item["source"])
+                page.limitations = [x for x in page.limitations if not x.startswith(PAPER_COHORTS)]
             page.limitations += [one_line(x) for x in item.get("limitations") or []]
             if item.get("hold"):
                 page.holds.append(
