@@ -54,81 +54,115 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
     );
   }
   const all = files.data ?? [];
-  const figures = all.filter((f) => f.kind === "image");
-  const others = all.filter((f) => f.kind !== "image");
+  // Grouped by kind of file, not by a guess at which one is the result.
+  const groups: { title: string; files: WorkspaceFile[] }[] = [
+    { title: "Documents", files: all.filter((f) => f.kind === "html" || f.kind === "pdf") },
+    { title: "Figures", files: all.filter((f) => f.kind === "image") },
+    { title: "Tables", files: all.filter((f) => f.kind === "csv") },
+    { title: "Other files", files: all.filter((f) => !["html", "pdf", "image", "csv"].includes(f.kind)) },
+  ].filter((group) => group.files.length > 0);
+  const prefix = sharedPrefix(all.map((f) => splitPath(f.path).name));
   const open = (file: WorkspaceFile) =>
     onOpen({ root: "outputs", path: file.path, kind: file.kind, size: file.size, checkpoint: file.checkpoint });
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
         <span className="dl-label">
-          Made here · {all.length} file{all.length === 1 ? "" : "s"}
+          {all.length} file{all.length === 1 ? "" : "s"} in outputs
         </span>
         <Button variant="ghost" className="px-0 py-0 text-xs" onClick={() => setExporting(true)}>
           <Icon name="export" size={14} /> Export…
         </Button>
       </div>
-      {exporting && <ExportDialog conversation={conversation} withReport={false} onClose={() => setExporting(false)} />}
-      {figures.length > 0 && (
-        <section>
-          <h3 className="dl-label mb-2">Figures</h3>
-          <ul className="grid grid-cols-2 gap-2">
-            {figures.map((file) => (
-              <li key={file.path}>
-                <button
-                  onClick={() => open(file)}
-                  title={file.path}
-                  className="group flex w-full flex-col text-left"
-                >
-                  <span className="flex aspect-[4/3] w-full items-center justify-center border border-line bg-white p-1 group-hover:border-ink">
-                    <img
-                      src={api.fileUrl(conversationId, "outputs", file.path, file.checkpoint)}
-                      alt=""
-                      loading="lazy"
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  </span>
-                  <span className="truncate pt-1.5 font-mono text-[11px] text-faint group-hover:text-ink">{splitPath(file.path).name}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {prefix && (
+        <p className="-mt-3 font-sans text-[12px] text-muted">
+          All start <span className="font-mono text-ink">{prefix}</span>; shown without it.
+        </p>
       )}
-      {others.length > 0 && (
-        <section>
-          {figures.length > 0 && (
-            <h3 className="dl-label mb-2">Files</h3>
-          )}
-          <ul className="flex flex-col gap-0.5">
-            {others.map((file) => {
-              const { dir, name } = splitPath(file.path);
-              return (
+      {exporting && <ExportDialog conversation={conversation} withReport={false} onClose={() => setExporting(false)} />}
+      {groups.map((group) => (
+        <section key={group.title}>
+          <h3 className="dl-label mb-2">{group.title}</h3>
+          {group.title === "Figures" ? (
+            <ul className={clsx("grid gap-2", group.files.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+              {group.files.map((file) => (
                 <li key={file.path}>
-                  <button
-                    onClick={() => open(file)}
-                    className="group flex w-full items-center gap-3 rounded-[3px] px-1.5 py-2 text-left hover:bg-surface"
-                    title={file.path}
-                  >
-                    <FileGlyph kind={file.kind} size={26} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-sans text-[13.5px] font-medium group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
-                        {name}
-                      </span>
-                      <span className="block truncate font-mono text-[11px] text-faint">
-                        {dir && <span className="font-mono">{dir} · </span>}
-                        {formatBytes(file.size)}
-                      </span>
+                  <button onClick={() => open(file)} title={file.path} className="group flex w-full flex-col text-left">
+                    <span className="flex aspect-[4/3] w-full items-center justify-center rounded-[3px] border border-line bg-white p-1 group-hover:border-ink">
+                      <img
+                        src={api.fileUrl(conversationId, "outputs", file.path, file.checkpoint)}
+                        alt=""
+                        loading="lazy"
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    </span>
+                    <span className="truncate pt-1.5 font-sans text-[12.5px] text-ink group-hover:underline">
+                      {shown(file.path, prefix)}
                     </span>
                   </button>
                 </li>
-              );
-            })}
-          </ul>
+              ))}
+            </ul>
+          ) : (
+            <ul className="flex flex-col gap-0.5">
+              {group.files.map((file) => {
+                const { dir } = splitPath(file.path);
+                return (
+                  <li key={file.path}>
+                    <button
+                      onClick={() => open(file)}
+                      className="group flex w-full items-center gap-3 rounded-[3px] px-1.5 py-2 text-left hover:bg-surface"
+                      title={file.path}
+                    >
+                      <FileGlyph kind={file.kind} size={26} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-sans text-[13.5px] font-medium group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
+                          {shown(file.path, prefix)}
+                        </span>
+                        <span className="block truncate font-sans text-[11.5px] text-muted">
+                          {extension(file.path)} · {formatBytes(file.size)}
+                          {dir && <span className="font-mono"> · {dir}</span>}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
-      )}
+      ))}
     </div>
   );
+}
+
+/**
+ * The start several file names share, cut at a separator, when it's long
+ * enough to crowd out the part that tells them apart (sleep_mood_2025_pilot_).
+ */
+export function sharedPrefix(names: string[]): string {
+  if (names.length < 2) return "";
+  let prefix = names[0];
+  for (const name of names.slice(1)) {
+    let i = 0;
+    while (i < prefix.length && i < name.length && prefix[i] === name[i]) i++;
+    prefix = prefix.slice(0, i);
+  }
+  const cut = Math.max(prefix.lastIndexOf("_"), prefix.lastIndexOf("-"), prefix.lastIndexOf(" "));
+  prefix = cut >= 0 ? prefix.slice(0, cut + 1) : "";
+  // Never swallow a whole name: every file keeps something to show.
+  return prefix.length >= 8 && names.every((name) => name.length > prefix.length + 2) ? prefix : "";
+}
+
+function shown(path: string, prefix: string): string {
+  const { name } = splitPath(path);
+  return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
+}
+
+function extension(path: string): string {
+  const { name } = splitPath(path);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toUpperCase() : "File";
 }
 
 function History({ conversation }: { conversation: Conversation }) {

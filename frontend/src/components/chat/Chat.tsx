@@ -17,7 +17,15 @@ import { useConversationEvents } from "./useConversationEvents";
 const TURN_EVENTS = new Set(["user_message", "turn_started", "turn_finished", "review_started", "review_finished", "turn_done"]);
 
 /** The shared chat. Every tab that needs an agent uses this component. */
-export function Chat({ conversation, headerActions }: { conversation: Conversation; headerActions?: ReactNode }) {
+export function Chat({
+  conversation,
+  headerStart,
+  headerActions,
+}: {
+  conversation: Conversation;
+  headerStart?: ReactNode;
+  headerActions?: ReactNode;
+}) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
   const last = turns.at(-1);
@@ -84,7 +92,8 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <header className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-line px-8 py-3.5">
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-8">
+        {headerStart}
         <Title conversation={conversation} />
         <SessionBadge kind={conversation.kind} />
         <span className="font-mono text-[11.5px] text-faint">{conversation.model}</span>
@@ -94,7 +103,7 @@ export function Chat({ conversation, headerActions }: { conversation: Conversati
         </div>
       </header>
       <div
-        className="relative min-h-0 flex-1 overflow-y-auto px-8 py-8"
+        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8"
         onScroll={(e) => {
           const el = e.currentTarget;
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
@@ -611,7 +620,7 @@ function Composer({
   };
 
   return (
-    <footer className="px-8 pt-2 pb-6">
+    <footer className="px-4 pt-2 pb-6 sm:px-8">
       <div className="mx-auto max-w-[42rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
         {/* The hint sits under the box, so the box itself asks a plain question. */}

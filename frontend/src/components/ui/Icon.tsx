@@ -1,7 +1,7 @@
 import type { IconName } from "@/components/chat/activity";
 
 // One stroke style for every icon, drawn on a 24-unit grid.
-const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | "open" | "history" | "export" | "attach" | "image" | "page" | "restore", string> = {
+const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | "open" | "history" | "export" | "attach" | "image" | "page" | "restore" | "menu", string> = {
   book: "M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z",
   search: "M16.5 10.5a6 6 0 1 1-12 0 6 6 0 0 1 12 0zM15 15l5 5",
   table: "M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM4 10h16M10 10v9",
@@ -29,6 +29,7 @@ const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | 
   image: "M4.5 5.5h15v13h-15zM4.5 15.5l4-4 3.5 3.5 2.5-2.5 5 5M15 9.5h.01",
   page: "M7 3.5h6.5L18 8v11.5a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-15a1 1 0 0 1 1-1zM9 12h6M9 15.5h6M9 8.5h2",
   restore: "M4 12a8 8 0 1 0 2.4-5.7M4 4.5v3.8h3.8",
+  menu: "M4 7h16M4 12h16M4 17h16",
   attach: "m19 11.5-7.3 7.3a4.5 4.5 0 0 1-6.4-6.4l7.6-7.6a3 3 0 0 1 4.3 4.3l-7.6 7.6a1.5 1.5 0 0 1-2.1-2.1l7-7",
 };
 
