@@ -267,21 +267,73 @@ def _empty_hrv(answer: str, e: dict) -> list[Check]:
     ]
 
 
+# A disclaimer of a causal reading: a negation, a few filler words, then a
+# verb of knowing ("we cannot establish", "can't say", "does not by itself
+# show", "it isn't possible to conclude", "the design doesn't let us infer"),
+# or a denial of evidence ("not causal evidence", "no proof"). The fillers are
+# a fixed list, so "I haven't seen data show more clearly that the internship
+# caused it" is still a claim; so is "not only ... show".
+_NEGATION = r"(?:\b(?:not(?!\s+only\b)|cannot|unable|insufficient|impossible)\b|n['’]t\b)"
+_FILLER = (
+    r"(?:be|been|by|it|its|itself|themselves|on|own|alone|yet|really|fully|reliably|safely"
+    r"|definitively|confidently|firmly|possible|enough|sufficient|able|to|we|i|you|one|us"
+    r"|allow|allows|let|lets|with|any|certainty|confidence|for|sure|used|this|these|data)"
+)
+_KNOWING = (
+    r"(?:establish|conclude|say|claim|infer|show|mean|imply|prove|determine|demonstrate"
+    r"|confirm|attribute|support|tell|isolate|assume|know)"
+)
+DISCLAIMER = re.compile(
+    rf"{_NEGATION}(?:[\s,]+{_FILLER}\b){{0,4}}[\s,]+{_KNOWING}"
+    rf"|(?:{_NEGATION}|\bno\b)(?:\s+(?:a|an|any|causal|direct|strong|good|clear))*\s+(?:evidence|proof)\b"
+    r"|\bnot (?:a )?causal\b",
+    re.IGNORECASE,
+)
+# Where a disclaimer stops applying: "We can't say how large; the internship
+# caused it" still claims a cause, and so does "we don't know the exact size
+# - the internship lowered mood". "As" and "because" start a clause after a
+# comma; "because" does anywhere, except in "because of".
+_CLAUSE_BREAK = re.compile(
+    r"[;:—–]|\s-\s|,\s*(?:and|but|yet|so|as|although|though|however|whereas|while)\b"
+    r"|\b(?:but|however|although|though|whereas)\b|\bbecause\b(?!\s+of\b)",
+    re.IGNORECASE,
+)
+# A negation that only limits the claim: "we cannot say anything except that
+# the internship reduced mood", "the data don't show any other cause".
+_NOT_A_DISCLAIMER = re.compile(
+    r"\bexcept\b|\bother than\b|\banything but\b|\bany other (?:caus\w*|explanations?)\b"
+    r"|\bthe exact (?:size|amount|magnitude)\b",
+    re.IGNORECASE,
+)
+
+
 def _claims_cause(answer: str) -> bool:
-    """Causal wording about the internship, not negated ("not evidence that it caused")."""
-    negated = r"\b(not|no|cannot|nor|without)\b|n't\b"
-    # Sentences that deny a causal reading ("this is not causal evidence that…").
-    denial = (
-        r"\bnot (causal )?(evidence|proof)\b|\b(does|do|did|is|are) not (show|mean|imply|establish|prove)\b"
-        r"|\bcan(not|'t) (conclude|say|claim|infer)\b|\bno (causal )?(evidence|claim)\b|\bnot (a )?causal\b"
-    )
+    """Causal wording about the internship, not negated ("the internship didn't
+    cause") and not under a disclaimer earlier in the same clause ("we cannot
+    establish internship as the cause")."""
+    negated = r"\b(not|no|cannot|nor|without)\b|n['’]t\b"
     for sentence in sentences(answer):
-        if re.search(denial, sentence, re.IGNORECASE):
-            continue
-        for pattern in CAUSAL:
+        disclaimers = [d.span() for d in DISCLAIMER.finditer(sentence)]
+        # Each pattern's gap both greedy and lazy, so both the first and the
+        # last causal word are tried: "the internship caused X; this is not a
+        # causal estimate" and "the internship didn't cause X but caused Y".
+        for pattern in CAUSAL + tuple(re.sub(r"(\{\d+,\d+\})", r"\1?", p) for p in CAUSAL):
             for match in re.finditer(pattern, sentence, re.IGNORECASE):
-                # A negation in the four words just before the causal word.
-                before = " ".join(sentence[: match.end()].split()[-5:-1])
+                # A disclaimer covers the claim when it comes first, with no
+                # clause break before the causal word and no "except" or
+                # "other than" between them.
+                if any(
+                    end <= match.start()
+                    and not _CLAUSE_BREAK.search(sentence, start, match.end())
+                    and not _NOT_A_DISCLAIMER.search(sentence, end, match.end())
+                    for start, end in disclaimers
+                ):
+                    continue
+                # A negation in the four words just before the causal word,
+                # in its own clause.
+                head = sentence[: match.end()]
+                head = head[max((b.end() for b in _CLAUSE_BREAK.finditer(head)), default=0) :]
+                before = " ".join(head.split()[-5:-1])
                 if not re.search(negated, before, re.IGNORECASE):
                     return True
     return False

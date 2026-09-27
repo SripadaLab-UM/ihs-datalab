@@ -116,5 +116,66 @@ def test_every_task_has_both():
     assert {t for t, _ in PASS} == {t for t, _ in FAIL} == set(TASK)
 
 
+MOOD = "Mood fell by 0.70 within person (95% CI -0.74 to -0.66), n = 135. "
+
+
+def causal_check(answer: str) -> bool:
+    checks = TASK["mood_change"].grade(MOOD + answer, EXPECTED)
+    assert [c.name for c in checks if not c.passed] in ([], ["no causal claim"])
+    return next(c for c in checks if c.name == "no causal claim").passed
+
+
+@pytest.mark.parametrize(
+    "disclaimer",
+    [
+        "This design cannot establish internship as the cause.",
+        "We can't establish internship as the cause.",
+        "We can’t establish that the internship caused it.",
+        "It does not establish that internship caused the drop.",
+        "This doesn't establish internship as the cause.",
+        "We cannot conclude that the internship caused the decline.",
+        "One cannot be sure: we can not say internship caused it.",
+        "These data don't let us infer that internship caused the change.",
+        "It isn't possible to conclude the internship led to the decline.",
+        "The change alone does not by itself show that internship caused it.",
+        "We are unable to determine whether internship caused it.",
+        "Observational data can't be used to prove the internship caused the drop.",
+        "This is not causal evidence that internship itself caused the decrease.",
+        "There is no causal evidence that the internship caused it.",
+        "That isn't proof the internship caused the change.",
+        "This is not a causal estimate of the effect of internship.",
+        "The internship didn't cause it by itself; many things changed.",
+    ],
+)
+def test_a_disclaimer_isnt_a_causal_claim(disclaimer):
+    assert causal_check(disclaimer)
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "The internship caused the decline, though we cannot say by how much.",
+        "We can't say how large it is for everyone; the internship caused it.",
+        "We cannot establish the exact size, but the internship caused the drop.",
+        "Not only do the data show it, the internship caused the drop.",
+        "I haven't seen data show more clearly that the internship caused a decline.",
+        "There's no question the data show internship caused the decline.",
+        "The drop was caused by the internship, which cannot be ignored.",
+        "The internship caused mood to fall; this is not a causal estimate of anything else.",
+        "The internship did not cause stress but caused the mood decline.",
+        # From the review of the disclaimer rule.
+        "We don't know the exact size - the internship lowered mood by 0.4 points.",
+        "The data don't show any other cause — the internship caused the drop.",
+        "We don't know of any other explanation—the internship caused it.",
+        "We cannot fully determine why mood dropped when the internship began, "
+        "as the internship caused stress.",
+        "It is not possible to say anything except that the internship reduced mood.",
+        "We cannot establish anything other than that mood fell because of the internship.",
+    ],
+)
+def test_a_causal_claim_with_a_disclaimer_elsewhere(claim):
+    assert not causal_check(claim)
+
+
 def test_numbers_are_read_as_written():
     assert numbers("7,443 steps, −0.69, .69, 7.4k and 4.93%") == [7443, -0.69, 0.69, 7400, 4.93]
