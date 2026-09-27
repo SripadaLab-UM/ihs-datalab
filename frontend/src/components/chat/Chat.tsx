@@ -109,7 +109,7 @@ export function Chat({
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
         }}
       >
-        <div className="mx-auto flex max-w-[42rem] flex-col gap-14">
+        <div className="mx-auto flex max-w-[56rem] flex-col gap-14 2xl:max-w-[64rem]">
           {turns.length === 0 && <EmptyState conversation={conversation} onPick={setSuggestion} />}
           {turns.map((turn, index) => (
             <TurnView
@@ -704,7 +704,7 @@ function Composer({
 
   return (
     <footer className="px-4 pt-2 pb-6 sm:px-8">
-      <div className="mx-auto max-w-[42rem]">
+      <div className="mx-auto max-w-[56rem] 2xl:max-w-[64rem]">
         {send.error && <p className="mb-2 text-sm text-danger">{send.error.message}</p>}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
         <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">

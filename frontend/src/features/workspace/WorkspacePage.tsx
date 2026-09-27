@@ -70,7 +70,7 @@ export function WorkspacePage() {
     <div
       className={clsx(
         "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)]",
-        conversationId && "xl:grid-cols-[16rem_minmax(0,1fr)_20rem]",
+        conversationId && "xl:grid-cols-[16rem_minmax(0,1fr)_20rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_24rem]",
       )}
     >
       {railOpen && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={closeDrawer} />}
