@@ -35,10 +35,13 @@ from sqlglot.errors import SqlglotError
 
 from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.exports import effective_name, safe_name
+from datalab.sessions.titles import normalize_title, scrub_title
 
 SCHEMA_VERSION = 1
 # The smallest `small_cells: min` DataLab accepts: counts of 1 to 10 are small.
 SMALL_CELL_FLOOR = 11
+# A `deliver.without_small_cells` reason goes into the delivery manifest.
+MAX_REASON_CHARS = 300
 MAX_FILE_BYTES = 256 * 1024
 
 # Step ids and output files are lower case: NTFS ignores case, and they end
@@ -148,6 +151,9 @@ class SmallCells(_Strict):
     totals: TotalRows | None = None
     # A column that is the sum of `count_columns` in each row.
     total_column: str | None = None
+    # Percentage columns, each with the count it's a percentage of: a hidden
+    # count with its percentage shown beside it is given away.
+    percent_columns: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("count_columns", mode="before")
     @classmethod
@@ -558,6 +564,12 @@ def check_workflow(
                     )
                 if not rule.count_columns:
                     problem(f"{where}.qc.small_cells.count_columns", "Name the count columns.")
+                for pct, count in rule.percent_columns.items():
+                    if count not in rule.count_columns:
+                        problem(
+                            f"{where}.qc.small_cells.percent_columns.{pct}",
+                            f"{count!r} isn't one of the count columns.",
+                        )
             columns = [
                 *qc.required_columns,
                 *qc.no_missing,
@@ -624,15 +636,24 @@ def check_workflow(
                 continue
             if len(reason.strip()) < 10:
                 problem(path, "Say why this file needn't be checked for small cells.")
+            elif len(reason) > MAX_REASON_CHARS:
+                problem(path, f"Keep the reason to {MAX_REASON_CHARS} characters.")
+            elif scrub_title(reason) != normalize_title(reason):
+                # It goes into the manifest: nothing shaped like a study identifier.
+                problem(path, "The reason seems to hold an identifier, a date or an email.")
             opted_out.add(resolved)
         if require_small_cells:
             for index, ref in enumerate(deliver.files):
                 resolved = resolve_ref(ref, outputs)
-                if isinstance(resolved, str) or not outputs[resolved[0]][resolved[1]].endswith(
-                    ".csv"
-                ):
+                if isinstance(resolved, str) or resolved in opted_out:
                     continue
-                if resolved not in small_checked and resolved not in opted_out:
+                if not outputs[resolved[0]][resolved[1]].endswith(".csv"):
+                    problem(
+                        f"deliver.files[{index}]",
+                        "Built-in checks read only CSVs: give a reason under "
+                        "deliver.without_small_cells to deliver this file.",
+                    )
+                elif resolved not in small_checked:
                     problem(
                         f"deliver.files[{index}]",
                         "A delivered CSV needs a small_cells check first (or a reason under "

@@ -167,3 +167,75 @@ def test_a_column_named_twice_fails(tmp_path):
     found = checks(path, small_cells={"count_columns": ["n"]})
     assert found["unique_columns"]["status"] == "fail"
     assert found["unique_columns"]["message"].endswith(": n")
+
+
+BOTH = {
+    "count_columns": ["c1", "c2", "c3"],
+    "total_column": "total",
+    "totals": {"column": "row", "value": "All"},
+}
+HEADER = ["row", "c1", "c2", "c3", "total"]
+
+
+def test_row_and_column_totals_together_give_hidden_cells_away(tmp_path):
+    """The re-review's pattern: each margin alone leaves every hidden cell two
+    or more values, but together they pin all six. r3's hide 19, so each is 9
+    or 10; c2 then leaves r1's second 9 or 10, so r1's first is 1 or 2; c1
+    hides 12, so r2's first is 10, and the rest follow."""
+    rows = [
+        ["r1", "<11", "<11", "30", "41"],  # 2, 9
+        ["r2", "<11", "25", "<11", "37"],  # 10, 2
+        ["r3", "40", "<11", "<11", "59"],  # 10, 9
+        ["All", "52", "44", "41", "137"],
+    ]
+    path = write(tmp_path / "x.csv", HEADER, rows)
+    found = checks(path, small_cells=BOTH)
+    assert found["small_cells_recoverable"]["status"] == "fail"
+    assert found["small_cells_recoverable"]["observed"] == 6
+
+
+def test_a_suppression_pattern_that_is_truly_safe_passes(tmp_path):
+    # A 2 x 2 block of hidden cells, each row and column hiding 15: every
+    # cell could be anything from 5 to 10.
+    rows = [
+        ["r1", "<11", "<11", "30", "45"],
+        ["r2", "<11", "<11", "25", "40"],
+        ["r3", "40", "35", "20", "95"],
+        ["All", "55", "50", "75", "180"],
+    ]
+    found = checks(write(tmp_path / "x.csv", HEADER, rows), small_cells=BOTH)
+    assert found["small_cells_recoverable"]["status"] == "pass", found
+
+
+def test_margins_that_conflict_with_the_small_premise_or_each_other(tmp_path):
+    rule = {"count_columns": ["n"], "totals": {"column": "DEVICE", "value": "All"}}
+    header = ["DEVICE", "n"]
+    # A large cell hidden to protect a small one: 43 can't be two small
+    # counts, so the check widens its premise, and neither cell is pinned.
+    large = write(tmp_path / "large.csv", header, [["a", "<11"], ["b", ""], ["All", "43"]])
+    assert checks(large, small_cells=rule)["small_cells_recoverable"]["status"] == "pass"
+    # Totals that can't add up with the cells shown: nothing can be said.
+    wrong = write(tmp_path / "wrong.csv", header, [["a", "30"], ["b", "<11"], ["All", "20"]])
+    found = checks(wrong, small_cells=rule)["small_cells_recoverable"]
+    assert found["status"] == "fail" and "don't add up" in found["message"]
+
+
+def test_total_rows_are_found_as_a_person_reads_them(tmp_path):
+    rule = {"count_columns": ["n"], "totals": {"column": "DEVICE", "value": "All"}}
+    header = ["DEVICE", "n"]
+    spaced = write(tmp_path / "spaced.csv", header, [["a", "30"], ["b", "<11"], [" all ", "35"]])
+    found = checks(spaced, small_cells=rule)
+    assert found["small_cells_recoverable"]["observed"] == 1  # "all" was the total
+    misspelt = write(tmp_path / "misspelt.csv", header, [["a", "30"], ["Totl", "35"]])
+    missing = checks(misspelt, small_cells=rule)["small_cells_totals"]
+    assert missing["status"] == "fail" and "no row has 'All'" in missing["message"]
+
+
+def test_a_percentage_beside_a_hidden_count_gives_it_away(tmp_path):
+    rule = {"count_columns": ["n"], "percent_columns": {"pct": "n"}}
+    header = ["DEVICE", "n", "pct"]
+    shown = write(tmp_path / "x.csv", header, [["a", "40", "80.0"], ["b", "<11", "20.0"]])
+    found = checks(shown, small_cells=rule)["small_cells_percentages"]
+    assert found["status"] == "fail" and found["observed"] == 1
+    hidden = write(tmp_path / "y.csv", header, [["a", "40", "80.0"], ["b", "<11", ""]])
+    assert checks(hidden, small_cells=rule)["small_cells_percentages"]["status"] == "pass"

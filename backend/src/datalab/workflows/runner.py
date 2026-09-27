@@ -355,12 +355,17 @@ class WorkflowRunner:
     async def close(self) -> None:
         """Stop every run (DataLab is shutting down). A delivery already
         under way finishes and is recorded first."""
-        tasks = [t for t in self._tasks.values() if not t.done()]
-        for task in tasks:
+        tasks = {run_id: t for run_id, t in self._tasks.items() if not t.done()}
+        for task in tasks.values():
             task.cancel()
-        for task in tasks:
+        for run_id, task in tasks.items():
+            # A delivery under way has written, or is writing, files: however
+            # long it takes, it finishes and is recorded before DataLab stops.
+            delivering = run_id in self._delivering
+            if delivering:
+                log.warning("Waiting for run %s to finish its delivery before stopping.", run_id)
             with contextlib.suppress(asyncio.CancelledError, Exception):
-                await asyncio.wait_for(asyncio.shield(task), timeout=60)
+                await asyncio.wait_for(asyncio.shield(task), timeout=None if delivering else 60)
 
     def running(self, run_id: str) -> bool:
         task = self._tasks.get(run_id)

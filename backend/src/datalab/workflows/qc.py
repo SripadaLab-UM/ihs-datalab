@@ -8,13 +8,12 @@ Workflows tab and the delivery manifest.
 The small-cell rule: a count from 1 to `min - 1` (10, with the usual 11)
 mustn't be shown; 0 may be. `min` can't be set below SMALL_CELL_FLOOR (11),
 in either profile, so a parameter can't turn the rule off. A hidden count
-(empty, NA, or text such as "<11") mustn't be recoverable either. Given a
-shown total, the hidden cells it adds up share what's left of it (the rest),
-each between 0 and `min - 1`; a margin fails when that leaves any hidden
-cell only one possible value (one hidden cell, or a rest of exactly
-`hidden * (min - 1)`), or when the hidden cells' combined count is itself
-small. Only one level of totals is checked: differencing between delivered
-tables, or across nested totals, isn't.
+(empty, NA, or text such as "<11") mustn't be recoverable either: every row
+total (`total_column`) and group total (`totals`) is an equation over the
+hidden cells, and suppression.py works out, across all of them together,
+which hidden cells they pin to one value. A declared percentage shown beside
+a hidden count gives it away too. A `totals` value that matches no row
+(compared ignoring case and spaces) fails, rather than checking nothing.
 
 A header that names a column twice fails too: which of the two a check
 read would be anyone's guess.
@@ -37,6 +36,7 @@ from datalab.workflows.model import (
     SmallCells,
     param_value,
 )
+from datalab.workflows.suppression import Equation, audit
 
 MISSING = frozenset({"", "NA", "NaN", "NULL"})
 
@@ -63,40 +63,18 @@ def _count(value: str) -> float | None:
 
 
 @dataclass
-class _Margin:
-    """The cells one total adds up, for one count column."""
+class _Row:
+    """One row of a table the margin check reads: its group, whether it's a
+    total row, and its count cells (None where hidden)."""
 
-    total: float | None = None
-    total_seen: bool = False
-    shown: float = 0.0
-    hidden: int = 0
+    group: tuple[str, ...]
+    total: bool
+    cells: dict[str, float | None]
+    percents: dict[str, float | None]
 
-    def add(self, value: float | None) -> None:
-        if value is None:
-            self.hidden += 1
-        else:
-            self.shown += value
 
-    def recoverable(self, minimum: float) -> int:
-        """How many hidden cells a shown total gives away.
-
-        Each hidden cell is taken to be a suppressed small count, from 0 to
-        `minimum - 1`, and together they make up the rest of the total. A
-        cell is given away when those bounds leave it one possible value;
-        the combined count gives something away when it is itself small.
-        """
-        if not self.total_seen or self.total is None or self.hidden == 0:
-            return 0
-        if self.hidden == 1:
-            return 1
-        rest = self.total - self.shown
-        if 1 <= rest < minimum:
-            return self.hidden
-        high = math.ceil(minimum) - 1  # the largest small count
-        # Each cell lies between rest - (hidden - 1) * high and min(high, rest).
-        low_bound = max(0.0, rest - (self.hidden - 1) * high)
-        high_bound = min(float(high), rest)
-        return self.hidden if low_bound == high_bound and rest > 0 else 0
+def _label(value: str) -> str:
+    return " ".join(value.split()).casefold()
 
 
 def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[dict]:
@@ -129,8 +107,10 @@ def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[
         rule = qc.small_cells
         minimum = float(param_value(rule.min, params)) if rule else 0.0
         small_shown = 0
-        margins: dict[tuple[str, tuple[str, ...]], _Margin] = {}
-        row_margins_recoverable = 0
+        table: list[_Row] = []
+        keep_table = rule is not None and bool(
+            rule.totals or rule.total_column or rule.percent_columns
+        )
         rows = 0
         for row in reader:
             rows += 1
@@ -145,8 +125,8 @@ def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[
                 keys.add(digest)
             if rule is not None:
                 small_shown += _small_in_row(rule, row, cell, minimum)
-                _add_to_margins(rule, row, cell, margins)
-                row_margins_recoverable += _row_total_recoverable(rule, row, cell, minimum)
+                if keep_table:
+                    table.append(_table_row(rule, row, cell))
 
     def absent(columns: Any) -> list[str]:
         return [c for c in columns if c not in index]
@@ -218,9 +198,7 @@ def builtin_qc(qc: BuiltinQc, path: Path, params: Mapping[str, Scalar]) -> list[
                 )
             )
     if rule is not None:
-        checks += _small_cell_checks(
-            rule, index, minimum, small_shown, margins, row_margins_recoverable
-        )
+        checks += _small_cell_checks(rule, index, minimum, small_shown, table)
     return checks
 
 
@@ -234,29 +212,57 @@ def _small_in_row(rule: SmallCells, row: list[str], cell, minimum: float) -> int
     return small
 
 
-def _add_to_margins(rule: SmallCells, row: list[str], cell, margins: dict) -> None:
+def _table_row(rule: SmallCells, row: list[str], cell) -> _Row:
     totals = rule.totals
-    if totals is None:
-        return
-    within = tuple(cell(row, c) for c in totals.within)
-    is_total = cell(row, totals.column) == totals.value
-    for column in rule.count_columns:
-        margin = margins.setdefault((column, within), _Margin())
-        value = _count(cell(row, column))
-        if is_total:
-            margin.total_seen = True
-            margin.total = value
+    columns = [*rule.count_columns, *([rule.total_column] if rule.total_column else [])]
+    return _Row(
+        group=tuple(cell(row, c) for c in totals.within) if totals else (),
+        # Labels are compared as a person reads them: "Total " is "total".
+        total=bool(totals) and _label(cell(row, totals.column)) == _label(totals.value),
+        cells={c: _count(cell(row, c)) for c in columns},
+        percents={p: _count(cell(row, p)) for p in rule.percent_columns},
+    )
+
+
+def _margin_equations(rule: SmallCells, table: list[_Row]) -> tuple[int, list[Equation]]:
+    """Every shown or hidden total as an equation over the hidden cells."""
+    names: dict[tuple[int, str], int] = {}
+
+    def var(i: int, column: str) -> int:
+        return names.setdefault((i, column), len(names))
+
+    equations: list[Equation] = []
+
+    def relation(members: list[tuple[int, str]], total: tuple[int, str]) -> None:
+        terms: list[tuple[int, int]] = []
+        shown = 0.0
+        for i, column in members:
+            value = table[i].cells[column]
+            if value is None:
+                terms.append((var(i, column), 1))
+            else:
+                shown += value
+        value = table[total[0]].cells[total[1]]
+        if value is None:
+            terms.append((var(*total), -1))
+            equations.append(Equation(terms, -shown))
         else:
-            margin.add(value)
+            equations.append(Equation(terms, value - shown, shown_total=True))
 
-
-def _row_total_recoverable(rule: SmallCells, row: list[str], cell, minimum: float) -> int:
-    if rule.total_column is None:
-        return 0
-    margin = _Margin(total=_count(cell(row, rule.total_column)), total_seen=True)
-    for column in rule.count_columns:
-        margin.add(_count(cell(row, column)))
-    return margin.recoverable(minimum)
+    if rule.total_column:
+        for i in range(len(table)):
+            relation([(i, c) for c in rule.count_columns], (i, rule.total_column))
+    if rule.totals:
+        groups: dict[tuple[str, ...], tuple[list[int], list[int]]] = {}
+        for i, row in enumerate(table):
+            members, totals = groups.setdefault(row.group, ([], []))
+            (totals if row.total else members).append(i)
+        columns = [*rule.count_columns, *([rule.total_column] if rule.total_column else [])]
+        for members, totals in groups.values():
+            for column in columns:
+                for t in totals:
+                    relation([(i, column) for i in members], (t, column))
+    return len(names), equations
 
 
 def _small_cell_checks(
@@ -264,14 +270,14 @@ def _small_cell_checks(
     index: Mapping[str, int],
     minimum: float,
     small_shown: int,
-    margins: Mapping[tuple[str, tuple[str, ...]], _Margin],
-    row_recoverable: int,
+    table: list[_Row],
 ) -> list[dict]:
     wanted = [*rule.count_columns]
     if rule.total_column:
         wanted.append(rule.total_column)
     if rule.totals:
         wanted += [rule.totals.column, *rule.totals.within]
+    wanted += list(rule.percent_columns)
     gone = [c for c in wanted if c not in index]
     if gone:
         return [_check("small_cells", False, None, 0, f"not in the file: {', '.join(gone)}")]
@@ -296,15 +302,52 @@ def _small_cell_checks(
             f"{small_shown} shown counts in {columns} below {shown_min} and above 0",
         )
     ]
+    if rule.totals is not None and not any(row.total for row in table):
+        checks.append(
+            _check(
+                "small_cells_totals",
+                False,
+                0,
+                ">= 1",
+                f"no row has {rule.totals.value!r} in {rule.totals.column}, so the totals "
+                "can't be checked",
+            )
+        )
     if rule.totals is not None or rule.total_column is not None:
-        recoverable = row_recoverable + sum(m.recoverable(minimum) for m in margins.values())
+        variables, equations = _margin_equations(rule, table)
+        found = audit(variables, equations, minimum)
+        recoverable = len(found.recoverable)
+        if found.inconsistent:
+            message = (
+                "the totals don't add up with the counts shown, so hidden counts can't be checked"
+            )
+        elif found.unsettled:
+            message = "the margin check didn't settle, so hidden counts can't be checked"
+        else:
+            message = f"{recoverable} hidden counts in {columns} can be worked out from the totals"
         checks.append(
             _check(
                 "small_cells_recoverable",
-                recoverable == 0,
+                recoverable == 0 and not found.inconsistent and not found.unsettled,
                 recoverable,
                 0,
-                f"{recoverable} hidden counts in {columns} can be worked out from a total",
+                message,
+            )
+        )
+    if rule.percent_columns:
+        given_away = sum(
+            1
+            for row in table
+            for pct, count in rule.percent_columns.items()
+            if row.cells.get(count, 0) is None and row.percents.get(pct) is not None
+        )
+        checks.append(
+            _check(
+                "small_cells_percentages",
+                given_away == 0,
+                given_away,
+                0,
+                f"{given_away} hidden counts have their percentage shown beside them",
             )
         )
     return checks

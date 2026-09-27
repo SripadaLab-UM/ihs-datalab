@@ -231,3 +231,34 @@ def test_a_pipelines_where_is_checked_as_sql():
     ):
         found = problems(USES_PIPELINE, pipelines=lookup_for(where))
         assert any(message in p for p in found), (where, found)
+
+
+def test_every_real_delivery_is_checked_or_says_why_not():
+    tsv = (
+        WEEKLY.replace("output: weekly.csv", "output: weekly.tsv")
+        .replace("      small_cells: { count_column: n_participants, min: $min_cell }\n", "")
+        .replace("  - id: check_summary\n    qc:\n      file: summary\n", "")
+    )
+    found = problems(tsv, require_small_cells=True)
+    assert any("Built-in checks read only CSVs" in p for p in found), found
+    reason = "weekly means by device only; no counts in it"
+    assert load_workflow(
+        tsv + f"  without_small_cells: {{ summary: {reason} }}\n",
+        allowed_schemas=COHORTS,
+        require_small_cells=True,
+    )
+    for bad, message in (
+        ("x" * 301, "300 characters"),
+        ("checked by hand with participant SYN-0001", "identifier"),
+        ("approved by jane@example.org for the share", "identifier"),
+    ):
+        found = problems(tsv + f"  without_small_cells: {{ summary: '{bad}' }}\n")
+        assert any(message in p for p in found), (bad, found)
+
+
+def test_percent_columns_name_a_count_column():
+    text = WEEKLY.replace(
+        "small_cells: { count_column: n_participants, min: $min_cell }",
+        "small_cells: { count_column: n_participants, percent_columns: { pct: n_days } }",
+    )
+    assert any("isn't one of the count columns" in p for p in problems(text))
