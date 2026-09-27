@@ -113,13 +113,23 @@ own slot, and the shared modules offer extension points:
   - `register_after_turn(async fn(conversation_id, turn_info))` runs after
     every turn's checkpoint, number check, and review, before `turn_done`.
     `TurnInfo` gives the turn number, how it ended, where its events start,
-    and the checkpoint to read files from. Each hook has a time limit, and
-    one that fails is logged without affecting the turn. Knowledge uses it
-    to diff `/work/kb`.
-  - `register_mounts(fn(conversation) -> list[Mount])` adds read-only mounts
-    when a conversation's container starts, alongside its attachments.
-    Mounts at or inside `/work`, `/codex-home`, `/data`, or `/inputs` are
-    refused.
+    and the checkpoint to read files from. A turn's hooks run concurrently
+    within one 30-second limit; one that fails is logged, and one still
+    going is cancelled and left to end on its own, so `turn_done` is always
+    written. Hooks must not block the event loop or catch cancellation.
+    Knowledge uses one to diff `/work/kb`.
+  - `register_workspace_seed(name, fn(conversation, work) -> base)` writes
+    into a conversation's `/work` once, before its first turn, and records
+    the base it returns (`workspace_base`), in the session folder. It never
+    runs again for that conversation, so container restarts keep the
+    agent's edits. Knowledge uses one for the `/work/kb` copy.
+  - `register_mounts(fn(conversation) -> list[Mount], roots=[...])` adds
+    read-only mounts when a conversation's container starts, alongside its
+    attachments. Targets are normalised and must be under `/mnt`; duplicates
+    are dropped. Sources are resolved, following links, and must be inside
+    the provider's declared roots, never in any conversation's folder, a
+    home folder, a dot-folder in it, or a credentials file. The resolved
+    path is what's mounted.
 - **Migrations** are numbered per area, so branches don't collide: 0007
   knowledge, 0008 workflow runs, 0009 update metadata (see
   `db/migrations/README.md`).

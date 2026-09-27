@@ -157,6 +157,25 @@ def check_attachable(
     return real, kind
 
 
+def private_place(real: Path) -> str | None:
+    """Why a resolved path is private to this computer's user, or None.
+
+    The home-folder and credential rules of `check_attachable`, for mounts
+    DataLab's own features add (see hooks.py): a whole home folder or drive,
+    anything holding one, a dotfile or dot-folder in the home folder, or a
+    credentials file.
+    """
+    home = Path(os.path.realpath(Path.home()))
+    if _same(real, home) or _inside(home, real) or real.parent == real:
+        return "it's a whole home folder or drive"
+    top = _top_in(real, home)
+    if top is not None and top.startswith("."):
+        return f"~/{top} is private settings or credentials"
+    if real.name.lower() in _CREDENTIAL_FILES:
+        return f"{real.name} looks like a credentials file"
+    return None
+
+
 def credential_files_in(folder: Path, *, limit: int = 20_000) -> tuple[list[str], bool]:
     """Credential-like files inside a folder, by path under it, and whether the look was complete.
 

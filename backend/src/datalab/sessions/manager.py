@@ -14,7 +14,8 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 from datalab.config import Settings, default_data_dir
@@ -23,12 +24,20 @@ from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
 from datalab.sessions.containers import DockerError, SessionContainers, SessionPaths, instance_of
 from datalab.sessions.helper import ResearchHelper
-from datalab.sessions.hooks import AfterTurnHook, MountProvider, TurnInfo, mount_problem
+from datalab.sessions.hooks import (
+    AfterTurnHook,
+    MountProvider,
+    MountRefused,
+    TurnInfo,
+    WorkspaceSeed,
+    checked_mount,
+)
 from datalab.sessions.inputs import (
     AttachmentStore,
     is_sample,
     mount_args,
     practice_samples,
+    private_place,
     recheck,
 )
 from datalab.sessions.plan_schema import TYPES_BY_ID
@@ -75,8 +84,9 @@ _OWN_TURN_EVENTS = frozenset({"files_restored", "input_attached", "input_removed
 _TURN_STARTS = frozenset({"user_message", "review_started"})
 # Model trouble that picking up again won't fix.
 _NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
-# How long each after-turn hook may take before it's given up on.
-AFTER_TURN_SECONDS = 120
+# How long a turn's after-turn hooks may take, together, before the turn
+# ends without them.
+AFTER_TURN_SECONDS = 30
 
 
 class Busy(RuntimeError):
@@ -116,17 +126,39 @@ class SessionManager:
         self._starting: set[str] = set()
         # Extension points for later milestones (see hooks.py).
         self._after_turn: list[AfterTurnHook] = []
-        self._mount_providers: list[MountProvider] = []
+        self._seeds: dict[str, WorkspaceSeed] = {}
+        self._mount_providers: list[tuple[MountProvider, tuple[Path, ...]]] = []
+        # Hooks still running after their turn ended (kept so they aren't
+        # garbage-collected mid-run).
+        self._detached: set[asyncio.Task[None]] = set()
 
     def register_after_turn(self, hook: AfterTurnHook) -> None:
         """Run `await hook(conversation_id, turn_info)` after every turn,
         once its checkpoint, number check and review are done."""
         self._after_turn.append(hook)
 
-    def register_mounts(self, provider: MountProvider) -> None:
+    def register_workspace_seed(self, name: str, seed: WorkspaceSeed) -> None:
+        """Run `seed(conversation, work)` once per conversation, before its
+        first turn, and record what it returns (`workspace_base`)."""
+        if name in self._seeds:
+            raise ValueError(f"A workspace seed named {name!r} is already registered.")
+        self._seeds[name] = seed
+
+    def workspace_base(self, conversation_id: str, name: str) -> str | None:
+        """What the seed `name` returned for this conversation, if it ran."""
+        entry = self._seeded(conversation_id).get(name)
+        return entry.get("base") if entry else None
+
+    def register_mounts(self, provider: MountProvider, *, roots: Sequence[Path]) -> None:
         """Add `provider(conversation)`'s read-only mounts to each container
-        the conversation starts from now on."""
-        self._mount_providers.append(provider)
+        the conversation starts from now on. Their sources must be inside
+        `roots`, folders the provider owns (such as a repo clone)."""
+        for root in roots:
+            real = Path(os.path.realpath(root))
+            problem = "it isn't a full path" if not root.is_absolute() else private_place(real)
+            if problem:
+                raise ValueError(f"{root} can't be a mount root: {problem}")
+        self._mount_providers.append((provider, tuple(roots)))
 
     def paths(self, conversation_id: str) -> SessionPaths:
         return SessionPaths(self._settings.data_dir / "sessions" / conversation_id)
@@ -157,6 +189,8 @@ class SessionManager:
         self._starting.add(conversation.id)
         try:
             await self._make_room(keep=conversation.id)
+            if self._seeds:
+                await asyncio.to_thread(self._seed_workspace, conversation)
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
@@ -462,7 +496,9 @@ class SessionManager:
         conversation = self._store.get(conversation_id) if self._mount_providers else None
         if conversation is None:
             return mounts
-        for provider in self._mount_providers:
+        sessions_dir = self._settings.data_dir / "sessions"
+        targets: set[str] = set()
+        for provider, roots in self._mount_providers:
             try:
                 provided = provider(conversation)
             except Exception:
@@ -470,12 +506,45 @@ class SessionManager:
                 log.exception("a mount provider failed in %s", conversation_id)
                 continue
             for mount in provided:
-                problem = mount_problem(mount)
-                if problem is None:
-                    mounts += mount.args()
-                else:
-                    log.warning("not mounting %s in %s: %s", mount.target, conversation_id, problem)
+                try:
+                    checked = checked_mount(mount, roots=roots, sessions_dir=sessions_dir)
+                    if checked.target in targets:
+                        # Docker refuses to start a container with two.
+                        raise MountRefused(f"{checked.target} is already mounted")
+                except MountRefused as refused:
+                    log.warning("not mounting %s in %s: %s", mount.target, conversation_id, refused)
+                    continue
+                targets.add(checked.target)
+                mounts += checked.args()
         return mounts
+
+    def _seeded(self, conversation_id: str) -> dict[str, dict[str, Any]]:
+        """The workspace seeds that have run for a conversation, by name."""
+        try:
+            return json.loads(self.paths(conversation_id).seeds.read_text())
+        except (OSError, ValueError):
+            return {}
+
+    def _seed_workspace(self, conversation: Conversation) -> None:
+        """Run the seeds that haven't run for this conversation yet (on a worker
+        thread). Recorded in its session folder, outside every mount, so each
+        runs once per conversation however often its container restarts."""
+        paths = self.paths(conversation.id)
+        done = self._seeded(conversation.id)
+        pending = [(n, seed) for n, seed in self._seeds.items() if n not in done]
+        if not pending:
+            return
+        paths.create()
+        for name, seed in pending:
+            try:
+                base = seed(conversation, paths.work)
+            except Exception:
+                log.exception("workspace seed %s failed in %s", name, conversation.id)
+                continue
+            done[name] = {"base": base, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+            fresh = paths.seeds.with_suffix(".tmp")
+            fresh.write_text(json.dumps(done, indent=1))
+            fresh.replace(paths.seeds)
 
     def _input_mounts(self, conversation_id: str) -> list[str]:
         """Mounts for the attachments that still pass every check, right now."""
@@ -665,13 +734,45 @@ class SessionManager:
         return checkpoint
 
     async def _run_after_turn(self, conversation_id: str, info: TurnInfo) -> None:
-        """Each after-turn hook in turn, each on its own: one that fails or
-        takes too long is logged, and the others and the turn carry on."""
-        for hook in list(self._after_turn):
-            try:
-                await asyncio.wait_for(hook(conversation_id, info), AFTER_TURN_SECONDS)
-            except Exception:
-                log.exception("an after-turn hook failed in %s", conversation_id)
+        """The after-turn hooks, all at once, within one time limit. One that
+        fails is logged; one still going then is cancelled and left to end on
+        its own (never awaited), so the turn always ends. If the turn itself
+        is cancelled (DataLab closing), so are its hooks."""
+        if not self._after_turn:
+            return
+        tasks = [asyncio.ensure_future(hook(conversation_id, info)) for hook in self._after_turn]
+        try:
+            _, late = await asyncio.wait(tasks, timeout=AFTER_TURN_SECONDS)
+        except asyncio.CancelledError:
+            for task in tasks:
+                self._detach(task, conversation_id)
+            raise
+        for task in tasks:
+            if task in late:
+                log.error("an after-turn hook took too long in %s; left to end", conversation_id)
+                self._detach(task, conversation_id)
+            elif not task.cancelled() and task.exception() is not None:
+                log.error(
+                    "an after-turn hook failed in %s",
+                    conversation_id,
+                    exc_info=task.exception(),
+                )
+
+    def _detach(self, task: asyncio.Task[None], conversation_id: str) -> None:
+        """Cancel a hook without waiting for it; log how it ends."""
+        if task.done():
+            return
+        task.cancel()
+        self._detached.add(task)
+
+        def ended(done: asyncio.Task[None]) -> None:
+            self._detached.discard(done)
+            if not done.cancelled() and done.exception() is not None:
+                log.error(
+                    "an after-turn hook failed in %s", conversation_id, exc_info=done.exception()
+                )
+
+        task.add_done_callback(ended)
 
     def _end_cut_off_turn(self, conversation_id: str) -> bool:
         """End a turn the log shows still going: what was running (the agent's

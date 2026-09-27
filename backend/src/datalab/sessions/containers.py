@@ -90,6 +90,11 @@ class SessionPaths:
         return self.root / "checkpoints"
 
     @property
+    def seeds(self) -> Path:
+        # Which workspace seeds have run (see hooks.py), outside every mount.
+        return self.root / "workspace-seeds.json"
+
+    @property
     def gateway_conf(self) -> Path:
         return self.root / "gateway.conf"
 

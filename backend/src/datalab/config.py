@@ -9,11 +9,13 @@ profile's database details live only in the user's settings file.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, field, fields
 from pathlib import Path
-from typing import Any, Literal
+from types import UnionType
+from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
 
 Profile = Literal["real", "practice"]
 
@@ -55,6 +57,16 @@ class QueryLimits:
 # area adds what it needs here, and nowhere else in this file.
 
 
+# A GitHub repository as `owner/name`. Neither part may start with "-" (it
+# could reach git as an option) or be "." or "..".
+_REPO = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/(?!\.\.?$)[A-Za-z0-9._][A-Za-z0-9._-]*")
+
+
+def _check_repo(key: str, value: str | None) -> None:
+    if value is not None and not _REPO.fullmatch(value):
+        raise ValueError(f"{key} must be a GitHub repository as owner/name, not {value!r}")
+
+
 @dataclass(frozen=True)
 class PlaygroundSettings:
     """`[playground]`: the SQL Playground (milestone 4).
@@ -84,6 +96,10 @@ class RepoSettings:
     knowledge: str | None = None
     # e.g. "SripadaLab-UM/ihs-pipelines"
     pipelines: str | None = None
+
+    def __post_init__(self) -> None:
+        for key in ("knowledge", "pipelines"):
+            _check_repo(f"repos.{key}", getattr(self, key))
 
 
 @dataclass(frozen=True)
@@ -115,6 +131,9 @@ class UpdateSettings:
     check_on_start: bool = True
     # Where releases come from.
     repository: str = "SripadaLab-UM/ihs_datalab"
+
+    def __post_init__(self) -> None:
+        _check_repo("updates.repository", self.repository)
 
 
 @dataclass(frozen=True)
@@ -238,27 +257,34 @@ def _section[T](cls: type[T], raw: dict, name: str) -> T:
     table = raw.get(name, {})
     if not isinstance(table, dict):
         raise ValueError(f"[{name}] in settings.toml must be a table")
-    known = {f.name: f for f in fields(cls)}  # type: ignore[arg-type]
-    unknown = sorted(set(table) - set(known))
+    hints = get_type_hints(cls)
+    known = {f.name for f in fields(cls)}  # type: ignore[arg-type]
+    unknown = sorted(set(table) - known)
     if unknown:
         raise ValueError(f"Unknown settings in [{name}] in settings.toml: {', '.join(unknown)}")
     for key, value in table.items():
-        if not _fits(known[key].default, value):
+        if not _fits(hints[key], value):
             raise ValueError(f"{name}.{key} in settings.toml has the wrong type: {value!r}")
     return cls(**table)
 
 
-def _fits(default: Any, value: Any) -> bool:
-    """Whether a settings value has the type its field's default has."""
-    if default is None:  # the optional text fields
-        return isinstance(value, str)
-    if isinstance(default, bool):
+def _fits(hint: Any, value: Any) -> bool:
+    """Whether a settings value has its field's declared type. Covers the
+    types these sections use: bool, int, float, str, and unions such as
+    `str | None` (TOML has no null, so None never arrives)."""
+    if get_origin(hint) in (UnionType, Union):
+        return any(_fits(option, value) for option in get_args(hint))
+    if hint is type(None):
+        return value is None
+    if hint is bool:
         return isinstance(value, bool)
-    if isinstance(default, int):
+    if hint is int:
         return isinstance(value, int) and not isinstance(value, bool)
-    if isinstance(default, float):
+    if hint is float:
         return isinstance(value, int | float) and not isinstance(value, bool)
-    return isinstance(value, type(default))
+    if hint is str:
+        return isinstance(value, str)
+    raise TypeError(f"settings of type {hint!r} aren't supported in sections yet")
 
 
 def _allowed_models(raw: dict) -> tuple[str, ...] | None:

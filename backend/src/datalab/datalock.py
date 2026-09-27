@@ -12,11 +12,15 @@ ends, even in a crash, so there's never a stale lock to clear by hand.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +54,10 @@ class DataFolderLock:
 def hold(data_dir: Path) -> DataFolderLock:
     """Take the data folder's lock, or raise DataFolderInUse.
 
-    The lock file holds the owner's process id, for the message a second
-    DataLab shows. It's opened without truncating, so a refused launch never
-    erases it.
+    The lock file records the owner (process id, computer, and when that
+    process started), for the message a second DataLab shows and for the
+    fallback below. It's opened without truncating, so a refused launch
+    never erases it.
     """
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / LOCK_NAME
@@ -62,32 +67,49 @@ def hold(data_dir: Path) -> DataFolderLock:
     except BaseException:
         handle.close()
         raise
+    owner = {"pid": os.getpid(), "host": socket.gethostname(), "started": _started(os.getpid())}
     handle.seek(0)
     handle.truncate()
-    handle.write(f"{os.getpid()}\n".encode())
+    handle.write((json.dumps(owner) + "\n").encode())
     handle.flush()
     return DataFolderLock(path, handle)
 
 
+def owner(data_dir: Path) -> dict[str, Any] | None:
+    """What the DataLab holding (or last holding) the folder recorded, if readable."""
+    with contextlib.suppress(OSError, ValueError):
+        record = json.loads((data_dir / LOCK_NAME).read_text(encoding="utf-8"))
+        if isinstance(record, dict) and isinstance(record.get("pid"), int):
+            return record
+    return None
+
+
 def holder(data_dir: Path) -> int | None:
     """The process id recorded by the DataLab holding the folder, if readable."""
-    with contextlib.suppress(OSError, ValueError):
-        return int((data_dir / LOCK_NAME).read_text(encoding="utf-8").split()[0])
-    return None
+    record = owner(data_dir)
+    return record["pid"] if record else None
+
+
+# Windows can release a crashed process's locks a little late.
+_WINDOWS_RETRY_SECONDS = 2.0
 
 
 def _lock(handle: IO[bytes], path: Path) -> None:
     if sys.platform == "win32":
         import msvcrt
 
-        # Locks one byte far past anything written, so the process id stays
+        # Locks one byte far past anything written, so the record stays
         # readable (Windows locks stop other processes reading what they cover).
-        handle.seek(1 << 20)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as error:
-            raise DataFolderInUse(str(path)) from error
-        return
+        deadline = time.monotonic() + _WINDOWS_RETRY_SECONDS
+        while True:
+            handle.seek(1 << 20)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                return
+            except OSError as error:
+                if time.monotonic() >= deadline:
+                    raise DataFolderInUse(str(path)) from error
+                time.sleep(0.1)
     try:
         import fcntl
     except ImportError:
@@ -103,22 +125,42 @@ def _lock(handle: IO[bytes], path: Path) -> None:
 
 
 def _fallback(path: Path) -> None:
-    """Without OS locks: refuse if the recorded process is still alive.
-
-    Weaker than a lock (two launches at the same instant could both pass),
-    but still stops the usual case of starting DataLab twice.
+    """Without OS locks: refuse only if the recorded owner is certainly still
+    running, that is on this computer, alive, and started when it said (a
+    process id can be reused). Otherwise the lock is taken over, with a
+    warning. Weaker than a lock (two launches at the same instant could both
+    pass), but it stops the usual case of starting DataLab twice.
     """
-    pid = holder(path.parent)
-    if pid is None or pid == os.getpid():
-        log.warning("file locks aren't available for %s; checking its process id only", path)
+    log.warning("file locks aren't available for %s; checking its owner's record", path)
+    record = owner(path.parent)
+    if record is None or record["pid"] == os.getpid():
         return
-    try:
-        os.kill(pid, 0)  # POSIX only (this is never reached on Windows): no signal is sent
-    except ProcessLookupError:
+    if record.get("host") != socket.gethostname():
+        log.warning("taking over %s from a DataLab on %s", path, record.get("host"))
         return
-    except PermissionError:
-        pass  # alive, and someone else's
+    started = _started(record["pid"])
+    if started is None or started != record.get("started"):
+        log.warning("taking over %s: process %s has ended", path, record["pid"])
+        return
     raise DataFolderInUse(str(path))
+
+
+def _started(pid: int) -> str | None:
+    """When a process started, as `ps` reports it, or None if it isn't running
+    (or this isn't a system with `ps`)."""
+    if sys.platform == "win32":
+        return None
+    try:
+        output = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return output or None
 
 
 # Locks this process holds until it exits, by data folder.
@@ -141,3 +183,10 @@ def refuse_second_instance(data_dir: Path, profile: str) -> DataFolderLock:
             "Use that one, or stop it first."
         )
     return _held[key]
+
+
+def release_all() -> None:
+    """Let go of every lock `refuse_second_instance` took (for tests)."""
+    while _held:
+        _, lock = _held.popitem()
+        lock.release()

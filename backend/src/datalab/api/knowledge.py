@@ -1,7 +1,9 @@
 """Knowledge (milestone 5): the lab knowledge base, its proposed edits, and Save & share.
 
-Only the status endpoint exists so far. Each session gets an editable copy of
-the knowledge base at `/work/kb`; after each turn an after-turn hook
+Only the status endpoint exists so far. Each conversation gets an editable
+copy of the knowledge base at `/work/kb`, made once by a workspace seed
+(`SessionManager.register_workspace_seed`, which records the commit it came
+from); after each turn an after-turn hook
 (`SessionManager.register_after_turn`) diffs the copy in the turn's
 checkpoint against the version it was copied from, and proposes the edits
 (see docs/KNOWLEDGE_BASE.md, "How edits happen"). Its tables are migration

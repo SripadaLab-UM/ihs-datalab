@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 import uvicorn
 
-from datalab import credentials
+from datalab import credentials, datalock
 from datalab.config import OracleSettings, QueryLimits, Settings
 from datalab.data.catalog import Catalog, Column, TableInfo
 from datalab.data.oracle import ExtractResult, QueryCancelled
@@ -34,6 +34,13 @@ def no_real_model_key(monkeypatch: pytest.MonkeyPatch) -> None:
             None if service == credentials.MODEL_KEY_SERVICE else real(service, account)
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def release_data_folder_locks() -> Iterator[None]:
+    """No test keeps a data folder locked for the rest of the run."""
+    yield
+    datalock.release_all()
 
 
 class FakeDatabase:

@@ -311,9 +311,12 @@ access. It never gains it.
 
 - The knowledge base is a git repository synced with GitHub. The synced
   clone stays on the host, and **no container sees it**.
-- Each session gets its own **editable copy** at `/work/kb`, made fresh from
-  the synced clone when the session starts, in both session types. The agent
-  edits pages there like any other file in `/work`.
+- Each conversation gets its own **editable copy** at `/work/kb`, in both
+  session types. It is made **once**, from the synced clone, before the
+  conversation's first turn, and DataLab records which commit it came from.
+  It is not remade when the container restarts (after being idle, say), so
+  the agent's edits are kept until a person saves or discards them. The
+  agent edits pages there like any other file in `/work`.
 - After each turn, DataLab compares the copy in that turn's checkpoint (never
   the live folder) with the version it was copied from. Any difference
   becomes a proposed-edit card with the exact diff. Only a person saves and

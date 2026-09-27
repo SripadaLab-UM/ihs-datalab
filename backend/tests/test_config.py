@@ -62,9 +62,26 @@ def test_sections_are_frozen(settings_file):
         ('repos = "x"\n', "[repos]"),
         ("[playground]\npreview_rows = 0\n", "between 1 and 500"),
         ("[workflows]\nmax_concurrent_runs = 0\n", "at least 1"),
+        ('[repos]\nknowledge = "--upload-pack=touch /tmp/x"\n', "owner/name"),
+        ('[repos]\npipelines = "-lab/ihs-pipelines"\n', "owner/name"),
+        ('[repos]\nknowledge = "lab/-x"\n', "owner/name"),
+        ('[repos]\nknowledge = "lab/.."\n', "owner/name"),
+        ('[repos]\nknowledge = "https://github.com/lab/kb"\n', "owner/name"),
+        ('[updates]\nrepository = "lab"\n', "owner/name"),
+        ("[playground]\npreview_rows = 1.5\n", "playground.preview_rows"),
     ],
 )
 def test_mistakes_in_a_section_are_refused_with_a_clear_message(settings_file, toml, message):
     settings_file.write_text(toml)
     with pytest.raises(ValueError, match=message.replace("[", r"\[").replace("]", r"\]")):
         load_settings("practice")
+
+
+def test_optional_text_takes_text_and_numbers_take_whole_numbers():
+    from datalab.config import _fits
+
+    assert _fits(str | None, "lab/kb") and not _fits(str | None, 3)
+    assert _fits(int, 3) and not _fits(int, True) and not _fits(int, 1.5)
+    assert _fits(float, 3) and _fits(float, 1.5) and not _fits(float, False)
+    with pytest.raises(TypeError):
+        _fits(list[str], ["a"])  # a section field type not handled yet: said so, not guessed

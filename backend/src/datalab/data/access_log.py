@@ -25,6 +25,8 @@ from typing import Any, Literal, get_args
 Origin = Literal["conversation", "playground", "run"]
 ORIGINS: frozenset[str] = frozenset(get_args(Origin))
 # The owner ids of queries that aren't a conversation's start with these.
+# (Later, origin could simply be read from the owner id's prefix instead of
+# being passed separately; for now both are given, and must agree.)
 _OWNER_PREFIXES = {"playground": "pg_", "run": "run_"}
 
 
