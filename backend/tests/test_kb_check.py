@@ -277,7 +277,7 @@ def test_the_github_workflow_template_runs_datalabs_published_check():
     assert workflow["permissions"] == {"contents": "read"}
     [job] = workflow["jobs"].values()
     command = job["steps"][-1]["run"]
-    assert "github.com/SripadaLab-UM/ihs_datalab@${DATALAB_REF}" in command
+    assert "github.com/SripadaLab-UM/ihs-datalab@${DATALAB_REF}" in command
     assert "datalab kb-check . --format github" in command
     checkout = job["steps"][0]
     assert checkout["with"]["persist-credentials"] is False
