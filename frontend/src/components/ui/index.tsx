@@ -251,3 +251,13 @@ export function EmptyNote({ icon, title, children }: { icon: AnyIcon; title: str
     </div>
   );
 }
+
+/** A tab that isn't built yet. Each tab's page shows this until its work lands. */
+export function ComingSoon({ name }: { name: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
+      <p className="font-serif text-[34px] text-ink">{name}</p>
+      <p className="font-serif text-[17px] italic">Coming in a later milestone.</p>
+    </div>
+  );
+}

@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button, FileGlyph } from "@/components/ui";
 
+import { Section } from "./Section";
+
 /** Folders the person has chosen to export to, such as a local Dropbox folder. */
 export function ExportDestinations({ practice }: { practice: boolean }) {
   const queryClient = useQueryClient();
@@ -12,15 +14,16 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
   const remove = useMutation({ mutationFn: api.removeDestination, onSuccess: refresh });
 
   return (
-    <section className="border-t border-ink pt-6">
-      <div className="flex items-center justify-between">
-        <h2 className="font-serif text-[28px] leading-tight">Export folders</h2>
-        {!practice && (
+    <Section
+      title="Export folders"
+      actions={
+        !practice && (
           <Button onClick={() => add.mutate()} disabled={add.isPending}>
             {add.isPending ? "Choose in the window that opened…" : "Add a folder…"}
           </Button>
-        )}
-      </div>
+        )
+      }
+    >
       <p className="mt-1 text-sm text-muted">
         {practice
           ? "Practice DataLab exports only to its own practice folder, so nothing from it ends up somewhere real."
@@ -49,6 +52,6 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
       {!practice && (
         <p className="mt-2 text-xs text-muted">Removing a folder here doesn't touch anything already exported to it.</p>
       )}
-    </section>
+    </Section>
   );
 }

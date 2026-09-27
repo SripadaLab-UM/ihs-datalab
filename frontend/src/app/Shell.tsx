@@ -67,12 +67,3 @@ export function Shell() {
     </div>
   );
 }
-
-export function ComingSoon({ name }: { name: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
-      <p className="font-serif text-[34px] text-ink">{name}</p>
-      <p className="font-serif text-[17px] italic">Coming in a later milestone.</p>
-    </div>
-  );
-}
