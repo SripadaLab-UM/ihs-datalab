@@ -7,7 +7,7 @@
 // rendered as text (and Markdown, for guides), never as HTML.
 
 import type { Approval } from "./ApprovalCard";
-import type { Item } from "./transcript";
+import { finalAnswer, type Item, type Turn } from "./transcript";
 
 export type IconName =
   | "book" | "search" | "table" | "link" | "db" | "code" | "chart" | "shield"
@@ -336,4 +336,14 @@ export function nowLine(rows: Row[], reasoning: string): string {
     .find(Boolean);
   if (heading) return `${heading}…`;
   return rows.length ? "Thinking about the next step…" : "Getting started…";
+}
+
+/**
+ * The turn's answer, only if it has one: a message marked as the final answer,
+ * or (for a turn that completed) its last message. A stopped or failed turn's
+ * last words are narration, already in its story, not an answer.
+ */
+export function answerOf(turn: Turn): string {
+  const hasFinal = turn.items.some((item) => item.kind === "message" && item.phase === "final_answer");
+  return hasFinal || turn.status === "completed" ? finalAnswer(turn) : "";
 }

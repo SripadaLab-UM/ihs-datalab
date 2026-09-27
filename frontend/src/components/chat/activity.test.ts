@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activityRows, describeCommand, nowLine, shortTable, tablesIn } from "./activity";
+import { activityRows, answerOf, describeCommand, nowLine, shortTable, tablesIn } from "./activity";
 import type { Item } from "./transcript";
 
 // Commands as Codex really sends them (from practice sessions, synthetic data).
@@ -122,4 +122,18 @@ it("finds the tables a query reads, once each", () => {
 it("names tables the way people say them", () => {
   expect(shortTable("IHS_2025.FITBITDAILYDATA")).toBe("FITBITDAILYDATA (2025)");
   expect(shortTable("OTHER")).toBe("OTHER");
+});
+
+// From a fork's review: a stopped turn showed its last commentary as "the answer".
+describe("answerOf", () => {
+  const said = { kind: "message" as const, id: "m", phase: "commentary" as const, text: "Next I'll check the sleep table." };
+  it("gives a stopped or failed turn no answer", () => {
+    expect(answerOf({ userText: "q", items: [said], status: "interrupted" })).toBe("");
+    expect(answerOf({ userText: "q", items: [said], status: "failed" })).toBe("");
+  });
+  it("keeps a real answer, and a completed turn's last words", () => {
+    const final = { ...said, id: "f", phase: "final_answer" as const, text: "The answer." };
+    expect(answerOf({ userText: "q", items: [said, final], status: "interrupted" })).toBe("The answer.");
+    expect(answerOf({ userText: "q", items: [said], status: "completed" })).toBe("Next I'll check the sleep table.");
+  });
 });

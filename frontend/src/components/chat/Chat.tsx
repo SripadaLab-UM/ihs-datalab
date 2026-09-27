@@ -8,9 +8,9 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
-import { activityRows, nowLine, type Row } from "./activity";
+import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
-import { buildTranscript, canContinue, finalAnswer, type Item, type ModelStatus, type Turn } from "./transcript";
+import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
 // Events that start or end a turn or its review: DataLab's busy flag changes.
@@ -283,7 +283,7 @@ function TurnView({
   running: boolean;
   last: boolean;
 }) {
-  const answer = finalAnswer(turn);
+  const answer = answerOf(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
   const storyRows = rows.filter((row) => row.type !== "review");
