@@ -195,6 +195,7 @@ def build_agent_tools(
                     # Named by the host from its own record, so the hash is right.
                     raw["revises"] = plans.revision_link(access.session_id, revises)
                 content = clean_plan(raw)
+                plans.check_revision(access.session_id, content)
             except PlanInvalid as error:
                 raise ToolError(str(error)) from error
 

@@ -27,6 +27,8 @@ def desk(store):
     events: list[tuple[str, dict]] = []
     desk = PlanDesk(Approvals(), store, lambda cid, kind, data: events.append((kind, data)))
     desk.events = events  # type: ignore[attr-defined]
+    desk.turn = object()  # type: ignore[attr-defined]
+    desk.current_turn = lambda cid: desk.turn  # type: ignore[attr-defined]
     return desk
 
 
@@ -40,12 +42,17 @@ def answering(desk, *, approve=True, edit=None, change_type=None, cards=None):
             cards.append(pending.card())
         await asyncio.sleep(0)
         edits = edit(json.loads(json.dumps(pending.plan))) if edit else None
-        desk._approvals.answer("c1", approval_id, approve, plan=edits, change_type=change_type)
+        try:
+            desk._approvals.answer("c1", approval_id, approve, plan=edits, change_type=change_type)
+        except Exception:
+            desk._approvals.withdraw("c1", approval_id)  # fail the test, don't wait for an answer
+            raise
 
     return codex
 
 
 def revision(desk, of: Plan, reason="Add a missing-data section.", **changes):
+    changes = changes or {"missing_data": "Complete cases, with the share missing reported."}
     raw = plan("association", {**ASSOCIATION, **changes})
     raw["revises"] = desk.revision_link("c1", of.id)
     raw["revision_reason"] = reason
@@ -151,6 +158,12 @@ async def test_asking_for_another_type_sends_back_the_persons_draft(desk):
         "label": "The version you sent back",
         "plan": outcome.suggested,
     }
+    # But not a proposal in a later turn, for a new question.
+    await desk.propose("c1", proposed, answering(desk, approve=False, edit=edit))
+    desk.turn = object()
+    cards.clear()
+    await desk.propose("c1", proposed, answering(desk, approve=False, cards=cards))
+    assert cards[0]["compare_to"] is None
 
 
 def test_a_draft_sent_back_may_be_unfinished_but_an_approval_may_not():
@@ -182,3 +195,70 @@ async def test_the_review_sees_every_version_and_the_latest_ones_checks(desk, st
     # A version-1 plan approved last has no type, so no extra checks.
     store.approve("c1", {"question": "Sleep?"})
     assert store.for_review("c1")[1] == []
+
+
+async def test_a_plan_approved_just_before_stop_is_still_frozen(desk, store):
+    """Stop can land after the person approves, while the tool waits for
+    Codex's side of the request to finish: the approved plan is frozen."""
+    approved_now = asyncio.Event()
+
+    async def codex(approval_id):
+        desk._approvals.get(approval_id, "c1").shown = True
+        desk._approvals.answer("c1", approval_id, True)
+        approved_now.set()
+        await asyncio.sleep(3600)  # Codex's reply, still on its way
+
+    proposing = asyncio.ensure_future(
+        desk.propose("c1", clean_plan(plan("association", ASSOCIATION)), codex)
+    )
+    await approved_now.wait()
+    await asyncio.sleep(0)
+    proposing.cancel()  # what Stop does
+    with pytest.raises(asyncio.CancelledError):
+        await proposing
+    [frozen] = store.list("c1")
+    assert desk.events[-1][0] == "plan_approved" and desk.events[-1][1]["plan_id"] == frozen.id
+
+
+async def test_a_revision_must_change_something(desk):
+    first = await approved_plan(desk)
+    same = clean_plan(
+        {
+            **first.content,
+            "revises": desk.revision_link("c1", first.id),
+            "revision_reason": "No change.",
+        }
+    )
+    with pytest.raises(PlanInvalid, match="doesn't change anything"):
+        desk.check_revision("c1", same)
+    # Nor can the person approve it after editing it back to the original.
+    revised = revision(desk, first)
+    with pytest.raises(PlanInvalid, match="doesn't change anything"):
+        plan_answer(revised, True, same, None, first.content)
+
+
+async def test_a_revision_cant_name_another_conversations_plan(desk, store):
+    store._db.execute(
+        "INSERT INTO conversations (id, kind, mode, title, model, created_at, updated_at) "
+        "VALUES ('c2', 'data', 'analysis', 't', 'm', 'x', 'x')"
+    )
+    elsewhere = store.approve("c2", clean_plan(plan("describe", {"measures": "m"})))
+    with pytest.raises(PlanInvalid, match="no approved plan to revise"):
+        desk.revision_link("c1", elsewhere.id)
+
+
+async def test_the_review_keeps_current_plans_when_old_versions_pile_up(desk, store):
+    a = await approved_plan(desk)
+    b = await desk.propose("c1", clean_plan(plan("describe", {"measures": "B"})), answering(desk))
+    b2 = await desk.propose("c1", _revise(desk, b, "B2"), answering(desk))
+    b3 = await desk.propose("c1", _revise(desk, b2, "B3"), answering(desk))
+    texts, _ = store.for_review("c1")
+    shown = [t.split()[3] for t in texts[-3:]]  # "Approved analysis plan <id> ..."
+    assert shown == [b2.id, a.id, b3.id]
+
+
+def _revise(desk, of, measures):
+    raw = plan("describe", {"measures": measures})
+    raw["revises"] = desk.revision_link("c1", of.id)
+    raw["revision_reason"] = f"Now {measures}."
+    return clean_plan(raw)

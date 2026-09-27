@@ -427,12 +427,17 @@ def _revision(raw: dict[str, Any], draft: bool) -> tuple[dict[str, str] | None, 
 
 
 def plan_answer(
-    proposed: dict[str, Any], approved: bool, edits: Any, change_type: str | None
+    proposed: dict[str, Any],
+    approved: bool,
+    edits: Any,
+    change_type: str | None,
+    revises_plan: dict[str, Any] | None = None,
 ) -> str:
     """What the person's answer on a proposed plan hands back, as JSON.
 
     Approved: the plan to freeze, as they left it; it must be complete, and
-    still revise the plan it was proposed to revise. Not approved: "" for a
+    still revise the plan it was proposed to revise (`revises_plan`), and
+    change something in it. Not approved: "" for a
     bare no, or {edits, change_type}: their edits, if they're a usable draft
     that differs from the proposal, and the type they asked for instead. A
     "no" always counts, whatever comes with it.
@@ -443,6 +448,11 @@ def plan_answer(
         plan = clean_plan(edits if edits is not None else proposed)
         if revision_of(plan) != revision_of(proposed):
             raise PlanInvalid("Which approved plan this revises can't be changed here.")
+        if revises_plan is not None and same_plan(revises_plan, plan):
+            raise PlanInvalid(
+                "This revision doesn't change anything in the approved plan. Change what needs "
+                "changing, or choose Not yet to keep the approved plan."
+            )
         return json.dumps(plan)
     edited = None
     if edits is not None:
@@ -504,11 +514,13 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
         raise PlanInvalid("An additional section needs a title.")
     if "\n" in title or len(title) > MAX_TITLE:
         raise PlanInvalid(f"A section title must be one line of at most {MAX_TITLE} characters.")
-    if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in title):
-        # Look-alike letters from other scripts could pass for a real section's title.
+    if any(
+        c.isalpha() and not unicodedata.name(c, "").startswith(("LATIN", "GREEK")) for c in title
+    ):
+        # Letters from other scripts can look like Latin ones, and aren't needed here.
         raise PlanInvalid(
-            f"The section title {title!r} has letters from outside the Latin alphabet. "
-            "Write it in plain Latin letters (accents are fine)."
+            f"The section title {title!r} has letters from outside the Latin and Greek "
+            "alphabets. Write it in those letters (accents are fine)."
         )
     taken = {_title_key(t) for t in (*(s.label for s in SECTIONS.values()), *RESERVED_TITLES)}
     taken |= {_title_key(s["label"]) for s in earlier}
@@ -523,9 +535,52 @@ def _additional(label: str | None, content: Any, earlier: list[dict[str, str]]) 
 
 
 def _title_key(title: str) -> str:
-    """A title as it reads: accents dropped, case folded, spacing squeezed."""
-    bare = "".join(c for c in unicodedata.normalize("NFKD", title) if not unicodedata.combining(c))
-    return " ".join(bare.casefold().split())
+    """A title as it reads, to compare with others: accents and punctuation
+    dropped, case folded, and each letter that looks like a Latin letter (a
+    Latin alpha, a dotless i, small capitals, Greek alpha or omicron) taken as
+    that letter."""
+    bare = (c for c in unicodedata.normalize("NFKD", title) if not unicodedata.combining(c))
+    words = "".join(_skeleton(c) if c.isalnum() else " " for c in bare)
+    return " ".join(words.split())
+
+
+# Greek letters that look like a Latin one.
+_GREEK_LOOKALIKES = dict(
+    zip(
+        "αβγδεζηικμνοπρστυχωςϲΑΒΕΖΗΙΚΜΝΟΡΤΥΧ",
+        "abydeznikuvonpotuxwccabezhikmnoptyx",
+        strict=True,
+    )
+)
+# Latin letters named after the Greek letter they look like (Latin alpha, iota, ...).
+_GREEK_NAMES = {"ALPHA": "a", "IOTA": "i", "UPSILON": "u", "OMEGA": "w", "GAMMA": "y"}
+
+
+def _skeleton(char: str) -> str:
+    """The plain lower-case Latin letter a letter looks like, or the letter itself."""
+    if char.isascii():
+        return char.lower()
+    if char in _GREEK_LOOKALIKES:
+        return _GREEK_LOOKALIKES[char]
+    name = unicodedata.name(char, "")
+    if name.startswith("LATIN"):
+        # "LATIN SMALL LETTER DOTLESS I", "LATIN LETTER SMALL CAPITAL A",
+        # "LATIN SMALL LETTER L WITH STROKE": the last word before any "WITH".
+        base = name.split(" WITH ")[0].split()[-1]
+        if len(base) == 1:
+            return base.lower()
+        return _GREEK_NAMES.get(base, char.casefold())
+    return char.casefold()
+
+
+def same_plan(earlier: dict[str, Any], later: dict[str, Any]) -> bool:
+    """Whether two version-2 plans say the same thing (ignoring any revision link)."""
+
+    def said(plan: dict[str, Any]) -> tuple[Any, ...]:
+        sections = [(s["kind"], s["label"], s["content"]) for s in plan.get("sections", [])]
+        return plan.get("analysis_type"), plan.get("rationale"), sections
+
+    return said(earlier) == said(later)
 
 
 def _content(value: Any, label: str) -> str:

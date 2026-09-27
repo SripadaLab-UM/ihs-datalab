@@ -30,7 +30,9 @@ place it doesn't.
 1. Traced claims: does every number in the answer come from a query result,
    a command's output, or a file in /work/outputs? List any that don't.
 2. Plan: if there is an approved analysis plan, did the work follow it? Is
-   anything off-plan clearly labelled exploratory?
+   anything off-plan clearly labelled exploratory? If a plan was revised,
+   work done before the revision followed the version then approved: check
+   each result against the version it was made under.
 3. Causal language: does the answer imply cause and effect ("leads to",
    "improves", "because of") that an observational design can't support?
 4. Sample sizes: are the numbers of participants and observations reported
@@ -82,8 +84,8 @@ def instructions(
     plans = plans or []
     if len(plans) > MAX_PLANS:
         parts.append(
-            f"This conversation has {len(plans)} approved plans; only the latest "
-            f"{MAX_PLANS} are shown, oldest first. Work follows the latest one it names."
+            f"This conversation has {len(plans)} approved plans; only {MAX_PLANS} are "
+            "shown: the current ones, then the latest versions they replaced."
         )
     for plan in plans[-MAX_PLANS:]:
         parts.append(_fenced("approved_plan", plan[:MAX_PLAN_TEXT]))

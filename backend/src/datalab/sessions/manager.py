@@ -347,6 +347,9 @@ class SessionManager:
         answered: dict[str, Any] = {"id": approval_id, "approved": approved}
         if approved and kind == "research_helper":
             answered["question"] = value
+        if approved and kind == "analysis_plan":
+            # The plan as approved (with the person's edits), for the card until it's frozen.
+            answered["plan"] = json.loads(value)
         # A plan sent back: the type the person asked for instead, if they did.
         sent_back = kind == "analysis_plan" and not approved and value
         requested = json.loads(value).get("change_type") if sent_back else None
@@ -702,6 +705,11 @@ class SessionManager:
             oldest = min(idle, key=lambda c: self._last_used.get(c, 0))
             await self._shutdown(oldest)
             running.remove(oldest)
+
+    def current_turn(self, conversation_id: str) -> object | None:
+        """The running turn (the same object only within one turn), or None."""
+        task = self._turns.get(conversation_id)
+        return task if task is not None and not task.done() else None
 
     def turn_running(self, conversation_id: str) -> bool:
         task = self._turns.get(conversation_id)

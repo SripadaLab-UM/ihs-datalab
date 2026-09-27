@@ -158,7 +158,15 @@ class Approvals:
         if pending.kind == "analysis_plan":
             from datalab.sessions.plan_schema import plan_answer
 
-            approved_value = plan_answer(pending.plan or {}, approved, plan, change_type)
+            # A revision is compared with the approved plan it revises.
+            earlier = (
+                pending.compare_to
+                if pending.compare_to and "plan_id" in pending.compare_to
+                else None
+            )
+            approved_value = plan_answer(
+                pending.plan or {}, approved, plan, change_type, earlier and earlier["plan"]
+            )
         elif approved:
             approved_value = clean_question(text)
         pending.decision.set_result((approved, approved_value))

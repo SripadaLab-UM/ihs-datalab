@@ -223,3 +223,28 @@ it("turn_done ends the turn and any review still open", () => {
   expect(turns[0].status).toBe("completed");
   expect(turns[0].items.find((i) => i.kind === "review")).toMatchObject({ status: "failed" });
 });
+
+it("carries the approved plan, and says a plan the turn ended before freezing wasn't frozen", () => {
+  const proposed = { schema_version: 2, analysis_type: "describe", analysis_type_label: "Describe or compare", rationale: "", sections: [] };
+  const approved = { ...proposed, rationale: "Edited." };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan: proposed }),
+    e("approval_answered", { id: "ap1", approved: true, plan: approved }),
+    e("turn_finished", { status: "interrupted" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({ plan: approved, notFrozen: "The turn ended before the plan was frozen." });
+  expect(turns[0].items[0]).not.toHaveProperty("answer");
+});
+
+it("keeps the reason a plan wasn't frozen when the turn then ends", () => {
+  const plan = { schema_version: 2, analysis_type: "describe", analysis_type_label: "Describe or compare", rationale: "", sections: [] };
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("approval_requested", { id: "ap1", kind: "analysis_plan", plan }),
+    e("approval_answered", { id: "ap1", approved: true, plan }),
+    e("plan_not_frozen", { approval: "ap1", reason: "Another revision was approved first." }),
+    e("turn_finished", { status: "completed" }),
+  ]);
+  expect(turns[0].items[0]).toMatchObject({ notFrozen: "Another revision was approved first." });
+});

@@ -99,7 +99,8 @@ Pilot first, then ask before scaling up:
   alternatives.
 - After approval, reuse the pilot's pipeline and settings. Don't silently
   change the estimand, measures, exclusions, transformations, checks, or model
-  between the pilot and the full run.
+  between the pilot and the full run: if one must change, propose a revision
+  of the approved plan and say why.
 
 Reproducibility:
 - Put a concise researcher-facing report and the complete analysis source in

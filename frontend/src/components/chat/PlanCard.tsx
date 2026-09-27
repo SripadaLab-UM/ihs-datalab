@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { api, type PlanSchema } from "@/api/client";
 import { Button, Chip, Icon } from "@/components/ui";
@@ -43,7 +43,7 @@ export function PlanCard({ conversationId, approval }: { conversationId: string;
   const typeLabel = planTypeLabel(approval.plan);
   const summary = planSummary(approval.plan);
   const revision = isV2(approval.plan) ? approval.plan : undefined;
-  // Approved but not frozen yet: what's held is the proposal, not what the person approved.
+  // Approved but not frozen (yet): the plan held is the one the person approved.
   const unfrozen = approval.state === "approved" && !approval.frozen;
   return (
     <div className={clsx("border-l py-1 pl-5", approval.state === "pending" ? "border-you" : "border-line")}>
@@ -65,18 +65,22 @@ export function PlanCard({ conversationId, approval }: { conversationId: string;
       ) : (
         <>
           {summary && <p className="mt-1 max-w-[60ch] font-serif text-[16px] leading-relaxed">{summary}</p>}
-          {!unfrozen && (
-            <div className="mt-2 flex flex-wrap gap-x-5">
-              <Toggle open={showPlan} onClick={() => setShowPlan(!showPlan)}>
-                {showPlan ? "Hide the plan" : approval.frozen ? "Show the frozen plan" : "Show the plan"}
+          <div className="mt-2 flex flex-wrap gap-x-5">
+            <Toggle open={showPlan} onClick={() => setShowPlan(!showPlan)}>
+              {showPlan
+                ? "Hide the plan"
+                : approval.frozen
+                  ? "Show the frozen plan"
+                  : unfrozen
+                    ? "Show the plan as approved"
+                    : "Show the plan"}
+            </Toggle>
+            {revision && approval.compareTo && (
+              <Toggle open={showChanges} onClick={() => setShowChanges(!showChanges)}>
+                {showChanges ? "Hide what changed" : "Show what changed"}
               </Toggle>
-              {revision && approval.compareTo && (
-                <Toggle open={showChanges} onClick={() => setShowChanges(!showChanges)}>
-                  {showChanges ? "Hide what changed" : "Show what changed"}
-                </Toggle>
-              )}
-            </div>
-          )}
+            )}
+          </div>
           {showChanges && revision && approval.compareTo && <PlanChanges before={approval.compareTo} after={revision} />}
           {showPlan && <PlanText plan={approval.plan} />}
           <p className="mt-3 font-sans text-[12.5px] text-muted">
@@ -223,9 +227,56 @@ function Change({ label, status, before, after }: { label: string; status: keyof
 }
 
 /** How much of a limit some text uses, as the server will count it. */
-function Count({ text, limit }: { text: string; limit: number }) {
+function Count({ id, text, limit }: { id: string; text: string; limit: number }) {
   const n = length(text);
-  return <p className={clsx("mt-0.5 text-right font-sans text-[12px]", n > limit ? "text-danger" : "text-muted")}>{n} / {limit}</p>;
+  return (
+    <p id={id} className={clsx("mt-0.5 text-right font-sans text-[12px]", n > limit ? "text-danger" : "text-muted")}>
+      {n} / {limit} characters
+    </p>
+  );
+}
+
+function Hint({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <p id={id} className="mt-0.5 max-w-[62ch] font-sans text-[12.5px] leading-snug text-muted">
+      {children}
+    </p>
+  );
+}
+
+/** A text field with its label, guidance, and character count, tied together for screen readers. */
+function Field({
+  id,
+  label,
+  hint,
+  value,
+  limit,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  value: string;
+  limit: number;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <label htmlFor={id} className="dl-label">
+        {label}
+      </label>
+      <Hint id={`${id}-hint`}>{hint}</Hint>
+      <textarea
+        id={id}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows(value)}
+        aria-describedby={`${id}-hint ${id}-count`}
+        className={BOX}
+      />
+      <Count id={`${id}-count`} text={value} limit={limit} />
+    </div>
+  );
 }
 
 /**
@@ -304,6 +355,7 @@ function Editing({
   onAnswer: (approve: boolean, changeType?: string) => void;
 }) {
   const [otherType, setOtherType] = useState<string | null>(null);
+  const typeChoice = useRef<HTMLSelectElement>(null);
   const [toAdd, setToAdd] = useState("");
   // The section just added, to move the keyboard focus to.
   const [added, setAdded] = useState<string | null>(null);
@@ -321,6 +373,10 @@ function Editing({
     length(plan.revision_reason ?? "") +
     plan.sections.reduce((n, s) => n + length(s.label) + length(s.content), 0);
   const fieldId = (index: number) => `${approval.id}-section-${index}`;
+
+  useEffect(() => {
+    if (otherType === "") typeChoice.current?.focus();
+  }, [otherType]);
 
   useEffect(() => {
     if (added === null) return;
@@ -346,27 +402,23 @@ function Editing({
       {/* Once answered nothing can change, so what's shown is what was sent. */}
       <fieldset disabled={decided} className="mt-4 flex min-w-0 flex-col gap-4">
         {plan.revises && (
-          <label className="block">
-            <span className="dl-label">What changes, and why</span>
-            <textarea
-              value={plan.revision_reason ?? ""}
-              onChange={(e) => setPlan({ ...plan, revision_reason: e.target.value })}
-              rows={rows(plan.revision_reason ?? "")}
-              className={BOX}
-            />
-            <Count text={plan.revision_reason ?? ""} limit={limits.reason} />
-          </label>
-        )}
-        <label className="block">
-          <span className="dl-label">Why this kind of analysis</span>
-          <textarea
-            value={plan.rationale}
-            onChange={(e) => setPlan({ ...plan, rationale: e.target.value })}
-            rows={rows(plan.rationale)}
-            className={BOX}
+          <Field
+            id={`${approval.id}-reason`}
+            label="What changes, and why"
+            hint="What this revision changes in the approved plan, and why, including anything seen in the data that prompted it."
+            value={plan.revision_reason ?? ""}
+            limit={limits.reason}
+            onChange={(value) => setPlan({ ...plan, revision_reason: value })}
           />
-          <Count text={plan.rationale} limit={limits.rationale} />
-        </label>
+        )}
+        <Field
+          id={`${approval.id}-rationale`}
+          label="Why this kind of analysis"
+          hint="In a sentence, why this type of analysis fits the question."
+          value={plan.rationale}
+          limit={limits.rationale}
+          onChange={(value) => setPlan({ ...plan, rationale: value })}
+        />
         {plan.sections.map((section, index) => {
           const id = fieldId(index);
           const own = section.kind === ADDITIONAL;
@@ -400,21 +452,17 @@ function Editing({
                   </button>
                 )}
               </div>
-              {hint && (
-                <p id={`${id}-hint`} className="mt-0.5 max-w-[62ch] font-sans text-[12.5px] leading-snug text-muted">
-                  {hint}
-                </p>
-              )}
+              {hint && <Hint id={`${id}-hint`}>{hint}</Hint>}
               <textarea
                 id={id}
                 aria-label={own ? section.label || "Section" : undefined}
-                aria-describedby={hint ? `${id}-hint` : undefined}
+                aria-describedby={`${hint ? `${id}-hint ` : ""}${id}-count`}
                 value={section.content}
                 onChange={(e) => update(index, { content: e.target.value })}
                 rows={rows(section.content)}
                 className={BOX}
               />
-              <Count text={section.content} limit={limits.section} />
+              <Count id={`${id}-count`} text={section.content} limit={limits.section} />
             </div>
           );
         })}
@@ -470,14 +518,14 @@ function Editing({
           {plan.revises ? "Approve revision" : "Approve plan"}
         </Button>
       </div>
-      {otherType !== null && (
+      {otherType !== null && !decided && (
         <div className="mt-3 border border-line px-3 py-2.5 font-sans text-[13px]">
           <label className="flex flex-wrap items-baseline gap-2 text-muted">
             <span className="shrink-0">Send it back as a</span>
             <select
+              ref={typeChoice}
               value={otherType}
               onChange={(e) => setOtherType(e.target.value)}
-              disabled={decided}
               className="border border-line bg-transparent px-2 py-1 text-ink outline-none focus:border-ink"
             >
               <option value="">Choose a type…</option>
@@ -489,12 +537,13 @@ function Editing({
             </select>
             <span className="shrink-0">plan</span>
           </label>
-          {chosen && <p className="mt-1.5 text-muted">{chosen.summary}</p>}
+          {/* Always one line here, so choosing a type doesn't move the buttons. */}
+          <p className="mt-1.5 min-h-[1lh] text-muted">{chosen ? chosen.summary : "Choose a type to see what it's for."}</p>
           <p className="mt-1.5 text-muted">
             The agent rewrites it as that type, keeping your edits, and you'll see what changed before approving.
           </p>
           <div className="mt-2 flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOtherType(null)} disabled={decided}>
+            <Button variant="ghost" onClick={() => setOtherType(null)}>
               Cancel
             </Button>
             <Button onClick={() => onAnswer(false, otherType)} disabled={decided || !chosen}>

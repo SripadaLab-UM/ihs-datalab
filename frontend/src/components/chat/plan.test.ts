@@ -9,6 +9,7 @@ import {
   planSummary,
   planTypeLabel,
   requiredKinds,
+  titleKey,
   withSection,
   type PlanV2,
 } from "./plan";
@@ -92,4 +93,13 @@ it("says what changed between two versions, section by section", () => {
     unchanged: 2,
   });
   expect(planChanges({ question: "v1" }, plan).comparable).toBe(false);
+});
+
+it("matches a person's own section across versions however its title is written", () => {
+  const before: PlanV2 = { ...plan, sections: [{ kind: "additional", label: "Pilot cohort", content: "50." }] };
+  const after: PlanV2 = { ...plan, sections: [{ kind: "additional", label: "Pil\u03bft c\u00f3hort!", content: "100." }] };
+  expect(planChanges(before, after).changes).toEqual([
+    { label: "Pil\u03bft c\u00f3hort!", status: "changed", before: "50.", after: "100." },
+  ]);
+  expect(titleKey("Deliver\u0251bles:")).toBe(titleKey("deliverables"));
 });

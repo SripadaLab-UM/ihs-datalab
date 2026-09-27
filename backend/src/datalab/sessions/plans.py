@@ -14,6 +14,7 @@ approves it, and it's frozen as a new version. The earlier one stays.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import secrets
@@ -28,6 +29,7 @@ from datalab.sessions.plan_schema import (
     PlanInvalid,
     review_checks,
     revision_of,
+    same_plan,
     sections_of,
     type_change_note,
     type_label,
@@ -79,8 +81,10 @@ def as_text(plan: Plan, superseded_by: Plan | None = None) -> str:
 
 def _indented(text: str) -> str:
     # Every line after a section's first is indented, so no text in a section
-    # can pass for the start of another ("- Method and adjustment: ...").
-    return text.replace("\n", "\n  ")
+    # can pass for the start of another ("- Method and adjustment: ..."). A
+    # blank line can't, so it's left alone: the text at most doubles.
+    first, *rest = text.split("\n")
+    return "\n".join([first, *(f"  {line}" if line else "" for line in rest)])
 
 
 class PlanStore:
@@ -122,11 +126,19 @@ class PlanStore:
 
     def for_review(self, conversation_id: str) -> tuple[list[str], list[str]]:
         """The approved plans as the rigor review is shown them, and the extra
-        checks for the latest one's type and add-on sections."""
+        checks for the latest one's type and add-on sections.
+
+        Replaced versions come first and current plans last, so when the
+        review is shown only the last few, no current plan is left out for
+        an old version.
+        """
         plans = self.list(conversation_id)
         replaced = self.superseded(conversation_id)
         checks = review_checks(plans[-1].content) if plans else []
-        return [as_text(p, replaced.get(p.id)) for p in plans], checks
+        ordered = [p for p in plans if p.id in replaced] + [
+            p for p in plans if p.id not in replaced
+        ]
+        return [as_text(p, replaced.get(p.id)) for p in ordered], checks
 
     def current(self, conversation_id: str) -> list[Plan]:
         """The approved plans no revision has replaced."""
@@ -144,9 +156,12 @@ class PlanDesk:
         self._store = store
         self._emit = emit
         self.turn_running: Any = lambda conversation_id: True
+        # Which turn is running (any value that's the same only within one turn).
+        self.current_turn: Any = lambda conversation_id: None
         # The version of a plan the person last sent back, per conversation,
-        # so the next proposal can be shown against it. For display only.
-        self._returned: dict[str, dict[str, Any]] = {}
+        # and the turn it was sent back in, so the agent's next proposal in
+        # that turn can be shown against it. For display only.
+        self._returned: dict[str, tuple[Any, dict[str, Any]]] = {}
 
     def revision_link(self, conversation_id: str, plan_id: str) -> dict[str, str]:
         """How a revision names the approved plan it revises, or PlanInvalid."""
@@ -162,6 +177,16 @@ class PlanDesk:
         listed = "; ".join(f"{p.id} ({_summary(p)})" for p in current)
         raise PlanInvalid(f"There's no approved plan {plan_id!r} to revise. Current: {listed}.")
 
+    def check_revision(self, conversation_id: str, content: dict[str, Any]) -> None:
+        """PlanInvalid if a revision changes nothing in the plan it revises."""
+        if revises := revision_of(content):
+            earlier = self._plan(conversation_id, revises["plan_id"])
+            if earlier is not None and same_plan(earlier.content, content):
+                raise PlanInvalid(
+                    f"This revision doesn't change anything in plan {earlier.id}. Change what "
+                    "needs changing, or keep following the approved plan."
+                )
+
     async def propose(
         self, conversation_id: str, content: dict[str, Any], elicit: Any
     ) -> Plan | Outcome:
@@ -174,13 +199,26 @@ class PlanDesk:
             plan=content,
             compare_to=self._compare_to(conversation_id, content),
         )
-        approved, value = await self._approvals.decide(
-            pending, elicit, self._emit, self.WAIT_SECONDS
-        )
+        try:
+            approved, value = await self._approvals.decide(
+                pending, elicit, self._emit, self.WAIT_SECONDS
+            )
+        except asyncio.CancelledError:
+            # Stopped after the person approved, while the tool was finishing:
+            # what they approved is still frozen, so the card isn't left waiting.
+            if pending.decision.done() and not pending.decision.cancelled():
+                approved, value = pending.decision.result()
+                if approved:
+                    self._freeze(conversation_id, pending.id, json.loads(value))
+            raise
         if not approved:
             return self._not_approved(conversation_id, content, value)
-        approved_content = json.loads(value)
-        revises = revision_of(approved_content)
+        return self._freeze(conversation_id, pending.id, json.loads(value))
+
+    def _freeze(
+        self, conversation_id: str, approval_id: str, content: dict[str, Any]
+    ) -> Plan | Outcome:
+        revises = revision_of(content)
         if revises and revises["plan_id"] in self._store.superseded(conversation_id):
             # Another revision of the same plan was approved while this one waited.
             # The card says so, rather than waiting to be frozen.
@@ -188,7 +226,7 @@ class PlanDesk:
                 conversation_id,
                 "plan_not_frozen",
                 {
-                    "approval": pending.id,
+                    "approval": approval_id,
                     "reason": "Another revision of the same plan was "
                     "approved first, so this one wasn't frozen.",
                 },
@@ -197,12 +235,12 @@ class PlanDesk:
                 f"This revision wasn't frozen: plan {revises['plan_id']} was already revised "
                 "while it waited. Revise the latest plan instead."
             )
-        plan = self._store.approve(conversation_id, approved_content)
+        plan = self._store.approve(conversation_id, content)
         self._emit(
             conversation_id,
             "plan_approved",
             {
-                "approval": pending.id,
+                "approval": approval_id,
                 "plan_id": plan.id,
                 "approved_at": plan.approved_at,
                 "sha256": plan.sha256,
@@ -211,13 +249,15 @@ class PlanDesk:
         )
         return plan
 
+    def _plan(self, conversation_id: str, plan_id: str) -> Plan | None:
+        return next((p for p in self._store.list(conversation_id) if p.id == plan_id), None)
+
     def _compare_to(self, conversation_id: str, content: dict[str, Any]) -> dict[str, Any] | None:
-        """What a proposal is shown against: the plan it revises, or what was sent back."""
-        returned = self._returned.pop(conversation_id, None)
+        """What a proposal is shown against: the plan it revises, or what the
+        person sent back earlier in the same turn (a new question is a new turn)."""
+        turn, returned = self._returned.pop(conversation_id, (None, None))
         if revises := revision_of(content):
-            earlier = next(
-                (p for p in self._store.list(conversation_id) if p.id == revises["plan_id"]), None
-            )
+            earlier = self._plan(conversation_id, revises["plan_id"])
             if earlier is not None:
                 return {
                     "label": "The approved plan it revises",
@@ -226,7 +266,7 @@ class PlanDesk:
                     "approved_at": earlier.approved_at,
                     "sha256": earlier.sha256,
                 }
-        if returned is not None:
+        if returned is not None and turn is not None and turn is self.current_turn(conversation_id):
             return {"label": "The version you sent back", "plan": returned}
         return None
 
@@ -239,7 +279,7 @@ class PlanDesk:
             )
         answer = json.loads(value)
         edits, change_type = answer.get("edits"), answer.get("change_type")
-        self._returned[conversation_id] = edits or proposed
+        self._returned[conversation_id] = (self.current_turn(conversation_id), edits or proposed)
         if change_type:
             return Outcome(type_change_note(edits or proposed, change_type), edits, change_type)
         return Outcome(

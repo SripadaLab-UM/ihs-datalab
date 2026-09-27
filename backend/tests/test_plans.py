@@ -336,3 +336,35 @@ def test_a_sections_text_cant_pass_for_another_section_in_the_review():
     text = as_text(Plan("pl_1", "c1", "2026-09-26T00:00:00+00:00", cleaned, "0" * 64))
     assert [line for line in text.splitlines() if line.startswith("- Method")] == []
     assert "\n  - Method and adjustment: none" in text
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Method \u0251nd \u0251djustment",  # Latin alpha
+        "Deliver\u0251bles",
+        "Why it ch\u0251nged",
+        "Measures and summar\u0131es",  # dotless i
+        "Pr\u03bfposed \u0391pproach",  # Greek omicron and capital alpha
+        "Type:",
+        "Revises.",
+        "Why it changed!",
+    ],
+)
+def test_look_alike_letters_and_punctuation_dont_make_a_new_title(title):
+    with pytest.raises(PlanInvalid, match="already has a section"):
+        clean_plan(plan("other", {"approach": "a"}, [(title, "x")]))
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Cronbach's \u03b1",
+        "\u03b2-blocker exposure",
+        "Test\u2013retest (\u03ba)",
+        "\u00b5g/L thresholds",
+    ],
+)
+def test_greek_letters_are_fine_in_a_title(title):
+    cleaned = clean_plan(plan("describe", {"measures": "m"}, [(title, "x")]))
+    assert cleaned["sections"][-1]["content"] == "x"

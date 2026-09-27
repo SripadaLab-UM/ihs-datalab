@@ -1,3 +1,5 @@
+import pytest
+
 from datalab.sessions.rigor import instructions
 
 
@@ -15,17 +17,17 @@ def test_material_is_capped():
     assert len(text) < 20000 + 8000 + 30 * 2100 + 5000
 
 
-def lines(n: int) -> str:
+def lines(n: int, pattern: str = "y\n") -> str:
     """Text of n characters that's all short lines: the most a plan's text form grows."""
-    return ("y\n" * n)[: n - 1] + "y"
+    return (pattern * n)[: n - 1] + "y"
 
 
-def largest_plans():
+def largest_plans(pattern: str = "y\n"):
     """The longest valid plan of each version, as the review is given them."""
     from datalab.sessions import plan_schema as ps
     from datalab.sessions.plans import Plan, as_text
 
-    v1 = dict.fromkeys(ps.V1_LABELS, lines(ps.MAX_SECTION))
+    v1 = dict.fromkeys(ps.V1_LABELS, lines(ps.MAX_SECTION, pattern))
     kinds = ps.allowed_kinds(ps.TYPES_BY_ID["association"])
     titles = [f"{i}" * ps.MAX_TITLE for i in range(ps.MAX_ADDITIONAL)]
     labels = sum(len(ps.SECTIONS[k].label) for k in kinds) + sum(map(len, titles))
@@ -35,21 +37,25 @@ def largest_plans():
         {
             "schema_version": 2,
             "analysis_type": "association",
-            "rationale": lines(ps.MAX_RATIONALE),
+            "rationale": lines(ps.MAX_RATIONALE, pattern),
             "revises": {"plan_id": "pl_" + "a" * 12, "sha256": "b" * 64},
-            "revision_reason": lines(ps.MAX_REASON),
+            "revision_reason": lines(ps.MAX_REASON, pattern),
             "sections": [
-                *({"kind": k, "content": lines(each)} for k in kinds),
-                *({"kind": "additional", "label": t, "content": lines(each)} for t in titles),
+                *({"kind": k, "content": lines(each, pattern)} for k in kinds),
+                *(
+                    {"kind": "additional", "label": t, "content": lines(each, pattern)}
+                    for t in titles
+                ),
             ],
         }
     )
     return [as_text(Plan("p", "c", "2026-09-26T00:00:00+00:00", c, "0" * 64)) for c in (v1, v2)]
 
 
-def test_a_whole_plan_of_the_largest_valid_size_is_shown():
-    for text in largest_plans():
-        assert len(text) > 16000  # longer than the review used to be shown
+@pytest.mark.parametrize("pattern", ["y\n", "y\n\n", "y"])
+def test_a_whole_plan_of_the_largest_valid_size_is_shown(pattern):
+    for text in largest_plans(pattern):
+        assert len(text) > 8000  # longer than the review used to be shown
         body = instructions(answer="a", plans=[text])
         assert text in body and "continues" not in body
 
@@ -65,7 +71,7 @@ def test_a_plan_too_long_to_show_says_so_and_older_plans_are_counted():
     from datalab.sessions.rigor import MAX_PLAN_TEXT
 
     body = instructions(answer="a", plans=["old"] * 4 + ["p" * (MAX_PLAN_TEXT + 4000)])
-    assert "has 5 approved plans; only the latest 3" in body
+    assert "has 5 approved plans; only 3 are shown: the current ones" in body
     # DataLab's note is outside the plan's fence, so it can't be mistaken for the plan.
     fenced, after = body.rsplit("</approved_plan>", 1)
     assert "continues" not in fenced

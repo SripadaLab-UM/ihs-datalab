@@ -75,6 +75,22 @@ export function asPlan(value: unknown): AnyPlan | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as AnyPlan) : undefined;
 }
 
+// Greek letters that look like a Latin one, and Latin letters that aren't a–z
+// but look like one; the backend compares titles the same way (plan_schema.py).
+const LOOKALIKES: Record<string, string> = Object.fromEntries(
+  [...Array.from("αβγδεζηικμνοπρστυχωςϲ").map((c, i) => [c, "abydeznikuvonpotuxwcc"[i]])].concat(
+    Array.from("ɑıɩɡʊɪʏɴʙʜʟᴀᴄᴅᴇᴊᴋᴍᴏᴘᴛᴜᴠᴡᴢ").map((c, i) => [c, "aiiguiynbhlacdejkmoptuvwz"[i]]),
+  ),
+);
+
+/** A section title as it reads, to match it across versions: accents, case,
+ * punctuation, and look-alike letters don't count. */
+export function titleKey(title: string): string {
+  const bare = title.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+  const letters = Array.from(bare, (c) => LOOKALIKES[c] ?? (/[\p{L}\p{N}]/u.test(c) ? c : " ")).join("");
+  return letters.split(/\s+/).filter(Boolean).join(" ");
+}
+
 /** A comparison from an event, or undefined if there isn't one. */
 export function asComparison(value: unknown): PlanComparison | undefined {
   if (!value || typeof value !== "object") return undefined;
@@ -90,7 +106,7 @@ export function asComparison(value: unknown): PlanComparison | undefined {
  */
 export function planChanges(before: AnyPlan, after: PlanV2): PlanDiff {
   if (!isV2(before)) return { comparable: false, changes: [], unchanged: 0 };
-  const key = (s: PlanSection) => (s.kind === ADDITIONAL ? `${ADDITIONAL}:${s.label.trim().toLowerCase()}` : s.kind);
+  const key = (s: PlanSection) => (s.kind === ADDITIONAL ? `${ADDITIONAL}:${titleKey(s.label)}` : s.kind);
   const earlier = new Map(before.sections.map((s) => [key(s), s]));
   const seen = new Set<string>();
   const changes: PlanChange[] = [];

@@ -601,3 +601,28 @@ def test_a_plan_edit_that_isnt_valid_is_refused_and_the_plan_stays_waiting(app):
         # Then approved as it was proposed.
         assert client.post(url, json={"approve": True, "plan": proposed}).status_code == 204
         assert pending.decision.done() and pending.decision.result()[0] is True
+
+
+def test_a_plan_sent_back_as_another_type_over_http(app):
+    with TestClient(app) as client:
+        url, proposed, pending = open_plan_approval(client, app)
+        both = {"approve": True, "plan": proposed, "change_type": "prediction"}
+        assert client.post(url, json=both).status_code == 422
+        assert not pending.decision.done()
+        # A type that doesn't exist isn't a request; the "no" still counts.
+        assert client.post(url, json={"approve": False, "change_type": "causal"}).status_code == 204
+        assert pending.decision.result() == (False, "")
+
+
+def test_an_approved_plans_answer_carries_the_plan_as_approved(app):
+    with TestClient(app) as client:
+        url, proposed, _ = open_plan_approval(client, app)
+        edited = {**proposed, "rationale": "Edited by the person."}
+        assert client.post(url, json={"approve": True, "plan": edited}).status_code == 204
+        cid = url.split("/")[3]
+        [answered] = [
+            e
+            for e in client.get(f"/api/conversations/{cid}/events").json()
+            if e["type"] == "approval_answered"
+        ]
+    assert answered["data"]["plan"]["rationale"] == "Edited by the person."

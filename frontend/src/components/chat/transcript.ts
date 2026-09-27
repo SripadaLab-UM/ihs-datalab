@@ -246,6 +246,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           item.state = data.approved ? "approved" : "declined";
           if (data.approved) item.sent = text(data.question);
           if (data.change_type_label) item.changeTypeLabel = text(data.change_type_label);
+          // Approved: the plan as the person left it, until the frozen copy arrives.
+          if (data.approved && data.plan) item.plan = asPlan(data.plan) ?? item.plan;
         }
         break;
       }
@@ -320,9 +322,13 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A question still waiting when the turn ends can't be answered any more.
         for (const approval of approvals.values()) {
           if (approval.state === "pending") approval.state = "withdrawn";
-          if (approval.state === "approved" && !approval.answer) {
+          if (approval.approvalKind === "research_helper" && approval.state === "approved" && !approval.answer) {
             approval.answer = "No answer came back.";
             approval.answerStatus = "failed";
+          }
+          // A plan approved but never frozen by the turn's end won't be now.
+          if (approval.approvalKind === "analysis_plan" && approval.state === "approved" && !approval.frozen) {
+            approval.notFrozen ??= "The turn ended before the plan was frozen.";
           }
         }
         const status = text(data.status);

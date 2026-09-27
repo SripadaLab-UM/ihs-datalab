@@ -213,8 +213,11 @@ it("says so when the sections can't be loaded, and can still be declined", async
 it("shows each section's guidance and how much of its limit it uses", async () => {
   show(pending);
   const measures = await screen.findByLabelText("Measures and summaries");
-  expect(measures).toHaveAccessibleDescription("Each measure, with its table and column.");
-  expect(screen.getByText("14 / 2000")).toBeInTheDocument(); // "Sleep minutes."
+  expect(measures).toHaveAccessibleDescription("Each measure, with its table and column. 14 / 2000 characters");
+  // Counts describe their field; they aren't part of its name.
+  expect(screen.getByRole("textbox", { name: "Why this kind of analysis" })).toHaveAccessibleDescription(
+    /why this type of analysis fits the question\. 32 \/ 300 characters/,
+  );
   expect(screen.getByText(/The whole plan: .* of 12,000 characters/)).toBeInTheDocument();
 });
 
@@ -226,17 +229,35 @@ it("locks what was sent, then says it's being frozen rather than showing the une
   fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
   await waitFor(() => expect(screen.getByDisplayValue("A table and a figure.")).toBeDisabled());
   finish();
-  // The chat has the answer, but not yet the frozen plan.
+  // The chat has the answer, with the plan as approved, but not yet the frozen plan.
+  const sent = vi.mocked(api.answerApproval).mock.calls[0][4] as PlanV2;
   view.rerender(
     <QueryClientProvider client={new QueryClient()}>
-      <PlanCard conversationId="c1" approval={{ ...pending, state: "approved" }} />
+      <PlanCard conversationId="c1" approval={{ ...pending, plan: sent, state: "approved" }} />
     </QueryClientProvider>,
   );
   expect(screen.getByText("Approved. Freezing it…")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Show the plan/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Show the plan as approved" }));
+  expect(screen.getByText("A table and a figure.")).toBeInTheDocument();
 });
 
 it("says when an approved revision couldn't be frozen", () => {
   show({ ...pending, plan: revision, state: "approved", notFrozen: "Another revision of the same plan was approved first, so this one wasn't frozen." });
   expect(screen.getByText(/Approved, but not frozen: Another revision/)).toBeInTheDocument();
+});
+
+it("moves focus into the type choice, and keeps the buttons still when a type is chosen", async () => {
+  vi.mocked(api.planSchema).mockResolvedValue({
+    ...schema,
+    types: [...schema.types, { id: "prediction", label: "Prediction", summary: "Predict an outcome.", required: [], optional: [], checks: "" }],
+  });
+  show(pending);
+  fireEvent.click(await screen.findByRole("button", { name: "A different kind of analysis?" }));
+  expect(screen.getByDisplayValue("Choose a type…")).toHaveFocus();
+  expect(screen.getByText("Choose a type to see what it's for.")).toBeInTheDocument();
+  fireEvent.change(screen.getByDisplayValue("Choose a type…"), { target: { value: "prediction" } });
+  expect(screen.getByText("Predict an outcome.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Send back" }));
+  // Once answered, the panel goes.
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Send back" })).toBeNull());
 });
