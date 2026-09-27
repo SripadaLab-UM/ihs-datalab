@@ -1,0 +1,46 @@
+{
+  "task": "enrolled_count",
+  "mode": "extraction",
+  "prompt": "How many participants are enrolled in the 2025 cohort?",
+  "tests": "screened-but-not-enrolled rows in STUDYPARTICIPANTS",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled count",
+      "passed": true,
+      "detail": "expected 136 enrolled (122 if withdrawals are excluded, and said so); 150 also counts people screened but never enrolled"
+    }
+  ],
+  "answer": "There are **136 enrolled participants** in the 2025 cohort.\n\nCatalog evidence: `IHS_2025.STUDYPARTICIPANTS.SECONDARYIDENTIFIER` is documented as the study participant ID and is null for screened-but-never-enrolled people.\n\nSQL run:\n\n```sql\n-- Quality check; returned 1 row\nSELECT COUNT(*) AS table_rows,\n       COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants,\n       COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date\nFROM IHS_2025.STUDYPARTICIPANTS;\n```\n\nResults: 150 source rows, 136 populated IDs, and 136 distinct IDs.\n\n```sql\n-- Final extraction; returned 1 row\nSELECT :cohort_year AS cohort_year,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS enrolled_participants\nFROM IHS_2025.STUDYPARTICIPANTS\nWHERE SECONDARYIDENTIFIER IS NOT NULL;\n```\n\nBind: `cohort_year = 2025`.\n\nFiles:\n\n- [Dataset](/work/outputs/ihs_2025_enrolled_participant_count.csv)\n- [Data dictionary](/work/outputs/ihs_2025_enrolled_participant_count_data_dictionary.md)\n\nThe dataset has one row and two integer columns: `COHORT_YEAR` and `ENROLLED_PARTICIPANTS`. Previously enrolled participants who later withdrew remain included.",
+  "finished": true,
+  "seconds": 45.200242042541504,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS table_rows, COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id, COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants, COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date FROM IHS_2025.STUDYPARTICIPANTS",
+    "SELECT :cohort_year AS cohort_year, COUNT(DISTINCT SECONDARYIDENTIFIER) AS enrolled_participants FROM IHS_2025.STUDYPARTICIPANTS WHERE SECONDARYIDENTIFIER IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 190376,
+        "inputTokens": 188059,
+        "cachedInputTokens": 59204,
+        "cacheWriteInputTokens": 128822,
+        "outputTokens": 2317,
+        "reasoningOutputTokens": 654
+      },
+      "last": {
+        "totalTokens": 21459,
+        "inputTokens": 21048,
+        "cachedInputTokens": 19928,
+        "cacheWriteInputTokens": 1117,
+        "outputTokens": 411,
+        "reasoningOutputTokens": 92
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_d8e5ebf1981a2d87",
+  "attempt": 2
+}

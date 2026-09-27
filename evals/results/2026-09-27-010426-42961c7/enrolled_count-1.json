@@ -1,0 +1,46 @@
+{
+  "task": "enrolled_count",
+  "mode": "extraction",
+  "prompt": "How many participants are enrolled in the 2025 cohort?",
+  "tests": "screened-but-not-enrolled rows in STUDYPARTICIPANTS",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled count",
+      "passed": true,
+      "detail": "expected 136 enrolled (122 if withdrawals are excluded, and said so); 150 also counts people screened but never enrolled"
+    }
+  ],
+  "answer": "There are **136 enrolled participants** in the 2025 cohort.\n\nCatalog evidence: `IHS_2025.STUDYPARTICIPANTS.SECONDARYIDENTIFIER` is documented as the study participant ID and is null for people screened but never enrolled.\n\nSQL run:\n\n```sql\n-- Profiling/quality check (1 row)\nSELECT COUNT(*) AS total_rows,\n       COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n       COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants,\n       COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant_identifier,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers,\n       COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date,\n       MIN(ENROLLMENTDATE) AS earliest_enrollment_date,\n       MAX(ENROLLMENTDATE) AS latest_enrollment_date\nFROM IHS_2025.STUDYPARTICIPANTS;\n```\n\nThis found 150 total records and 136 distinct non-null study participant IDs.\n\n```sql\n-- Final extraction (1 row)\nSELECT COUNT(DISTINCT SECONDARYIDENTIFIER) AS ENROLLED_PARTICIPANT_COUNT\nFROM IHS_2025.STUDYPARTICIPANTS\nWHERE SECONDARYIDENTIFIER IS NOT NULL;\n```\n\nOutput column: `ENROLLED_PARTICIPANT_COUNT` (integer participants).\n\nFiles:\n\n- [Enrollment count CSV](/work/outputs/2025_cohort_enrollment_count.csv)\n- [Data dictionary](/work/outputs/2025_cohort_enrollment_count_data_dictionary.md)\n\nCaveat: this treats \u201cenrolled\u201d according to the database\u2019s documented study participant ID definition; no exclusion was made for later withdrawal.",
+  "finished": true,
+  "seconds": 36.113495111465454,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(SECONDARYIDENTIFIER) AS rows_with_study_participant_id,\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS distinct_enrolled_participants,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant_identifier,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participant_identifiers,\n  COUNT(ENROLLMENTDATE) AS rows_with_enrollment_date,\n  MIN(ENROLLMENTDATE) AS earliest_enrollment_date,\n  MAX(ENROLLMENTDATE) AS latest_enrollment_date\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "SELECT\n  COUNT(DISTINCT SECONDARYIDENTIFIER) AS ENROLLED_PARTICIPANT_COUNT\nFROM IHS_2025.STUDYPARTICIPANTS\nWHERE SECONDARYIDENTIFIER IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 150226,
+        "inputTokens": 148356,
+        "cachedInputTokens": 38892,
+        "cacheWriteInputTokens": 109437,
+        "outputTokens": 1870,
+        "reasoningOutputTokens": 518
+      },
+      "last": {
+        "totalTokens": 20927,
+        "inputTokens": 20433,
+        "cachedInputTokens": 16160,
+        "cacheWriteInputTokens": 4270,
+        "outputTokens": 494,
+        "reasoningOutputTokens": 124
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_acff86fc00171332",
+  "attempt": 1
+}

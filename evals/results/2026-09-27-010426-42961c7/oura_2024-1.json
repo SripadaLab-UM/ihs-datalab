@@ -1,0 +1,43 @@
+{
+  "task": "oura_2024",
+  "mode": "extraction",
+  "prompt": "How many Oura daily activity records does the 2024 cohort have?",
+  "tests": "a table the cohort doesn't have",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says the table isn't there",
+      "passed": true,
+      "detail": "IHS_2024 has no Oura tables at all: no count to give"
+    }
+  ],
+  "answer": "The 2024 cohort has **no queryable Oura daily activity records**.\n\n- Catalog evidence: `OURADAILYACTIVITY` exists only in `IHS_2025` and `IHS_2026`.\n- `IHS_2024.OURADAILYACTIVITY` is not in the catalog.\n- SQL run: none\u2014the table does not exist, so an SQL row count cannot be performed.\n- Output file/columns: none.\n\nCaveat: this means \u201cno cataloged table,\u201d not a confirmed empty table.",
+  "finished": true,
+  "seconds": 33.66511297225952,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 137604,
+        "inputTokens": 136144,
+        "cachedInputTokens": 29697,
+        "cacheWriteInputTokens": 106420,
+        "outputTokens": 1460,
+        "reasoningOutputTokens": 713
+      },
+      "last": {
+        "totalTokens": 18826,
+        "inputTokens": 18432,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 18429,
+        "outputTokens": 394,
+        "reasoningOutputTokens": 276
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_d4d60c9a36493cd6",
+  "attempt": 1
+}

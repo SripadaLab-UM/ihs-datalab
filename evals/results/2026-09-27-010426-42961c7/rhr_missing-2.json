@@ -1,0 +1,54 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "## Result\n\nResting heart rate is **95.08% complete among stored Fitbit daily records** in the 2025 cohort:\n\n- Present: 19,619 participant-days\n- Missing: 1,015 participant-days (4.92%)\n- Total: 20,634 participant-days from 65 participants\n- Participant-level median completeness: 95.12% (range 91.49%\u201397.20%)\n- No duplicate participant-date records found\n- Monthly completeness ranged from 93.94% to 96.65%\n\nThe cohort data span April 1, 2025\u2013June 30, 2026. This measures missing resting heart rate among existing daily rows\u2014not missing entire Fitbit days.\n\n## Deliverables\n\n- [Monthly completeness dataset](/work/outputs/fitbit_rhr_completeness_2025_monthly.csv) \u2014 15 rows\n- [Data dictionary and caveats](/work/outputs/fitbit_rhr_completeness_2025_dictionary.md)\n- [Reproducible extraction SQL](/work/resting_heart_rate_completeness_2025.sql)\n\nDataset columns: `MONTH_START`, `PARTICIPANT_DAYS`, `PARTICIPANTS`, `RHR_PRESENT_DAYS`, `RHR_MISSING_DAYS`, and `RHR_COMPLETENESS_PCT`.\n\n## Catalog evidence\n\nCatalog search found `IHS_2025.FITBITDAILYDATA` and `IHS_2025.VFITBITDAILYDATA`. The view was used. Its metadata confirms:\n\n- `PARTICIPANTIDENTIFIER`: `VARCHAR2(15)`\n- `RECORD_DATE`: Oracle `DATE`\n- `RESTINGHEARTRATE`: `NUMBER`\n\nAll three fields were confirmed populated.\n\n## SQL executed\n\n1. Field-population check; returned 1 row:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(RESTINGHEARTRATE) AS rows_with_resting_heart_rate\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\n2. Dataset profile; returned 1 row:\n\n```sql\nSELECT\n  COUNT(RECORD_DATE) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\n3. Duplicate and missingness check; returned 1 row:\n\n```sql\nWITH participant_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TRUNC(RECORD_DATE) AS record_day,\n    COUNT(RECORD_DATE) AS rows_per_day,\n    COUNT(RESTINGHEARTRATE) AS rhr_values_per_day\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, TRUNC(RECORD_DATE)\n)\nSELECT\n  COUNT(record_day) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicated_participant_days,\n  SUM(rows_per_day - 1) AS duplicate_extra_rows,\n  SUM(CASE WHEN rhr_values_per_day = 0 THEN 1 ELSE 0 END) AS participant_days_missing_rhr,\n  SUM(CASE WHEN rhr_values_per_day > 0 THEN 1 ELSE 0 END) AS participant_days_with_rhr\nFROM participant_days\n```\n\n4. Participant-level completeness profile; returned 1 row:\n\n```sql\nWITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(RECORD_DATE) AS participant_days,\n    COUNT(RESTINGHEARTRATE) AS days_with_rhr,\n    100 * COUNT(RESTINGHEARTRATE) / COUNT(RECORD_DATE) AS completeness_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  COUNT(PARTICIPANTIDENTIFIER) AS participants,\n  MIN(completeness_pct) AS min_participant_completeness_pct,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY completeness_pct) AS p25_participant_completeness_pct,\n  MEDIAN(completeness_pct) AS median_participant_completeness_pct,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY completeness_pct) AS p75_participant_completeness_pct,\n  MAX(completeness_pct) AS max_participant_completeness_pct\nFROM participant_completeness\n```\n\n5. Final monthly extraction; returned 15 rows. Binds: `start_date = 2025-04-01`, `end_date = 2026-07-01` (exclusive).\n\n```sql\nSELECT\n  TRUNC(RECORD_DATE, 'MM') AS month_start,\n  COUNT(RECORD_DATE) AS participant_days,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  COUNT(RESTINGHEARTRATE) AS rhr_present_days,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_days,\n  ROUND(100 * COUNT(RESTINGHEARTRATE) / COUNT(RECORD_DATE), 2) AS rhr_completeness_pct\nFROM IHS_2025.VFITBITDAILYDATA\nWHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND RECORD_DATE < TO_DATE(:end_date, 'YYYY-MM-DD')\nGROUP BY TRUNC(RECORD_DATE, 'MM')\nORDER BY month_start\n```\n\nDouble-check whether \u201ccomplete\u201d should instead mean coverage of every expected calendar day during each participant\u2019s observation window; that requires defining those individual expected windows.",
+  "finished": true,
+  "seconds": 88.04912400245667,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(RESTINGHEARTRATE) AS rows_with_resting_heart_rate\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(RECORD_DATE) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  MIN(RECORD_DATE) AS min_record_date,\n  MAX(RECORD_DATE) AS max_record_date\nFROM IHS_2025.VFITBITDAILYDATA",
+    "WITH participant_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TRUNC(RECORD_DATE) AS record_day,\n    COUNT(RECORD_DATE) AS rows_per_day,\n    COUNT(RESTINGHEARTRATE) AS rhr_values_per_day\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER, TRUNC(RECORD_DATE)\n)\nSELECT\n  COUNT(record_day) AS participant_days,\n  SUM(CASE WHEN rows_per_day > 1 THEN 1 ELSE 0 END) AS duplicated_participant_days,\n  SUM(rows_per_day - 1) AS duplicate_extra_rows,\n  SUM(CASE WHEN rhr_values_per_day = 0 THEN 1 ELSE 0 END) AS participant_days_missing_rhr,\n  SUM(CASE WHEN rhr_values_per_day > 0 THEN 1 ELSE 0 END) AS participant_days_with_rhr\nFROM participant_days",
+    "WITH participant_completeness AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    COUNT(RECORD_DATE) AS participant_days,\n    COUNT(RESTINGHEARTRATE) AS days_with_rhr,\n    100 * COUNT(RESTINGHEARTRATE) / COUNT(RECORD_DATE) AS completeness_pct\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  COUNT(PARTICIPANTIDENTIFIER) AS participants,\n  MIN(completeness_pct) AS min_participant_completeness_pct,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY completeness_pct) AS p25_participant_completeness_pct,\n  MEDIAN(completeness_pct) AS median_participant_completeness_pct,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY completeness_pct) AS p75_participant_completeness_pct,\n  MAX(completeness_pct) AS max_participant_completeness_pct\nFROM participant_completeness",
+    "SELECT\n  TRUNC(RECORD_DATE, 'MM') AS month_start,\n  COUNT(RECORD_DATE) AS participant_days,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  COUNT(RESTINGHEARTRATE) AS rhr_present_days,\n  SUM(CASE WHEN RESTINGHEARTRATE IS NULL THEN 1 ELSE 0 END) AS rhr_missing_days,\n  ROUND(100 * COUNT(RESTINGHEARTRATE) / COUNT(RECORD_DATE), 2) AS rhr_completeness_pct\nFROM IHS_2025.VFITBITDAILYDATA\nWHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND RECORD_DATE < TO_DATE(:end_date, 'YYYY-MM-DD')\nGROUP BY TRUNC(RECORD_DATE, 'MM')\nORDER BY month_start"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 276921,
+        "inputTokens": 270532,
+        "cachedInputTokens": 151578,
+        "cacheWriteInputTokens": 118909,
+        "outputTokens": 6389,
+        "reasoningOutputTokens": 2293
+      },
+      "last": {
+        "totalTokens": 24917,
+        "inputTokens": 23358,
+        "cachedInputTokens": 22788,
+        "cacheWriteInputTokens": 567,
+        "outputTokens": 1559,
+        "reasoningOutputTokens": 323
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_418001ad95ecae21",
+  "attempt": 2
+}

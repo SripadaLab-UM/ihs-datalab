@@ -1,0 +1,68 @@
+{
+  "task": "phq9_sep",
+  "mode": "analysis",
+  "prompt": "What was the mean PHQ-9 total in the 2025 cohort's September survey?",
+  "tests": "who counts as a participant (the denominator); uncertainty",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled respondents only",
+      "passed": true,
+      "detail": "expected mean 3.91 over n = 119 enrolled participants; 3.76 over 133 includes people screened but never enrolled"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI, SD, or standard error"
+    }
+  ],
+  "answer": "Exploratory/descriptive: The mean September PHQ-9 total was **3.91** (SD 3.50; 95% CI 3.27\u20134.54) among **119 enrolled participants** with complete responses.\n\nOf 133 survey rows, 14 lacked an enrolled participant ID and were excluded. No duplicates or invalid item values were found. This reflects respondents, not necessarily the full cohort.\n\n[Report](/work/outputs/phq9_september_2025.html) \u00b7 [Analysis source](/work/outputs/analyze_phq9_sep2025.py)",
+  "finished": true,
+  "seconds": 100.87309217453003,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_afcdb21f29665ff3",
+      "plan": {
+        "question": "What was the mean PHQ-9 total score in the 2025 cohort's September survey?",
+        "estimand": "The arithmetic mean of participant-level PHQ-9 total scores in the September survey, with a 95% confidence interval. The unit of analysis is one participant.",
+        "exposure": "None; this is a descriptive estimate.",
+        "outcome": "PHQ-9 total constructed as the sum of the nine item columns interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, and suic1 in IHS_2025.VW_SEP_SURVEY.",
+        "covariates": "None.",
+        "cohort": "Enrolled 2025 cohort participants represented in IHS_2025.VW_SEP_SURVEY who have a nonmissing STUDY_PARTICIPANT_ID and complete responses to all nine PHQ-9 items. Check and resolve duplicate participant records before estimating.",
+        "decisions": "Verify each item is coded in the expected 0\u20133 range; report total rows, distinct enrolled participants, duplicate records, missing-item patterns, and complete-score participants. Define the total only when all nine items are present (possible range 0\u201327). If duplicate completed records exist, pause to determine a defensible record-selection rule rather than silently averaging or selecting one. Report mean, standard deviation, and a 95% t-based confidence interval; label the result exploratory/descriptive."
+      }
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "WITH prof AS (\n  SELECT\n    STUDY_PARTICIPANT_ID,\n    STARTDATE1,\n    ENDDATE1,\n    interest1, down1, asleep1, tired1, appetite1,\n    failure1, concentr1, activity1, suic1,\n    CASE WHEN interest1 IS NOT NULL AND down1 IS NOT NULL\n           AND asleep1 IS NOT NULL AND tired1 IS NOT NULL\n           AND appetite1 IS NOT NULL AND failure1 IS NOT NULL\n           AND concentr1 IS NOT NULL AND activity1 IS NOT NULL\n           AND suic1 IS NOT NULL THEN 1 ELSE 0 END AS complete_phq9,\n    CASE WHEN (interest1 NOT BETWEEN 0 AND 3 AND interest1 IS NOT NULL)\n           OR (down1 NOT BETWEEN 0 AND 3 AND down1 IS NOT NULL)\n           OR (asleep1 NOT BETWEEN 0 AND 3 AND asleep1 IS NOT NULL)\n           OR (tired1 NOT BETWEEN 0 AND 3 AND tired1 IS NOT NULL)\n           OR (appetite1 NOT BETWEEN 0 AND 3 AND appetite1 IS NOT NULL)\n           OR (failure1 NOT BETWEEN 0 AND 3 AND failure1 IS NOT NULL)\n           OR (concentr1 NOT BETWEEN 0 AND 3 AND concentr1 IS NOT NULL)\n           OR (activity1 NOT BETWEEN 0 AND 3 AND activity1 IS NOT NULL)\n           OR (suic1 NOT BETWEEN 0 AND 3 AND suic1 IS NOT NULL)\n         THEN 1 ELSE 0 END AS invalid_item\n  FROM IHS_2025.VW_SEP_SURVEY\n)\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(STUDY_PARTICIPANT_ID) AS rows_with_enrolled_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_enrolled_participants,\n  COUNT(STUDY_PARTICIPANT_ID) - COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS excess_id_rows,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS rows_missing_enrolled_id,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND complete_phq9 = 1 THEN 1 ELSE 0 END) AS complete_phq9_rows,\n  COUNT(DISTINCT CASE WHEN complete_phq9 = 1 THEN STUDY_PARTICIPANT_ID END) AS complete_phq9_participants,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND complete_phq9 = 0 THEN 1 ELSE 0 END) AS incomplete_phq9_rows,\n  SUM(invalid_item) AS rows_with_invalid_item,\n  MIN(STARTDATE1) AS min_startdate,\n  MAX(STARTDATE1) AS max_startdate,\n  MIN(ENDDATE1) AS min_enddate,\n  MAX(ENDDATE1) AS max_enddate,\n  MIN(interest1) AS min_interest, MAX(interest1) AS max_interest,\n  MIN(down1) AS min_down, MAX(down1) AS max_down,\n  MIN(asleep1) AS min_asleep, MAX(asleep1) AS max_asleep,\n  MIN(tired1) AS min_tired, MAX(tired1) AS max_tired,\n  MIN(appetite1) AS min_appetite, MAX(appetite1) AS max_appetite,\n  MIN(failure1) AS min_failure, MAX(failure1) AS max_failure,\n  MIN(concentr1) AS min_concentr, MAX(concentr1) AS max_concentr,\n  MIN(activity1) AS min_activity, MAX(activity1) AS max_activity,\n  MIN(suic1) AS min_suic, MAX(suic1) AS max_suic\nFROM prof",
+    "WITH prof AS (\n  SELECT\n    STUDY_PARTICIPANT_ID,\n    STARTDATE1,\n    ENDDATE1,\n    \"interest1\" AS interest1,\n    \"down1\" AS down1,\n    \"asleep1\" AS asleep1,\n    \"tired1\" AS tired1,\n    \"appetite1\" AS appetite1,\n    \"failure1\" AS failure1,\n    \"concentr1\" AS concentr1,\n    \"activity1\" AS activity1,\n    \"suic1\" AS suic1,\n    CASE WHEN \"interest1\" IS NOT NULL AND \"down1\" IS NOT NULL\n           AND \"asleep1\" IS NOT NULL AND \"tired1\" IS NOT NULL\n           AND \"appetite1\" IS NOT NULL AND \"failure1\" IS NOT NULL\n           AND \"concentr1\" IS NOT NULL AND \"activity1\" IS NOT NULL\n           AND \"suic1\" IS NOT NULL THEN 1 ELSE 0 END AS complete_phq9,\n    CASE WHEN (\"interest1\" NOT BETWEEN 0 AND 3 AND \"interest1\" IS NOT NULL)\n           OR (\"down1\" NOT BETWEEN 0 AND 3 AND \"down1\" IS NOT NULL)\n           OR (\"asleep1\" NOT BETWEEN 0 AND 3 AND \"asleep1\" IS NOT NULL)\n           OR (\"tired1\" NOT BETWEEN 0 AND 3 AND \"tired1\" IS NOT NULL)\n           OR (\"appetite1\" NOT BETWEEN 0 AND 3 AND \"appetite1\" IS NOT NULL)\n           OR (\"failure1\" NOT BETWEEN 0 AND 3 AND \"failure1\" IS NOT NULL)\n           OR (\"concentr1\" NOT BETWEEN 0 AND 3 AND \"concentr1\" IS NOT NULL)\n           OR (\"activity1\" NOT BETWEEN 0 AND 3 AND \"activity1\" IS NOT NULL)\n           OR (\"suic1\" NOT BETWEEN 0 AND 3 AND \"suic1\" IS NOT NULL)\n         THEN 1 ELSE 0 END AS invalid_item\n  FROM IHS_2025.VW_SEP_SURVEY\n)\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(prof.STUDY_PARTICIPANT_ID) AS rows_with_enrolled_id,\n  COUNT(DISTINCT prof.STUDY_PARTICIPANT_ID) AS distinct_enrolled_participants,\n  COUNT(prof.STUDY_PARTICIPANT_ID) - COUNT(DISTINCT prof.STUDY_PARTICIPANT_ID) AS excess_id_rows,\n  SUM(CASE WHEN prof.STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS rows_missing_enrolled_id,\n  SUM(CASE WHEN prof.STUDY_PARTICIPANT_ID IS NOT NULL AND prof.complete_phq9 = 1 THEN 1 ELSE 0 END) AS complete_phq9_rows,\n  COUNT(DISTINCT CASE WHEN prof.complete_phq9 = 1 THEN prof.STUDY_PARTICIPANT_ID END) AS complete_phq9_participants,\n  SUM(CASE WHEN prof.STUDY_PARTICIPANT_ID IS NOT NULL AND prof.complete_phq9 = 0 THEN 1 ELSE 0 END) AS incomplete_phq9_rows,\n  SUM(prof.invalid_item) AS rows_with_invalid_item,\n  MIN(prof.STARTDATE1) AS min_startdate,\n  MAX(prof.STARTDATE1) AS max_startdate,\n  MIN(prof.ENDDATE1) AS min_enddate,\n  MAX(prof.ENDDATE1) AS max_enddate,\n  MIN(prof.interest1) AS min_interest, MAX(prof.interest1) AS max_interest,\n  MIN(prof.down1) AS min_down, MAX(prof.down1) AS max_down,\n  MIN(prof.asleep1) AS min_asleep, MAX(prof.asleep1) AS max_asleep,\n  MIN(prof.tired1) AS min_tired, MAX(prof.tired1) AS max_tired,\n  MIN(prof.appetite1) AS min_appetite, MAX(prof.appetite1) AS max_appetite,\n  MIN(prof.failure1) AS min_failure, MAX(prof.failure1) AS max_failure,\n  MIN(prof.concentr1) AS min_concentr, MAX(prof.concentr1) AS max_concentr,\n  MIN(prof.activity1) AS min_activity, MAX(prof.activity1) AS max_activity,\n  MIN(prof.suic1) AS min_suic, MAX(prof.suic1) AS max_suic\nFROM prof",
+    "WITH complete_scores AS (\n  SELECT\n    STUDY_PARTICIPANT_ID,\n    \"interest1\" + \"down1\" + \"asleep1\" + \"tired1\" +\n    \"appetite1\" + \"failure1\" + \"concentr1\" + \"activity1\" +\n    \"suic1\" AS phq9_total\n  FROM IHS_2025.VW_SEP_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND \"interest1\" IS NOT NULL\n    AND \"down1\" IS NOT NULL\n    AND \"asleep1\" IS NOT NULL\n    AND \"tired1\" IS NOT NULL\n    AND \"appetite1\" IS NOT NULL\n    AND \"failure1\" IS NOT NULL\n    AND \"concentr1\" IS NOT NULL\n    AND \"activity1\" IS NOT NULL\n    AND \"suic1\" IS NOT NULL\n)\nSELECT\n  COUNT(*) AS n_participants,\n  AVG(complete_scores.phq9_total) AS mean_phq9_total,\n  STDDEV_SAMP(complete_scores.phq9_total) AS sd_phq9_total,\n  MIN(complete_scores.phq9_total) AS min_phq9_total,\n  MAX(complete_scores.phq9_total) AS max_phq9_total\nFROM complete_scores"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 316094,
+        "inputTokens": 307344,
+        "cachedInputTokens": 103314,
+        "cacheWriteInputTokens": 203988,
+        "outputTokens": 8750,
+        "reasoningOutputTokens": 1823
+      },
+      "last": {
+        "totalTokens": 31851,
+        "inputTokens": 31674,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 31671,
+        "outputTokens": 177,
+        "reasoningOutputTokens": 49
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_4c4610e847bfa6fc",
+  "attempt": 2
+}

@@ -18,8 +18,6 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-COOKIE = "datalab_session"
-
 CONTENT_SECURITY_POLICY = "; ".join(
     [
         "default-src 'self'",
@@ -50,9 +48,13 @@ _SECURITY_HEADERS = [
 class BrowserSession:
     """The one-time sign-in link and the cookie it sets."""
 
-    def __init__(self) -> None:
+    def __init__(self, port: int) -> None:
         self._launch_token: str | None = secrets.token_urlsafe(24)
         self._cookie = secrets.token_urlsafe(32)
+        # Named for the port: browsers share cookies between ports of one host,
+        # so two DataLabs on one computer (practice and an evaluation run, say)
+        # would otherwise sign each other's windows out.
+        self.cookie_name = f"datalab_session_{port}"
 
     def sign_in_path(self) -> str:
         return f"/sign-in?token={self._launch_token}"
@@ -82,7 +84,7 @@ class ApiProtection:
             return
         path: str = scope["path"]
         if self._enforce and path.startswith("/api/") and path != "/api/health":
-            cookie = Request(scope).cookies.get(COOKIE)
+            cookie = Request(scope).cookies.get(self._session.cookie_name)
             if not self._session.valid(cookie):
                 response = JSONResponse(
                     {"detail": "Open DataLab from its launcher to sign in."}, status_code=401
@@ -113,7 +115,7 @@ def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> No
         if cookie is None:
             return RedirectResponse("/signed-out", status_code=303)
         response = RedirectResponse("/", status_code=303)
-        response.set_cookie(COOKIE, cookie, httponly=True, samesite="strict", path="/")
+        response.set_cookie(session.cookie_name, cookie, httponly=True, samesite="strict", path="/")
         return response
 
     if dist is None or not (dist / "index.html").exists():

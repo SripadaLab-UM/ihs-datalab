@@ -1,0 +1,60 @@
+{
+  "task": "garmin_steps",
+  "mode": "analysis",
+  "prompt": "What were average daily steps during the intern year (July 2025 to June 2026) for the 2025 cohort's Garmin users? Exploratory is fine: no plan needed.",
+  "tests": "superseded duplicate rows in GARMINDAILYSUMMARY; n and uncertainty",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one row per participant-day",
+      "passed": true,
+      "detail": "expected ~7465 (all) or ~7443 (enrolled) keeping the latest row per day; ~7286 means superseded rows were averaged in"
+    },
+    {
+      "name": "participants reported",
+      "passed": true,
+      "detail": "28 Garmin users (25 enrolled)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or SE: with ~25 people it's wide"
+    }
+  ],
+  "answer": "Exploratory result: the 28 Garmin users averaged **7,381 steps per observed day** when users were weighted equally (95% CI **6,889\u20137,872**). Pooling all **8,024 observed person-days** gave **7,465 steps/day**.\n\nCoverage averaged 78.5% of the year, so this excludes missing/non-upload days and may overestimate true calendar-day activity.\n\n- [Report](/work/outputs/garmin_steps_2025_cohort.html)\n- [Analysis source](/work/outputs/garmin_steps_analysis.py)\n- [All SQL queries and provenance](/work/outputs/garmin_steps_queries.sql)",
+  "finished": true,
+  "seconds": 142.2122299671173,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT participantidentifier) AS participant_count,\n  COUNT(DISTINCT participantid) AS garmin_account_count,\n  MIN(calendardate) AS min_date,\n  MAX(calendardate) AS max_date,\n  SUM(CASE WHEN participantidentifier IS NULL THEN 1 ELSE 0 END) AS missing_study_id_rows,\n  SUM(CASE WHEN participantid IS NULL THEN 1 ELSE 0 END) AS missing_garmin_id_rows,\n  SUM(CASE WHEN calendardate IS NULL THEN 1 ELSE 0 END) AS missing_date_rows,\n  SUM(CASE WHEN steps IS NULL THEN 1 ELSE 0 END) AS missing_steps_rows,\n  SUM(CASE WHEN steps < 0 THEN 1 ELSE 0 END) AS negative_steps_rows,\n  MIN(steps) AS min_steps,\n  MAX(steps) AS max_steps,\n  COUNT(DISTINCT participantidentifier || '|' || TO_CHAR(calendardate, 'YYYY-MM-DD')) AS distinct_person_days,\n  COUNT(DISTINCT participantidentifier || '|' || participantid) AS distinct_id_pairs\nFROM IHS_2025.GARMINDAILYSUMMARY\nWHERE calendardate >= :start_date\n  AND calendardate < :end_date",
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT participantidentifier) AS participant_count,\n  COUNT(DISTINCT participantid) AS garmin_account_count,\n  MIN(calendardate) AS min_date,\n  MAX(calendardate) AS max_date,\n  SUM(CASE WHEN participantidentifier IS NULL THEN 1 ELSE 0 END) AS missing_study_id_rows,\n  SUM(CASE WHEN participantid IS NULL THEN 1 ELSE 0 END) AS missing_garmin_id_rows,\n  SUM(CASE WHEN calendardate IS NULL THEN 1 ELSE 0 END) AS missing_date_rows,\n  SUM(CASE WHEN steps IS NULL THEN 1 ELSE 0 END) AS missing_steps_rows,\n  SUM(CASE WHEN steps < 0 THEN 1 ELSE 0 END) AS negative_steps_rows,\n  MIN(steps) AS min_steps,\n  MAX(steps) AS max_steps,\n  COUNT(DISTINCT participantidentifier || '|' || TO_CHAR(calendardate, 'YYYY-MM-DD')) AS distinct_person_days,\n  COUNT(DISTINCT participantidentifier || '|' || participantid) AS distinct_id_pairs\nFROM IHS_2025.GARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')",
+    "WITH in_window AS (\n  SELECT participantidentifier, participantid, calendardate, summaryid, steps, inserteddate\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n),\nperson_day AS (\n  SELECT participantidentifier, calendardate,\n         COUNT(*) AS n_rows,\n         COUNT(DISTINCT steps) AS n_step_values,\n         COUNT(DISTINCT summaryid) AS n_summary_ids\n  FROM in_window\n  GROUP BY participantidentifier, calendardate\n),\nstudy_map AS (\n  SELECT participantidentifier, COUNT(DISTINCT participantid) AS n_accounts\n  FROM in_window GROUP BY participantidentifier\n),\naccount_map AS (\n  SELECT participantid, COUNT(DISTINCT participantidentifier) AS n_study_ids\n  FROM in_window GROUP BY participantid\n)\nSELECT\n  (SELECT COUNT(*) FROM person_day WHERE n_rows > 1) AS duplicated_person_days,\n  (SELECT SUM(n_rows - 1) FROM person_day WHERE n_rows > 1) AS excess_rows,\n  (SELECT MAX(n_rows) FROM person_day) AS max_rows_per_person_day,\n  (SELECT COUNT(*) FROM person_day WHERE n_step_values > 1) AS conflicting_step_person_days,\n  (SELECT COUNT(*) FROM person_day WHERE n_summary_ids > 1) AS multi_summaryid_person_days,\n  (SELECT COUNT(DISTINCT summaryid) FROM in_window) AS distinct_summary_ids,\n  (SELECT COUNT(*) FROM study_map WHERE n_accounts > 1) AS study_ids_with_multiple_accounts,\n  (SELECT COUNT(*) FROM account_map WHERE n_study_ids > 1) AS accounts_with_multiple_study_ids\nFROM dual",
+    "WITH in_window AS (\n  SELECT participantidentifier, calendardate, summaryid, steps, inserteddate,\n         ROW_NUMBER() OVER (\n           PARTITION BY participantidentifier, calendardate\n           ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n         ) AS rn_latest,\n         ROW_NUMBER() OVER (\n           PARTITION BY participantidentifier, calendardate\n           ORDER BY inserteddate ASC NULLS LAST, summaryid ASC NULLS LAST\n         ) AS rn_earliest\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n    AND participantidentifier IS NOT NULL\n    AND steps IS NOT NULL\n),\nlatest_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM in_window WHERE rn_latest = 1\n),\nearliest_days AS (\n  SELECT participantidentifier, calendardate, steps\n  FROM in_window WHERE rn_earliest = 1\n),\nmax_days AS (\n  SELECT participantidentifier, calendardate, MAX(steps) AS steps\n  FROM in_window GROUP BY participantidentifier, calendardate\n),\nparticipant_summary AS (\n  SELECT participantidentifier, COUNT(*) AS observed_days, AVG(steps) AS mean_steps\n  FROM latest_days GROUP BY participantidentifier\n),\ncalendar_days AS (\n  SELECT TO_DATE(:end_date, 'YYYY-MM-DD') - TO_DATE(:start_date, 'YYYY-MM-DD') AS n_days\n  FROM dual\n)\nSELECT\n  (SELECT COUNT(*) FROM latest_days) AS observed_person_days,\n  (SELECT COUNT(*) FROM participant_summary) AS participants,\n  (SELECT AVG(steps) FROM latest_days) AS person_day_weighted_mean,\n  (SELECT AVG(mean_steps) FROM participant_summary) AS participant_weighted_mean,\n  (SELECT STDDEV_SAMP(mean_steps) FROM participant_summary) AS participant_mean_sd,\n  (SELECT MEDIAN(mean_steps) FROM participant_summary) AS median_participant_mean,\n  (SELECT PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY mean_steps) FROM participant_summary) AS q1_participant_mean,\n  (SELECT PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY mean_steps) FROM participant_summary) AS q3_participant_mean,\n  (SELECT MIN(observed_days) FROM participant_summary) AS min_days_per_user,\n  (SELECT MEDIAN(observed_days) FROM participant_summary) AS median_days_per_user,\n  (SELECT MAX(observed_days) FROM participant_summary) AS max_days_per_user,\n  (SELECT AVG(observed_days) FROM participant_summary) AS mean_days_per_user,\n  (SELECT AVG(observed_days / n_days) FROM participant_summary CROSS JOIN calendar_days) AS mean_coverage_fraction,\n  (SELECT COUNT(*) FROM latest_days WHERE steps = 0) AS zero_step_days,\n  (SELECT AVG(steps) FROM earliest_days) AS earliest_record_mean,\n  (SELECT AVG(steps) FROM max_days) AS max_record_mean,\n  (SELECT AVG(steps) FROM in_window) AS raw_row_mean\nFROM dual",
+    "WITH in_window AS (\n  SELECT participantidentifier, calendardate, summaryid, steps, inserteddate,\n         ROW_NUMBER() OVER (\n           PARTITION BY participantidentifier, calendardate\n           ORDER BY inserteddate DESC NULLS LAST, summaryid DESC NULLS LAST\n         ) AS rn_latest,\n         MAX(steps) OVER (\n           PARTITION BY participantidentifier, calendardate\n         ) AS max_steps,\n         COUNT(*) OVER (\n           PARTITION BY participantidentifier, calendardate, inserteddate\n         ) AS n_at_insert_time\n  FROM IHS_2025.GARMINDAILYSUMMARY\n  WHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n    AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')\n    AND participantidentifier IS NOT NULL\n    AND steps IS NOT NULL\n)\nSELECT\n  SUM(CASE WHEN rn_latest = 1 AND steps <> max_steps THEN 1 ELSE 0 END) AS latest_not_max_person_days,\n  SUM(CASE WHEN rn_latest = 1 AND inserteddate IS NULL THEN 1 ELSE 0 END) AS latest_missing_insert_time_days,\n  SUM(CASE WHEN rn_latest = 1 AND n_at_insert_time > 1 THEN 1 ELSE 0 END) AS latest_insert_time_tie_days\nFROM in_window",
+    "SELECT\n  SUM(CASE WHEN calendardate <> TRUNC(calendardate) THEN 1 ELSE 0 END) AS non_midnight_date_rows,\n  COUNT(DISTINCT TRUNC(calendardate)) AS represented_calendar_dates\nFROM IHS_2025.GARMINDAILYSUMMARY\nWHERE calendardate >= TO_DATE(:start_date, 'YYYY-MM-DD')\n  AND calendardate < TO_DATE(:end_date, 'YYYY-MM-DD')"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 550784,
+        "inputTokens": 539118,
+        "cachedInputTokens": 225005,
+        "cacheWriteInputTokens": 314059,
+        "outputTokens": 11666,
+        "reasoningOutputTokens": 2903
+      },
+      "last": {
+        "totalTokens": 41806,
+        "inputTokens": 41455,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 41452,
+        "outputTokens": 351,
+        "reasoningOutputTokens": 205
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_a10ffdb58c20b9a0",
+  "attempt": 2
+}

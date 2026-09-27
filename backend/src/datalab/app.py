@@ -200,7 +200,7 @@ def create_app(
     app.state.safety = safety
     app.include_router(build_safety_router(safety, settings.data_dir / "logs" / "safety-last.json"))
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
-    browser = browser or BrowserSession()
+    browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
     app.add_middleware(ApiProtection, session=browser, enforce=protect_api)
 
