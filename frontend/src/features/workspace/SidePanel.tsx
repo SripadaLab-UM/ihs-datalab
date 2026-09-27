@@ -329,11 +329,11 @@ function DataAccessed({
   }
   return (
     <>
-      <div className="mb-2 flex items-center gap-2">
-        <p className="dl-label flex flex-1 items-center gap-1.5 !text-data">
+      <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="dl-label flex min-w-[13rem] flex-1 items-center gap-1.5 !text-data">
           <Icon name="lock" size={11} /> Read-only · every query, newest last
+          <InfoTip term="data-accessed" align="end" />
         </p>
-        <InfoTip term="data-accessed" align="end" />
         {queries.data?.some((q) => q.status === "succeeded") && (
           <Button variant="ghost" className="px-1.5 py-0.5 text-[12px]" onClick={() => setDrafting(true)}>
             <Icon name="history" size={12} /> Turn this into a workflow

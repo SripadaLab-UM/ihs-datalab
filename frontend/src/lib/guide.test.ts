@@ -75,7 +75,7 @@ describe("the guide, bundled", () => {
     expect(topicFor("/workflows/runs/r1").file).toBe("running-a-workflow.md");
     expect(topicFor("/pipelines").file).toBe("pipelines.md");
     expect(topicFor("/knowledge/tables/x").file).toBe("knowledge-proposals.md");
-    expect(topicFor("/settings").slug).not.toBe("");
+    expect(topicFor("/settings").file).toBe("settings.md");
     expect(topicFor("/nowhere").file).toBe("README.md");
     // Every screen named in the guide is one of the app's.
     const routes = ["/workspace", "/sql", "/workflows", "/pipelines", "/knowledge", "/settings"];

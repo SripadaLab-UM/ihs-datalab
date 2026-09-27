@@ -2,7 +2,6 @@
 title: What DataLab will and won't do
 summary: The safety boundaries DataLab enforces, and the things it doesn't promise.
 order: 1
-screens: /settings
 keywords: safety, promises, privacy, PHI, study data, internet, boundary, safety check, sealed, container
 ---
 

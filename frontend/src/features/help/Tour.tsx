@@ -171,7 +171,7 @@ export function TourCard({
           onClose();
         }
       }}
-      className="dl-in fixed bottom-4 left-4 z-40 flex w-[min(18rem,calc(100vw-2rem))] flex-col gap-3 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-5 pt-4 pb-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]"
+      className="dl-in fixed bottom-28 left-4 z-40 lg:bottom-4 flex w-[min(18rem,calc(100vw-2rem))] flex-col gap-3 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-5 pt-4 pb-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.35)]"
     >
       <p className="dl-label">
         Tour · {index + 1} of {steps.length}
