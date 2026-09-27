@@ -3628,7 +3628,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "not-checked" | "up-to-date" | "available" | "offline" | "rate-limited" | "not-visible" | "failed";
+            state: "not-checked" | "not-configured" | "up-to-date" | "available" | "offline" | "rate-limited" | "not-visible" | "failed";
             /** Message */
             message: string;
             /** Current Version */
@@ -3643,6 +3643,8 @@ export interface components {
             /** Cannot Install Because */
             cannot_install_because: string | null;
             install: components["schemas"]["UpdateInstallOut"];
+            /** Updating */
+            updating: boolean;
         };
         /** UpdateHistoryOut */
         UpdateHistoryOut: {

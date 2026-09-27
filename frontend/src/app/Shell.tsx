@@ -7,7 +7,7 @@ import { api, SIGNED_OUT } from "@/api/client";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
-import { UpdatePill } from "@/features/settings/UpdatePill";
+import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
 
 const TABS = [
   { to: "/workspace", label: "Workspace" },
@@ -37,6 +37,7 @@ export function Shell() {
           open DataLab again with the link it printed when it started.
         </div>
       )}
+      <UpdatingBanner />
       <header className="flex items-center gap-8 border-b border-line px-5">
         <span className="py-3.5 font-serif text-[21px] leading-none">datalab.</span>
         <nav className="flex gap-1 self-stretch overflow-x-auto">

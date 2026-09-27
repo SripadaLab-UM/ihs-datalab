@@ -76,9 +76,11 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
           {check.message}
           {check.checked_at && <span className="block text-xs text-muted">Last checked {when(check.checked_at)}</span>}
         </p>
-        <Button onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
-          {checkNow.isPending ? "Checking…" : "Check now"}
-        </Button>
+        {check.state !== "not-configured" && (
+          <Button onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
+            {checkNow.isPending ? "Checking…" : "Check now"}
+          </Button>
+        )}
       </div>
       {checkNow.error && <p className="mt-2 text-sm text-danger">{checkNow.error.message}</p>}
 

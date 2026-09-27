@@ -5,7 +5,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import { settingsApi, type UpdateCheck } from "@/api/settings";
 
-import { UpdatePill } from "./UpdatePill";
+import { UpdatePill, UpdatingBanner } from "./UpdatePill";
 
 vi.mock("@/api/settings", async (original) => ({
   ...(await original<typeof import("@/api/settings")>()),
@@ -24,6 +24,7 @@ const CHECK: UpdateCheck = {
   can_install: false,
   cannot_install_because: null,
   install: { state: "idle", version: null, message: "", started_at: null, updated_at: null },
+  updating: false,
 };
 
 const RELEASE = {
@@ -57,7 +58,7 @@ it("shows Update available, linking to Settings → Updates", async () => {
   expect(pill.getAttribute("title")).toContain("DataLab 0.1.0a3 is available (this is 0.1.0a2)");
 });
 
-it.each(["up-to-date", "offline", "rate-limited", "not-visible", "failed", "not-checked"] as const)(
+it.each(["up-to-date", "offline", "rate-limited", "not-visible", "failed", "not-checked", "not-configured"] as const)(
   "shows nothing when the check says %s",
   async (state) => {
     mocked.updateCheck.mockResolvedValue({ ...CHECK, state });
@@ -78,4 +79,29 @@ it("says an update is being installed", async () => {
   });
   show();
   expect(await screen.findByText("Updating to 0.1.0a3…")).toBeTruthy();
+});
+
+it("says on every page that nothing new can start while it updates", async () => {
+  mocked.updateCheck.mockResolvedValue({
+    ...CHECK,
+    updating: true,
+    install: { state: "backing-up", version: "0.1.0a3", message: "", started_at: null, updated_at: null },
+  });
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <UpdatingBanner />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText(/being updated to 0.1.0a3. Nothing new can start/)).toBeTruthy();
+});
+
+it("shows no banner otherwise", async () => {
+  mocked.updateCheck.mockResolvedValue(CHECK);
+  const { container } = render(
+    <QueryClientProvider client={new QueryClient()}>
+      <UpdatingBanner />
+    </QueryClientProvider>,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(container.textContent).toBe("");
 });

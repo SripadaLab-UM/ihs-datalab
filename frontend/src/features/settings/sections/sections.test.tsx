@@ -205,6 +205,7 @@ const UP_TO_DATE: UpdateCheck = {
   can_install: false,
   cannot_install_because: null,
   install: IDLE,
+  updating: false,
 };
 
 const AVAILABLE: UpdateCheck = {
@@ -391,4 +392,19 @@ it("warns that saving won't take effect while an environment variable sets the s
   const field = screen.getByLabelText("Database password for SVC_READER") as HTMLInputElement;
   expect(field.autocomplete).toBe("new-password");
   expect(screen.getByText(/saving here won't take effect/)).toBeTruthy();
+});
+
+it("says updates aren't set up until a release key is pinned, with nothing to press", async () => {
+  const off: UpdateCheck = {
+    ...UP_TO_DATE,
+    state: "not-configured",
+    message: "Updates aren't set up in this DataLab: it has no release signing key.",
+    checked_at: null,
+  };
+  mocked.updates.mockResolvedValue(updatesWith(off));
+  mocked.updateCheck.mockResolvedValue(off);
+  wrap(<UpdatesSection />);
+  expect(await screen.findByText(/Updates aren't set up/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Install update…" })).toBeNull();
 });

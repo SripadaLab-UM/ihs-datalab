@@ -30,7 +30,7 @@ export function useUpdateCheck() {
     // only DataLab's host ever asks GitHub.)
     refetchInterval: (query) => {
       const data = query.state.data;
-      if (installing(data)) return 2000;
+      if (installing(data) || data?.updating) return 2000;
       return data?.state === "not-checked" ? 15_000 : 5 * 60_000;
     },
     retry: false,
