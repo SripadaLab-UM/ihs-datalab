@@ -121,11 +121,51 @@ def test_ordered_list_numbers_are_left_out():
     cases = {
         "11. Sleep\n12. Steps\n13. Mood": [],
         "  15) nested item": [],
-        "Steps:\n99.\n100.": [],
+        "Steps:\n\n99.\n100.": [],
+        "Steps:\n1. Sleep\n12. Steps": [],  # a list that starts at 1 may follow text
+        "- Sleep\n  - Naps\n12. Steps": [],
+        "Intro\n> 12. item\n> 13. item": [],
+        "> 12. item\n>\n> 13. item": [],
         "42. Mean sleep was 7.2 hours": ["7.2"],
         "## 3. Results": [],
         "2025 cohort": [],
         "7 sites": [],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_numbered_headings_are_left_out():
+    cases = {
+        "## 12. Results": [],
+        "### 12) Results": [],
+        "Some text\n## 14. Discussion": [],
+        "> ## 15. Quoted": [],
+        "## 312 participants": ["312"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_a_hard_wrapped_count_is_checked():
+    # A list can't break into a paragraph unless it starts at 1, so these
+    # are sentences, not list items.
+    cases = {
+        "The cohort enrolled\n312. Of these, 45 withdrew.": ["312", "45"],
+        "Total enrolled:\n  312.": ["312"],
+        "Steps:\n99.\n100.": ["99", "100"],  # 99. is text, so 100. is too
+        "> The cohort enrolled\n> 312. Of these": ["312"],
+    }
+    for answer, expected in cases.items():
+        assert numbers_in_answer(answer) == expected, answer
+
+
+def test_removed_text_does_not_make_a_line_start():
+    cases = {
+        "`n` 312. rows": ["312"],
+        "2024-03-01 312. rows": ["312"],
+        "PMID: 34042743 312. rows": ["312"],
+        "```\nx\n```\n\n12. item": [],
     }
     for answer, expected in cases.items():
         assert numbers_in_answer(answer) == expected, answer
