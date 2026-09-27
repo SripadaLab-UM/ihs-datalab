@@ -393,22 +393,40 @@ The drafting is `backend/src/datalab/workflows/drafts.py`, the routes
 **The draft.** DataLab writes it itself from the SQL and binds, with no
 model and no data. A query the SQL check refuses (with the catalog, as in
 the Playground) makes no draft. Each query becomes a SQL step; `reads:`
-comes from the same analysis as the file check's `reads:` rule; each bind
-becomes a lower-case parameter typed from the value it ran with, which is
-its default unless it looks like it could identify someone (the export
-folder-name scan). A value like that is left out, with a note. Each step
-gets a built-in check: `min_rows: 1`, the named output columns (not after
-`*`), and, when the query aggregates (GROUP BY or an aggregate outside a
-WHERE), `small_cells` over its named `COUNT` columns, `min: 11`. If DataLab
-can't tell which columns are counts, `count_columns` is left empty, so the
-file check asks for them. With a destination key, `deliver:` delivers every
-output. In the real profile a delivered row-level extract then needs a
-reason under `deliver.without_small_cells`, written by the person.
+comes from the same analysis as the file check's `reads:` rule.
+
+- **Parameters.** Each bind becomes a lower-case parameter. Its type comes
+  from the catalog type of the column it's compared with (a number or a
+  date; a bind inside TO_DATE is a date); otherwise it stays text, as the
+  Playground sent it, so `'12'` against a VARCHAR2 column isn't turned into
+  a number. The value it ran with is kept as the default only for a date,
+  or a number compared as a range (`>`, `BETWEEN`) or named as a limit
+  (`min_…`, `max_…`). Text never is, and nothing is when the bind's name,
+  or the column it's compared with, looks like it's about a person (the
+  Save & share check's identifier words, plus `identifier`, `birth`,
+  `name`, `postal` and the like: `:dob`, `PARTICIPANTIDENTIFIER = :p`,
+  `LASTNAME = :n`). A note says why each other one has no default.
+- **Checks.** Each step gets `min_rows: 1`, the named output columns (not
+  after `*`), and, when the query aggregates (GROUP BY, or an aggregate
+  outside a WHERE), `small_cells` with `min: 11`. It covers `COUNT(…)`, and
+  `SUM` of 1s and 0s (`SUM(CASE WHEN … THEN 1 ELSE 0 END)`) as counts, and
+  every other aggregate too (`SUM(x)`, `AVG`, `MAX`), with a note: DataLab
+  can't tell that one isn't a count, so it fails closed. When an aggregate
+  has no name, or the counting happens in a subquery, the list is left
+  empty and the file check asks the person for it.
+- **Delivery.** With a destination key, `deliver:` delivers every output.
+  In the real profile a delivered row-level extract then needs a reason
+  under `deliver.without_small_cells`, written by the person.
+- **The data check.** The draft gets Save & share's check
+  (pipelines/check.py) for possible participant data, such as an id typed
+  into the SQL. Each finding must be confirmed before saving, wherever it's
+  saved, and one edited away no longer counts.
 
 **Review.** The dialog shows the YAML in the editor, editable, with the
 file check's problems marked (checked again after each edit) and the
 draft's notes. Only the person's Save saves anything; drafting saves
-nothing, and no agent tool reaches these routes.
+nothing, and no agent tool reaches these routes. Escape doesn't close a
+review being saved, and asks first when it's been edited.
 
 **Saving.** Where the Workflows tab's files are the synced pipelines clone,
 Save is the Pipelines tab's Save & share (`Pipelines.share_workflow`, the
@@ -416,7 +434,9 @@ same `share.save_and_share`): the check, the package's tests on the
 change's tree, a commit as the person with `DataLab-Workflow-From` (and the
 conversation) in its message, rebased and pushed. Possible participant
 data waits for the person to confirm each finding. A file already in the
-repo isn't replaced. Otherwise (practice, no `[repos] pipelines`, or a
+repo isn't replaced (whatever its case, or as `.yml`); if someone saves the
+same name meanwhile, nothing is shared, and if they saved exactly this
+file, the dialog says it was already there rather than that it was shared. Otherwise (practice, no `[repos] pipelines`, or a
 `[workflows] folder`) the file is written into that folder, never over
 another, and the dialog says it isn't shared. With the repo configured but
 not yet synced, Save waits for a sync.

@@ -105,17 +105,90 @@ def test_binds_become_parameters_with_the_values_they_ran_with(api):
     )
     parameters = yaml.safe_load(draft["text"])["parameters"]
     assert parameters == {
-        # A value shaped like an identifier isn't kept, and a note says why.
         "cohort": {"type": "string"},
         "device": {"type": "string"},
+        # A date, and a number compared as a threshold: kept.
         "end_date": {"type": "date", "default": "2025-05-01"},
         "min_steps": {"type": "integer", "default": 1000},
     }
-    assert any(":cohort looks like it could identify someone" in n for n in draft["notes"])
+    assert any(":cohort has no default" in n for n in draft["notes"])
     assert any(":device had no value" in n for n in draft["notes"])
     # Every bind is a declared parameter (Oracle's binds ignore case), so it passes.
     assert draft["valid"] is True, draft["problems"]
     assert draft["target"]["kind"] == "local"
+
+
+# Each value, and the way the SQL uses it: none of them may become a default.
+PERSONAL = """\
+SELECT w.DEVICE, w.STEPS
+FROM IHS_2025.WEARABLE_DAILY w JOIN IHS_2025.PARTICIPANTS p
+  ON p.STUDY_PARTICIPANT_ID = w.STUDY_PARTICIPANT_ID
+WHERE w.RECORD_DATE >= TO_DATE(:dob, 'YYYY-MM-DD')
+  AND w.STEPS = :steps
+  AND w.STUDY_PARTICIPANT_ID = :who
+  AND p.COHORT = :cohort
+  AND w.DEVICE = :device
+  AND w.DEVICE <> :other
+"""
+
+
+@pytest.mark.parametrize(
+    ("bind", "value", "why"),
+    [
+        ("dob", "1985-03-14", "may be about a person (its name)"),  # a date, but a birth date
+        ("steps", "4521", "only dates, and numbers used as a threshold"),  # = a number
+        ("steps", 4521, "only dates, and numbers used as a threshold"),
+        ("who", "0042", "compared with STUDY_PARTICIPANT_ID"),
+        ("cohort", "IHS-12", "only dates, and numbers"),  # text never is
+        ("device", "ab12", "only dates, and numbers"),
+        ("other", "Smith", "only dates, and numbers"),
+    ],
+)
+def test_values_that_could_identify_someone_never_become_defaults(api, bind, value, why):
+    client, _ = api
+    binds = {"dob": "2025-04-01", "steps": "1", "who": "x", "cohort": "a", "device": "b"}
+    draft = drafted(client, queries=playground(PERSONAL, **{**binds, "other": "c", bind: value}))
+    parameter = yaml.safe_load(draft["text"])["parameters"][bind]
+    assert "default" not in parameter, parameter
+    assert str(value) not in draft["text"].split("steps:")[0]  # nowhere in the parameters
+    assert any(f":{bind}" in n and why in n for n in draft["notes"]), draft["notes"]
+
+
+def test_a_column_about_a_person_keeps_even_a_threshold_or_date_out():
+    columns = {
+        "IHS_2025": {"P": {"DATEOFBIRTH": "DATE", "LASTNAME": "VARCHAR2(40)", "N": "NUMBER"}}
+    }
+    sql = (
+        "SELECT N FROM IHS_2025.P WHERE DATEOFBIRTH < TO_DATE(:cutoff, 'YYYY-MM-DD') "
+        "AND LASTNAME > :min_name AND N > :min_n"
+    )
+    made = draft_workflow(
+        [DraftQuery(sql, {"cutoff": "1985-03-14", "min_name": "Smith", "min_n": "3"})],
+        name="p",
+        allowed_schemas=None,
+        columns=columns,
+    )
+    parameters = yaml.safe_load(made.text)["parameters"]
+    assert parameters == {
+        "cutoff": {"type": "date"},
+        "min_name": {"type": "string"},
+        "min_n": {"type": "integer", "default": 3},
+    }
+    assert "1985" not in made.text and "Smith" not in made.text
+
+
+def test_text_binds_stay_text_unless_the_catalog_says_the_column_is_a_number(api):
+    client, _ = api
+    sql = (
+        "SELECT DEVICE FROM IHS_2025.WEARABLE_DAILY "
+        "WHERE DEVICE = :code AND STEPS >= :min_steps AND RECORD_DATE >= :since"
+    )
+    draft = drafted(client, queries=playground(sql, code="12", min_steps="12", since="2025-04-01"))
+    parameters = yaml.safe_load(draft["text"])["parameters"]
+    # '12' against a VARCHAR2 column stays text (a number there is ORA-01722).
+    assert parameters["code"] == {"type": "string"}
+    assert parameters["min_steps"] == {"type": "integer", "default": 12}
+    assert parameters["since"] == {"type": "date", "default": "2025-04-01"}
 
 
 def test_reads_are_the_tables_the_sql_names_as_the_file_check_finds_them(api):
@@ -166,7 +239,42 @@ def test_a_count_it_cant_name_is_left_for_the_person_and_the_file_check_says_so(
         "SELECT DEVICE, n FROM c"
     )
     asked = drafted(client, queries=playground(cte))
-    assert any("couldn't tell which columns are counts" in n for n in asked["notes"])
+    assert any("counts in a subquery" in n for n in asked["notes"])
+    assert yaml.safe_load(asked["text"])["steps"][1]["qc"]["small_cells"]["count_columns"] == []
+
+
+def test_sums_of_ones_are_counts_and_other_aggregates_are_checked_too(api):
+    client, _ = api
+    sql = (
+        "SELECT DEVICE, COUNT(*) AS N, SUM(CASE WHEN STEPS > 10000 THEN 1 ELSE 0 END) AS N_ACTIVE, "
+        "SUM(1) AS N_DAYS, SUM(STEPS) AS TOTAL_STEPS, AVG(STEPS) AS MEAN_STEPS "
+        "FROM IHS_2025.WEARABLE_DAILY GROUP BY DEVICE"
+    )
+    draft = drafted(client, queries=playground(sql))
+    rule = yaml.safe_load(draft["text"])["steps"][1]["qc"]["small_cells"]
+    # Counts first, then what can't be told from one: none is left unchecked.
+    assert rule["count_columns"] == ["N", "N_ACTIVE", "N_DAYS", "TOTAL_STEPS", "MEAN_STEPS"]
+    assert any("TOTAL_STEPS, MEAN_STEPS are aggregates" in n for n in draft["notes"])
+    assert draft["valid"] is True, draft["problems"]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # A count with no name: the others alone would leave it unchecked.
+        "SELECT DEVICE, COUNT(*) AS N, SUM(CASE WHEN STEPS > 1 THEN 1 ELSE 0 END) "
+        "FROM IHS_2025.WEARABLE_DAILY GROUP BY DEVICE",
+        # Counted in a subquery, passed through by name.
+        "SELECT DEVICE, N, COUNT(*) AS M FROM (SELECT DEVICE, COUNT(*) AS N "
+        "FROM IHS_2025.WEARABLE_DAILY GROUP BY DEVICE) GROUP BY DEVICE, N",
+    ],
+)
+def test_counts_it_cant_place_leave_the_check_asking(api, sql):
+    client, _ = api
+    draft = drafted(client, queries=playground(sql))
+    assert yaml.safe_load(draft["text"])["steps"][1]["qc"]["small_cells"]["count_columns"] == []
+    assert draft["valid"] is False
+    assert [p["path"] for p in draft["problems"]] == ["steps[1].qc.small_cells.count_columns"]
 
 
 def test_the_real_profile_wants_small_cells_on_whatever_is_delivered():
@@ -211,7 +319,11 @@ def test_saved_locally_it_is_listed_and_runs(api):
     assert listed["steps_by_device.yaml"]["valid"] is True
     assert listed["steps_by_device.yaml"]["reads"] == ["IHS_2025.WEARABLE_DAILY"]
 
-    started = client.post("/api/workflows/runs", json={"path": "steps_by_device.yaml"})
+    # A text bind has no default: it's given when it runs.
+    started = client.post(
+        "/api/workflows/runs",
+        json={"path": "steps_by_device.yaml", "params": {"skip_device": "apple"}},
+    )
     assert started.status_code == 201, started.text
     run = finished(client, started.json()["id"])
     assert run["status"] == "succeeded", (run["message"], [s["message"] for s in run["steps"]])
@@ -234,10 +346,68 @@ def test_small_cells_stop_a_saved_workflow_before_delivery(api):
         queries=playground(BY_DEVICE, start_date="2025-04-01", skip_device="none"),
     )
     assert client.post("/api/workflows/saves", json={"text": draft["text"]}).status_code == 201
-    run_id = client.post("/api/workflows/runs", json={"path": "steps_by_device.yaml"}).json()["id"]
+    run_id = client.post(
+        "/api/workflows/runs",
+        json={"path": "steps_by_device.yaml", "params": {"skip_device": "none"}},
+    ).json()["id"]
     run = finished(client, run_id)
     assert run["status"] == "failed" and run["delivery_status"] != "delivered"
     assert [s["status"] for s in run["steps"]] == ["succeeded", "failed"]
+
+
+WITH_AN_ID = BY_DEVICE.replace("GROUP BY", "AND STUDY_PARTICIPANT_ID <> 'SYN-0042'\nGROUP BY")
+
+
+def test_a_local_save_waits_for_possible_participant_data_to_be_confirmed(api):
+    client, h = api
+    draft = drafted(
+        client, queries=playground(WITH_AN_ID, start_date="2025-04-01", skip_device="a")
+    )
+    # The draft says so up front, and so does a check of edited text.
+    [finding] = draft["findings"]
+    assert finding["severity"] == "data" and "SYN-0042" in finding["text"]
+    checked = client.post("/api/workflows/drafts/check", json={"text": draft["text"]}).json()
+    assert [f["id"] for f in checked["findings"]] == [finding["id"]] and checked["valid"]
+    edited = draft["text"].replace("AND STUDY_PARTICIPANT_ID <> 'SYN-0042'\n", "")
+    assert (
+        client.post("/api/workflows/drafts/check", json={"text": edited}).json()["findings"] == []
+    )
+
+    held = client.post("/api/workflows/saves", json={"text": draft["text"]}).json()
+    assert held["state"] == "check_failed" and held["findings"][0]["id"] == finding["id"]
+    assert not (h.folder / "steps_by_device.yaml").exists()
+    saved = client.post(
+        "/api/workflows/saves", json={"text": draft["text"], "confirmed": [finding["id"]]}
+    ).json()
+    assert saved["state"] == "saved" and (h.folder / "steps_by_device.yaml").exists()
+
+
+def test_in_the_real_profile_an_edited_file_without_its_checks_is_refused(tmp_path):
+    h = Harness(tmp_path, sandbox=FakeSandbox(), profile="real")
+    app = FastAPI()
+    app.include_router(
+        build_workflows_router(
+            WorkflowServices(
+                h.settings, h.connection, h.data, h.access_log, sandbox=h.sandbox, catalog=catalog()
+            )
+        )
+    )
+    with TestClient(app) as client:
+        draft = drafted(
+            client,
+            destination="dropbox-ihs-2025",
+            queries=playground(BY_DEVICE, start_date="2025-04-01", skip_device="a"),
+        )
+        assert draft["valid"] is True and draft["target"]["kind"] == "local", draft
+        text = draft["text"]
+        lowered = text.replace("min: 11", "min: 5")
+        no_small_cells = text[: text.index("      small_cells:")] + text[text.index("deliver:") :]
+        no_qc = text[: text.index("  - id: check")] + text[text.index("deliver:") :]
+        for edited in (lowered, no_small_cells, no_qc):
+            refused = client.post("/api/workflows/saves", json={"text": edited})
+            assert refused.status_code == 422, edited
+            assert refused.json()["detail"]["problems"]
+        assert list(h.folder.iterdir()) == []
 
 
 def test_turn_a_conversations_queries_into_a_workflow(api):
@@ -343,8 +513,10 @@ def test_with_the_pipelines_repo_it_is_saved_with_save_and_share(lab, shared):
     assert done["path"] == "workflows/steps_by_device.yaml"
     assert lab.remote.show("workflows/steps_by_device.yaml") == draft["text"].rstrip("\n")
     assert done["commit"] == lab.remote.head() != before
-    [line] = lab.remote.log("%an|%s")[:1]
-    assert line == "Yu Fang|Workflows: steps_by_device.yaml"
+    # Authored and committed as the person.
+    [line] = lab.remote.log("%an <%ae>|%cn <%ce>|%s")[:1]
+    me = "Yu Fang <42+yfang@users.noreply.github.com>"
+    assert line == f"{me}|{me}|Workflows: steps_by_device.yaml"
     message = "\n".join(lab.remote.log("%B"))
     assert "DataLab-Workflow-From: SQL Playground" in message
     assert f"DataLab-Tests: {done['test']}" in message
@@ -354,7 +526,7 @@ def test_with_the_pipelines_repo_it_is_saved_with_save_and_share(lab, shared):
     assert "workflows/steps_by_device.yaml" in listed
     # A file already in the repo isn't replaced.
     again = client.post("/api/workflows/saves", json={"text": draft["text"]})
-    assert again.status_code == 409 and "already has" in again.json()["detail"]
+    assert again.status_code == 409 and "already there" in again.json()["detail"]
 
 
 def test_what_may_be_participant_data_waits_for_the_person_to_confirm(lab, shared):
@@ -402,3 +574,47 @@ def test_failing_package_tests_share_nothing(lab, shared):
     done = settled_save(client, started["id"])
     assert done["state"] == "tests_failed" and lab.remote.head() == before
     assert client.get("/api/workflows/saves/ws_nope").status_code == 404
+
+
+def test_a_file_already_there_in_another_case_or_as_yml_isnt_replaced(lab, shared):
+    client = shared
+    lab.remote.write({"workflows/Steps_By_Device.yml": b"name: steps_by_device\n"}, "Someone")
+    synced(lab)
+    draft = client.post(
+        "/api/workflows/drafts",
+        json={"name": "steps_by_device", "queries": playground(BY_DEVICE, start_date="2025-04-01")},
+    ).json()
+    refused = client.post("/api/workflows/saves", json={"text": draft["text"]})
+    assert refused.status_code == 409
+    assert "workflows/Steps_By_Device.yml is already there" in refused.json()["detail"]
+
+
+@pytest.mark.parametrize("same", [True, False])
+def test_someone_saving_the_same_name_meanwhile(lab, shared, same):
+    client = shared
+    synced(lab)
+    draft = client.post(
+        "/api/workflows/drafts",
+        json={"name": "steps_by_device", "queries": playground(BY_DEVICE, start_date="2025-04-01")},
+    ).json()
+    theirs = draft["text"].encode() if same else b"name: steps_by_device\nsteps: []\n"
+    real_run = lab.sandbox.run
+
+    async def run_after_someone_pushes(step):
+        # While the package's tests run, someone else pushes the same file name.
+        if not lab.remote.log("%s")[0].startswith("Theirs"):
+            lab.remote.write({"workflows/steps_by_device.yaml": theirs}, "Theirs")
+        return await real_run(step)
+
+    lab.sandbox.run = run_after_someone_pushes  # type: ignore[method-assign]
+    started = client.post("/api/workflows/saves", json={"text": draft["text"]}).json()
+    done = settled_save(client, started["id"])
+    head = lab.remote.head()
+    assert lab.remote.log("%s")[0] == "Theirs"  # nothing of ours was pushed
+    if same:
+        # Not "saved and shared": it's their commit, and nothing new was shared.
+        assert done["state"] == "already_there" and done["commit"] is None, done
+        assert "Nothing new was shared" in done["message"]
+    else:
+        assert done["state"] == "conflict" and "choose another name" in done["message"]
+    assert lab.remote.head() == head

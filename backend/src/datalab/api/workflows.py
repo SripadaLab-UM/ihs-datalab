@@ -32,6 +32,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -43,6 +44,7 @@ from datalab.data.catalog import Catalog
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import MAX_SQL_BYTES
 from datalab.exports import DestinationStore
+from datalab.pipelines.check import check as data_check
 from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
 from datalab.repos.git import GitError
 from datalab.repos.github import GitHubUnavailable, SignInNeeded
@@ -310,6 +312,21 @@ class DraftOut(BaseModel):
     # What the person should know before saving (a default left out, and why).
     notes: list[str]
     target: SaveTargetOut
+    # The Save & share check's findings on the file (possible participant data):
+    # each must be confirmed before it's saved, wherever it's saved.
+    findings: list[PipelineFindingOut]
+
+
+class DraftCheckIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+
+
+class DraftCheckOut(BaseModel):
+    """A draft's text, checked again after an edit: the file check and the data check."""
+
+    valid: bool
+    problems: list[ProblemOut]
+    findings: list[PipelineFindingOut]
 
 
 class SaveIn(BaseModel):
@@ -321,7 +338,10 @@ class SaveIn(BaseModel):
     conversation_id: str | None = Field(default=None, max_length=100)
 
 
-SaveState = Literal["saving", "saved", "check_failed", "tests_failed", "conflict", "failed"]
+# already_there: the same file was saved by someone else meanwhile; nothing new was shared.
+SaveState = Literal[
+    "saving", "saved", "already_there", "check_failed", "tests_failed", "conflict", "failed"
+]
 
 
 class WorkflowSaveOut(BaseModel):
@@ -653,7 +673,19 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             problems=problems,
             notes=made.notes,
             target=save_target(),
+            findings=_findings(made.text),
         )
+
+    @router.post("/drafts/check")
+    def check_draft(body: DraftCheckIn) -> DraftCheckOut:
+        """A draft's text checked again, as Save will check it."""
+        try:
+            runner.check_text(body.text)
+        except WorkflowInvalid as error:
+            problems = _problems_out(error.problems, body.text)
+        else:
+            problems = []
+        return DraftCheckOut(valid=not problems, problems=problems, findings=_findings(body.text))
 
     @router.post("/saves", status_code=201)
     async def save(body: SaveIn) -> WorkflowSaveOut:
@@ -667,6 +699,21 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         if target.kind == "unavailable":
             raise HTTPException(409, target.message)
         if target.kind == "local":
+            # The same data check as Save & share's, confirmed the same way.
+            report = data_check({_repo_path(workflow.name): body.text.encode("utf-8")})
+            blocking = report.blocking(body.confirmed)
+            if blocking:
+                return WorkflowSaveOut(
+                    id=None,
+                    state="check_failed",
+                    shared=False,
+                    path=_repo_path(workflow.name),
+                    message=(
+                        "The check found text that may be participant data. Confirm each one "
+                        "isn't, or change the file, then save again."
+                    ),
+                    findings=[PipelineFindingOut(**f.to_dict()) for f in blocking],
+                )
             try:
                 path = folder.add(workflow.name, body.text)
             except FileExistsError as error:
@@ -690,7 +737,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     trailers += (("DataLab-Conversation", body.conversation_id),)
         try:
             job = await services.pipelines.share_workflow(
-                f"workflows/{workflow.name}.yaml",
+                _repo_path(workflow.name),
                 body.text.encode("utf-8"),
                 confirmed=body.confirmed,
                 trailers=trailers,
@@ -728,11 +775,27 @@ def _problems_out(problems: list[Problem], text: str | None = None) -> list[Prob
     return out
 
 
+def _repo_path(name: str) -> str:
+    """Where a new workflow file goes in the pipelines repo (and what the data check calls it)."""
+    return f"workflows/{name}.yaml"
+
+
+def _findings(text: str) -> list[PipelineFindingOut]:
+    """The Save & share data check's findings on a draft (named as it would be saved)."""
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError:
+        raw = None
+    name = raw.get("name") if isinstance(raw, dict) else None
+    path = _repo_path(name if isinstance(name, str) and _KEY.fullmatch(name) else "draft")
+    report = data_check({path: text.encode("utf-8")})
+    return [PipelineFindingOut(**f.to_dict()) for f in report.findings]
+
+
 def _save_out(job: Any) -> WorkflowSaveOut:
-    state = job.state if job.state != "nothing to save" else "saved"
     return WorkflowSaveOut(
         id=job.id,
-        state=state,
+        state=job.state,
         shared=True,
         path=job.path,
         message=job.message,

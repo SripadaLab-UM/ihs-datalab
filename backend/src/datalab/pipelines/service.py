@@ -106,7 +106,7 @@ class WorkflowSave:
 
     id: str
     path: str  # in the repo: workflows/<name>.yaml
-    state: str  # "saving", then share.SaveState
+    state: str  # "saving", then share.SaveState ("already_there" for "nothing to save")
     message: str
     commit: str | None = None  # what was pushed, once saved
     findings: list[dict[str, Any]] = field(default_factory=list)
@@ -544,9 +544,12 @@ class Pipelines:
                     raise NotAvailable(
                         "The pipelines repo hasn't been downloaded yet: sync it (Pipelines tab)."
                     )
-                if path in repo.clone.ls_tree(base):
+                stem = path.removeprefix("workflows/").rsplit(".", 1)[0].lower()
+                taken = {f"workflows/{stem}.yaml", f"workflows/{stem}.yml"}
+                clash = next((p for p in repo.clone.ls_tree(base) if p.lower() in taken), None)
+                if clash is not None:
                     raise NotActionable(
-                        f"The pipelines repo already has {path}. Choose another name."
+                        f"{clash} is already there in the pipelines repo. Choose another name."
                     )
                 commit = repo.clone.commit_files(
                     base, {path: content}, f"{path}, saved in DataLab\n\nNever pushed.\n", _DATALAB
@@ -600,12 +603,18 @@ class Pipelines:
             result = share.SaveResult("failed", f"Saving failed ({type(error).__name__}).")
         if result.state in ("saved", "nothing to save"):
             await asyncio.to_thread(repo.saved, result.commit)
-        job.state = "saved" if result.state == "nothing to save" else result.state
+        job.state = "already_there" if result.state == "nothing to save" else result.state
         job.message = result.message
         job.commit = result.commit if job.state == "saved" else None
         job.findings = result.findings
         job.test = result.test
-        if result.state == "conflict":
+        if result.state == "nothing to save":
+            # Someone else saved the same file meanwhile: it's theirs, not this save's.
+            job.message = (
+                f"{job.path} was already in the pipelines repo, exactly as this file: someone "
+                "saved it meanwhile. Nothing new was shared."
+            )
+        elif result.state == "conflict":
             job.message = (
                 f"Someone else saved {job.path} meanwhile. Nothing was shared: choose another "
                 "name and save again."

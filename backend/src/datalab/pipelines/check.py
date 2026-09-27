@@ -141,7 +141,7 @@ def data_file_findings(path: str, text: str) -> list[Finding]:
     ]
     if lines:
         columns = [c.strip().strip("\"'") for c in re.split(r"[,;\t|]", lines[0])]
-        named = [c for c in columns if _looks_identifying(c)]
+        named = [c for c in columns if looks_identifying(c)]
         if named:
             found.append(
                 Finding(
@@ -212,7 +212,9 @@ def install_findings(path: str, text: str | None) -> list[Finding]:
     return []
 
 
-def _looks_identifying(column: str) -> bool:
+def looks_identifying(column: str) -> bool:
+    """Whether a column name looks like it identifies someone (`id`, `dob`,
+    `STUDY_PARTICIPANT_ID`…). Also used by workflow drafts (workflows/drafts.py)."""
     lowered = column.lower()
     words = [w for w in re.split(r"[_.\-\s]+", lowered) if w]
     squashed = "".join(words)
