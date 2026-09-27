@@ -1618,6 +1618,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/updates/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Update Check
+         * @description What the last check found (no network): for the Update available pill.
+         */
+        get: operations["update_check_api_settings_updates_check_get"];
+        put?: never;
+        /**
+         * Check Now
+         * @description Ask GitHub now (at most once a minute; never while GitHub asked to wait).
+         */
+        post: operations["check_now_api_settings_updates_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/updates/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Update
+         * @description Install the release on offer, once the person has confirmed. Returns at
+         *     once; GET /updates/check follows it. DataLab restarts at the end.
+         */
+        post: operations["install_update_api_settings_updates_install_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/diagnostics": {
         parameters: {
             query?: never;
@@ -3102,6 +3147,25 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** ReleaseOut */
+        ReleaseOut: {
+            /** Version */
+            version: string;
+            /** Tag */
+            tag: string;
+            /** Title */
+            title: string;
+            /** Notes */
+            notes: string;
+            /** Published At */
+            published_at: string | null;
+            /** Page */
+            page: string | null;
+            /** Prerelease */
+            prerelease: boolean;
+            /** Size Bytes */
+            size_bytes: number;
+        };
         /** ReplayCheckOut */
         ReplayCheckOut: {
             /** Exact */
@@ -3558,6 +3622,28 @@ export interface components {
             /** Freed Bytes */
             freed_bytes: number;
         };
+        /** UpdateCheckOut */
+        UpdateCheckOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "not-checked" | "up-to-date" | "available" | "offline" | "rate-limited" | "not-visible" | "failed";
+            /** Message */
+            message: string;
+            /** Current Version */
+            current_version: string;
+            /** Channel */
+            channel: string;
+            /** Checked At */
+            checked_at: string | null;
+            available: components["schemas"]["ReleaseOut"] | null;
+            /** Can Install */
+            can_install: boolean;
+            /** Cannot Install Because */
+            cannot_install_because: string | null;
+            install: components["schemas"]["UpdateInstallOut"];
+        };
         /** UpdateHistoryOut */
         UpdateHistoryOut: {
             /** At */
@@ -3568,6 +3654,32 @@ export interface components {
             from_version: string | null;
             /** To Version */
             to_version: string | null;
+        };
+        /** UpdateInstallIn */
+        UpdateInstallIn: {
+            /** Version */
+            version: string;
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** UpdateInstallOut */
+        UpdateInstallOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "idle" | "downloading" | "stopping" | "backing-up" | "installing" | "pulling-images" | "switching" | "restarting" | "failed";
+            /** Version */
+            version: string | null;
+            /** Message */
+            message: string;
+            /** Started At */
+            started_at: string | null;
+            /** Updated At */
+            updated_at: string | null;
         };
         /** UpdateMarkerOut */
         UpdateMarkerOut: {
@@ -3588,10 +3700,7 @@ export interface components {
         UpdatesOut: {
             /** Version */
             version: string;
-            /** Check Available */
-            check_available: boolean;
-            /** Check Message */
-            check_message: string;
+            check: components["schemas"]["UpdateCheckOut"];
             marker: components["schemas"]["UpdateMarkerOut"] | null;
             /** Marker Unreadable */
             marker_unreadable: boolean;
@@ -6480,6 +6589,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdatesOut"];
+                };
+            };
+        };
+    };
+    update_check_api_settings_updates_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+        };
+    };
+    check_now_api_settings_updates_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+        };
+    };
+    install_update_api_settings_updates_install_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInstallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

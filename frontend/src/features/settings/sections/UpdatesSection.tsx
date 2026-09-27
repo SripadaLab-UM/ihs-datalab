@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 
-import { formatBytes, settingsApi, type Updates } from "@/api/settings";
-import { Chip, Icon } from "@/components/ui";
+import { formatBytes, settingsApi, type UpdateCheck, type UpdateRelease, type Updates } from "@/api/settings";
+import { Button, Chip, Icon, Modal } from "@/components/ui";
 
+import { installing, UPDATE_CHECK, useUpdateCheck } from "../updateCheck";
 import { Section } from "./Section";
 
 const STATE: Record<string, string> = {
@@ -26,19 +28,174 @@ const REASON: Record<string, string> = {
   manual: "taken by hand",
 };
 
+const STEP: Record<string, string> = {
+  downloading: "Downloading and checking the new version",
+  stopping: "Stopping conversations",
+  "backing-up": "Backing up the database",
+  installing: "Installing it beside this version",
+  "pulling-images": "Downloading its container images",
+  switching: "Switching the launcher to it",
+  restarting: "Restarting",
+};
+
 /**
- * Updates: the installed version, an update in progress or interrupted, what
- * DataLab did about it at this start, and the database backups. Checking for
- * a newer release isn't built yet.
+ * Updates: the installed version, what the last check for a newer release
+ * found (with its notes and Install update, always confirmed), an update in
+ * progress or interrupted, what DataLab did about it at this start, and the
+ * database backups.
  */
 export function UpdatesSection() {
   const updates = useQuery({ queryKey: ["settings-updates"], queryFn: settingsApi.updates });
   const shown = updates.data;
   return (
-    <Section title="Updates">
-      {updates.isError && <p className="mt-3 text-sm text-danger">{updates.error.message}</p>}
-      {shown && <Status updates={shown} />}
-    </Section>
+    <div id="updates" className="scroll-mt-6">
+      <Section title="Updates">
+        {updates.isError && <p className="mt-3 text-sm text-danger">{updates.error.message}</p>}
+        {shown && <Status updates={shown} />}
+      </Section>
+    </div>
+  );
+}
+
+/** What the last check found, Check now, and the release on offer. */
+function NewVersions({ initial }: { initial: UpdateCheck }) {
+  const queryClient = useQueryClient();
+  const live = useUpdateCheck();
+  const check = live.data ?? initial;
+  const [confirming, setConfirming] = useState(false);
+  const checkNow = useMutation({
+    mutationFn: settingsApi.checkForUpdates,
+    onSuccess: (next) => queryClient.setQueryData(UPDATE_CHECK, next),
+  });
+  const working = installing(check);
+  const failed = check.install.state === "failed";
+  return (
+    <div className="mt-5">
+      <div className="flex items-start gap-3">
+        <p className="min-w-0 flex-1 text-sm" role="status">
+          {check.message}
+          {check.checked_at && <span className="block text-xs text-muted">Last checked {when(check.checked_at)}</span>}
+        </p>
+        <Button onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
+          {checkNow.isPending ? "Checking…" : "Check now"}
+        </Button>
+      </div>
+      {checkNow.error && <p className="mt-2 text-sm text-danger">{checkNow.error.message}</p>}
+
+      {working && (
+        <p className="mt-4 flex items-start gap-2 border-l-2 border-attn pl-3 text-sm" role="status">
+          <Icon name="restore" size={14} className="mt-0.5 shrink-0" />
+          <span>
+            <span className="block font-medium">
+              {STEP[check.install.state] ?? check.install.state} (DataLab {check.install.version})
+            </span>
+            {check.install.message}
+          </span>
+        </p>
+      )}
+      {failed && (
+        <p className="mt-4 border-l-2 border-danger pl-3 text-sm text-danger" role="alert">
+          <span className="block font-medium">The update didn't happen</span>
+          {check.install.message}
+        </p>
+      )}
+
+      {check.available && !working && (
+        <Offer
+          release={check.available}
+          current={check.current_version}
+          canInstall={check.can_install}
+          why={check.cannot_install_because}
+          onInstall={() => setConfirming(true)}
+        />
+      )}
+      {confirming && check.available && (
+        <ConfirmInstall release={check.available} current={check.current_version} onClose={() => setConfirming(false)} />
+      )}
+    </div>
+  );
+}
+
+function Offer({
+  release,
+  current,
+  canInstall,
+  why,
+  onInstall,
+}: {
+  release: UpdateRelease;
+  current: string;
+  canInstall: boolean;
+  why: string | null;
+  onInstall: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-[3px] border border-you/40 bg-you-soft/40 p-4">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-serif text-[19px] leading-tight">{release.title}</h3>
+          <p className="mt-0.5 text-xs text-muted">
+            DataLab {release.version}
+            {release.prerelease && " · pre-release"}
+            {release.published_at && ` · published ${when(release.published_at)}`} · you have {current}
+            {release.page && (
+              <>
+                {" · "}
+                <a href={release.page} target="_blank" rel="noreferrer noopener" className="underline hover:text-ink">
+                  on GitHub
+                </a>
+              </>
+            )}
+          </p>
+        </div>
+        <Button variant="primary" onClick={onInstall} disabled={!canInstall}>
+          Install update…
+        </Button>
+      </div>
+      {why && <p className="mt-2 text-xs text-muted">{why}</p>}
+      <h4 className="dl-label mt-3">Release notes</h4>
+      {/* As written on GitHub, shown as text: never rendered as HTML. */}
+      <pre className="mt-1 max-h-64 overflow-auto font-sans text-sm whitespace-pre-wrap">
+        {release.notes.trim() || "No notes for this release."}
+      </pre>
+    </div>
+  );
+}
+
+function ConfirmInstall({ release, current, onClose }: { release: UpdateRelease; current: string; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const install = useMutation({
+    mutationFn: () => settingsApi.installUpdate(release.version),
+    onSuccess: (next) => {
+      queryClient.setQueryData(UPDATE_CHECK, next);
+      onClose();
+    },
+  });
+  return (
+    <Modal title={`Install DataLab ${release.version}?`} onClose={onClose}>
+      <div className="flex flex-col gap-3 text-sm">
+        <p>Installing the update:</p>
+        <ol className="ml-5 list-decimal space-y-1">
+          <li>closes the conversations' sandboxes (nothing may be working; conversations reopen after the restart);</li>
+          <li>backs up DataLab's database;</li>
+          <li>
+            installs DataLab {release.version} beside {current}, which is kept, so you can go back to it;
+          </li>
+          <li>restarts DataLab. It opens again in a new window; run the Safety check there.</li>
+        </ol>
+        <p className="text-muted">
+          Your files (conversations' workspaces, query results, exports and the lab's repos) aren't touched. If
+          anything fails, DataLab stays on {current}.
+        </p>
+        {install.error && <p className="text-danger">{install.error.message}</p>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={() => install.mutate()} disabled={install.isPending}>
+            {install.isPending ? "Starting…" : "Install and restart"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -50,14 +207,14 @@ function Status({ updates }: { updates: Updates }) {
       <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1.5 text-sm">
         <dt className="text-muted">Installed</dt>
         <dd className="font-mono text-xs leading-5">DataLab {updates.version}</dd>
-        <dt className="text-muted">New versions</dt>
-        <dd className="text-muted">{updates.check_message}</dd>
         <dt className="text-muted">Database layout</dt>
         <dd className="font-mono text-xs leading-5">
           {updates.latest_migration ?? "empty"}{" "}
           <span className="font-sans text-muted">({updates.migrations_applied} changes applied)</span>
         </dd>
       </dl>
+
+      <NewVersions initial={updates.check} />
 
       {recovery && (
         <p
@@ -68,6 +225,9 @@ function Status({ updates }: { updates: Updates }) {
           <span>
             {needsYou && <span className="block font-medium">This needs you</span>}
             {recovery.message}
+            {recovery.outcome === "finishing" && (
+              <span className="block">Run the Safety check, at the top of this page, to see everything still holds.</span>
+            )}
           </span>
         </p>
       )}

@@ -12,6 +12,9 @@ export type StorageItem = Schemas["StorageItemOut"];
 export type StorageRemoved = Schemas["StorageRemovedOut"];
 export type RemovableKind = Schemas["StorageRemoveIn"]["kind"];
 export type Updates = Schemas["UpdatesOut"];
+export type UpdateCheck = Schemas["UpdateCheckOut"];
+export type UpdateRelease = Schemas["ReleaseOut"];
+export type UpdateInstall = Schemas["UpdateInstallOut"];
 export type BackupInfo = Schemas["BackupInfoOut"];
 export type DestinationKey = Schemas["DestinationKeyOut"];
 
@@ -34,6 +37,16 @@ export const settingsApi = {
     }),
 
   updates: () => request<Updates>("/api/settings/updates"),
+  /** What the last check for a newer release found. No network: DataLab asks GitHub at start. */
+  updateCheck: () => request<UpdateCheck>("/api/settings/updates/check"),
+  /** Ask GitHub now (DataLab's host does; at most once a minute). */
+  checkForUpdates: () => request<UpdateCheck>("/api/settings/updates/check", { method: "POST" }),
+  /** Install the release on offer. Only after the person confirmed; DataLab restarts at the end. */
+  installUpdate: (version: string) =>
+    request<UpdateCheck>("/api/settings/updates/install", {
+      method: "POST",
+      body: JSON.stringify({ version, confirmed: true }),
+    }),
   diagnostics: () => request<{ text: string }>("/api/settings/diagnostics"),
 
   /** The destination keys workflow files name, and the export folder each maps to here. */

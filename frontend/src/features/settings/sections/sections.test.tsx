@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import type { ReactNode } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import type { Connections, Storage, StorageItem, Updates } from "@/api/settings";
+import type { Connections, Storage, StorageItem, UpdateCheck, Updates } from "@/api/settings";
 import { formatBytes, settingsApi } from "@/api/settings";
 
 import { ConnectionsSection } from "./ConnectionsSection";
@@ -30,6 +30,9 @@ vi.mock("@/api/settings", async (original) => ({
     storage: vi.fn(),
     removeStorageItem: vi.fn(),
     updates: vi.fn(),
+    updateCheck: vi.fn(),
+    checkForUpdates: vi.fn(),
+    installUpdate: vi.fn(),
     diagnostics: vi.fn(),
     destinationKeys: vi.fn(),
     setDestinationKey: vi.fn(async () => undefined),
@@ -190,11 +193,125 @@ it("a rollback's backup needs the person to say they understand", async () => {
   await waitFor(() => expect(mocked.removeStorageItem).toHaveBeenCalledWith("backup", "0.1.0-r", true));
 });
 
+const IDLE = { state: "idle", version: null, message: "", started_at: null, updated_at: null } as const;
+
+const UP_TO_DATE: UpdateCheck = {
+  state: "up-to-date",
+  message: "DataLab 0.1.0a2 is the newest release or pre-release.",
+  current_version: "0.1.0a2",
+  channel: "auto",
+  checked_at: "2026-09-27T10:00:00+00:00",
+  available: null,
+  can_install: false,
+  cannot_install_because: null,
+  install: IDLE,
+};
+
+const AVAILABLE: UpdateCheck = {
+  ...UP_TO_DATE,
+  state: "available",
+  message: "DataLab 0.1.0a3 is available.",
+  available: {
+    version: "0.1.0a3",
+    tag: "v0.1.0-alpha.3",
+    title: "DataLab v0.1.0-alpha.3",
+    notes: "Faster exports.\n<img src=x onerror=alert(1)>",
+    published_at: "2026-09-27T12:00:00Z",
+    page: "https://github.com/SripadaLab-UM/ihs-datalab/releases/tag/v0.1.0-alpha.3",
+    prerelease: true,
+    size_bytes: 500_000,
+  },
+  can_install: true,
+};
+
+function updatesWith(check: UpdateCheck): Updates {
+  return {
+    version: "0.1.0a2",
+    check,
+    marker: null,
+    marker_unreadable: false,
+    recovery: null,
+    history: [],
+    set_aside_notes: [],
+    backups: [],
+    migrations_applied: 8,
+    latest_migration: "0008_workflow_runs.sql",
+  };
+}
+
+it("offers a newer release with its notes as text, and installs only once confirmed", async () => {
+  mocked.updates.mockResolvedValue(updatesWith(AVAILABLE));
+  mocked.updateCheck.mockResolvedValue(AVAILABLE);
+  mocked.installUpdate.mockResolvedValue({
+    ...AVAILABLE,
+    install: { ...IDLE, state: "downloading", version: "0.1.0a3", message: "Downloading DataLab 0.1.0a3…" },
+  });
+  const { container } = wrap(<UpdatesSection />);
+  expect(await screen.findByText("DataLab v0.1.0-alpha.3")).toBeTruthy();
+  // The notes are shown as written, never as HTML.
+  expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeTruthy();
+  expect(container.querySelector("img")).toBeNull();
+  expect(screen.getByRole("link", { name: "on GitHub" }).getAttribute("href")).toContain("/releases/tag/");
+
+  fireEvent.click(screen.getByRole("button", { name: "Install update…" }));
+  const dialog = await screen.findByRole("dialog");
+  expect(within(dialog).getByText(/installs DataLab 0.1.0a3 beside 0.1.0a2, which is kept/)).toBeTruthy();
+  expect(mocked.installUpdate).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(mocked.installUpdate).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Install update…" }));
+  fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Install and restart" }));
+  await waitFor(() => expect(mocked.installUpdate).toHaveBeenCalledWith("0.1.0a3"));
+  expect(await screen.findByText("Downloading and checking the new version (DataLab 0.1.0a3)")).toBeTruthy();
+});
+
+it("says why an update can't be installed here", async () => {
+  const cant = {
+    ...AVAILABLE,
+    can_install: false,
+    cannot_install_because: "This copy of DataLab wasn't installed by the DataLab installer.",
+  };
+  mocked.updates.mockResolvedValue(updatesWith(cant));
+  mocked.updateCheck.mockResolvedValue(cant);
+  wrap(<UpdatesSection />);
+  expect(await screen.findByText(/wasn't installed by the DataLab installer/)).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Install update…" }) as HTMLButtonElement).disabled).toBe(true);
+});
+
+it("checks now, and shows being offline as a plain message", async () => {
+  const offline: UpdateCheck = {
+    ...UP_TO_DATE,
+    state: "offline",
+    message: "Couldn't reach GitHub to check for updates (no internet connection?).",
+  };
+  mocked.updates.mockResolvedValue(updatesWith(UP_TO_DATE));
+  mocked.updateCheck.mockResolvedValue(UP_TO_DATE);
+  mocked.checkForUpdates.mockResolvedValue(offline);
+  wrap(<UpdatesSection />);
+  expect(await screen.findByText(/is the newest release or pre-release/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Check now" }));
+  expect(await screen.findByText(/Couldn't reach GitHub/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Install update…" })).toBeNull();
+});
+
+it("says when an update didn't happen", async () => {
+  const failed: UpdateCheck = {
+    ...AVAILABLE,
+    install: { ...IDLE, state: "failed", version: "0.1.0a3", message: "DataLab 0.1.0a2 is still the one in use." },
+  };
+  mocked.updates.mockResolvedValue(updatesWith(failed));
+  mocked.updateCheck.mockResolvedValue(failed);
+  wrap(<UpdatesSection />);
+  expect(await screen.findByText("The update didn't happen")).toBeTruthy();
+  expect(screen.getByText(/is still the one in use/)).toBeTruthy();
+});
+
 it("updates show the version, what needs you, and the backups", async () => {
+  mocked.updateCheck.mockResolvedValue(UP_TO_DATE);
   const updates: Updates = {
     version: "0.1.0a2",
-    check_available: false,
-    check_message: "Update checks aren't set up yet.",
+    check: UP_TO_DATE,
     marker: null,
     marker_unreadable: false,
     recovery: { outcome: "needs-you", message: "Reinstall DataLab 0.3.0, or run `datalab rollback`." },
@@ -218,7 +335,7 @@ it("updates show the version, what needs you, and the backups", async () => {
   };
   mocked.updates.mockResolvedValue(updates);
   wrap(<UpdatesSection />);
-  expect(await screen.findByText("Update checks aren't set up yet.")).toBeTruthy();
+  expect(await screen.findByText(/is the newest release or pre-release/)).toBeTruthy();
   expect(screen.getByText("This needs you")).toBeTruthy();
   expect(screen.getByText("Updated")).toBeTruthy();
   expect(screen.getByText("0.1.0a2-20260927-100000-abcdef")).toBeTruthy();
