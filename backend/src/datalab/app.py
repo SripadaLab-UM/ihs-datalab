@@ -130,6 +130,8 @@ def create_app(
             await helper.remove_leftovers(settings)
         # Turns the last run stopped in the middle of, if it didn't close cleanly.
         sessions.end_cut_off_turns()
+        # And the queries it was running, for chat, the Playground and workflows.
+        access_log.end_cut_off_queries()
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
             yield

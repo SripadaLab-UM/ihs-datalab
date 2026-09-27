@@ -128,3 +128,37 @@ def test_catalog_from_database(database):
         connection.close()
     assert catalog.get(TABLE_2025) is not None
     assert catalog.get(TABLE_2025).columns  # type: ignore[union-attr]
+
+
+def test_extract_names_each_columns_type_as_oracle_does(database, tmp_path):
+    sql = (
+        "SELECT CAST('a' AS VARCHAR2(64 CHAR)) a, CAST('a' AS NVARCHAR2(10)) b, "
+        "TO_CLOB('x') c, CAST(1 AS BINARY_DOUBLE) d, CAST(1 AS FLOAT) e, "
+        "CAST(1 AS NUMBER(10,2)) f, CAST(1 AS NUMBER(5)) g, 1 h, SYSDATE i, "
+        "CAST(SYSTIMESTAMP AS TIMESTAMP) j, CAST(HEXTORAW('AB') AS RAW(8)) k FROM DUAL"
+    )
+    result = extract(database, sql, tmp_path / "out.csv")
+    assert result.column_types == [
+        "VARCHAR2(64)",
+        "NVARCHAR2(10)",
+        "CLOB",
+        "BINARY_DOUBLE",
+        "FLOAT(126)",
+        "NUMBER(10,2)",
+        "NUMBER(5)",
+        "NUMBER",
+        "DATE",
+        "TIMESTAMP(6)",
+        "RAW(8)",
+    ]
+
+
+def test_a_database_that_isnt_there_fails_the_query_cleanly(tmp_path):
+    """Connecting is part of the query: a refused connection is a QueryFailed."""
+    import dataclasses
+
+    closed = dataclasses.replace(PRACTICE_ORACLE, port=1)
+    database = OracleDatabase(closed, PASSWORD or "x", QueryLimits(deadline_seconds=3))
+    with pytest.raises(QueryFailed):
+        extract(database, "SELECT 1 FROM DUAL", tmp_path / "out.csv")
+    assert list(tmp_path.iterdir()) == []

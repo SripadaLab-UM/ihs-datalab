@@ -87,6 +87,8 @@ class Run:
     # Where the SQL check found the problem, for a rejected run.
     diagnostic: Diagnostic | None = None
     outcome: QueryOutcome | None = None
+    # Stop was pressed: a second Stop only waits for the first.
+    stopping: bool = False
     task: asyncio.Task[None] | None = field(default=None, repr=False)
 
 
@@ -101,6 +103,10 @@ class ResultPage:
     # Rows the grid can show at most; the rest are only in the CSV.
     preview_limit: int
     has_more: bool
+
+
+class PlaygroundBusy(RuntimeError):
+    """A query is already running in the Playground."""
 
 
 class Playground:
@@ -127,6 +133,16 @@ class Playground:
     @property
     def results_dir(self) -> Path:
         return self._root / self.id / "results"
+
+    def remove_leftovers(self) -> int:
+        """Remove half-written results a previous run of DataLab left behind
+        (it stopped mid-query). Called at startup. Returns how many there were."""
+        removed = 0
+        for partial in self._root.glob("pg_*/results/*.partial"):
+            with contextlib.suppress(OSError):
+                partial.unlink()
+                removed += 1
+        return removed
 
     def _load_or_make_id(self) -> str:
         file = self._root / "playground.json"
@@ -165,7 +181,15 @@ class Playground:
     # Running ---------------------------------------------------------------
 
     def start(self, sql: str, binds: Mapping[str, Any]) -> Run:
-        """Start a query in the background and return its run at once."""
+        """Start a query in the background and return its run at once.
+
+        One query runs at a time here, so the Playground can never take more
+        than one of the query slots it shares with chat and workflows.
+        """
+        if any(r.state == "running" for r in self._runs.values()):
+            raise PlaygroundBusy(
+                "A query is already running here. Stop it, or wait for it to finish."
+            )
         run = Run(
             id=f"pgr_{secrets.token_hex(8)}",
             sql=sql,
@@ -189,8 +213,11 @@ class Playground:
         """Stop a running query: the database call is cancelled, and no result is kept."""
         if run.task is None or run.task.done():
             return
-        run.task.cancel()
-        # The data service cancels the call in Oracle and waits for it.
+        if not run.stopping:
+            run.stopping = True
+            run.task.cancel()
+        # The data service cancels the call in Oracle and waits for it (keeping
+        # its slot until then); this only waits a while to report how it went.
         await asyncio.wait({run.task}, timeout=15)
 
     async def _execute(self, run: Run) -> None:

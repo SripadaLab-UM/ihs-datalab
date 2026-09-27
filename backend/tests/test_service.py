@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,7 @@ import pytest
 from datalab import db
 from datalab.config import QueryLimits
 from datalab.data.access_log import AccessLog
-from datalab.data.oracle import QueryCancelled
+from datalab.data.oracle import QueryCancelled, QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
 from tests.conftest import COHORTS, FakeDatabase, sample_catalog
@@ -161,3 +162,113 @@ async def test_an_owner_that_doesnt_match_its_origin_is_refused_before_anything_
     assert not (tmp_path / "logs" / "audit.jsonl").exists() or audit_entries(tmp_path) == []
     with pytest.raises(ValueError):
         log.for_origin(origin, owner)
+
+
+async def test_a_database_that_cant_be_reached_fails_the_query(tmp_path, log, monkeypatch):
+    """A refused connection is a failed query, never one left running."""
+    import oracledb
+
+    from datalab.config import PRACTICE_ORACLE
+    from datalab.data.oracle import OracleDatabase
+
+    def refuse(**kwargs):
+        raise oracledb.OperationalError("DPY-6005: cannot connect to database")
+
+    monkeypatch.setattr(oracledb, "connect", refuse)
+    database = OracleDatabase(PRACTICE_ORACLE, "x", QueryLimits())
+    with pytest.raises(QueryFailed, match="Couldn't connect"):
+        await service(database, log).run_query(
+            session_id="s1", sql=SQL, binds={"d": 1}, results_dir=tmp_path / "r"
+        )
+    [record] = log.for_session("s1")
+    assert record.status == "failed"
+    assert list((tmp_path / "r").iterdir()) == []
+
+
+async def test_an_unexpected_error_is_logged_as_failed(tmp_path, log):
+    class Broken(FakeDatabase):
+        def extract_to_csv(self, *args, **kwargs):
+            raise RuntimeError("a bug")
+
+    with pytest.raises(RuntimeError):
+        await service(Broken(), log).run_query(
+            session_id="s1", sql=SQL, binds={"d": 1}, results_dir=tmp_path
+        )
+    [record] = log.for_session("s1")
+    assert record.status == "failed"
+
+
+class SlowToStop(FakeDatabase):
+    """Oracle taking its time to cancel: the call ends only when `release` is set,
+    and (with `finish`) writes its whole result even though it was stopped."""
+
+    def __init__(self, finish: bool = False) -> None:
+        super().__init__()
+        self.release = threading.Event()
+        self.finish = finish
+
+    def extract_to_csv(self, sql, binds, out_path, *, cancel, **kwargs):
+        if self.calls:  # every query after the first runs at once
+            return super().extract_to_csv(sql, binds, out_path, cancel=cancel, **kwargs)
+        self.calls.append((sql, dict(binds)))
+        self.started.set()
+        cancel.wait(timeout=10)
+        self.release.wait(timeout=10)
+        if self.finish:
+            self.calls.pop()
+            return super().extract_to_csv(sql, binds, out_path, cancel=cancel, **kwargs)
+        raise QueryCancelled("The query was stopped.")
+
+
+async def test_stopping_twice_keeps_the_slot_until_oracle_has_stopped(tmp_path, log):
+    database = SlowToStop()
+    svc = service(database, log, max_concurrent_queries=1)
+    first = asyncio.create_task(
+        svc.run_query(session_id="a", sql=SQL, binds={"d": 1}, results_dir=tmp_path)
+    )
+    await asyncio.to_thread(database.started.wait, 5)
+    second = asyncio.create_task(
+        svc.run_query(session_id="b", sql=SQL, binds={"d": 1}, results_dir=tmp_path)
+    )
+    for _ in range(2):  # Stop, and Stop again while Oracle is still cancelling
+        first.cancel()
+        await asyncio.sleep(0.1)
+    assert not first.done()
+    assert len(database.calls) == 1  # the second query still waits for the slot
+    assert log.for_session("a")[0].status == "running"
+    database.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert (await second).row_count == 2
+    assert log.for_session("a")[0].status == "cancelled"
+
+
+async def test_a_stop_that_races_the_end_keeps_no_result(tmp_path, log):
+    database = SlowToStop(finish=True)
+    task = asyncio.create_task(
+        service(database, log).run_query(
+            session_id="s1", sql=SQL, binds={"d": 1}, results_dir=tmp_path
+        )
+    )
+    await asyncio.to_thread(database.started.wait, 5)
+    task.cancel()
+    database.release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    [record] = log.for_session("s1")
+    assert record.status == "cancelled"
+    assert list(tmp_path.glob("*.csv")) == []
+
+
+def test_queries_a_previous_run_left_running_are_ended(tmp_path, log):
+    log.started(query_id="q1", session_id="c1", sql="SELECT 1", binds={}, tables=[])
+    log.started(
+        query_id="q2", session_id="pg_1", sql="SELECT 1", binds={}, tables=[], origin="playground"
+    )
+    assert log.end_cut_off_queries() == 2
+    [chat] = log.for_session("c1")
+    [playground] = log.for_origin("playground", "pg_1")
+    for record in (chat, playground):
+        assert record.status == "cancelled"
+        assert "DataLab stopped" in (record.message or "")
+    assert log.end_cut_off_queries() == 0

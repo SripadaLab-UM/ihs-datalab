@@ -31,7 +31,7 @@ from datalab.data.catalog import Catalog, TableInfo
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import MAX_SQL_BYTES
 from datalab.exports import DestinationStore, ExportError, ExportSource
-from datalab.playground import Diagnostic, Playground, Run
+from datalab.playground import Diagnostic, Playground, PlaygroundBusy, Run
 from datalab.sessions.checkpoints import UnsafePath, open_workspace_file
 
 
@@ -178,6 +178,8 @@ def build_sql_router(services: SqlServices) -> APIRouter:
     settings = services.settings
     catalog = services.catalog
     playground = Playground(settings, services.data, catalog, services.access_log)
+    # Made when DataLab starts: nothing half-written from a previous run stays.
+    playground.remove_leftovers()
 
     def find_run(run_id: str) -> Run:
         run = playground.get(run_id)
@@ -217,7 +219,10 @@ def build_sql_router(services: SqlServices) -> APIRouter:
     @router.post("/runs", status_code=202)
     async def start_run(body: RunIn) -> RunOut:
         """Start a query. It runs in the background; follow it with GET /runs/{id}."""
-        run = playground.start(body.sql, body.binds)
+        try:
+            run = playground.start(body.sql, body.binds)
+        except PlaygroundBusy as error:
+            raise HTTPException(409, str(error)) from error
         # One turn of the event loop, so a query the check refuses says so at once.
         await asyncio.sleep(0)
         return _run_out(run)
@@ -354,6 +359,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             destination=str(folder),
             files=len(done.files),
             contains_study_data=not practice,
+            query_id=record.id,
         )
         return ExportOut(folder=str(done.folder), files=done.files)
 

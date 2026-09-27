@@ -130,10 +130,37 @@ class AccessLog:
         )
         self.finished(query_id, status="rejected", message=reason)
 
+    def end_cut_off_queries(self) -> int:
+        """Mark queries a previous run of DataLab left running as cancelled.
+
+        Called at startup, when no query can be running (one DataLab per
+        data folder). The log has no "interrupted" status, so they're
+        cancelled, and the message says why. Returns how many there were.
+        """
+        with self._lock:
+            ids = [
+                row["id"]
+                for row in self._db.execute("SELECT id FROM queries WHERE status = 'running'")
+            ]
+        for query_id in ids:
+            self.finished(
+                query_id,
+                status="cancelled",
+                message="DataLab stopped before this query finished. Nothing was kept.",
+            )
+        return len(ids)
+
     def record_export(
-        self, *, session_id: str, destination: str, files: int, contains_study_data: bool
+        self,
+        *,
+        session_id: str,
+        destination: str,
+        files: int,
+        contains_study_data: bool,
+        query_id: str | None = None,
     ) -> None:
-        """An export the person made: where to, and how many files. No contents."""
+        """An export the person made: where to, and how many files. No contents.
+        `query_id` names the query whose result it was, for a Playground export."""
         entry = {
             "ts": _now(),
             "event": "export",
@@ -141,6 +168,7 @@ class AccessLog:
             "destination": destination,
             "files": files,
             "contains_study_data": contains_study_data,
+            **({"query_id": query_id} if query_id else {}),
         }
         with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")

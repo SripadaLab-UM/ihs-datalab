@@ -127,7 +127,14 @@ class OracleDatabase:
         """
         started = time.monotonic()
         partial = out_path.with_name(out_path.name + ".partial")
-        connection = self.connect()
+        try:
+            connection = self.connect()
+        except oracledb.Error as error:
+            # No database to talk to (it's down, or the port is closed): the
+            # query failed, with a message that's safe to show.
+            raise QueryFailed(
+                f"Couldn't connect to the database: {_oracle_message(error)}"
+            ) from error
         done = threading.Event()
         timed_out = threading.Event()
 
@@ -192,8 +199,9 @@ class OracleDatabase:
                 rows += len(batch)
                 if rows > max_rows:
                     raise LimitExceeded(
-                        f"The result has more than {max_rows:,} rows. Narrow the query, "
-                        "or ask the user to approve a larger extraction."
+                        f"The result has more than {max_rows:,} rows, the most one query can "
+                        "return, so it was stopped and nothing was kept. Narrow the query: "
+                        "fewer rows, columns or cohorts."
                     )
                 values = [["" if v is None else str(v) for v in row] for row in batch]
                 if len(preview) < preview_rows:
@@ -202,8 +210,9 @@ class OracleDatabase:
                 size = handle.tell()
                 if size > max_bytes:
                     raise LimitExceeded(
-                        f"The result is larger than {max_bytes / 1024**3:.1f} GB. Narrow the "
-                        "query, or ask the user to approve a larger extraction."
+                        f"The result is larger than {max_bytes / 1024**3:.1f} GB, the most one "
+                        "query can return, so it was stopped and nothing was kept. Narrow the "
+                        "query: fewer rows, columns or cohorts."
                     )
                 if shutil.disk_usage(path.parent).free < self._limits.min_free_disk_bytes:
                     raise LimitExceeded("The disk is nearly full, so the query was stopped.")
@@ -268,28 +277,46 @@ def _close_quietly(connection: oracledb.Connection) -> None:
         connection.close()
 
 
-# python-oracledb's type names that differ from Oracle's own.
+# python-oracledb's type names that differ from Oracle's own. LOBs are
+# fetched as strings and bytes (`fetch_lobs = False`), so the driver calls
+# them LONG types; they are almost always CLOBs and BLOBs, and are named so.
 _TYPE_NAMES = {
     "VARCHAR": "VARCHAR2",
     "NVARCHAR": "NVARCHAR2",
-    "TIMESTAMP_TZ": "TIMESTAMP WITH TIME ZONE",
-    "TIMESTAMP_LTZ": "TIMESTAMP WITH LOCAL TIME ZONE",
+    "LONG": "CLOB",
+    "LONG_NVARCHAR": "NCLOB",
+    "LONG_RAW": "BLOB",
+    "BINARY_DOUBLE": "BINARY_DOUBLE",
+    "BINARY_FLOAT": "BINARY_FLOAT",
+    "BINARY_INTEGER": "BINARY_INTEGER",
     "INTERVAL_DS": "INTERVAL DAY TO SECOND",
     "INTERVAL_YM": "INTERVAL YEAR TO MONTH",
+}
+_TIMESTAMPS = {
+    "TIMESTAMP": "",
+    "TIMESTAMP_TZ": " WITH TIME ZONE",
+    "TIMESTAMP_LTZ": " WITH LOCAL TIME ZONE",
 }
 
 
 def _type_label(column: Any) -> str:
     """A result column's type as Oracle names it: NUMBER(10,2), VARCHAR2(64), DATE."""
-    name = getattr(column.type_code, "name", str(column.type_code)).removeprefix("DB_TYPE_")
-    name = _TYPE_NAMES.get(name, name.replace("_", " "))
-    if name in ("VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "RAW") and column.internal_size:
-        return f"{name}({column.internal_size})"
+    raw = getattr(column.type_code, "name", str(column.type_code)).removeprefix("DB_TYPE_")
+    if raw in _TIMESTAMPS:
+        precision = f"({column.scale})" if column.scale is not None else ""
+        return f"TIMESTAMP{precision}{_TIMESTAMPS[raw]}"
+    name = _TYPE_NAMES.get(raw, raw.replace("_", " "))
+    if name in ("VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "RAW") and column.display_size:
+        # In characters, as the column was declared (internal_size is in bytes).
+        return f"{name}({column.display_size})"
     if name == "NUMBER" and column.precision:
+        if column.scale == -127:
+            # A FLOAT: its precision is in binary digits.
+            return f"FLOAT({column.precision})"
         return (
             f"NUMBER({column.precision},{column.scale})"
             if column.scale
-            else (f"NUMBER({column.precision})")
+            else f"NUMBER({column.precision})"
         )
     return name
 

@@ -336,6 +336,7 @@ def test_a_result_is_exported_with_a_manifest(settings, client):
     assert manifest["playground"]["id"].startswith("pg_")
     audit = (settings.data_dir / "logs" / "audit.jsonl").read_text().splitlines()
     assert json.loads(audit[-1])["event"] == "export"
+    assert json.loads(audit[-1])["query_id"] == done["query_id"]
 
 
 def test_export_needs_a_known_folder_and_a_result(client):
@@ -360,3 +361,43 @@ def test_the_routes_need_the_browser_session(settings, catalog, database):
         assert client.post("/api/sql/runs", json={"sql": SQL}).status_code in (401, 403)
         assert client.get("/api/sql/catalog").status_code in (401, 403)
     assert database.calls == []
+
+
+def test_one_query_runs_at_a_time_in_the_playground(settings, catalog):
+    database = FakeDatabase(block=True)
+    with make_client(settings, catalog, database) as client:
+        first = client.post("/api/sql/runs", json={"sql": SQL}).json()
+        assert database.started.wait(5)
+        second = client.post("/api/sql/runs", json={"sql": SQL})
+        assert second.status_code == 409
+        assert "already running" in second.json()["detail"]
+        # Stopping twice is fine: the second only waits for the first.
+        assert client.post(f"/api/sql/runs/{first['id']}/stop").json()["state"] == "stopped"
+        assert len(database.calls) == 1
+        # Once it has stopped, another can start.
+        again = client.post("/api/sql/runs", json={"sql": SQL})
+        assert again.status_code == 202
+        client.post(f"/api/sql/runs/{again.json()['id']}/stop")
+
+
+def test_what_a_previous_run_left_is_tidied_at_startup(settings, catalog, database):
+    with make_client(settings, catalog, database) as client:
+        folder = playground_folder(settings, client)
+        owner = client.get("/api/sql/status").json()["playground_id"]
+        services = client.app.state.services  # type: ignore[attr-defined]
+        services.access_log.started(
+            query_id="q_20260101T000000_aaaaaa",
+            session_id=owner,
+            sql=SQL,
+            binds={},
+            tables=[],
+            origin="playground",
+        )
+    (folder / "results").mkdir(parents=True, exist_ok=True)
+    leftover = folder / "results" / "q_20260101T000000_aaaaaa.csv.partial"
+    leftover.write_text("half")
+    with make_client(settings, catalog, database) as client:
+        [item] = client.get("/api/sql/history").json()
+        assert item["status"] == "cancelled"
+        assert "DataLab stopped" in item["message"]
+    assert not leftover.exists()

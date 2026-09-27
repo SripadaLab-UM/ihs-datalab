@@ -54,13 +54,26 @@ def test_positions_count_from_the_sql_as_typed():
     assert marked("\n\n   SELECT FROM WHERE;") == "WHERE"
 
 
-def column(kind, size=0, precision=None, scale=None):
-    return SimpleNamespace(type_code=kind, internal_size=size, precision=precision, scale=scale)
+def column(kind, size=None, precision=None, scale=None, internal=None):
+    return SimpleNamespace(
+        type_code=kind, display_size=size, internal_size=internal, precision=precision, scale=scale
+    )
 
 
 def test_result_column_types_are_named_as_oracle_names_them():
-    assert _type_label(column(oracledb.DB_TYPE_VARCHAR, 64)) == "VARCHAR2(64)"
+    # VARCHAR2(64 CHAR) in UTF-8: 64 characters, 256 bytes.
+    assert _type_label(column(oracledb.DB_TYPE_VARCHAR, 64, internal=256)) == "VARCHAR2(64)"
+    assert _type_label(column(oracledb.DB_TYPE_NVARCHAR, 10, internal=20)) == "NVARCHAR2(10)"
     assert _type_label(column(oracledb.DB_TYPE_NUMBER, precision=10, scale=2)) == "NUMBER(10,2)"
+    assert _type_label(column(oracledb.DB_TYPE_NUMBER, precision=5, scale=0)) == "NUMBER(5)"
     assert _type_label(column(oracledb.DB_TYPE_NUMBER, precision=0, scale=-127)) == "NUMBER"
-    assert _type_label(column(oracledb.DB_TYPE_DATE)) == "DATE"
-    assert _type_label(column(oracledb.DB_TYPE_TIMESTAMP_TZ)) == "TIMESTAMP WITH TIME ZONE"
+    assert _type_label(column(oracledb.DB_TYPE_NUMBER, precision=126, scale=-127)) == "FLOAT(126)"
+    assert _type_label(column(oracledb.DB_TYPE_BINARY_DOUBLE, 127)) == "BINARY_DOUBLE"
+    assert _type_label(column(oracledb.DB_TYPE_LONG)) == "CLOB"
+    assert _type_label(column(oracledb.DB_TYPE_LONG_RAW)) == "BLOB"
+    assert _type_label(column(oracledb.DB_TYPE_DATE, 23)) == "DATE"
+    assert _type_label(column(oracledb.DB_TYPE_TIMESTAMP, precision=0, scale=6)) == "TIMESTAMP(6)"
+    assert (
+        _type_label(column(oracledb.DB_TYPE_TIMESTAMP_TZ, precision=0, scale=6))
+        == "TIMESTAMP(6) WITH TIME ZONE"
+    )

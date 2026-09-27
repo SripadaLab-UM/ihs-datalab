@@ -137,7 +137,15 @@ class DataService:
             self._log.finished(query_id, status="failed", message=str(error))
             raise
         except asyncio.CancelledError:
+            # Stopped just as it finished: the result isn't kept, as the log says.
+            out_path.unlink(missing_ok=True)
             self._log.finished(query_id, status="cancelled", message="Stopped.")
+            raise
+        except BaseException:
+            # Anything else (a bug, an unexpected error): never left as running.
+            self._log.finished(
+                query_id, status="failed", message="The query failed in DataLab; see its log."
+            )
             raise
 
         self._log.finished(
@@ -169,8 +177,13 @@ async def _cancel_on_task_cancel(work, cancel: threading.Event) -> ExtractResult
         return await asyncio.shield(task)
     except asyncio.CancelledError:
         cancel.set()
-        with contextlib.suppress(QueryFailed):
-            await task
+        # Keep the query's slot until the database call has really ended, even
+        # if the caller is cancelled again while Oracle is still cancelling.
+        while not task.done():
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait({task})
+        if not task.cancelled():
+            task.exception()  # retrieved: it's reported as the stop
         raise
 
 

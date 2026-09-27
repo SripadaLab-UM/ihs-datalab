@@ -220,6 +220,9 @@ named folders set up in Settings:
 **Nothing is deleted automatically.** Settings has a **Storage** view that
 shows disk use per conversation and per run, and offers one-click cleanup of
 old ones. This matches the promise "nothing is deleted unless you delete it".
+The SQL Playground's results (`<data_dir>/playground/<pg_id>/results/`, one
+CSV per query, up to the extraction cap each) are never cleaned up either,
+so the Storage view should show them too, with a way to remove old ones.
 
 ## Uninstalling
 
