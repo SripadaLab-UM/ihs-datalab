@@ -135,6 +135,14 @@ PLANS_PASS = [
     ("plan_mixed", plan("association", "repeated_observations", "temporal_alignment")),
     ("plan_affects", plan("association", text="An association, not a causal effect.")),
     ("plan_affects", {"plan": None, "answer": "Do you mean a causal effect, or an association?"}),
+    (
+        "plan_affects",
+        plan(
+            "association",
+            text="This supports an association claim only: it will "
+            "not show that sleeping less causes worse mood.",
+        ),
+    ),  # the eval run's words
 ]
 PLANS_FAIL = [
     ("plan_describe", plan("association")),  # an invented exposure and outcome
@@ -147,6 +155,9 @@ PLANS_FAIL = [
     ("plan_mixed", plan("association", "repeated_observations")),  # no timing
     ("plan_affects", plan("association", text="Sleep drives mood.")),  # the claim never made explicit
     ("plan_affects", {"plan": None, "answer": "Shorter sleep lowers mood."}),
+    ("plan_affects", plan("association", text="The association between sleep and mood.")),
+    ("plan_affects", plan("association", text="Short sleep causes worse mood.")),  # in passing
+    ("plan_affects", {"plan": None, "answer": "I can do that. Which cohort do you mean?"}),
 ]  # fmt: skip
 
 

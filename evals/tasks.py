@@ -477,7 +477,20 @@ def _small_cells(answer: str, e: dict) -> list[Check]:
 # only the sections it raises? Graded on the plan as proposed, before anyone
 # edits it.
 _ADD_ONS = {m.kind for m in MODULES}
-_CAUSAL = (r"\bcaus", r"\bnot (?:a )?(?:causal|cause)", r"\bassociation\b", r"\bconfound")
+# Saying which claim is intended: that it isn't causal, that it is only an
+# association, or naming it as a causal claim or effect. Not just using the
+# word "association", and not a causal claim made in passing ("X causes Y").
+_CLAIM = (
+    r"\bnot (?:a |the |as a )?caus",
+    r"\bnon-?causal\b",
+    r"\bcausal (?:claim|effect|conclusion|interpretation|question|inference)s?\b",
+    r"\b(?:won't|will not|can't|cannot|can not|does not|doesn't|do not|don't)\s+"
+    r"(?:show|establish|prove|support|imply|tell us)\b[^.]{0,80}\bcaus",
+    r"\bassociation(?:al)?(?: claim)?,? (?:not|rather than)\b",
+    r"\bassociation (?:claim )?only\b",
+)
+# Asking the person which claim they mean.
+_ABOUT_THE_CLAIM = (r"\bcaus", r"\beffect\b", r"\bassociat", r"\bcorrelat")
 
 
 def _plan_text(plan: dict) -> str:
@@ -510,7 +523,8 @@ def _plan_grader(
     def grade(result: dict, expected: dict) -> list[Check]:
         plan, answer = result.get("plan"), result.get("answer", "")
         if plan is None:
-            asked = or_asks and "?" in answer[-600:]
+            questions = [s for s in sentences(answer[-600:]) if s.rstrip().endswith("?")]
+            asked = or_asks and any(mentions(q, *_ABOUT_THE_CLAIM) for q in questions)
             return [
                 Check(
                     "proposed a plan",
@@ -537,7 +551,7 @@ def _plan_grader(
             checks.append(
                 Check(
                     "says what claim is intended",
-                    mentions(_plan_text(plan), *_CAUSAL),
+                    mentions(_plan_text(plan), *_CLAIM),
                     "the plan says whether it's a causal claim or an association",
                 )
             )

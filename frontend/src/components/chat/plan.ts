@@ -227,6 +227,16 @@ export function saveDraft(approvalId: string, proposed: PlanV2, plan: PlanV2): v
   }
 }
 
+/** Every saved draft in this tab, for when the person is signed out. */
+export function clearAllDrafts(): void {
+  try {
+    const keys = Array.from({ length: sessionStorage.length }, (_, i) => sessionStorage.key(i));
+    for (const key of keys) if (key?.startsWith("datalab:plan-draft:")) sessionStorage.removeItem(key);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 export function clearDraft(approvalId: string): void {
   try {
     sessionStorage.removeItem(draftKey(approvalId));
@@ -239,7 +249,8 @@ export function clearDraft(approvalId: string): void {
 export function proposedAfterText(plan: AnyPlan | undefined): string {
   const record = isV2(plan) ? plan.proposed_after : undefined;
   if (!record) return "Not recorded (this plan is from an earlier version of DataLab).";
-  if (!record.queries) return "No queries had returned data in this conversation.";
+  const notCounted = "Attached files, and files read in the workspace, aren't counted.";
+  if (!record.queries) return `No queries had returned data in this conversation. ${notCounted}`;
   const tables = (record.tables.join(", ") || "no tables") + (record.more_tables ? `, and ${record.more_tables} more` : "");
-  return `${record.queries} ${record.queries === 1 ? "query" : "queries"} had already returned data in this conversation, from ${tables}. Results seen before a plan aren't prespecified by it.`;
+  return `${record.queries} ${record.queries === 1 ? "query" : "queries"} had already returned data (or were running) in this conversation, from ${tables}. Results seen before a plan aren't prespecified by it. ${notCounted}`;
 }

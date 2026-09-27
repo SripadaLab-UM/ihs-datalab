@@ -7,6 +7,8 @@ import {
   planChanges,
   planSections,
   planStatus,
+  proposedAfterText,
+  clearAllDrafts,
   planSummary,
   planTypeLabel,
   requiredKinds,
@@ -123,4 +125,13 @@ it("names what became of a turn's last plan", () => {
   expect(planStatus([{ ...declined, changeTypeLabel: "Prediction" }])?.text).toBe("plan sent back");
   expect(planStatus([{ approvalKind: "analysis_plan", state: "approved", notFrozen: "x" }])?.text).toBe("plan approved, not frozen");
   expect(planStatus([helper])).toBeNull();
+});
+
+it("says what the record of what ran doesn't count, and clears every draft on sign-out", () => {
+  expect(proposedAfterText({ ...plan, proposed_after: { queries: 0, tables: [], more_tables: 0 } })).toContain("aren't counted");
+  sessionStorage.setItem("datalab:plan-draft:ap1", "{}");
+  sessionStorage.setItem("datalab:other", "kept");
+  clearAllDrafts();
+  expect(sessionStorage.getItem("datalab:plan-draft:ap1")).toBeNull();
+  expect(sessionStorage.getItem("datalab:other")).toBe("kept");
 });

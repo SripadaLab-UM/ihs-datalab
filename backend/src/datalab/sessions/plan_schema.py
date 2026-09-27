@@ -287,8 +287,10 @@ _TOP_FIELDS = {
     "revision_reason",
     "proposed_after",
 }
-# How many of the tables queried before a plan it names (the rest are counted).
+# How many of the tables queried before a plan it names (the rest are counted),
+# and the longest name one can have (Oracle: 128 for the schema, 128 for the table).
 MAX_RECORDED_TABLES = 30
+MAX_TABLE_NAME = 257
 _SECTION_FIELDS = {"kind", "label", "content"}
 # Row titles the card, the export, and the review's text use for a plan's own
 # parts, so no section of the agent's or person's can take them.
@@ -298,6 +300,8 @@ RESERVED_TITLES = (
     "Why this kind of analysis",
     "Why it changed",
     "What changes, and why",
+    "Proposed after",
+    "When it was proposed",
 )
 _PLAN_ID = re.compile(r"pl_[0-9a-f]{12}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -424,7 +428,7 @@ def _proposed_after(record: Any) -> dict[str, Any] | None:
         or not all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in counts)
         or not isinstance(record["tables"], list)
         or len(record["tables"]) > MAX_RECORDED_TABLES
-        or not all(isinstance(t, str) and 0 < len(t) <= 128 for t in record["tables"])
+        or not all(isinstance(t, str) and 0 < len(t) <= MAX_TABLE_NAME for t in record["tables"])
     ):
         raise PlanInvalid("A plan's record of what ran before it isn't in the expected form.")
     return {
@@ -440,14 +444,16 @@ def proposed_after_text(content: dict[str, Any]) -> str:
     if not isinstance(record, dict):
         return "Not recorded (this plan is from an earlier version of DataLab)."
     queries = record["queries"]
+    not_counted = "Attached files, and files read in the workspace, aren't counted."
     if not queries:
-        return "No queries had returned data in this conversation."
+        return f"No queries had returned data in this conversation. {not_counted}"
     tables = ", ".join(record["tables"]) or "no tables"
     if record["more_tables"]:
         tables += f", and {record['more_tables']} more"
     return (
-        f"{queries} {'query' if queries == 1 else 'queries'} had already returned data in this "
-        f"conversation, from {tables}. Results seen before a plan aren't prespecified by it."
+        f"{queries} {'query' if queries == 1 else 'queries'} had already returned data (or were "
+        f"running) in this conversation, from {tables}. Results seen before a plan aren't "
+        f"prespecified by it. {not_counted}"
     )
 
 

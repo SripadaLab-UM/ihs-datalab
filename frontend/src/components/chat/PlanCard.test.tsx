@@ -291,10 +291,19 @@ it("says what had returned data when the plan was proposed, and when that wasn't
   const recorded = { ...proposed, proposed_after: { queries: 2, tables: ["IHS_2025.VW_DAILY_MOOD"], more_tables: 0 } };
   const view = show({ ...pending, plan: recorded });
   expect(
-    await screen.findByText(/When it was proposed: 2 queries had already returned data in this conversation, from IHS_2025.VW_DAILY_MOOD/),
+    await screen.findByText(/When it was proposed: 2 queries had already returned data \(or were running\) in this conversation, from IHS_2025.VW_DAILY_MOOD/),
   ).toBeInTheDocument();
   view.unmount();
   show({ ...pending, state: "approved", plan: { question: "Sleep?" }, frozen: { at: "2026-09-01T12:00:00Z", sha256: "0123456789" } });
   fireEvent.click(screen.getByRole("button", { name: "Show the frozen plan" }));
   expect(screen.getByText("Not recorded (this plan is from an earlier version of DataLab).")).toBeInTheDocument();
+});
+
+it("drops saved edits once the plan isn't waiting any more, however it ended", async () => {
+  const first = show(pending);
+  fireEvent.change(await screen.findByDisplayValue("A table."), { target: { value: "A table and a figure." } });
+  expect(sessionStorage.getItem("datalab:plan-draft:ap1")).not.toBeNull();
+  first.unmount();
+  show({ ...pending, state: "withdrawn" }); // the turn stopped, or it timed out, or another tab answered
+  expect(sessionStorage.getItem("datalab:plan-draft:ap1")).toBeNull();
 });

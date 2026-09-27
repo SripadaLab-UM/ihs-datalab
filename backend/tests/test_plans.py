@@ -398,3 +398,9 @@ def test_a_registered_section_given_as_an_additional_one_is_pointed_to_its_kind(
     # The eval run's agent did this; the error says how to do it instead.
     with pytest.raises(PlanInvalid, match="give it in `sections` as 'repeated_observations'"):
         clean_plan(plan("describe", {"measures": "m"}, [("Repeated Observations", "x")]))
+
+
+@pytest.mark.parametrize("title", ["Proposed after", "Proposed After:", "When it was proposed"])
+def test_the_records_row_titles_are_reserved(title):
+    with pytest.raises(PlanInvalid, match="already has a section"):
+        clean_plan(plan("describe", {"measures": "m"}, [(title, "No queries had returned data.")]))

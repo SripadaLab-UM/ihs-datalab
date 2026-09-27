@@ -287,17 +287,22 @@ async def test_a_failure_freezing_as_the_turn_stops_doesnt_swallow_the_stop(desk
 
 
 class Query:
+    count = 0
+
     def __init__(self, status, tables):
-        self.status, self.tables = status, tables
+        Query.count += 1
+        self.id, self.status, self.tables = f"q{Query.count}", status, tables
 
 
 async def test_a_plan_records_what_had_returned_data_when_it_was_proposed(desk, store):
     assert desk.planning_record("c1") == {"queries": 0, "tables": [], "more_tables": 0}
-    desk.queries_so_far = lambda cid: [
+    so_far = [
         Query("succeeded", ["IHS_2025.VW_DAILY_MOOD"]),
         Query("succeeded", ["IHS_2025.VW_DAILY_MOOD", "IHS_2025.STUDYPARTICIPANTS"]),
         Query("rejected", ["IHS_2025.SECRET"]),  # never returned anything
+        Query("failed", ["IHS_2025.OTHER"]),
     ]
+    desk.queries_so_far = lambda cid: so_far
     record = desk.planning_record("c1")
     assert record == {
         "queries": 2,
@@ -328,3 +333,69 @@ def test_the_record_of_what_ran_before_cant_be_edited_or_malformed():
 def test_a_plan_from_before_the_record_says_it_wasnt_recorded():
     old = Plan("pl_1", "c1", "2026-09-01T00:00:00+00:00", {"question": "Sleep?"}, "0" * 64)
     assert "- Proposed after: Not recorded" in as_text(old)
+
+
+def test_a_running_query_counts_and_other_conversations_queries_dont(desk):
+    queries = {
+        "c1": [Query("running", ["IHS_2025.VW_DAILY_MOOD"])],
+        "c2": [Query("succeeded", ["X"])],
+    }
+    desk.queries_so_far = lambda cid: queries[cid]
+    assert desk.planning_record("c1") == {
+        "queries": 1,
+        "tables": ["IHS_2025.VW_DAILY_MOOD"],
+        "more_tables": 0,
+    }
+
+
+def test_many_tables_are_counted_and_long_names_fit(desk):
+    from datalab.sessions.plan_schema import MAX_RECORDED_TABLES, MAX_TABLE_NAME
+
+    longest = "S" * 128 + "." + "T" * 128
+    assert len(longest) == MAX_TABLE_NAME
+    tables = [f"IHS_2025.T{i:02}" for i in range(MAX_RECORDED_TABLES + 5)] + [longest]
+    desk.queries_so_far = lambda cid: [Query("succeeded", tables)]
+    record = desk.planning_record("c1")
+    assert len(record["tables"]) == MAX_RECORDED_TABLES and record["more_tables"] == 6
+    record = {"queries": 1, "tables": [longest], "more_tables": 0}
+    clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})  # accepted
+
+
+async def test_a_plan_isnt_frozen_if_queries_ran_while_it_waited(desk, store):
+    """Codex can call query alongside propose_plan: results that arrive while
+    the plan waits would make its record untrue, so it isn't frozen."""
+    ran: list = []
+    desk.queries_so_far = lambda cid: ran
+    record = desk.planning_record("c1")
+    proposed = clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})
+
+    async def codex(approval_id):
+        ran.append(Query("succeeded", ["IHS_2025.VW_DAILY_MOOD"]))  # a query in parallel
+        desk._approvals.answer("c1", approval_id, True)
+
+    outcome = await desk.propose("c1", proposed, codex)
+    assert isinstance(outcome, Outcome) and "wasn't frozen" in outcome.note
+    assert store.list("c1") == []
+    kind, data = desk.events[-1]
+    assert kind == "plan_not_frozen" and "1 more query ran while the plan waited" in data["reason"]
+    # Proposed again, now with that query in its record, it's frozen.
+    again = clean_plan(
+        {**plan("association", ASSOCIATION), "proposed_after": desk.planning_record("c1")}
+    )
+    frozen = await desk.propose("c1", again, answering(desk))
+    assert isinstance(frozen, Plan) and frozen.content["proposed_after"]["queries"] == 1
+
+
+def test_removing_the_record_on_approval_is_refused():
+    record = {"queries": 0, "tables": [], "more_tables": 0}
+    proposed = clean_plan({**plan("association", ASSOCIATION), "proposed_after": record})
+    without = {k: v for k, v in proposed.items() if k != "proposed_after"}
+    with pytest.raises(PlanInvalid, match="can't be changed"):
+        plan_answer(proposed, True, without, None)
+
+
+def test_the_record_says_what_it_doesnt_count():
+    from datalab.sessions.plan_schema import proposed_after_text
+
+    text = proposed_after_text({"proposed_after": {"queries": 0, "tables": [], "more_tables": 0}})
+    assert "aren't counted" in text and "Attached files" in text

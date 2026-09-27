@@ -10,14 +10,24 @@ from __future__ import annotations
 
 import re
 
-from datalab.sessions.plan_schema import MAX_PLAN, MAX_SECTION, V1_LABELS
+from datalab.sessions.plan_schema import (
+    MAX_PLAN,
+    MAX_RECORDED_TABLES,
+    MAX_SECTION,
+    MAX_TABLE_NAME,
+    V1_LABELS,
+)
 
 # The most of one plan the review is shown. Plans are bounded when they're
 # written (plan_schema.py), and every valid plan's text fits in this, so none
 # is cut: at most twice its longest content (each continuation line is
 # indented), plus labels. If a stored plan ever didn't fit, the review is
 # told what's missing.
-MAX_PLAN_TEXT = 2 * max(MAX_PLAN, len(V1_LABELS) * MAX_SECTION) + 2000
+MAX_PLAN_TEXT = (
+    2 * max(MAX_PLAN, len(V1_LABELS) * MAX_SECTION)
+    + MAX_RECORDED_TABLES * (MAX_TABLE_NAME + 2)  # the record of what ran before the plan
+    + 2000
+)
 # The review sees this many of the latest plans; it's told about any others.
 MAX_PLANS = 3
 

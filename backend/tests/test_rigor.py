@@ -43,7 +43,7 @@ def largest_plans(pattern: str = "y\n"):
             # The longest record of what ran before it, too.
             "proposed_after": {
                 "queries": 10**6,
-                "tables": ["T" * 128] * ps.MAX_RECORDED_TABLES,
+                "tables": ["T" * ps.MAX_TABLE_NAME] * ps.MAX_RECORDED_TABLES,
                 "more_tables": 10**6,
             },
             "sections": [

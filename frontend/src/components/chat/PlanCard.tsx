@@ -41,6 +41,11 @@ const length = (text: string) => Array.from(text.trim()).length;
 /** An analysis plan to approve (and edit) before the agent touches outcome data. */
 export function PlanCard({ conversationId, approval }: { conversationId: string; approval: Approval }) {
   const editable = approval.state === "pending" && isV2(approval.plan);
+  // No longer waiting (answered, here or in another tab, withdrawn, or timed
+  // out): its saved edits have nothing to go back to.
+  useEffect(() => {
+    if (approval.state !== "pending") clearDraft(approval.id);
+  }, [approval.state, approval.id]);
   // Decided: the plan folds to its question and status; the exact frozen text is a click away.
   const [showPlan, setShowPlan] = useState(false);
   const [showChanges, setShowChanges] = useState(false);

@@ -166,6 +166,8 @@ class PlanDesk:
         self.current_turn: Any = lambda conversation_id: None
         # The conversation's queries so far (access_log.AccessLog.for_session).
         self.queries_so_far: Any = lambda conversation_id: []
+        # The queries a plan's record counted, per conversation, until it's proposed.
+        self._recorded: dict[str, set[str]] = {}
         # The version of a plan the person last sent back, per conversation,
         # and the turn it was sent back in, so the agent's next proposal in
         # that turn can be shown against it. For display only.
@@ -187,15 +189,23 @@ class PlanDesk:
 
     def planning_record(self, conversation_id: str) -> dict[str, Any]:
         """What had run in the conversation so far, for a plan proposed now:
-        the queries that returned data, and the tables they read. Recorded by
-        DataLab, not said by the agent, so it holds whatever the plan says."""
-        ran = [q for q in self.queries_so_far(conversation_id) if q.status == "succeeded"]
+        the queries that returned data or are still running (their results may
+        arrive before the plan is approved), and the tables they read.
+        Recorded by DataLab, not said by the agent, so it holds whatever the
+        plan says. The plan is only frozen if no more ran while it waited."""
+        ran = self._ran(conversation_id)
+        self._recorded[conversation_id] = {q.id for q in ran}
         tables = sorted({t for q in ran for t in q.tables})
         return {
             "queries": len(ran),
             "tables": tables[:MAX_RECORDED_TABLES],
             "more_tables": max(0, len(tables) - MAX_RECORDED_TABLES),
         }
+
+    def _ran(self, conversation_id: str) -> list[Any]:
+        return [
+            q for q in self.queries_so_far(conversation_id) if q.status in ("succeeded", "running")
+        ]
 
     def check_revision(self, conversation_id: str, content: dict[str, Any]) -> None:
         """PlanInvalid if a revision changes nothing in the plan it revises."""
@@ -211,6 +221,7 @@ class PlanDesk:
         self, conversation_id: str, content: dict[str, Any], elicit: Any
     ) -> Plan | Outcome:
         """The approved (maybe edited) plan, or why there isn't one."""
+        counted = self._recorded.pop(conversation_id, None)
         if not self.turn_running(conversation_id):
             return Outcome("Plans can only be proposed during a turn.")
         pending = self._approvals.open(
@@ -230,18 +241,39 @@ class PlanDesk:
                 approved, value = pending.decision.result()
                 if approved:
                     try:
-                        self._freeze(conversation_id, pending.id, json.loads(value))
+                        self._freeze(conversation_id, pending.id, json.loads(value), counted)
                     except Exception:
                         # The Stop still goes through; this is only logged.
                         log.exception("couldn't freeze a plan approved as the turn stopped")
             raise
         if not approved:
             return self._not_approved(conversation_id, content, value)
-        return self._freeze(conversation_id, pending.id, json.loads(value))
+        return self._freeze(conversation_id, pending.id, json.loads(value), counted)
 
     def _freeze(
-        self, conversation_id: str, approval_id: str, content: dict[str, Any]
+        self,
+        conversation_id: str,
+        approval_id: str,
+        content: dict[str, Any],
+        counted: set[str] | None = None,
     ) -> Plan | Outcome:
+        if counted is not None and (since := {q.id for q in self._ran(conversation_id)} - counted):
+            # Results that arrived while the plan waited would make its record untrue.
+            self._emit(
+                conversation_id,
+                "plan_not_frozen",
+                {
+                    "approval": approval_id,
+                    "reason": f"{len(since)} more {'query' if len(since) == 1 else 'queries'} "
+                    "ran while the plan waited, so its record of what had already run was out "
+                    "of date. The agent will propose it again.",
+                },
+            )
+            return Outcome(
+                "This plan wasn't frozen: queries ran while it waited for approval, so its "
+                "record of what had already run is out of date. Propose it again, and don't run "
+                "queries while a plan waits."
+            )
         revises = revision_of(content)
         if revises and revises["plan_id"] in self._store.superseded(conversation_id):
             # Another revision of the same plan was approved while this one waited.
