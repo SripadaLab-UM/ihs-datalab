@@ -14,8 +14,17 @@ if [ -n "${AGENT_IMAGE:-}" ]; then
   printf '{"agent_image": "%s"}\n' "$AGENT_IMAGE" > "$root/backend/src/datalab/release.json"
 fi
 (cd "$root/backend" && rm -rf dist && uv build --wheel)
-# The exact dependency versions from uv.lock. The installers pass this to
-# `uv tool install --constraints`, so every install gets the tested versions.
+# Every dependency from uv.lock, pinned by version and hash, then the package
+# itself by its checksum. The installers and the updater install exactly this,
+# with `uv pip install --require-hashes --only-binary :all: -r requirements.txt`,
+# so nothing is installed that the release didn't name (docs/DISTRIBUTION.md).
+(cd "$root/backend" && uv export --no-dev --no-emit-project \
+  --format requirements-txt -q -o dist/requirements.txt)
+wheel="$(cd "$root/backend/dist" && ls datalab-*-py3-none-any.whl)"
+digest="$(shasum -a 256 "$root/backend/dist/$wheel" 2>/dev/null || sha256sum "$root/backend/dist/$wheel")"
+printf './%s --hash=sha256:%s\n' "$wheel" "${digest%% *}" >> "$root/backend/dist/requirements.txt"
+# The same versions without hashes, for the Windows installer until it moves to
+# requirements.txt (it waits on the single-elevation installer, PR #11).
 (cd "$root/backend" && uv export --no-dev --no-hashes --no-emit-project \
   --format requirements-txt -q -o dist/constraints.txt)
 rm -rf "$root/backend/src/datalab/web_dist" "$root/backend/src/datalab/release.json"

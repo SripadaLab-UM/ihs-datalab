@@ -24,5 +24,5 @@ fi
 if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^datalab '; then
   uv tool uninstall datalab
 fi
-rm -rf "$HOME/Applications/DataLab.app"
+rm -rf "$HOME/Applications/DataLab.app" "$HOME/Applications/DataLab (practice).app"
 echo "DataLab has been removed."

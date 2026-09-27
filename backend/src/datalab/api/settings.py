@@ -246,7 +246,14 @@ class UpdateInstallOut(BaseModel):
 
 class UpdateCheckOut(BaseModel):
     state: Literal[
-        "not-checked", "up-to-date", "available", "offline", "rate-limited", "not-visible", "failed"
+        "not-checked",
+        "not-configured",
+        "up-to-date",
+        "available",
+        "offline",
+        "rate-limited",
+        "not-visible",
+        "failed",
     ]
     message: str
     current_version: str
@@ -257,6 +264,8 @@ class UpdateCheckOut(BaseModel):
     # Why Install update can't be used here or now, when it can't.
     cannot_install_because: str | None
     install: UpdateInstallOut
+    # An update is being installed: nothing new can start until DataLab restarts.
+    updating: bool
 
 
 class UpdateInstallIn(BaseModel):
@@ -540,6 +549,7 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             can_install=release is not None and last.state == "available" and why_not is None,
             cannot_install_because=why_not,
             install=UpdateInstallOut(**asdict(progress)),
+            updating=updater.gate.closed_for is not None,
         )
 
     @router.get("/updates/check")

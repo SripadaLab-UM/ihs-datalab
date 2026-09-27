@@ -21,14 +21,17 @@ from datalab import db, updater, updates
 from datalab.config import Settings
 from datalab.db import backups
 from datalab.releases import ChecksumMismatch, ReleaseSource, UpdateChecker
+from datalab.update_gate import UpdateGate
 from datalab.updater import Layout, Relaunch, UpdateFailed, Updater, check_images
 from tests.release_fakes import (
     AGENT,
     GATEWAY,
     PROXY,
     REPO,
+    TEST_PUBLIC,
     FakeGitHub,
     images_bytes,
+    requirements_for,
     sums_for,
     wheel_bytes,
 )
@@ -99,14 +102,25 @@ class World:
         self.github = FakeGitHub()
         self.github.release("v0.1.0-alpha.3", prerelease=True, notes="Faster exports.")
         self.checker = UpdateChecker(
-            self.settings, source=ReleaseSource(REPO, http=self.github.client()), current=OLD
+            self.settings,
+            source=ReleaseSource(REPO, http=self.github.client()),
+            current=OLD,
+            keys=(TEST_PUBLIC,),
         )
         self.run = FakeRunner(self.layout)
         self.events: list[str] = []
         self.run.events = self.events
         self.spawned: list[list[str]] = []
+        self.spawned_in: list[Path] = []
         self.shutdowns = 0
         self.busy: str | None = None
+        # The other profile's data folders, and which of them a DataLab holds.
+        self.others: list[Path] = []
+        self.gate = UpdateGate()
+
+    def spawn(self, command: list[str], cwd: Path) -> None:
+        self.spawned.append(command)
+        self.spawned_in.append(cwd)
 
     def updater(self, **overrides) -> Updater:
         async def stop_sessions() -> None:
@@ -124,12 +138,24 @@ class World:
             "platform": "darwin",
             "busy": lambda: self.busy,
             "stop_sessions": stop_sessions,
-            "spawn_helper": self.spawned.append,
+            "spawn_helper": self.spawn,
             "shutdown": shutdown,
             "python": "/old/python",
+            "gate": self.gate,
+            "other_data_dirs": lambda: self.others,
+            "settle": self.settle,
         }
         options.update(overrides)
         return Updater(self.settings, self.checker, **options)
+
+    async def settle(self, seconds: float) -> None:
+        self.events.append("settle")
+        if self.busy_until_settled:
+            self.busy_until_settled -= 1
+            if not self.busy_until_settled:
+                self.busy = None
+
+    busy_until_settled = 0
 
     def check(self):
         found = self.checker.check()
@@ -188,16 +214,18 @@ async def test_an_update_installs_beside_backs_up_switches_and_restarts(world):
     assert (world.root / "versions" / OLD / ".complete").read_text() == "{}"
     assert not (world.root / "downloads" / NEW).exists()
     venv, pip, *_ = world.run.commands
-    assert venv[:4] == ["/fake/uv", "venv", "--python", "3.13"]
+    assert venv[:5] == ["/fake/uv", "venv", "--no-config", "--python", "3.13"]
     assert venv[-1] == str(world.root / "versions" / NEW)
-    assert pip[-1].endswith(f"datalab-{NEW}-py3-none-any.whl")
-    # uv gets constraints.txt by its plain name, from its folder: uv cuts a
-    # --constraints path at its first space ("Application Support").
-    assert pip[pip.index("--constraints") + 1] == "constraints.txt"
+    # uv gets requirements.txt by its plain name, from its folder: uv cuts a
+    # path at its first space ("Application Support").
+    assert pip[-2:] == ["-r", "requirements.txt"]
     assert world.run.cwds[1] == world.root / "downloads" / NEW
-    # The restart helper runs on the old version's Python, then DataLab quits.
+    # The restart helper runs on the old version's Python, isolated (-I), in
+    # the install folder, then DataLab quits.
     [helper] = world.spawned
-    assert helper[:4] == ["/old/python", "-m", "datalab.updater", "relaunch"]
+    assert helper[:5] == ["/old/python", "-I", "-m", "datalab.updater", "relaunch"]
+    assert world.spawned_in == [world.root]
+    assert world.gate.closed_for == NEW  # nothing new starts before the restart
     assert helper[helper.index("--to") + 1] == NEW and helper[helper.index("--from") + 1] == OLD
     assert world.shutdowns == 1
 
@@ -377,10 +405,12 @@ async def test_an_interruption_mid_install_is_still_undone(world):
 def test_a_version_installed_before_is_reused_and_kept(world):
     world.check()
     (world.root / "versions" / NEW / "bin").mkdir(parents=True)
-    (world.root / "versions" / NEW / ".complete").write_text("{}")
-    world.run.fail = "pull-images"
     update = world.updater()
     staged = update.download(world.checker.last.release, world.checker.last.expected)  # type: ignore[arg-type]
+    (world.root / "versions" / NEW / ".complete").write_text(
+        json.dumps({"version": NEW, "wheel_sha256": staged.wheel_sha256})
+    )
+    world.run.fail = "pull-images"
     with pytest.raises(UpdateFailed):
         update.apply(staged)
     assert "venv" not in world.events  # not installed again
@@ -441,7 +471,7 @@ def test_abandon_refuses_once_the_new_version_changed_the_database(world):
 
 
 async def test_if_the_helper_cant_start_it_says_to_reopen(world):
-    def refuse(command):
+    def refuse(command, cwd):
         raise OSError("no")
 
     update = await install(world, spawn_helper=refuse)
@@ -464,6 +494,8 @@ class Fake:
         self.alive: set[int] = {100}
         self.owner = 100
         self.launched: list[list[str]] = []
+        # Whether something holds the data folder (a DataLab that doesn't say who).
+        self.held = False
         # What happens when a DataLab is opened: a function of the launch count.
         self.on_launch = self.new_version_starts
 
@@ -475,7 +507,8 @@ class Fake:
         if self.now > 2:
             self.alive.discard(100)  # the old DataLab has quit
 
-    def launch(self, command: list[str]) -> None:
+    def launch(self, command: list[str], cwd: Path) -> None:
+        assert cwd == self.world.root
         self.launched.append(command)
         self.on_launch()
 
@@ -495,6 +528,7 @@ class Fake:
             alive=lambda pid: pid in self.alive,
             owner=lambda data_dir: self.owner,
             launch=self.launch,
+            in_use=lambda data_dir: self.held,
             platform="darwin",
             clock=self.clock,
             sleep=self.sleep,
@@ -638,12 +672,13 @@ def test_images_must_be_pinned_and_match_the_package(tmp_path):
 
 
 async def test_a_release_whose_images_dont_match_its_package_isnt_installed(world):
+    package = wheel_bytes("0.1.0a4")
     world.github.release(
         "v0.1.0-alpha.4",
         prerelease=True,
         files={
-            "datalab-0.1.0a4-py3-none-any.whl": wheel_bytes("0.1.0a4"),
-            "constraints.txt": b"",
+            "datalab-0.1.0a4-py3-none-any.whl": package,
+            "requirements.txt": requirements_for("datalab-0.1.0a4-py3-none-any.whl", package),
             "images.json": images_bytes(gateway="docker.io/library/nginx@sha256:" + "e" * 64),
         },
     )
@@ -671,3 +706,361 @@ def test_sums_for_the_fake_release_match_its_files():
     # (The fake itself: SHA256SUMS lists what the release carries.)
     text = sums_for({"a": b"1"}).decode()
     assert text.endswith("  a\n") and json.dumps(text)
+
+
+# ------------------------------------------------------------------ installing by hash
+
+
+async def test_uv_installs_only_what_requirements_txt_pins_by_hash(world):
+    await install(world)
+    pip = world.run.commands[1]
+    assert pip[:4] == ["/fake/uv", "pip", "install", "--no-config"]
+    for flag in (
+        ["--require-hashes"],
+        ["--only-binary", ":all:"],
+        ["--default-index", "https://pypi.org/simple"],
+    ):
+        at = pip.index(flag[0])
+        assert pip[at : at + len(flag)] == flag
+    assert "--constraints" not in pip and "--index-url" not in pip
+    assert not any(part.endswith(".whl") for part in pip)  # only through requirements.txt
+
+
+def test_uv_and_pip_settings_never_reach_the_subprocesses(monkeypatch, tmp_path):
+    for name, value in {
+        "UV_INDEX_URL": "https://evil.example/simple",
+        "UV_EXTRA_INDEX_URL": "https://evil.example/simple",
+        "PIP_INDEX_URL": "https://evil.example/simple",
+        "uv_no_verify_hashes": "1",
+        "PYTHONPATH": str(tmp_path),
+        "DATALAB_KEEP_ME": "yes",
+    }.items():
+        monkeypatch.setenv(name, value)
+    seen: dict = {}
+
+    def fake_run(command, **options):
+        seen.update(options)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    updater.run_command(["uv", "--version"], 5, cwd=tmp_path)
+    env = seen["env"]
+    assert env["DATALAB_KEEP_ME"] == "yes" and seen["cwd"] == tmp_path
+    assert not [n for n in env if n.upper().startswith(("UV_", "PIP_")) or n == "PYTHONPATH"]
+
+
+def test_the_helper_is_started_isolated_and_detached(monkeypatch, tmp_path):
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "evil"))
+    monkeypatch.setenv("UV_INDEX_URL", "https://evil.example/simple")
+    started: dict = {}
+
+    class Popen:
+        def __init__(self, command, **options) -> None:
+            started.update(options, command=command)
+
+    monkeypatch.setattr(subprocess, "Popen", Popen)
+    updater._spawn_detached(["/old/python", "-I", "-m", "datalab.updater"], tmp_path)
+    assert started["cwd"] == tmp_path
+    assert "PYTHONPATH" not in started["env"] and "UV_INDEX_URL" not in started["env"]
+    assert started.get("start_new_session") is True
+    updater._open(["osascript"], tmp_path, "darwin")
+    assert started["cwd"] == tmp_path and "PYTHONPATH" not in started["env"]
+
+
+GOOD_HASH = "a" * 64
+WHEEL = f"datalab-{NEW}-py3-none-any.whl"
+
+
+def good_requirements() -> str:
+    from tests.release_fakes import REQUIREMENTS
+
+    return REQUIREMENTS + f"./{WHEEL} --hash=sha256:{GOOD_HASH}\n"
+
+
+def test_requirements_pinned_by_hash_pass():
+    updater.check_requirements(good_requirements(), WHEEL, GOOD_HASH)
+
+
+@pytest.mark.parametrize(
+    ("change", "why"),
+    [
+        (lambda t: t.replace(GOOD_HASH, "b" * 64), "another checksum"),
+        (lambda t: "--extra-index-url https://evil.example/simple\n" + t, "doesn't pin"),
+        (lambda t: "--index-url https://evil.example/simple\n" + t, "doesn't pin"),
+        (lambda t: t + "evil==1.0\n", "doesn't pin"),
+        (lambda t: t + "evil>=1.0 --hash=sha256:" + "c" * 64 + "\n", "doesn't pin"),
+        (lambda t: t + "-e ./somewhere\n", "doesn't pin"),
+        (lambda t: t + "evil @ https://evil.example/e.whl --hash=sha256:" + "c" * 64 + "\n", ""),
+        (lambda t: t + "datalab==9.0 --hash=sha256:" + "c" * 64 + "\n", "DataLab itself"),
+        (lambda t: t + f"./{WHEEL} --hash=sha256:{GOOD_HASH}\n", "once"),
+        (lambda t: t.replace(f"./{WHEEL}", "./other.whl"), ""),
+        (lambda t: t + "evil==1.0 --hash=md5:" + "c" * 32 + "\n", ""),
+        (lambda t: t + "evil==1.0 ; x == '1' --index-url=y --hash=sha256:" + "c" * 64 + "\n", ""),
+    ],
+)
+def test_requirements_that_could_install_something_else_are_refused(change, why):
+    with pytest.raises(ChecksumMismatch, match=why or None):
+        updater.check_requirements(change(good_requirements()), WHEEL, GOOD_HASH)
+
+
+async def test_a_release_whose_requirements_dont_pin_its_package_isnt_installed(world):
+    package = wheel_bytes("0.1.0a4")
+    wheel = "datalab-0.1.0a4-py3-none-any.whl"
+    world.github.release(
+        "v0.1.0-alpha.4",
+        prerelease=True,
+        files={
+            wheel: package,
+            "requirements.txt": requirements_for(wheel, b"a different package"),
+            "images.json": images_bytes(),
+        },
+    )
+    assert world.checker.check().state == "available"
+    update = world.updater()
+    await update.start("0.1.0a4")
+    await update.wait()
+    assert update.progress.state == "failed" and "another checksum" in update.progress.message
+    assert world.marker() is None and "venv" not in world.events
+
+
+# ------------------------------------------------------------------ the gate
+
+
+async def test_the_gate_is_closed_before_conversations_stop(world):
+    seen: list[str | None] = []
+
+    async def stop_sessions() -> None:
+        seen.append(world.gate.closed_for)
+
+    await install(world, stop_sessions=stop_sessions)
+    assert seen == [NEW]
+
+
+async def test_a_failed_update_opens_the_gate_again(world):
+    world.run.fail = "pip"
+    update = await install(world)
+    assert update.progress.state == "failed" and world.gate.closed_for is None
+
+
+async def test_work_that_began_before_the_gate_closed_stops_the_update(world):
+    world.check()
+    connection = db.connect(world.settings.database_file)
+    update = world.updater(
+        busy=lambda: updater.busy_reason(connection, lambda: False, world.gate.in_flight)
+    )
+    await update.start(NEW)
+    world.gate.enter()  # an export, say, started while it downloaded
+    await update.wait()
+    connection.close()
+    assert update.progress.state == "failed" and "in the middle of" in update.progress.message
+    assert world.gate.closed_for is None and "stop-sessions" not in world.events
+    assert_nothing_changed(world)
+
+
+async def test_before_restarting_it_waits_for_what_is_still_going(world):
+    busy_after_switch = {"on": False}
+
+    def busy():
+        return "A query is running." if busy_after_switch["on"] else None
+
+    async def stop_sessions() -> None:
+        world.events.append("stop-sessions")
+        busy_after_switch["on"] = True  # a query that began just before the gate
+
+    world.busy_until_settled = 3
+
+    async def settle(seconds: float) -> None:
+        world.events.append("settle")
+        world.busy_until_settled -= 1
+        if not world.busy_until_settled:
+            busy_after_switch["on"] = False
+
+    update = await install(world, busy=busy, stop_sessions=stop_sessions, settle=settle)
+    assert world.events.count("settle") == 3
+    assert world.shutdowns == 1 and update.progress.state == "restarting"
+
+
+async def test_if_something_never_finishes_it_doesnt_restart_and_keeps_the_gate(world):
+    state = {"switched": False}
+
+    def busy():
+        return "A query is running. Wait for it." if state["switched"] else None
+
+    async def stop_sessions() -> None:
+        state["switched"] = True
+
+    async def settle(seconds: float) -> None:
+        pass
+
+    update = await install(world, busy=busy, stop_sessions=stop_sessions, settle=settle)
+    assert world.shutdowns == 0 and world.spawned == []
+    assert "once it has, quit DataLab and open it again" in update.progress.message
+    assert world.gate.closed_for == NEW
+
+
+def test_the_gate_refuses_anything_that_could_start_work():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from datalab.update_gate import UpdateGateMiddleware
+
+    gate = UpdateGate()
+    app = FastAPI()
+    seen: list[int] = []
+
+    @app.post("/api/conversations/c1/messages")
+    def send() -> dict:
+        seen.append(gate.in_flight())
+        return {}
+
+    @app.get("/api/conversations")
+    def listing() -> dict:
+        return {}
+
+    @app.post("/api/settings/updates/check")
+    def check() -> dict:
+        return {}
+
+    app.add_middleware(UpdateGateMiddleware, gate=gate)
+    client = TestClient(app)
+    assert client.post("/api/conversations/c1/messages").status_code == 200
+    assert seen == [1] and gate.in_flight() == 0  # counted while under way
+    gate.close(NEW)
+    refused = client.post("/api/conversations/c1/messages")
+    assert refused.status_code == 409 and "being updated to 0.1.0a3" in refused.json()["detail"]
+    for method in ("put", "patch", "delete"):
+        assert getattr(client, method)("/api/exports/x").status_code == 409
+    assert client.post("/mcp").status_code == 409
+    assert client.post("/relay/v1/responses").status_code == 409
+    assert client.get("/api/conversations").status_code == 200
+    assert client.post("/api/settings/updates/check").status_code == 200
+    gate.open()
+    assert client.post("/api/conversations/c1/messages").status_code == 200
+
+
+def test_the_app_puts_the_gate_in_front_of_every_route(settings, catalog):
+    from fastapi.testclient import TestClient
+
+    from datalab.app import create_app
+    from tests.conftest import FakeDatabase
+
+    app = create_app(
+        settings,
+        database=FakeDatabase(),
+        catalog=catalog,
+        manage_containers=False,
+        protect_api=False,
+    )
+    client = TestClient(app)
+    gate = next(
+        m.kwargs["gate"] for m in app.user_middleware if m.cls.__name__ == "UpdateGateMiddleware"
+    )
+    gate.close(NEW)
+    refused = client.post("/api/conversations", json={"kind": "data"})
+    assert refused.status_code == 409
+    assert client.get("/api/settings/updates/check").json()["updating"] is True
+
+
+def test_busy_counts_requests_and_pipeline_tests(tmp_path):
+    connection = db.connect(tmp_path / "datalab.sqlite")
+    assert "in the middle of" in (updater.busy_reason(connection, lambda: False, lambda: 1) or "")
+    connection.execute(
+        "INSERT INTO pipeline_tests (id, tree, status, started_at) "
+        "VALUES ('pt_1', 'abc', 'running', '2026-09-27')"
+    )
+    assert "pipeline's tests" in (updater.busy_reason(connection, lambda: False) or "")
+
+
+# ------------------------------------------------------------------ the other profile
+
+
+def test_it_wont_update_while_the_other_profiles_datalab_is_open(world, tmp_path):
+    from datalab import datalock
+
+    other = tmp_path / "practice"
+    world.others = [other]
+    update = world.updater()
+    assert update.why_not() is None
+    with datalock.hold(other):
+        assert "quit that one first" in (update.why_not() or "")
+    assert update.why_not() is None
+
+
+def test_the_other_profile_opening_mid_update_stops_the_switch(world, tmp_path):
+    from datalab import datalock
+
+    other = tmp_path / "practice"
+    world.others = [other]
+    world.check()
+    update = world.updater()
+    staged = update.download(world.checker.last.release, world.checker.last.expected)  # type: ignore[arg-type]
+    with datalock.hold(other), pytest.raises(UpdateFailed, match="quit that one first"):
+        update.apply(staged)
+    assert_nothing_changed(world)
+
+
+def test_the_probe_never_writes_the_other_folders_lock_record(tmp_path):
+    from datalab import datalock
+
+    folder = tmp_path / "practice"
+    folder.mkdir()
+    (folder / ".lock").write_text('{"pid": 4242, "host": "x", "started": "y"}\n')
+    assert datalock.in_use(folder) is False
+    assert datalock.owner(folder) == {"pid": 4242, "host": "x", "started": "y"}
+    assert datalock.in_use(tmp_path / "missing") is False
+
+
+# ------------------------------------------------------------------ versions on disk
+
+
+def test_a_version_folder_with_another_package_is_reinstalled(world):
+    world.check()
+    (world.root / "versions" / NEW / "bin").mkdir(parents=True)
+    (world.root / "versions" / NEW / ".complete").write_text(
+        json.dumps({"version": NEW, "wheel_sha256": "0" * 64})
+    )
+    update = world.updater()
+    staged = update.download(world.checker.last.release, world.checker.last.expected)  # type: ignore[arg-type]
+    update.apply(staged)
+    assert "venv" in world.events
+    record = json.loads((world.root / "versions" / NEW / ".complete").read_text())
+    assert record["wheel_sha256"] == staged.wheel_sha256 and record["version"] == NEW
+
+
+async def test_older_versions_are_removed_once_the_launcher_switched(world):
+    for old in ("0.0.9", "0.1.0a1"):
+        (world.root / "versions" / old).mkdir(parents=True)
+        (world.root / "versions" / old / ".complete").write_text("{}")
+    (world.root / "versions" / "notes").mkdir()  # not a version: left alone
+    await install(world)
+    assert sorted(p.name for p in (world.root / "versions").iterdir()) == [OLD, NEW, "notes"]
+
+
+async def test_versions_are_kept_if_the_update_fails(world):
+    (world.root / "versions" / "0.0.9").mkdir(parents=True)
+    world.run.fail = "pull-images"
+    await install(world)
+    assert (world.root / "versions" / "0.0.9").exists()
+
+
+def test_the_helper_checks_again_before_going_back(switched, monkeypatch):
+    """The new version got there just after the helper stopped waiting: it
+    looks once more, and doesn't open the old one over it."""
+    fake = Fake(switched)
+    fake.on_launch = lambda: None
+    relaunch = fake.relaunch()
+
+    def gave_up_waiting() -> bool:
+        updates.finish(switched.data_dir, NEW)  # ...and then it finished
+        return False
+
+    monkeypatch.setattr(relaunch, "_new_one_finishes", gave_up_waiting)
+    assert relaunch.run() == "finished"
+    assert len(fake.launched) == 1 and switched.layout.pointer() == (NEW, OLD)
+
+
+def test_the_helper_doesnt_go_back_while_something_holds_the_folder(switched):
+    fake = Fake(switched)
+    fake.on_launch = lambda: setattr(fake, "held", True)  # a DataLab that records no owner
+    assert fake.relaunch().run() == "stuck"
+    assert len(fake.launched) == 1 and switched.layout.pointer() == (NEW, OLD)

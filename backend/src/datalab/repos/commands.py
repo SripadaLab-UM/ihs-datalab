@@ -12,6 +12,7 @@ Exit codes: 0 done, 1 didn't work (the message says why and what to do),
 
 from __future__ import annotations
 
+import os
 import time
 import webbrowser
 from collections.abc import Callable
@@ -51,6 +52,10 @@ def sign_in(
     """Sign in with GitHub's device flow, in the terminal."""
     sleep = sleep or _sleep
     browser = browser or _open_page
+    if _as_root():
+        # The tokens would go in root's keychain, not the person's.
+        say("Sign in to GitHub as yourself, not with sudo (or as root).")
+        return FAILED
     why = why_not(settings, auth)
     if why is not None or auth is None:
         say(f"Skipping the GitHub sign-in: {why}")
@@ -88,6 +93,11 @@ def sign_in(
     if state.message:
         say(state.message)
     return _report_access(settings, auth, say)
+
+
+def _as_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
 
 
 def _sleep(seconds: float) -> None:

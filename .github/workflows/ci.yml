@@ -120,9 +120,12 @@ jobs:
         # Catches dependencies that only the development setup provides.
         run: |
           sh scripts/build-release.sh
-          uv venv -q /tmp/clean --python 3.13
-          uv pip install -q --python /tmp/clean/bin/python \
-            --constraints backend/dist/constraints.txt backend/dist/*.whl
+          uv venv -q --no-config /tmp/clean --python 3.13
+          # As the installers and the updater install it: every file by hash,
+          # wheels only, from PyPI only.
+          (cd backend/dist && uv pip install -q --no-config --require-hashes \
+            --only-binary :all: --default-index https://pypi.org/simple \
+            --python /tmp/clean/bin/python -r requirements.txt)
           /tmp/clean/bin/datalab --version
           /tmp/clean/bin/python -c "import datalab.app, datalab.safety, datalab.trial; from datalab.cli import _web_dist; assert _web_dist(), 'web UI missing from the package'"
 

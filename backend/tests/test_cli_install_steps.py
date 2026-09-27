@@ -179,3 +179,22 @@ def test_going_back_to_the_previous_version(data_dir, install_root, capsys):
     assert (install_root / "previous").read_text().strip() == "0.1.0a3"
     assert "datalab rollback" in capsys.readouterr().out
     assert cli.main(["versions", "--use", "0.0.1"]) == 1
+
+
+def test_signing_in_as_root_is_refused(data_dir, auth, github, monkeypatch, capsys):
+    (data_dir / "settings.toml").write_text(LAB_REPOS)
+    monkeypatch.setattr(commands.os, "geteuid", lambda: 0, raising=False)
+    assert cli.main(["github", "sign-in", "--no-browser"]) == commands.FAILED
+    assert "not with sudo" in capsys.readouterr().out
+    assert not auth.signed_in() and github.requests == []
+
+
+def test_versions_use_waits_for_an_unfinished_update(data_dir, install_root, capsys):
+    from datalab import updates
+
+    updates.begin(
+        data_dir, data_dir / "datalab.sqlite", from_version="0.1.0a2", to_version="0.1.0a3"
+    )
+    assert cli.main(["versions", "--use", "0.1.0a2"]) == 1
+    assert "hasn't finished" in capsys.readouterr().out
+    assert (install_root / "current").read_text().strip() == "0.1.0a3"

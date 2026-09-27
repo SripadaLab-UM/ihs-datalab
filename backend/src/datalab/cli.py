@@ -373,8 +373,30 @@ def _versions(settings, use: str | None) -> int:
             ]
             print(f"{version:<16} {', '.join(notes)}")
         return 0
+    import os
+
+    from datalab import updates
+    from datalab.config import default_data_dir
     from datalab.releases import parse_version
 
+    # An update under way (in either profile's data folder) is the startup
+    # recovery's to sort out, with the launcher as the update left it.
+    folders = {settings.data_dir}
+    if not os.environ.get("DATALAB_DATA_DIR"):
+        folders |= {default_data_dir("real"), default_data_dir("practice")}
+    for folder in sorted(folders):
+        try:
+            marker = updates.read_marker(folder)
+        except updates.UnreadableMarker:
+            print(f"An update left a note in {folder} that DataLab couldn't read. Open DataLab")
+            print("once so it can sort that out, then try again.")
+            return 1
+        if marker is not None:
+            print(
+                f"An update from {marker.from_version} to {marker.to_version} hasn't finished "
+                f"({folder}). Open DataLab once so it can sort that out, then try again."
+            )
+            return 1
     parsed = parse_version(use)
     version = str(parsed) if parsed else use
     if version not in installed:

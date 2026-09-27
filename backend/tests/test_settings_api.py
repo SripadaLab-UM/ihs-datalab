@@ -637,7 +637,8 @@ def test_updates_show_the_version_marker_recovery_and_backups(settings, keychain
     updates.begin(h.root, settings.database_file, from_version=__version__, to_version="0.3.0")
     shown = h.client.get("/api/settings/updates").json()
     assert shown["version"] == __version__
-    assert shown["check"]["state"] == "not-checked"
+    # This package pins no release key yet (release_keys.py): updates aren't set up.
+    assert shown["check"]["state"] == "not-configured"
     assert shown["check"]["current_version"] == __version__
     assert shown["check"]["available"] is None and shown["check"]["can_install"] is False
     assert shown["check"]["install"]["state"] == "idle"
@@ -841,11 +842,13 @@ async def test_storage_waits_for_a_real_delivery(tmp_path):
 def update_world(settings, tmp_path):
     from datalab.releases import ReleaseSource, UpdateChecker
     from datalab.updater import Layout, Updater
-    from tests.release_fakes import REPO, FakeGitHub
+    from tests.release_fakes import REPO, TEST_PUBLIC, FakeGitHub
 
     github = FakeGitHub()
     github.release("v99.0.0", notes="**Faster** exports.\n<img src=x onerror=alert(1)>")
-    checker = UpdateChecker(settings, source=ReleaseSource(REPO, http=github.client()))
+    checker = UpdateChecker(
+        settings, source=ReleaseSource(REPO, http=github.client()), keys=(TEST_PUBLIC,)
+    )
     # A development copy: it can check, but not install itself.
     update = Updater(settings, checker, layout=Layout(tmp_path / "app"), platform="darwin")
     return github, checker, update

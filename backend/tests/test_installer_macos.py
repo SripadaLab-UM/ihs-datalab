@@ -7,6 +7,8 @@ Nothing is downloaded or installed, and HOME is a temporary folder.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import stat
 import subprocess
@@ -35,6 +37,8 @@ case "$1" in
   --version) echo "uv 0.12.19" ;;
   venv) for last; do :; done; mkdir -p "$last/bin"; : > "$last/bin/python" ;;
   pip)
+    here="$(basename "$(pwd)")"
+    echo "pip $* (in $here) UV_INDEX_URL=${UV_INDEX_URL:-unset}" >> "$DATALAB_TEST_UVLOG"
     while [ $# -gt 0 ]; do
       if [ "$1" = "--python" ]; then python="$2"; fi
       shift
@@ -65,26 +69,35 @@ def machine(tmp_path) -> dict[str, Path]:
     fake.write_text(FAKE_DATALAB)
     packages = tmp_path / "release"
     packages.mkdir()
-    (packages / "constraints.txt").write_text("")
     return {
         "home": home,
         "tools": tools,
         "fake": fake,
         "packages": packages,
         "log": tmp_path / "log",
+        "uvlog": tmp_path / "uvlog",
     }
 
 
-def install(machine, version: str, *args: str, signin: int = 0) -> subprocess.CompletedProcess[str]:
-    package = machine["packages"] / f"datalab-{version}-py3-none-any.whl"
-    package.write_text("")
+def install(
+    machine, version: str, *args: str, signin: int = 0, pinned: bool = True, **extra_env: str
+) -> subprocess.CompletedProcess[str]:
+    wheel = f"datalab-{version}-py3-none-any.whl"
+    package = machine["packages"] / wheel
+    package.write_bytes(f"package {version}".encode())
+    digest = hashlib.sha256(package.read_bytes() if pinned else b"another").hexdigest()
+    (machine["packages"] / "requirements.txt").write_text(
+        f"httpx==0.28.1 \\\n    --hash=sha256:{'1' * 64}\n./{wheel} --hash=sha256:{digest}\n"
+    )
     env = {
+        **extra_env,
         "HOME": str(machine["home"]),
         "PATH": f"{machine['tools']}:/usr/bin:/bin",
         "DATALAB_TEST_LOG": str(machine["log"]),
         "DATALAB_TEST_FAKE": str(machine["fake"]),
         "DATALAB_TEST_VERSION": version,
         "DATALAB_TEST_SIGNIN": str(signin),
+        "DATALAB_TEST_UVLOG": str(machine["uvlog"]),
     }
     return subprocess.run(
         ["sh", str(INSTALLER), "--package", str(package), *args],
@@ -183,3 +196,73 @@ def test_a_package_without_a_version_in_its_name_is_refused(machine):
         start_new_session=True,
     )
     assert done.returncode == 2 and "datalab-<version>-py3-none-any.whl" in done.stdout
+
+
+def test_uv_installs_only_what_requirements_txt_pins_by_hash(machine):
+    done = install(machine, "0.1.0a3", UV_INDEX_URL="https://evil.example/simple")
+    assert done.returncode == 0, done.stdout + done.stderr
+    [pip] = machine["uvlog"].read_text().splitlines()
+    assert (
+        "pip install -q --no-config --require-hashes --only-binary :all: "
+        "--default-index https://pypi.org/simple --python "
+    ) in pip
+    assert pip.split(" (in ")[0].endswith("-r requirements.txt")
+    assert "UV_INDEX_URL=unset" in pip  # the environment can't steer uv
+    record = json.loads((root(machine) / "versions" / "0.1.0a3" / ".complete").read_text())
+    package = machine["packages"] / "datalab-0.1.0a3-py3-none-any.whl"
+    assert record["wheel_sha256"] == hashlib.sha256(package.read_bytes()).hexdigest()
+
+
+def test_a_package_requirements_txt_doesnt_pin_is_refused(machine):
+    done = install(machine, "0.1.0a3", pinned=False)
+    assert done.returncode == 1 and "doesn't name this package with this checksum" in done.stdout
+    assert not (root(machine) / "versions" / "0.1.0a3").exists()
+
+
+def test_the_same_version_with_another_package_is_reinstalled(machine):
+    install(machine, "0.1.0a3")
+    (root(machine) / "versions" / "0.1.0a3" / ".complete").write_text(
+        json.dumps({"version": "0.1.0a3", "wheel_sha256": "0" * 64})
+    )
+    machine["uvlog"].unlink()
+    done = install(machine, "0.1.0a3")
+    assert done.returncode == 0 and machine["uvlog"].exists()
+
+
+def test_practice_gets_a_launcher_of_its_own(machine):
+    install(machine, "0.1.0a3")
+    install(machine, "0.1.0a3", "--profile", "practice")
+    apps = machine["home"] / "Applications"
+    assert sorted(p.name for p in apps.iterdir()) == ["DataLab (practice).app", "DataLab.app"]
+    plist = (apps / "DataLab (practice).app" / "Contents" / "Info.plist").read_text()
+    assert "edu.umich.ihs.datalab.practice" in plist
+    assert (
+        "--profile practice serve"
+        in (apps / "DataLab (practice).app" / "Contents" / "MacOS" / "DataLab").read_text()
+    )
+
+
+def test_the_shim_falls_back_to_the_previous_version(machine):
+    install(machine, "0.1.0a3")
+    install(machine, "0.1.0a4")
+    app = root(machine)
+    (app / "versions" / "0.1.0a4" / "bin" / "datalab").unlink()  # broken
+    shim = subprocess.run(
+        [str(app / "bin" / "datalab"), "--version"],
+        env={**os.environ, "DATALAB_TEST_LOG": str(machine["log"]), "DATALAB_TEST_VERSION": "x"},
+        capture_output=True,
+        text=True,
+    )
+    assert shim.returncode == 0 and "opening the version before it" in shim.stderr
+
+
+def test_a_version_must_start_with_a_digit(machine):
+    done = install(machine, "latest")
+    assert done.returncode == 2 and "datalab-<version>-py3-none-any.whl" in done.stdout
+
+
+def test_it_refuses_to_run_as_root(machine, tmp_path):
+    executable(machine["tools"] / "id", "#!/bin/sh\necho 0\n")
+    done = install(machine, "0.1.0a3")
+    assert done.returncode == 1 and "Run this without sudo." in done.stdout
+    assert not root(machine).exists()

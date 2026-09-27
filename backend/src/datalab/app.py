@@ -52,6 +52,7 @@ from datalab.sessions.plans import PlanDesk, PlanStore
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
+from datalab.update_gate import UpdateGate, UpdateGateMiddleware
 from datalab.updater import Updater, busy_reason
 from datalab.web import ApiProtection, BrowserSession, mount_web_ui
 
@@ -276,12 +277,16 @@ def create_app(
         shutdown()
         return True
 
+    # Closed by the updater once it starts changing things: from then on
+    # nothing new may start (update_gate.py).
+    gate = UpdateGate()
     updater = Updater(
         settings,
         update_checker,
-        busy=lambda: busy_reason(connection, sessions.any_busy),
+        busy=lambda: busy_reason(connection, sessions.any_busy, gate.in_flight),
         stop_sessions=sessions.close_all,
         shutdown=request_shutdown,
+        gate=gate,
     )
     app.include_router(
         build_settings_router(
@@ -299,6 +304,7 @@ def create_app(
         )
     )
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
+    app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
     app.add_middleware(ApiProtection, session=browser, enforce=protect_api)

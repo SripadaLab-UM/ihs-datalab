@@ -3,17 +3,22 @@
 The steps (docs/DISTRIBUTION.md, "How an update is installed"), each
 recorded in the update marker (updates.py):
 
-1. **Download and check.** The release's package, `constraints.txt` and
-   `images.json`, each refused unless it matches `SHA256SUMS` (and GitHub's
-   own checksum, where it keeps one). `images.json` must pin every image by
-   digest, and name the images the new package itself runs. Nothing has
-   changed yet; a failure here leaves no trace but the log.
-2. **Stop conversations**, then `updates.begin`: the marker, and a backup of
-   the database ("backed-up").
+1. **Download and check.** The release's package, `requirements.txt` and
+   `images.json`, each refused unless it matches `SHA256SUMS`, whose
+   signature the check verified (releases.py), and GitHub's own checksum.
+   `requirements.txt` must pin every dependency by hash, and the package by
+   its checksum; `images.json` must pin every image by digest, and name the
+   images the new package itself runs. Nothing has changed yet; a failure
+   here leaves no trace but the log.
+2. **Close the gate** (update_gate.py: nothing new may start), check again
+   that nothing is working, **stop conversations**, then `updates.begin`:
+   the marker, and a backup of the database ("backed-up").
 3. **Install beside the old version**, in its own folder
-   (`<install root>/versions/<version>/`, a Python environment `uv` makes),
-   then let the new version pull its pinned images ("installed"). The
-   running version's folder is never touched.
+   (`<install root>/versions/<version>/`, a Python environment `uv` makes,
+   with `--require-hashes --only-binary :all:` from PyPI only, no uv or pip
+   settings from the environment or config files), then let the new version
+   pull its pinned images ("installed"). The running version's folder is
+   never touched.
 4. **Switch the launcher**: `<install root>/current` names the version the
    launcher opens, and `previous` the one it replaced ("switched"). Both are
    one-line files, replaced whole.
@@ -24,9 +29,14 @@ recorded in the update marker (updates.py):
    opens the old version, whose startup recovery sorts out the rest.
 
 If step 3 or 4 fails, the launcher is put back, what the step installed is
-removed, and the marker cleared ("abandoned"). The previous version's folder
-stays, so `datalab versions --use <version>` can go back to it (and then
-`datalab rollback`, if the newer one changed the database).
+removed, the marker cleared ("abandoned"), and the gate opened again. The
+previous version's folder stays (older ones are removed once the launcher
+has switched), so `datalab versions --use <version>` can go back to it (and
+then `datalab rollback`, if the newer one changed the database).
+
+The real and practice profiles share the installed versions and the
+launcher's `current`, so an update refuses while the other profile's
+DataLab is running.
 
 Mac is the platform this has been tried on. The Windows paths (Scripts\\,
 `datalab.cmd`, a new console for the restart) follow the same steps and are
@@ -65,10 +75,21 @@ from datalab.releases import (
     is_newer,
     parse_version,
 )
+from datalab.update_gate import UpdateGate
 
 log = logging.getLogger(__name__)
 
 INSTALL_DIR_ENV = "DATALAB_INSTALL_DIR"
+PYPI = "https://pypi.org/simple"
+# Environment variables a uv or pip subprocess never inherits: they could
+# point it at another index, add one, or turn its checks off.
+_UNSAFE_ENV = ("UV_", "PIP_")
+_UNSAFE_NAMES = frozenset({"PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "VIRTUAL_ENV"})
+_REQUIREMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?==[A-Za-z0-9.+!_-]+")
+_HASH = re.compile(r"--hash=sha256:([0-9a-f]{64})")
+# How long the updater waits, before restarting, for work begun before the
+# gate closed to finish.
+SETTLE_SECONDS = 60
 _DIGEST = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
 _COMPLETE = ".complete"
 # How long the helper waits: for this DataLab to quit, for the new one to take
@@ -88,11 +109,26 @@ class UpdateFailed(RuntimeError):
     """An update step failed. Its message is for the person; nothing was left half-done."""
 
 
+def clean_environment() -> dict[str, str]:
+    """This process's environment, without anything that steers uv, pip or Python."""
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith(_UNSAFE_ENV) and name.upper() not in _UNSAFE_NAMES
+    }
+
+
 def run_command(
     command: Sequence[str], timeout: float, cwd: Path | None = None
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        list(command), capture_output=True, text=True, timeout=timeout, check=False, cwd=cwd
+        list(command),
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+        cwd=cwd,
+        env=clean_environment(),
     )
 
 
@@ -173,6 +209,31 @@ class Layout:
     def pointer(self) -> tuple[str | None, str | None]:
         return _read_line(self.root / "current"), _read_line(self.root / "previous")
 
+    def recorded_sha256(self, version: str) -> str | None:
+        """The package checksum `.complete` records for an installed version."""
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            record = json.loads((self.folder(version) / _COMPLETE).read_text(encoding="utf-8"))
+            value = record.get("wheel_sha256")
+            return value if isinstance(value, str) else None
+        return None
+
+    def prune(self, keep: set[str]) -> list[str]:
+        """Remove installed versions other than `keep` (and this process's own)."""
+        removed: list[str] = []
+        if not self.versions.is_dir():
+            return removed
+        running = self.running_version()
+        for folder in self.versions.iterdir():
+            name = folder.name
+            if name in keep or name == running or not folder.is_dir() or folder.is_symlink():
+                continue
+            if parse_version(name) is None or str(parse_version(name)) != name:
+                continue  # not one of ours
+            shutil.rmtree(folder, ignore_errors=True)
+            if not folder.exists():
+                removed.append(name)
+        return removed
+
     def switch(self, to: str, previous: str | None) -> None:
         """Point the launcher at `to`. `previous` first, so a switch cut off
         half way still names both."""
@@ -213,6 +274,19 @@ def _write_line(path: Path, text: str) -> None:
     with temporary.open("rb+") as file:
         os.fsync(file.fileno())
     os.replace(temporary, path)
+    fsync_folder(path.parent)
+
+
+def fsync_folder(folder: Path) -> None:
+    """Make a rename in `folder` durable (not possible, nor needed, on Windows)."""
+    if sys.platform == "win32":
+        return
+    with contextlib.suppress(OSError):
+        handle = os.open(folder, os.O_RDONLY)
+        try:
+            os.fsync(handle)
+        finally:
+            os.close(handle)
 
 
 # ------------------------------------------------------------------ checks
@@ -225,8 +299,51 @@ class Staged:
     version: str
     folder: Path
     wheel: Path
-    constraints: Path
+    wheel_sha256: str
+    requirements: Path
     images: dict[str, str]
+
+
+def check_requirements(text: str, wheel: str, wheel_sha256: str) -> None:
+    """`requirements.txt`, if it pins everything by hash: each dependency as
+    `name==version` with sha256 hashes, and the one local file the release's
+    package (`./<wheel>`) with exactly its checksum. No options (another
+    index, `-e`, `-r`...), URLs or other files."""
+    logical: list[str] = []
+    current = ""
+    for raw in text.splitlines():
+        line = raw.split(" #", 1)[0].strip() if not raw.lstrip().startswith("#") else ""
+        continued = line.endswith("\\")
+        current = f"{current} {line.removesuffix('\\').strip()}".strip()
+        if not continued:
+            if current:
+                logical.append(current)
+            current = ""
+    if current:
+        logical.append(current)
+    packages = 0
+    for line in logical:
+        head, _, tail = line.partition(" --hash=")
+        hashes = _HASH.findall(f"--hash={tail}") if tail else []
+        if tail and len(hashes) != len(tail.split()):
+            raise ChecksumMismatch(f"requirements.txt has a line it shouldn't: {line[:80]!r}")
+        requirement, _, marker = head.partition(";")
+        requirement = requirement.strip()
+        if "--" in marker or marker.strip().startswith("-"):
+            raise ChecksumMismatch(f"requirements.txt has a line it shouldn't: {line[:80]!r}")
+        if requirement == f"./{wheel}":
+            if hashes != [wheel_sha256]:
+                raise ChecksumMismatch("requirements.txt pins the package with another checksum.")
+            packages += 1
+            continue
+        if not _REQUIREMENT.fullmatch(requirement) or not hashes:
+            raise ChecksumMismatch(
+                f"requirements.txt doesn't pin this by version and hash: {line[:80]!r}"
+            )
+        if requirement.lower().startswith(("datalab==", "datalab[")):
+            raise ChecksumMismatch("requirements.txt names DataLab itself from an index.")
+    if packages != 1:
+        raise ChecksumMismatch("requirements.txt doesn't name the release's package once.")
 
 
 def check_images(images_json: bytes, wheel: Path) -> dict[str, str]:
@@ -263,10 +380,25 @@ def _constant(source: str, name: str) -> str | None:
     return match.group(1) if match else None
 
 
-def busy_reason(database: sqlite3.Connection, conversations_busy: Callable[[], bool]) -> str | None:
-    """Why an update shouldn't start now: something is working."""
+def _no_requests() -> int:
+    return 0
+
+
+def busy_reason(
+    database: sqlite3.Connection,
+    conversations_busy: Callable[[], bool],
+    in_flight: Callable[[], int] = _no_requests,
+) -> str | None:
+    """Why an update shouldn't start now: something is working. `in_flight`
+    counts requests under way that could change something (update_gate.py):
+    an export, a sync or push, starting a pipeline test..."""
     if conversations_busy():
         return "A conversation's agent is working. Wait for it to finish, then install the update."
+    if in_flight() > 0:
+        return (
+            "DataLab is in the middle of something (saving, exporting or syncing). Wait for "
+            "it to finish, then install the update."
+        )
     with contextlib.suppress(sqlite3.Error):
         if database.execute("SELECT 1 FROM queries WHERE status = 'running' LIMIT 1").fetchone():
             return "A query is running. Wait for it to finish, then install the update."
@@ -275,6 +407,13 @@ def busy_reason(database: sqlite3.Connection, conversations_busy: Callable[[], b
         ).fetchone()
         if running:
             return "A workflow run is going. Wait for it to finish, then install the update."
+        testing = database.execute(
+            "SELECT 1 FROM pipeline_tests WHERE status = 'running' LIMIT 1"
+        ).fetchone()
+        if testing:
+            return (
+                "A pipeline's tests are running. Wait for them to finish, then install the update."
+            )
     return None
 
 
@@ -322,9 +461,12 @@ class Updater:
         known: Callable[[], set[str]] | None = None,
         busy: Callable[[], str | None] = _nothing_busy,
         stop_sessions: Callable[[], Awaitable[None]] | None = None,
-        spawn_helper: Callable[[list[str]], None] | None = None,
+        spawn_helper: Callable[[list[str], Path], None] | None = None,
         shutdown: Callable[[], bool] | None = None,
         python: str = sys.executable,
+        gate: UpdateGate | None = None,
+        other_data_dirs: Callable[[], list[Path]] | None = None,
+        settle: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.settings = settings
         self.checker = checker
@@ -339,6 +481,9 @@ class Updater:
         self._spawn = spawn_helper or _spawn_detached
         self._shutdown = shutdown
         self._python = python
+        self.gate = gate or UpdateGate()
+        self._other_data_dirs = other_data_dirs or self._default_other_data_dirs
+        self._settle = settle
         self._progress = Progress()
         self._task: asyncio.Task[None] | None = None
 
@@ -358,7 +503,25 @@ class Updater:
             )
         if not self._uv:
             return "uv, which installs DataLab, wasn't found. Run the DataLab installer again."
+        return self._other_profile_running()
+
+    def _other_profile_running(self) -> str | None:
+        """The real and practice DataLabs share the installed versions and the
+        launcher's `current`: an update switches both, so the other must be closed."""
+        for folder in self._other_data_dirs():
+            if datalock.in_use(folder):
+                return (
+                    "The other DataLab (real or practice) is open. Both use the same installed "
+                    "DataLab, and an update switches both, so quit that one first."
+                )
         return None
+
+    def _default_other_data_dirs(self) -> list[Path]:
+        if os.environ.get("DATALAB_DATA_DIR"):
+            return []  # a development or test folder: no other profile beside it
+        other = "practice" if self.settings.profile == "real" else "real"
+        folder = default_data_dir(other)  # type: ignore[arg-type]
+        return [] if folder.resolve() == self.settings.data_dir.resolve() else [folder]
 
     def running(self) -> bool:
         return self._task is not None and not self._task.done()
@@ -397,10 +560,14 @@ class Updater:
 
     async def _install(self, release: Release, expected: dict[str, str]) -> None:
         version = release.version
+        closed = False
         try:
             staged = await asyncio.to_thread(self.download, release, expected)
             try:
-                # Something may have started during the download: never cut it off.
+                # From here on nothing new may start; then check nothing began
+                # during the download (it's never cut off).
+                self.gate.close(version)
+                closed = True
                 busy = self._busy()
                 if busy is not None:
                     raise UpdateFailed(f"{busy} Nothing was changed.")
@@ -411,11 +578,29 @@ class Updater:
             finally:
                 shutil.rmtree(staged.folder, ignore_errors=True)
         except UpdateFailed as failed:
+            if closed:
+                self.gate.open()
             self._set("failed", version, str(failed))
             return
         except Exception as error:
+            if closed:
+                self.gate.open()
             log.exception("the update to %s failed", version)
             self._set("failed", version, f"The update failed ({type(error).__name__}).")
+            return
+        # The gate stays closed until DataLab quits: anything recorded now
+        # would come after the backup.
+        waited = 0.0
+        while (busy := self._busy()) is not None and waited < SETTLE_SECONDS:
+            await self._settle(1)
+            waited += 1
+        if busy is not None:
+            self._set(
+                "restarting",
+                version,
+                f"DataLab {version} is installed. {busy.split('. ')[0]}; once it has, quit "
+                "DataLab and open it again to finish the update.",
+            )
             return
         self._set(
             "restarting",
@@ -441,6 +626,11 @@ class Updater:
                 paths[asset.name] = folder / asset.name
                 self.checker.source.download(asset, paths[asset.name], sha256=sha256)
             wheel = paths[release.wheel.name]
+            wheel_sha256 = expected[release.wheel.name]
+            requirements = paths[release.requirements.name]
+            check_requirements(
+                requirements.read_text(encoding="utf-8"), release.wheel.name, wheel_sha256
+            )
             images = check_images(paths[release.images.name].read_bytes(), wheel)
         except CheckProblem as problem:
             shutil.rmtree(folder, ignore_errors=True)
@@ -453,7 +643,7 @@ class Updater:
                 f"DataLab {release.version}'s files didn't pass their checks ({error}). "
                 "Nothing was changed."
             ) from None
-        return Staged(release.version, folder, wheel, paths[release.constraints.name], images)
+        return Staged(release.version, folder, wheel, wheel_sha256, requirements, images)
 
     def apply(self, staged: Staged) -> None:
         """Steps 2 to 4: back up, install beside this version, pull its images,
@@ -476,12 +666,17 @@ class Updater:
         switched = False
         try:
             self._set("installing", version, f"Installing DataLab {version} beside this one…")
-            # A version installed before (and switched away from) is reused, and kept.
-            created = not self.layout.complete(version)
-            self._install_beside(staged)
+            # The same package installed before (and switched away from) is
+            # reused, and kept; anything else in its folder is replaced.
+            reuse = self._reusable(staged)
+            created = not reuse
+            self._install_beside(staged, reuse=reuse)
             self._set("pulling-images", version, "Downloading DataLab's container images…")
             self._pull_images(version)
             updates.advance(data_dir, "installed")
+            other = self._other_profile_running()
+            if other is not None:
+                raise UpdateFailed(f"{other} DataLab {self.current} is still the one in use.")
             self._set("switching", version, "Switching the launcher to the new version…")
             switched = True
             self.layout.switch(version, previous=self.current)
@@ -502,11 +697,18 @@ class Updater:
                     f"DataLab {self.current} is still the one in use."
                 ) from None
             raise
+        # Older versions go; the new one and the one it replaces stay.
+        removed = self.layout.prune({version, self.current})
+        if removed:
+            log.info("removed older DataLab versions: %s", ", ".join(removed))
 
     def restart(self, version: str) -> None:
         """Step 5: hand over to the helper, then quit."""
+        # -I: isolated, so nothing from the working folder, PYTHONPATH or the
+        # user's site-packages can stand in for the updater's own code.
         command = [
             self._python,
+            "-I",
             "-m",
             "datalab.updater",
             "relaunch",
@@ -524,7 +726,7 @@ class Updater:
             str(os.getpid()),
         ]
         try:
-            self._spawn(command)
+            self._spawn(command, self.layout.root)
         except OSError as error:
             log.error("couldn't start the restart helper: %s", error)
             self._set(
@@ -544,21 +746,29 @@ class Updater:
 
     # ------------------------------------------------------------------------
 
-    def _install_beside(self, staged: Staged) -> None:
-        """Install into `versions/<version>`, unless it's there already."""
+    def _reusable(self, staged: Staged) -> bool:
+        """Whether `versions/<version>` holds exactly this package already."""
+        version = staged.version
+        return (
+            self.layout.complete(version)
+            and self.layout.recorded_sha256(version) == staged.wheel_sha256
+        )
+
+    def _install_beside(self, staged: Staged, *, reuse: bool) -> None:
+        """Install into `versions/<version>`, unless it holds this package already."""
         version = staged.version
         folder = self.layout.folder(version)
         if folder.resolve() == Path(sys.prefix).resolve():
             raise UpdateFailed("DataLab won't install over the version that's running.")
-        if self.layout.complete(version):
+        if reuse:
             self._check_version(version)
             return
-        if folder.exists():  # an earlier attempt that was cut off
+        if folder.exists():  # an earlier attempt that was cut off, or another package
             shutil.rmtree(folder)
         uv = self._uv
         assert uv is not None
         self._must(
-            [uv, "venv", "--python", "3.13", "--no-config", str(folder)],
+            [uv, "venv", "--no-config", "--python", "3.13", str(folder)],
             "making its Python environment",
             300,
         )
@@ -568,22 +778,31 @@ class Updater:
                 "pip",
                 "install",
                 "--no-config",
+                # Every file checked against requirements.txt's hashes (the
+                # package's own is in the signed SHA256SUMS), only wheels, and
+                # only from PyPI.
+                "--require-hashes",
+                "--only-binary",
+                ":all:",
+                "--default-index",
+                PYPI,
                 "--python",
                 str(self.layout.python(version)),
-                # By its plain name, from its own folder: uv cuts a --constraints
-                # path at its first space ("Application Support", "OneDrive - …").
-                "--constraints",
-                staged.constraints.name,
-                str(staged.wheel),
+                # By its plain name, from its own folder: uv cuts a path at its
+                # first space ("Application Support", "OneDrive - …").
+                "-r",
+                staged.requirements.name,
             ],
             "installing the package",
             900,
-            cwd=staged.constraints.parent,
+            cwd=staged.requirements.parent,
         )
         self._check_version(version)
-        (folder / _COMPLETE).write_text(
-            json.dumps({"version": version, "installed_at": _now()}) + "\n", encoding="utf-8"
-        )
+        # Everything installed reaches the disk before the folder counts as whole.
+        if hasattr(os, "sync"):
+            os.sync()
+        record = {"version": version, "wheel_sha256": staged.wheel_sha256, "installed_at": _now()}
+        _write_line(folder / _COMPLETE, json.dumps(record))
 
     def _check_version(self, version: str) -> None:
         result = self._must(
@@ -654,7 +873,7 @@ def _find_uv(platform: str) -> str | None:
     return str(candidate) if candidate.is_file() else None
 
 
-def _spawn_detached(command: list[str]) -> None:
+def _spawn_detached(command: list[str], cwd: Path) -> None:
     """Start the helper so it outlives this DataLab: its own session (Mac) or
     process group, without a console (Windows)."""
     options: dict = {
@@ -662,6 +881,8 @@ def _spawn_detached(command: list[str]) -> None:
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
         "close_fds": True,
+        "cwd": cwd,
+        "env": clean_environment(),
     }
     if sys.platform == "win32":  # UNTESTED on Windows
         options["creationflags"] = (
@@ -709,8 +930,13 @@ def launch_command(layout: Layout, profile: str, platform: str = sys.platform) -
     raise UpdateFailed("Restarting DataLab works on Mac and Windows.")
 
 
-def _open(command: list[str], platform: str = sys.platform) -> None:
-    options: dict = {"stdin": subprocess.DEVNULL, "close_fds": True}
+def _open(command: list[str], cwd: Path, platform: str = sys.platform) -> None:
+    options: dict = {
+        "stdin": subprocess.DEVNULL,
+        "close_fds": True,
+        "cwd": cwd,
+        "env": clean_environment(),
+    }
     if platform == "win32":  # UNTESTED on Windows: a window of its own
         options["creationflags"] = subprocess.CREATE_NEW_CONSOLE  # type: ignore[attr-defined]
     else:
@@ -756,7 +982,8 @@ class Relaunch:
     old_pid: int
     alive: Callable[[int], bool] = alive
     owner: Callable[[Path], int | None] = datalock.holder
-    launch: Callable[[list[str]], None] = _open
+    launch: Callable[[list[str], Path], None] = _open
+    in_use: Callable[[Path], bool] = datalock.in_use
     platform: str = sys.platform
     clock: Callable[[], float] = time.monotonic
     sleep: Callable[[float], None] = time.sleep
@@ -773,6 +1000,14 @@ class Relaunch:
         if self._running_new() is not None:
             # Still starting (a long migration?), or stuck: never interrupted.
             self._note(f"DataLab {self.to_version} is taking a long time to start; left running")
+            return "stuck"
+        # Once more, just before going back: it may have got there after all,
+        # or something may hold the data folder now.
+        if self._finished():
+            self._note(f"DataLab {self.to_version} started")
+            return "finished"
+        if self._running_new() is not None or self.in_use(self.data_dir):
+            self._note(f"something holds the data folder; not opening {self.from_version}")
             return "stuck"
         # The new version didn't start, or stopped: go back to the old one,
         # whose startup recovery sorts out the marker.
@@ -812,7 +1047,7 @@ class Relaunch:
 
     def _open(self) -> None:
         try:
-            self.launch(launch_command(self.layout, self.profile, self.platform))
+            self.launch(launch_command(self.layout, self.profile, self.platform), self.layout.root)
         except (OSError, UpdateFailed) as error:
             self._note(f"couldn't open DataLab: {type(error).__name__}")
 

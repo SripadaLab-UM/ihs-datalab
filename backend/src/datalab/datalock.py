@@ -195,3 +195,25 @@ def release_all() -> None:
     while _held:
         _, lock = _held.popitem()
         lock.release()
+
+
+def in_use(data_dir: Path) -> bool:
+    """Whether another process holds the data folder's lock.
+
+    A probe: it takes the lock for an instant only if it's free, and never
+    writes the owner's record, so it can't disturb a DataLab that is running
+    or about to start (which would see the folder free a moment later)."""
+    path = data_dir / LOCK_NAME
+    if not path.exists() or held(data_dir):
+        return False
+    try:
+        handle = path.open("a+b")
+    except OSError:
+        return False
+    try:
+        _lock(handle, path)
+    except DataFolderInUse:
+        return True
+    finally:
+        handle.close()
+    return False

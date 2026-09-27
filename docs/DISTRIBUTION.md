@@ -54,7 +54,9 @@ It comes from the install page in the app repo. The installer then:
    and the installer finishes everything else. It's skipped for the practice
    profile, when the lab's settings don't name the repos, or with
    `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
-   Settings.
+   Settings. The installer refuses to run as root (`sudo`), and so does
+   `datalab github sign-in`: the sign-in belongs in the person's own
+   keychain.
 5. **Adds a DataLab launcher**: an app in Applications on Mac, and a Start
    menu entry on Windows. The first launch opens **Connections**, which
    asks for the U-M GPT key and Oracle password and saves them to the
@@ -121,48 +123,133 @@ the host.
   full releases after that. A release counts as a pre-release if GitHub marks
   it so or its version is one.
 - Only a release with everything an update needs: the package for exactly
-  that version (`datalab-<version>-py3-none-any.whl`), `constraints.txt`,
-  `images.json` and `SHA256SUMS`. The check reads `SHA256SUMS` (after
-  checking it against GitHub's own checksum of the file) and it must list the
-  other three, each agreeing with GitHub's checksum where GitHub has one. A
-  release that doesn't pass is skipped (the log says why) and the newest of
-  the rest is offered.
+  that version (`datalab-<version>-py3-none-any.whl`), `requirements.txt`,
+  `images.json`, `SHA256SUMS` and `SHA256SUMS.sig`. GitHub must give its own
+  checksum (`digest`) of every one of them; a release where it doesn't is
+  skipped, never checked less. The check reads `SHA256SUMS` and its
+  signature, each checked against GitHub's checksum, verifies the signature
+  (see "Release signing"), and `SHA256SUMS` must list the other three, each
+  agreeing with GitHub's checksum. A release that doesn't pass is skipped (the
+  log says why, or Updates when it's the newest) and the newest of the rest
+  is offered.
+- **Nothing at all while updates aren't set up**: until the lab's public key
+  is pinned in the package (`release_keys.py` holds a placeholder), DataLab
+  trusts no release, doesn't ask GitHub, and Updates says so. New versions
+  are then installed with the installer.
 - The release notes are shown as text, never as HTML.
+
+### Release signing
+
+A release's `SHA256SUMS` is signed with the lab's **release key** (Ed25519),
+in the release workflow, as `SHA256SUMS.sig` (`datalab/signing.py`,
+`scripts/sign-release.py`). Each DataLab trusts only the public keys pinned in
+its own package (`datalab/release_keys.py`), and refuses a release with a
+missing or bad signature. Since `SHA256SUMS` names every other file by its
+checksum, including `requirements.txt` (every dependency by hash) and
+`images.json` (every image by digest), the signature covers everything an
+update installs. The package's name in `SHA256SUMS` carries its version,
+which must be the tag's, so an old signed release can't be passed off as a
+newer one.
+
+**Changing keys.** The pinned keys are a list, and any of them will do. To
+move to a new key, release a version that pins both the current and the new
+key (signed with the current one, so every installed DataLab accepts it);
+the release after that can be signed with the new key. The signing script
+refuses a key the package being released doesn't pin, so a release is never
+signed with a key its own version won't accept next time.
+
+**What this protects against.** Someone who can change the app repo's
+releases but doesn't hold the signing key: a GitHub token or account that can
+upload or replace release assets, or create a release; a release file changed
+on GitHub's storage or on the way; an index serving different dependency
+files (their hashes are signed, and only PyPI is used). The key lives only in
+the "release" environment, behind its required reviewers, so a workflow run
+on any other branch or tag can't use it.
+
+**What it doesn't.** Code merged into `main` and released the normal way;
+anyone who can approve a run of the release environment, or steal the key;
+GitHub withholding new releases (an update that never comes looks like none
+being out); the first install, which trusts whatever installer and package
+the person downloaded (the installer checks the package against
+`requirements.txt`, but nothing checks the pair against the key); and uv and
+the Python it downloads, which DataLab trusts as they are.
+
+**Setting up release signing** (the maintainer, once; DataLab never makes
+the key):
+
+1. Make the key on your own computer:
+   `uv run --project backend python scripts/sign-release.py --new-key`. It
+   prints a private and a public key. Keep the private key only in the next
+   step (a password manager copy is fine); never commit or paste it anywhere
+   else.
+2. In the app repo's Settings → Environments, create **release**, add
+   **required reviewers** (the maintainers), and add the private key as the
+   environment secret `RELEASE_SIGNING_KEY`.
+3. In Settings → General → Releases, turn on **immutable releases**, so a
+   published release's files can't be replaced.
+4. In Settings → Rules, add a **tag ruleset** for `v*`: only maintainers may
+   create these tags, and they can't be moved (updated) or deleted.
+5. Replace the placeholder in `backend/src/datalab/release_keys.py` with the
+   public key, and release. Versions from then on check updates; earlier ones
+   (with the placeholder) never offer one, so people on them install the next
+   version with the installer, once.
+
+Until step 5, the release workflow stops at signing, so no unsigned release
+is published.
 
 ### How an update is installed
 
 `datalab/updater.py`, only after the person confirms, and only when nothing
-is working (no agent turn, query, or workflow run going):
+is working (no agent turn, query, workflow run, pipeline test, or request
+that changes something, such as an export or a sync, going), and the other
+profile's DataLab isn't open:
 
-1. **Download and check.** The package, `constraints.txt` and `images.json`
-   go to `<app>/downloads/<version>/`, each refused unless it matches
-   `SHA256SUMS`. `images.json` must pin the agent, gateway and proxy images
-   by digest, and name exactly the images the new package runs (its
-   `release.json` and `containers.py`). Nothing else has changed yet.
-2. **Stop conversations, then back up**: `updates.begin`, marker "started",
-   then "backed-up" (see "The update marker" below).
-3. **Install beside the old version**: `uv venv` and `uv pip install` into
-   `<app>/versions/<version>/` with the release's `constraints.txt`, check
-   the new `datalab --version`, then the new version pulls its own pinned
-   images. Marker "installed".
+1. **Download and check.** The package, `requirements.txt` and
+   `images.json` go to `<app>/downloads/<version>/`, each refused unless it
+   matches the signed `SHA256SUMS`. `requirements.txt` must pin every
+   dependency as `name==version` with hashes, name the package once, by its
+   checksum, and hold nothing else (no index, no URL, no `-e`). `images.json`
+   must pin the agent, gateway and proxy images by digest, and name exactly
+   the images the new package runs (its `release.json` and `containers.py`).
+   Nothing else has changed yet.
+2. **Close the gate, stop conversations, then back up.** From here on
+   DataLab refuses (409) every request that could start or change something
+   (`update_gate.py`), and every page shows a banner; it checks once more
+   that nothing began during the download. Then `updates.begin`: marker
+   "started", then "backed-up" (see "The update marker" below).
+3. **Install beside the old version**: `uv venv` and
+   `uv pip install --no-config --require-hashes --only-binary :all:
+   --default-index https://pypi.org/simple -r requirements.txt` into
+   `<app>/versions/<version>/`, with no `UV_*`, `PIP_*` or `PYTHONPATH` from
+   the environment and no uv config files; check the new `datalab --version`,
+   then the new version pulls its own pinned images. Marker "installed".
+   `.complete` records the package's checksum, so a folder is reused only
+   for exactly the same package.
 4. **Switch the launcher**: `<app>/current` now names the new version and
-   `<app>/previous` the old one. Marker "switched".
-5. **Restart.** A small helper, run by the old version's own Python, waits
+   `<app>/previous` the old one. Marker "switched". Versions older than
+   those two are then removed (program files only, never data).
+5. **Restart**, once what began before the gate closed has finished (it
+   waits up to a minute; otherwise it asks the person to quit and reopen,
+   with the gate still closed). A small helper, run by the old version's
+   own Python in isolated mode (`python -I`, from the install folder), waits
    for this DataLab to quit, opens the new one as the launcher does (a
    Terminal window on Mac, PowerShell on Windows), and waits for it to
    finish the update. If the new version doesn't start, it puts `current`
    back and opens the old version, whose startup recovery sorts out the
-   marker. A new version that is still starting (a long migration) is never
-   interrupted.
+   marker. It looks once more before going back, and doesn't if the update
+   finished after all or something holds the data folder. A new version that
+   is still starting (a long migration) is never interrupted.
 
 If step 3 or 4 fails, the launcher is put back, what the step installed is
-removed, and the marker cleared ("abandoned"); the backup stays. The running
+removed, the marker cleared ("abandoned") and the gate opened; the backup
+stays. The running
 version's folder is never touched, and a version folder only counts once it
 has `.complete` (written last), so a cut-off install is redone next time.
 
 **Going back.** The previous version stays installed.
 `datalab versions` lists the installed versions, and
-`datalab versions --use <version>` points the launcher at one. If the newer
+`datalab versions --use <version>` points the launcher at one (not while an
+update's marker is there: opening DataLab sorts that out first). If the newer
 version had changed the database, the older one says so at start; then
 `datalab rollback` (run with the older version) restores the update's backup.
 
@@ -181,7 +268,15 @@ downloads/<version>/  a release's files while it's being installed
 ```
 
 The launcher (DataLab.app, the Start menu entry) runs `bin/datalab serve`,
-so switching `current` is all an update changes in it. An installer from
+so switching `current` is all an update changes in it. If the version
+`current` names can't run, the Mac `bin/datalab` falls back to `previous`
+and says so; by hand, `versions/<old>/bin/datalab versions --use <old>`
+(`Scripts\datalab.exe` on Windows) points it back.
+
+**The real and practice DataLabs share all of this**: the versions, `current`
+and `previous`. An update switches both, so it refuses while the other
+profile's DataLab is open. Each has its own launcher on Mac, "DataLab" and
+"DataLab (practice)", so installing one never replaces the other's. An installer from
 before this layout used `uv tool install`; that copy can't update itself
 (Updates says so), and the new installer replaces it.
 
@@ -381,10 +476,14 @@ It never touches export destinations.
   - build and push the agent image (the gateway and research proxy are
     upstream images, pinned by digest in the code);
   - publish a release that lists the exact image digests (also in
-    `images.json`), with the installers and a `SHA256SUMS` file. The update
-    check offers only releases with the package, `constraints.txt`,
-    `images.json` and `SHA256SUMS` listing them (see "Which releases are
-    offered"); a pre-release is tagged `v0.1.0-alpha.3` and marked so.
+    `images.json`), with the installers, `requirements.txt` (every
+    dependency by hash, then the package by its checksum), a `SHA256SUMS`
+    file and its signature, `SHA256SUMS.sig`, made in the protected
+    "release" environment (see "Release signing"). The update check offers
+    only releases with all of these (see "Which releases are offered"); a
+    pre-release is tagged `v0.1.0-alpha.3` and marked so. `constraints.txt`
+    (the same versions without hashes) is still published for the Windows
+    installer until it moves to `requirements.txt`.
 - Not automated yet: signing the Windows scripts and anything macOS runs
   directly (they need the lab's signing identities), and the Windows test on a
   real managed machine. `release.yml` marks each as a TODO.
