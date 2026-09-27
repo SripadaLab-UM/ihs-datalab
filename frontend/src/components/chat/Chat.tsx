@@ -9,6 +9,7 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
+import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
@@ -387,7 +388,9 @@ function TurnView({
   const answer = answerOf(turn);
   const live = turn.status === "running" && running;
   const rows = activityRows(turn.items, live);
-  const storyRows = rows.filter((row) => row.type !== "review");
+  const storyRows = rows.filter((row) => row.type !== "review" && row.type !== "proposal");
+  // Proposed knowledge edits wait for the person: never folded away with the story.
+  const proposals = rows.flatMap((row) => (row.type === "proposal" ? [row.proposal] : []));
   const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
   const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
   const queryClient = useQueryClient();
@@ -448,6 +451,9 @@ function TurnView({
       {/* Only the latest review: one run again replaces one that didn't finish. */}
       {reviews.slice(-1).map((review) => (
         <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
+      ))}
+      {proposals.map((proposal) => (
+        <ProposalCard key={proposal.id} proposal={proposal} />
       ))}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && <HowItWasMade rows={storyRows}>{story}</HowItWasMade>}

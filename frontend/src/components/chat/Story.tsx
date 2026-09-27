@@ -47,6 +47,8 @@ function rowKey(row: Row): string {
       return `approval-${row.approval.id}`;
     case "review":
       return `review-${row.index}`;
+    case "proposal":
+      return `proposal-${row.proposal.id}`;
   }
 }
 

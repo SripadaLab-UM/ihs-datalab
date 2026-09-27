@@ -43,6 +43,8 @@ export const EVENT_TYPES = [
   "trace",
   "turn_done",
   "title_changed",
+  "kb_proposal",
+  "kb_proposal_updated",
 ];
 
 /**

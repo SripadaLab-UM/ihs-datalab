@@ -1,8 +1,10 @@
 # Lab knowledge base
 
-Status: the backend is **implemented** (milestone 5, 2026-09-27): sign-in,
-the clone, each conversation's copy, proposed edits, Save & share, and the
-check. The Knowledge tab and the move of the Spine's content come next.
+Status: **implemented** (milestone 5, 2026-09-27): sign-in, the clone, each
+conversation's copy, proposed edits, Save & share, and the check; in the app,
+Settings → GitHub, the proposed-edit cards in the chat, and the Knowledge
+tab (reading pages, skills and recent changes). Reverting, editing a page
+directly, and the move of the Spine's content come next.
 
 The knowledge base holds the lab's shared, durable knowledge about IHS data:
 what tables and variables mean, device quirks, cleaning and QC rules, how
@@ -213,8 +215,25 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   resolution says. A deleted conversation's base is removed (and `git gc`
   prunes its commits) when DataLab starts and after each sync.
 - The API is `/api/knowledge/…`: `status`, `sync`, `sign-in` (start, poll,
-  cancel), `sign-out`, and `proposals` (list, get, `edits`, `accept`,
-  `reject`). The tables are migration 0007.
+  cancel), `sign-out`, `proposals` (list, get, `edits`, `accept`,
+  `reject`), and, for the Knowledge tab, `pages` (list, and read one) and
+  `history` (the latest commits). Those two read only GitHub's `main` as
+  last synced, from the clone's objects (never its working tree), and only
+  paths in the layout: not `generated/schema/` or `.github/`. The tables are
+  migration 0007.
+- **In the app.** Settings → GitHub signs in (the code, GitHub's device
+  page, and polling until it's entered) and out. Each proposal is a card
+  under the turn's answer, never folded away: the files with a diff each,
+  the check (possible participant data is ticked off one by one before
+  Save & share can be pressed), what was refused and why, and the person's
+  own edit or leaving a file out. Every end of Save & share says plainly
+  what happened: saved (with the commit), someone else changed it (GitHub's
+  version against theirs, to resolve), the check stopped it, or it failed;
+  nothing is shared otherwise. The Knowledge tab lists pages and skills by
+  folder, renders them with their front matter as facts, shows recent
+  changes, and docks a chat. There's no mode for writing pages yet, so the
+  chat is Data extraction (a data session, with the catalog that table and
+  query pages cite).
 
 ## The check
 

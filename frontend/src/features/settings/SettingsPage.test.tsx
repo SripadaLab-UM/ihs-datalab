@@ -36,6 +36,7 @@ it("shows each built section, in order, and nothing for the ones still to come",
   expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual([
     "Safety check",
     "Connections",
+    "GitHub",
     "Export folders",
     "Workflow destinations",
     "Storage",

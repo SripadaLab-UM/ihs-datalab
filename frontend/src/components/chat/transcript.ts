@@ -31,7 +31,26 @@ export type Item =
   | { kind: "files"; paths: string[] }
   | Approval
   | { kind: "review"; text: string; status: "running" | "done" | "stopped" | "failed" }
+  | KbProposalItem
   | { kind: "notice"; tone: "error" | "info"; text: string };
+
+/**
+ * Knowledge edits the agent proposed after a turn (backend knowledge/service.py):
+ * a `kb_proposal` event, then `kb_proposal_updated` as it's edited, saved or
+ * discarded. The texts and the full check are fetched from the API when shown.
+ */
+export interface KbProposalItem {
+  kind: "kb_proposal";
+  id: string;
+  files: { path: string; change: string; added: number; removed: number; flags: string[] }[];
+  refused: { path: string; reason: string }[];
+  check: { errors: number; data: number; warnings: number };
+  /** The diff in the event was cut short (the full one is in the API). */
+  truncated: boolean;
+  status: string;
+  message: string;
+  commit: string | null;
+}
 
 /** How the turn's model requests are going, from DataLab's relay (relay/recovery.py). */
 export interface ModelStatus {
@@ -69,6 +88,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   let turn: Turn | undefined;
   const byId = new Map<string, Item>();
   const approvals = new Map<string, Approval>();
+  const proposals = new Map<string, KbProposalItem>();
   // During a rigor review, Codex's messages are the review, not the answer.
   let review: Extract<Item, { kind: "review" }> | undefined;
 
@@ -81,6 +101,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   };
   const add = (item: Item) => current().items.push(item);
   const text = (value: unknown) => (typeof value === "string" ? value : "");
+  const list = (value: unknown): Record<string, unknown>[] =>
+    Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object") : [];
 
   for (const event of events) {
     const data = event.data;
@@ -269,6 +291,41 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         if (item) {
           item.answer = text(data.answer);
           item.answerStatus = text(data.status);
+        }
+        break;
+      }
+      case "kb_proposal": {
+        const item: KbProposalItem = {
+          kind: "kb_proposal",
+          id,
+          files: list(data.files).map((f) => ({
+            path: text(f.path),
+            change: text(f.change),
+            added: Number(f.added) || 0,
+            removed: Number(f.removed) || 0,
+            flags: Array.isArray(f.flags) ? f.flags.map(String) : [],
+          })),
+          refused: list(data.refused).map((r) => ({ path: text(r.path), reason: text(r.reason) })),
+          check: {
+            errors: Number((data.check as Record<string, unknown> | undefined)?.errors) || 0,
+            data: Number((data.check as Record<string, unknown> | undefined)?.data) || 0,
+            warnings: Number((data.check as Record<string, unknown> | undefined)?.warnings) || 0,
+          },
+          truncated: data.truncated === true,
+          status: "open",
+          message: "",
+          commit: null,
+        };
+        proposals.set(id, item);
+        add(item);
+        break;
+      }
+      case "kb_proposal_updated": {
+        const item = proposals.get(id);
+        if (item) {
+          item.status = text(data.status) || item.status;
+          item.message = text(data.message);
+          item.commit = text(data.commit) || null;
         }
         break;
       }
