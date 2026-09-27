@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,6 +21,7 @@ from datalab.sessions.approvals import Approvals
 from datalab.sessions.appserver import AppServerClient, AppServerError
 from datalab.sessions.containers import SessionContainers, SessionPaths
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
+from datalab.sessions.tracing import Source
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +78,10 @@ class SessionRuntime:
         self._approvals = approvals
         self._requests: dict[Any, str] = {}  # Codex request id -> approval id
         self._evidence: list[str] = []  # this turn's output, for tracing
+        # The same, with where each came from, for provenance. Not drained by
+        # take_evidence, and not added to by a review (which isn't the turn's work).
+        self._sourced: list[tuple[Source, str]] = []
+        self._reviewing = False
         self._ran_commands = False
         self._background: set[asyncio.Task[None]] = set()
 
@@ -99,6 +105,7 @@ class SessionRuntime:
                 return TurnResult("", "interrupted")
             self._turn = turn = _Turn()
             self._evidence = []
+            self._sourced = []
             self._ran_commands = False
             params: dict[str, Any] = {
                 "threadId": self._thread_id,
@@ -125,6 +132,7 @@ class SessionRuntime:
                 return TurnResult("", "interrupted")
             self._turn = turn = _Turn()
             self._ran_commands = False
+            self._reviewing = True
             params = {
                 "threadId": self._thread_id,
                 "target": {"type": "custom", "instructions": instructions},
@@ -139,11 +147,18 @@ class SessionRuntime:
                 return await self._wait_for(turn, self._client)
             finally:
                 self._turn = None
+                self._reviewing = False
 
     def take_evidence(self) -> list[str]:
         """What the last turn produced, for tracing its answer. Kept in memory only."""
         evidence, self._evidence = self._evidence, []
         return evidence
+
+    def turn_sources(self) -> list[tuple[Source, str]]:
+        """What the last turn produced, with where each piece came from: each
+        command's output and each query's result. For provenance; kept in
+        memory only, like the evidence."""
+        return list(self._sourced)
 
     def ran_commands(self) -> bool:
         """Whether the last turn (or review) ran any command. Resets."""
@@ -168,12 +183,16 @@ class SessionRuntime:
         if item.get("type") == "commandExecution":
             self._ran_commands = True
             text = str(item.get("aggregatedOutput") or "")
+            source = Source("command", str(item.get("id") or ""))
         elif item.get("type") == "mcpToolCall" and item.get("tool") == "query":
             text = _result_text(item.get("result"))
+            source = Source("query", _query_id(text))
         else:
             return
         if text and sum(len(t) for t in self._evidence) < _MAX_EVIDENCE:
             self._evidence.append(text[:_MAX_RESULT_TEXT])
+            if not self._reviewing and source.ref:
+                self._sourced.append((source, text[:_MAX_RESULT_TEXT]))
 
     async def stop_turn(self) -> None:
         """Stop the running turn, including any commands it started.
@@ -424,6 +443,18 @@ def _approval_id(method: str, params: dict[str, Any]) -> str | None:
 
 _MAX_RESULT_TEXT = 200_000
 _MAX_EVIDENCE = 5 * 1024**2
+
+
+# The query tool's result starts with its Data accessed id ({"query_id": ...}).
+# Read with a pattern, not by parsing: a wide preview is cut to
+# _MAX_RESULT_TEXT, which leaves the JSON unparseable.
+_QUERY_ID = re.compile(r'\A\s*\{\s*"query_id"\s*:\s*"([\w.-]{1,64})"')
+
+
+def _query_id(result_text: str) -> str:
+    """The Data accessed log's id for a query, from the query tool's result."""
+    found = _QUERY_ID.match(result_text)
+    return found.group(1) if found else ""
 
 
 def _result_text(result: Any) -> str:

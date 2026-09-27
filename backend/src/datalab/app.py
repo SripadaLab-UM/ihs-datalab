@@ -22,6 +22,7 @@ from datalab.api.files import Previews, build_files_router, build_preview_router
 from datalab.api.inputs import build_inputs_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
+from datalab.api.provenance import ProvenanceServices, build_provenance_router
 from datalab.api.safety import build_safety_router
 from datalab.api.settings import SettingsServices, build_settings_router
 from datalab.api.sql import SqlServices, build_sql_router
@@ -219,6 +220,9 @@ def create_app(
         build_workflows_router(WorkflowServices(settings, connection, data, access_log))
     )
     app.include_router(build_pipelines_router(PipelineServices(settings, conversations, sessions)))
+    app.include_router(
+        build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
+    )
     app.include_router(build_settings_router(SettingsServices(settings, connection)))
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     browser = browser or BrowserSession(settings.port)
