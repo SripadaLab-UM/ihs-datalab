@@ -264,9 +264,10 @@ Windows specifics).
     - ProgramData's location comes from Windows (`CommonApplicationData`),
       not `%ProgramData%`, which a person can set for their own account. The
       elevated part accepts only a folder named exactly
-      `DataLab-setup-<32 hex digits>` there, and checks that ProgramData
-      isn't a link and is owned by SYSTEM, TrustedInstaller or
-      Administrators.
+      `DataLab-setup-<32 hex digits>` there. It checks that ProgramData
+      isn't a link, is owned by SYSTEM, TrustedInstaller or Administrators,
+      and doesn't let any other account delete, replace or re-permission
+      what's in it; otherwise it stops and says to ask IT.
     - That folder is new, and only SYSTEM and Administrators can use it
       (created with those permissions, inheritance off, checked before use).
       Both downloads go there and are checked for their SHA-256 and their
@@ -274,13 +275,31 @@ Windows specifics).
       organisation (`Microsoft Corporation` for WSL, `Docker Inc` for Docker
       Desktop). They run from there, with `TEMP` pointed inside the folder
       too. At the end it deletes the downloads and lets the person read the
-      result and log and remove the folder. The installer does that after
-      reading them, or on its next run, but only for folders that aren't
-      links, are owned by SYSTEM or Administrators, and give that person a
-      permission of their own. Anyone can create folders in ProgramData, so
-      the name alone proves nothing.
+      result and log and remove the folder.
+    - Removing that folder afterwards: anyone can create folders in
+      ProgramData, so the installer never removes anything there by name or
+      pattern. Before starting the elevated part, it records the exact
+      folder in `%LOCALAPPDATA%\DataLab\installer-admin-folder.txt`, which
+      other accounts can't write. It removes only recorded folders, after
+      reading the result or on a later run, and only if the folder has
+      exactly the owner and permissions the elevated part sets: SYSTEM or
+      Administrators as owner, inheritance off, no Deny rules, and no rules
+      but SYSTEM and Administrators (full control), OWNER RIGHTS (read
+      permissions) and the person (list, read attributes, read permissions,
+      delete, on the folder only). It checks again that the folder isn't a
+      link right before removing it, and never follows a link inside it.
+      A folder that doesn't pass is left alone, with a note to ask IT.
+      `uninstall.ps1` does the same.
     - The installer stops at once if PowerShell runs in Constrained Language
-      Mode (AppLocker or WDAC).
+      Mode (AppLocker or WDAC), or if it's the 32-bit PowerShell on 64-bit
+      Windows.
+    - **For IT:** endpoint protection (Defender attack surface reduction
+      rules, CrowdStrike and the like) may block or flag an elevated
+      `powershell.exe -EncodedCommand`, which is how the elevated part
+      starts. If it's blocked, the elevated window doesn't open or closes at
+      once, and the installer says the administrator part closed before it
+      finished. Allow it for this install, or run the installer for the
+      person.
   - A Docker Desktop that was already installed, probably without
     `--always-run-service`, gets its service (`com.docker.service`) set to
     start automatically, in the same elevated step. A service IT has

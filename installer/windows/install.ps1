@@ -47,6 +47,15 @@ if ($ExecutionContext.SessionState.LanguageMode -ne "FullLanguage") {
     Write-Host "   DataLab installer can't run. Ask IT to install DataLab, or to allow this script." -ForegroundColor Red
     exit 1
 }
+# 32-bit PowerShell ("Windows PowerShell (x86)") on 64-bit Windows sees other
+# Program Files and system folders, and would install the wrong things.
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+    Write-Host ""
+    Write-Host "   This is the 32-bit PowerShell, 'Windows PowerShell (x86)'. Please open the" -ForegroundColor Red
+    Write-Host "   normal one (Start menu > Windows PowerShell, without '(x86)'), then run the" -ForegroundColor Red
+    Write-Host "   installer again from there." -ForegroundColor Red
+    exit 1
+}
 # The text of this script as it's running, for the administrator part (see
 # Invoke-AdminPart). Empty when the script wasn't started from its file.
 $ScriptText = $MyInvocation.MyCommand.ScriptContents
@@ -65,12 +74,16 @@ $DockerAgreement = "https://www.docker.com/legal/docker-subscription-service-agr
 
 $StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
 $ResumeFile = Join-Path $StateDir "installer-resume.json"
+# The administrator part's folders this account's installer made, one per line,
+# so that exactly those (and nothing else in ProgramData) are removed later.
+$AdminRecord = Join-Path $StateDir "installer-admin-folder.txt"
+$ProgramFilesDir = [Environment]::GetFolderPath("ProgramFiles")
 $ResumeShortcut = Join-Path ([Environment]::GetFolderPath("Startup")) "DataLab setup.lnk"
-$DockerDesktop = Join-Path $Env:ProgramFiles "Docker\Docker\Docker Desktop.exe"
+$DockerDesktop = Join-Path $ProgramFilesDir "Docker\Docker\Docker Desktop.exe"
 # Docker Desktop's Windows service. Docker Desktop starts without an
 # administrator only when this service starts by itself (--always-run-service).
 $DockerService = "com.docker.service"
-$WslExe = Join-Path $Env:ProgramFiles "WSL\wsl.exe"
+$WslExe = Join-Path $ProgramFilesDir "WSL\wsl.exe"
 # The group Docker Desktop creates for the people allowed to use it; its SID
 # differs per computer, so it's matched by name.
 $DockerUsers = "docker-users"
@@ -87,6 +100,7 @@ $WindowsPowerShell = Join-Path $SystemDir "WindowsPowerShell\v1.0\powershell.exe
 # Well-known SIDs.
 $SystemSid = "S-1-5-18"
 $AdminsSid = "S-1-5-32-544"
+$OwnerRightsSid = "S-1-3-4"
 $TrustedInstallerSid = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
 
 function Step($text) { Write-Host "`n== $text ==" -ForegroundColor Cyan }
@@ -162,9 +176,19 @@ function Test-DockerServiceManual {
     return [bool]($service -and "$($service.StartType)" -eq "Manual")
 }
 
-# Deletes a folder and what's in it without following links out of it: a link
-# is removed, never what it points to. Whatever can't be deleted stays.
+# --- Shared by install.ps1 and uninstall.ps1 (keep both copies the same) ----
+# Removing what an administrator part left for this account. ProgramData is
+# shared by every account and anyone can create folders in it, so nothing
+# there is removed by name or pattern: only the exact folders this account's
+# own installer recorded in $AdminRecord (under %LOCALAPPDATA%, which other
+# accounts can't write), and only after they check out.
+
+# Deletes a folder and what's in it without following links: a link inside is
+# removed as a link, never what it points to, and a folder that is itself a
+# link is left alone. Whatever can't be deleted stays.
 function Remove-Tree($path) {
+    $top = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $top -or -not $top.PSIsContainer -or ($top.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return }
     foreach ($child in @(Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue)) {
         $isLink = [bool]($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
         if ($child.PSIsContainer -and -not $isLink) { Remove-Tree $child.FullName }
@@ -176,30 +200,72 @@ function Remove-Tree($path) {
     try { [System.IO.Directory]::Delete($path, $false) } catch { Write-Verbose "Couldn't remove ${path}: $_" }
 }
 
-# Whether a folder in ProgramData is one an administrator part made and left
-# for this account ($sid) to remove. Anyone can create folders in ProgramData,
-# so a name alone proves nothing: another account could make one that's a link
-# into this person's files. So it must be a real folder (not a link), named
-# exactly as the installer names them, owned by SYSTEM or Administrators, and
-# give this account a permission of its own. (uninstall.ps1 has a copy.)
-function Test-AdminFolder($item, $sid) {
-    if (-not $item.PSIsContainer) { return $false }
-    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
-    if ($item.FullName -notmatch $AdminFolderPattern) { return $false }
-    try { $acl = Get-Acl -LiteralPath $item.FullName } catch { return $false }
-    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-    if ($owner -notin @($SystemSid, $AdminsSid)) { return $false }
-    $mine = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
-        Where-Object { $_.IdentityReference.Value -eq $sid })
-    return $mine.Count -gt 0
+# Whether $path is a real folder (read fresh, not a link) owned by SYSTEM or
+# Administrators.
+function Test-AdminOwned($path) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    try { $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { return $false }
+    return $owner -in @($SystemSid, $AdminsSid)
 }
 
-# Removes what earlier administrator parts left for this account, and nothing else.
-function Remove-AdminFolder($sid) {
-    foreach ($item in @(Get-ChildItem -LiteralPath $AdminBase -Force -Filter "$AdminFolderPrefix*" -ErrorAction SilentlyContinue)) {
-        if (Test-AdminFolder $item $sid) { Remove-Tree $item.FullName }
+# Whether $path is exactly what an administrator part leaves for the account
+# $sid: the installer's name for it, a real folder owned by SYSTEM or
+# Administrators, inheritance off, and no permissions but the ones it sets
+# (SYSTEM and Administrators: full control; OWNER RIGHTS: read permissions;
+# $sid: list, read attributes, read permissions and delete, on the folder
+# only). No Deny rules. A profile folder, say, fails this even if another
+# account manages to put a link to it where the folder was.
+function Test-AdminFolder($path, $sid) {
+    if ($path -notmatch $AdminFolderPattern -or -not (Test-AdminOwned $path)) { return $false }
+    try { $acl = Get-Acl -LiteralPath $path } catch { return $false }
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $fsr = [System.Security.AccessControl.FileSystemRights]
+    $sync = [int]$fsr::Synchronize  # Windows adds it to every Allow rule
+    $expected = @{
+        $SystemSid = [int]$fsr::FullControl
+        $AdminsSid = [int]$fsr::FullControl
+        $OwnerRightsSid = [int]$fsr::ReadPermissions
     }
+    $personRights = [int]($fsr::ListDirectory -bor $fsr::ReadAttributes -bor $fsr::ReadPermissions -bor $fsr::Delete)
+    $sawPerson = $false
+    foreach ($rule in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ($rule.IsInherited -or "$($rule.AccessControlType)" -ne "Allow") { return $false }
+        $who = $rule.IdentityReference.Value
+        $rights = [int]$rule.FileSystemRights -bor $sync
+        if ($who -eq $sid) {
+            if ($rights -ne ($personRights -bor $sync) -or "$($rule.InheritanceFlags)" -ne "None" -or
+                "$($rule.PropagationFlags)" -ne "None") { return $false }
+            $sawPerson = $true
+        } elseif ($expected.ContainsKey($who)) {
+            if ($rights -ne ($expected[$who] -bor $sync)) { return $false }
+        } else { return $false }
+    }
+    return $sawPerson
 }
+
+# Removes the folders recorded in $AdminRecord that check out, and forgets
+# them. One that doesn't check out is left alone (and forgotten); one that
+# couldn't be removed is kept for the next run.
+function Remove-RecordedAdminFolder($sid) {
+    if (-not (Test-Path -LiteralPath $AdminRecord -PathType Leaf)) { return }
+    $keep = @()
+    foreach ($path in @(Get-Content -LiteralPath $AdminRecord -ErrorAction SilentlyContinue)) {
+        $path = "$path".Trim()
+        if (-not $path -or $path -notmatch $AdminFolderPattern -or -not (Test-Path -LiteralPath $path)) { continue }
+        if (-not (Test-AdminFolder $path $sid)) {
+            Write-Host "   (A folder an earlier administrator step left, $path, doesn't have the"
+            Write-Host "   permissions it should, so it was left alone. IT can remove it.)"
+            continue
+        }
+        # Checked again right before removing: still a real folder, not a link.
+        if (Test-AdminOwned $path) { Remove-Tree $path }
+        if (Test-Path -LiteralPath $path) { $keep += $path }
+    }
+    if ($keep) { Set-Content -LiteralPath $AdminRecord -Value $keep -Encoding UTF8 }
+    else { Remove-Item -LiteralPath $AdminRecord -Force -ErrorAction SilentlyContinue }
+}
+# --- End of the part shared by install.ps1 and uninstall.ps1 ---------------
 
 # A Docker Desktop that was uninstalled (or crashed) can leave its socket files
 # behind. Windows can't open or delete them ("The file cannot be accessed by the
@@ -283,7 +349,7 @@ function New-ProtectedFolder($path) {
     # A file's owner may always change its permissions, and Windows can make
     # the person the owner of what an elevated window creates. With this rule
     # an owner gets only what it gives: reading the permissions.
-    $ownerRights = New-Object System.Security.Principal.SecurityIdentifier("S-1-3-4")
+    $ownerRights = New-Object System.Security.Principal.SecurityIdentifier($OwnerRightsSid)
     $inherit = [System.Security.AccessControl.InheritanceFlags]"ContainerInherit, ObjectInherit"
     $none = [System.Security.AccessControl.PropagationFlags]::None
     $allow = [System.Security.AccessControl.AccessControlType]::Allow
@@ -315,7 +381,7 @@ function New-ProtectedFolder($path) {
 }
 
 # Once the administrator part is completely done, lets the person read its
-# result and log, and check and remove the folder (Remove-AdminFolder).
+# result and log, and check and remove the folder (Remove-RecordedAdminFolder).
 # Nothing elevated uses the folder after this.
 function Grant-ResultToPerson($folder, [string[]]$files) {
     $person = New-Object System.Security.Principal.SecurityIdentifier($ForUserSid)
@@ -349,13 +415,29 @@ if ($Prepare) {
     $logFile = Join-Path $WorkDir "setup.log"
     try {
         if ($WorkDir -notmatch $AdminFolderPattern) { throw "Unexpected working folder: $WorkDir" }
-        # ProgramData itself must be Windows' own: not a link, and owned by
-        # SYSTEM, TrustedInstaller or Administrators (none of them the person).
+        # ProgramData itself must be Windows' own: not a link, owned by SYSTEM,
+        # TrustedInstaller or Administrators, and nobody else may delete,
+        # replace or re-permission what's in it.
         $baseItem = Get-Item -LiteralPath $AdminBase -Force
-        $baseOwner = (Get-Acl -LiteralPath $AdminBase).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-        if (($baseItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
-            $baseOwner -notin @($SystemSid, $TrustedInstallerSid, $AdminsSid)) {
-            throw "$AdminBase isn't set up the way Windows sets it up (owner $baseOwner), so it wasn't used."
+        $baseAcl = Get-Acl -LiteralPath $AdminBase
+        $baseOwner = $baseAcl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        $trusted = @($SystemSid, $TrustedInstallerSid, $AdminsSid)
+        if (($baseItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or $baseOwner -notin $trusted) {
+            throw "$AdminBase isn't set up the way Windows sets it up (owner $baseOwner), so it wasn't used. Please ask IT to check it."
+        }
+        $fsr = [System.Security.AccessControl.FileSystemRights]
+        $risky = [int]($fsr::DeleteSubdirectoriesAndFiles -bor $fsr::ChangePermissions -bor $fsr::TakeOwnership) -bor 0x10000000  # GENERIC_ALL
+        $modify = [int]$fsr::Modify
+        $loose = @($baseAcl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | Where-Object {
+            $rights = [int]$_.FileSystemRights
+            "$($_.AccessControlType)" -eq "Allow" -and $_.IdentityReference.Value -notin $trusted -and
+                -not ($_.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -and
+                (($rights -band $risky) -or (($rights -band $modify) -eq $modify))
+        })
+        if ($loose) {
+            $who = ($loose | ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique) -join ", "
+            throw ("On this computer, other accounts ($who) may delete or change what's in $AdminBase, " +
+                "so the administrator part can't keep its downloads safe there. Please ask IT to check the permissions on $AdminBase.")
         }
         New-ProtectedFolder $WorkDir
         $ready = $true
@@ -533,7 +615,7 @@ try {
 # this run asks for another restart (Request-Restart sets it up again).
 Unregister-Resume
 # What an earlier administrator part left for this account to remove.
-Remove-AdminFolder $MySid
+Remove-RecordedAdminFolder $MySid
 
 $saved = $null
 if (Test-Path $ResumeFile) { $saved = Get-Content $ResumeFile -Raw | ConvertFrom-Json }
@@ -642,9 +724,18 @@ function Invoke-AdminPart {
     $copy = Join-Path $Env:TEMP ($AdminFolderPrefix + [guid]::NewGuid().ToString("N") + ".ps1")
     $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($ScriptText)
     [System.IO.File]::WriteAllBytes($copy, $bytes)
+    # Recorded first, so this exact folder (and only it) is removed later, even
+    # if this window is closed before the administrator part finishes.
+    New-Item -ItemType Directory -Force $StateDir | Out-Null
+    Add-Content -LiteralPath $AdminRecord -Value $work -Encoding UTF8
     $data = { param($text) "(D '" + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($text)) + "')" }
+    # The window stays open to show a problem: -Yes waits a while, otherwise it
+    # waits for Enter. Only $Host is used for that, as other commands may not
+    # have loaded yet.
+    $pause = if ($Yes) { "[Threading.Thread]::Sleep(20000)" } else { "`$Host.UI.WriteLine('Press Enter to close this window.'); `$null = `$Host.UI.ReadLine()" }
     $command = @(
         "`$ErrorActionPreference = 'Stop'"
+        "try {"
         "`$env:PSModulePath = `$PSHOME + '\Modules;' + [Environment]::GetFolderPath('ProgramFiles') + '\WindowsPowerShell\Modules'"
         "`$PSModuleAutoLoadingPreference = 'None'"
         "foreach (`$m in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security', " +
@@ -652,8 +743,11 @@ function Invoke-AdminPart {
         "function D(`$t) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(`$t)) }"
         "`$b = [IO.File]::ReadAllBytes($(& $data $copy))"
         "`$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(`$b))"
-        "if (`$h -ne '$(Get-BytesHash $bytes)') { Write-Host 'The installer changed on disk after it started, so nothing was run.'; Start-Sleep -Seconds 20; exit 1 }"
+        "if (`$h -ne '$(Get-BytesHash $bytes)') { `$Host.UI.WriteErrorLine('The installer changed on disk after it started, so nothing was run.'); $pause; exit 1 }"
         "& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString(`$b))) -Prepare -ForUserSid $(& $data $MySid) -WorkDir $(& $data $work)$(if ($Yes) { ' -Yes' })"
+        "} catch {"
+        "`$Host.UI.WriteErrorLine('The administrator part could not start: ' + `$_); $pause; exit 1"
+        "}"
     ) -join "`n"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     Say "Asking Windows for permission now (look for the box; it may be behind this window)..."
@@ -669,8 +763,7 @@ function Invoke-AdminPart {
         Remove-Item -LiteralPath $copy -ErrorAction SilentlyContinue
     }
     $resultFile = Join-Path $work "result.json"
-    $item = Get-Item -LiteralPath $work -Force -ErrorAction SilentlyContinue
-    if (-not $item -or -not (Test-AdminFolder $item $MySid) -or -not (Test-Path -LiteralPath $resultFile)) {
+    if (-not (Test-AdminOwned $work) -or -not (Test-Path -LiteralPath $resultFile)) {
         Stop-Install "The administrator part closed before it finished."
     }
     $outcome = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
@@ -678,7 +771,7 @@ function Invoke-AdminPart {
         Stop-Install ("The administrator part didn't finish: $($outcome.error)`n   " +
             "Details are saved in $(Join-Path $work 'setup.log')")
     }
-    Remove-Tree $work
+    Remove-RecordedAdminFolder $MySid
     return $outcome
 }
 

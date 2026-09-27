@@ -26,16 +26,29 @@ Get-ChildItem -LiteralPath $Env:TEMP -File -Filter "DataLab-setup-*.ps1" -Force 
     ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue }
 
 # The administrator part's result and log, which it left for this account to
-# remove. Copies of install.ps1's Remove-Tree and Test-AdminFolder: anyone can
-# create folders in ProgramData, so only real folders (not links) that the
-# administrator part made for this account are removed, without following links.
+# remove: only the exact folders the installer recorded, never a pattern
+# (anyone can create folders in ProgramData). Names and checks match install.ps1.
 $AdminBase = [Environment]::GetFolderPath("CommonApplicationData")
 $AdminFolderPrefix = "DataLab-setup-"
 $AdminFolderPattern = "^" + [regex]::Escape((Join-Path $AdminBase $AdminFolderPrefix)) + "[0-9a-f]{32}$"
+$AdminRecord = Join-Path $Env:LOCALAPPDATA "DataLab\installer-admin-folder.txt"
 $SystemSid = "S-1-5-18"
 $AdminsSid = "S-1-5-32-544"
+$OwnerRightsSid = "S-1-3-4"
 
+# --- Shared by install.ps1 and uninstall.ps1 (keep both copies the same) ----
+# Removing what an administrator part left for this account. ProgramData is
+# shared by every account and anyone can create folders in it, so nothing
+# there is removed by name or pattern: only the exact folders this account's
+# own installer recorded in $AdminRecord (under %LOCALAPPDATA%, which other
+# accounts can't write), and only after they check out.
+
+# Deletes a folder and what's in it without following links: a link inside is
+# removed as a link, never what it points to, and a folder that is itself a
+# link is left alone. Whatever can't be deleted stays.
 function Remove-Tree($path) {
+    $top = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $top -or -not $top.PSIsContainer -or ($top.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return }
     foreach ($child in @(Get-ChildItem -LiteralPath $path -Force -ErrorAction SilentlyContinue)) {
         $isLink = [bool]($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
         if ($child.PSIsContainer -and -not $isLink) { Remove-Tree $child.FullName }
@@ -47,21 +60,74 @@ function Remove-Tree($path) {
     try { [System.IO.Directory]::Delete($path, $false) } catch { Write-Verbose "Couldn't remove ${path}: $_" }
 }
 
-function Test-AdminFolder($item, $sid) {
-    if (-not $item.PSIsContainer) { return $false }
-    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
-    if ($item.FullName -notmatch $AdminFolderPattern) { return $false }
-    try { $acl = Get-Acl -LiteralPath $item.FullName } catch { return $false }
-    $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-    if ($owner -notin @($SystemSid, $AdminsSid)) { return $false }
-    $mine = @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
-        Where-Object { $_.IdentityReference.Value -eq $sid })
-    return $mine.Count -gt 0
+# Whether $path is a real folder (read fresh, not a link) owned by SYSTEM or
+# Administrators.
+function Test-AdminOwned($path) {
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    if (-not $item -or -not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) { return $false }
+    try { $owner = (Get-Acl -LiteralPath $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value } catch { return $false }
+    return $owner -in @($SystemSid, $AdminsSid)
 }
 
-foreach ($item in @(Get-ChildItem -LiteralPath $AdminBase -Force -Filter "$AdminFolderPrefix*" -ErrorAction SilentlyContinue)) {
-    if (Test-AdminFolder $item $MySid) { Remove-Tree $item.FullName }
+# Whether $path is exactly what an administrator part leaves for the account
+# $sid: the installer's name for it, a real folder owned by SYSTEM or
+# Administrators, inheritance off, and no permissions but the ones it sets
+# (SYSTEM and Administrators: full control; OWNER RIGHTS: read permissions;
+# $sid: list, read attributes, read permissions and delete, on the folder
+# only). No Deny rules. A profile folder, say, fails this even if another
+# account manages to put a link to it where the folder was.
+function Test-AdminFolder($path, $sid) {
+    if ($path -notmatch $AdminFolderPattern -or -not (Test-AdminOwned $path)) { return $false }
+    try { $acl = Get-Acl -LiteralPath $path } catch { return $false }
+    if (-not $acl.AreAccessRulesProtected) { return $false }
+    $fsr = [System.Security.AccessControl.FileSystemRights]
+    $sync = [int]$fsr::Synchronize  # Windows adds it to every Allow rule
+    $expected = @{
+        $SystemSid = [int]$fsr::FullControl
+        $AdminsSid = [int]$fsr::FullControl
+        $OwnerRightsSid = [int]$fsr::ReadPermissions
+    }
+    $personRights = [int]($fsr::ListDirectory -bor $fsr::ReadAttributes -bor $fsr::ReadPermissions -bor $fsr::Delete)
+    $sawPerson = $false
+    foreach ($rule in @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))) {
+        if ($rule.IsInherited -or "$($rule.AccessControlType)" -ne "Allow") { return $false }
+        $who = $rule.IdentityReference.Value
+        $rights = [int]$rule.FileSystemRights -bor $sync
+        if ($who -eq $sid) {
+            if ($rights -ne ($personRights -bor $sync) -or "$($rule.InheritanceFlags)" -ne "None" -or
+                "$($rule.PropagationFlags)" -ne "None") { return $false }
+            $sawPerson = $true
+        } elseif ($expected.ContainsKey($who)) {
+            if ($rights -ne ($expected[$who] -bor $sync)) { return $false }
+        } else { return $false }
+    }
+    return $sawPerson
 }
+
+# Removes the folders recorded in $AdminRecord that check out, and forgets
+# them. One that doesn't check out is left alone (and forgotten); one that
+# couldn't be removed is kept for the next run.
+function Remove-RecordedAdminFolder($sid) {
+    if (-not (Test-Path -LiteralPath $AdminRecord -PathType Leaf)) { return }
+    $keep = @()
+    foreach ($path in @(Get-Content -LiteralPath $AdminRecord -ErrorAction SilentlyContinue)) {
+        $path = "$path".Trim()
+        if (-not $path -or $path -notmatch $AdminFolderPattern -or -not (Test-Path -LiteralPath $path)) { continue }
+        if (-not (Test-AdminFolder $path $sid)) {
+            Write-Host "   (A folder an earlier administrator step left, $path, doesn't have the"
+            Write-Host "   permissions it should, so it was left alone. IT can remove it.)"
+            continue
+        }
+        # Checked again right before removing: still a real folder, not a link.
+        if (Test-AdminOwned $path) { Remove-Tree $path }
+        if (Test-Path -LiteralPath $path) { $keep += $path }
+    }
+    if ($keep) { Set-Content -LiteralPath $AdminRecord -Value $keep -Encoding UTF8 }
+    else { Remove-Item -LiteralPath $AdminRecord -Force -ErrorAction SilentlyContinue }
+}
+# --- End of the part shared by install.ps1 and uninstall.ps1 ---------------
+
+Remove-RecordedAdminFolder $MySid
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     $DataLab = Join-Path (uv tool dir --bin) "datalab.exe"
