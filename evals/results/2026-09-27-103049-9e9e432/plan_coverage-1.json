@@ -1,0 +1,114 @@
+{
+  "task": "plan_coverage",
+  "mode": "analysis",
+  "prompt": "How complete is the 2025 cohort's Garmin daily data, month by month?",
+  "tests": "plan type: a coverage audit, with only the add-ons it needs",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Data quality or coverage (proposed data_quality)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, repeated_observations"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"data_quality\",\n  \"analysis_type_label\": \"Data quality or coverage\",\n  \"rationale\": \"The question asks how complete a data stream is over time, so this is a data-quality/coverage audit rather than an exposure-outcome analysis.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: How complete is Garmin daily data for the IHS 2025 cohort, summarized month by month? Purpose: quantify which months have usable daily Garmin records and where coverage gaps may affect later analyses.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025 only. Population: participants represented in the 2025 Garmin daily-data table(s), with participant counts interpreted at the study-ID level available in the table. Time window: calendar months present in the Garmin daily records, reported by month. Unit of analysis for completeness: participant-day records aggregated to participant-month and month. I will first use the catalog to identify the 2025 Garmin daily table and describe its columns before choosing date, participant, and daily-availability fields. If an enrollment/expected-days denominator is available and joinable, I will use it; otherwise I will define completeness among participants with any Garmin daily data and clearly label that denominator.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"I will check table/column metadata, row counts, date range, distinct participant counts, duplicate participant-day rows, impossible or missing dates, missing participant identifiers, and whether daily records have fields indicating usable data versus rows with all-null measures. Limitations: database records can show whether data are present, but may not prove the device was worn, synced correctly, or intended to be collected on every day for every participant. If no roster or enrollment window is available, completeness will be coverage among Garmin-observed participants, not the full 2025 cohort.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A static HTML report in /work/outputs with month-by-month tables and a simple figure, plus reproducible source code in /work. The report will state the exact tables and SQL queries used, sample sizes, date ranges, definitions, denominator choices, suppressed small counts where needed, and key limitations.\"\n    },\n    {\n      \"kind\": \"expected_structure\",\n      \"label\": \"Expected structure and rules\",\n      \"content\": \"Expected structure: one daily Garmin record per participant per calendar date, or enough information to collapse multiple same-day records to one participant-day. Dates should fall within the plausible 2025 cohort monitoring period; participant identifiers should be non-missing; core Garmin daily metrics should have plausible ranges when present. Completeness is expected to be interpretable as observed participant-days divided by expected participant-days for a defined participant set and month.\"\n    },\n    {\n      \"kind\": \"assessment\",\n      \"label\": \"Assessment method\",\n      \"content\": \"I will summarize by calendar month: number of participants with any Garmin daily record, observed participant-days, expected participant-days, and percent completeness. At participant-month level I will summarize the distribution of days observed and classify complete months using a transparent threshold, likely all calendar days observed unless a table-specific rule suggests otherwise. I will also report duplicate participant-day frequency and missing/invalid dates or IDs.\"\n    },\n    {\n      \"kind\": \"flag_handling\",\n      \"label\": \"Flagged records\",\n      \"content\": \"Flagged records such as missing participant ID, missing date, invalid date, or duplicate participant-day rows will be counted in data-quality checks. Duplicates will not be treated as extra completeness; for month-level coverage they will be collapsed to at most one observed day per participant-date. I will not correct records unless a documented table field makes the correction unambiguous.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"Garmin daily data are repeated by participant across days. Completeness will be summarized at day, participant-month, and month levels so that a small number of highly observed participants do not obscure how many participants contribute coverage.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"Missing Garmin days may reflect non-wear, non-syncing, device loss, participant withdrawal, delayed ingestion, or absence from the Garmin substudy. I will keep these mechanisms distinct where the available tables allow it; otherwise I will describe the ambiguity explicitly.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 24.962394952774048,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_149c8af507b783c2",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "data_quality",
+        "analysis_type_label": "Data quality or coverage",
+        "rationale": "The question asks how complete a data stream is over time, so this is a data-quality/coverage audit rather than an exposure-outcome analysis.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: How complete is Garmin daily data for the IHS 2025 cohort, summarized month by month? Purpose: quantify which months have usable daily Garmin records and where coverage gaps may affect later analyses."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025 only. Population: participants represented in the 2025 Garmin daily-data table(s), with participant counts interpreted at the study-ID level available in the table. Time window: calendar months present in the Garmin daily records, reported by month. Unit of analysis for completeness: participant-day records aggregated to participant-month and month. I will first use the catalog to identify the 2025 Garmin daily table and describe its columns before choosing date, participant, and daily-availability fields. If an enrollment/expected-days denominator is available and joinable, I will use it; otherwise I will define completeness among participants with any Garmin daily data and clearly label that denominator."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "I will check table/column metadata, row counts, date range, distinct participant counts, duplicate participant-day rows, impossible or missing dates, missing participant identifiers, and whether daily records have fields indicating usable data versus rows with all-null measures. Limitations: database records can show whether data are present, but may not prove the device was worn, synced correctly, or intended to be collected on every day for every participant. If no roster or enrollment window is available, completeness will be coverage among Garmin-observed participants, not the full 2025 cohort."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A static HTML report in /work/outputs with month-by-month tables and a simple figure, plus reproducible source code in /work. The report will state the exact tables and SQL queries used, sample sizes, date ranges, definitions, denominator choices, suppressed small counts where needed, and key limitations."
+          },
+          {
+            "kind": "expected_structure",
+            "label": "Expected structure and rules",
+            "content": "Expected structure: one daily Garmin record per participant per calendar date, or enough information to collapse multiple same-day records to one participant-day. Dates should fall within the plausible 2025 cohort monitoring period; participant identifiers should be non-missing; core Garmin daily metrics should have plausible ranges when present. Completeness is expected to be interpretable as observed participant-days divided by expected participant-days for a defined participant set and month."
+          },
+          {
+            "kind": "assessment",
+            "label": "Assessment method",
+            "content": "I will summarize by calendar month: number of participants with any Garmin daily record, observed participant-days, expected participant-days, and percent completeness. At participant-month level I will summarize the distribution of days observed and classify complete months using a transparent threshold, likely all calendar days observed unless a table-specific rule suggests otherwise. I will also report duplicate participant-day frequency and missing/invalid dates or IDs."
+          },
+          {
+            "kind": "flag_handling",
+            "label": "Flagged records",
+            "content": "Flagged records such as missing participant ID, missing date, invalid date, or duplicate participant-day rows will be counted in data-quality checks. Duplicates will not be treated as extra completeness; for month-level coverage they will be collapsed to at most one observed day per participant-date. I will not correct records unless a documented table field makes the correction unambiguous."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "Garmin daily data are repeated by participant across days. Completeness will be summarized at day, participant-month, and month levels so that a small number of highly observed participants do not obscure how many participants contribute coverage."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Missing Garmin days may reflect non-wear, non-syncing, device loss, participant withdrawal, delayed ingestion, or absence from the Garmin substudy. I will keep these mechanisms distinct where the available tables allow it; otherwise I will describe the ambiguity explicitly."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 35270,
+        "inputTokens": 34030,
+        "cachedInputTokens": 24576,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1240,
+        "reasoningOutputTokens": 97
+      },
+      "last": {
+        "totalTokens": 14029,
+        "inputTokens": 13182,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 847,
+        "reasoningOutputTokens": 0
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_d82eb1df3fb987e5",
+  "attempt": 1
+}

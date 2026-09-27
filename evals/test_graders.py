@@ -207,6 +207,9 @@ def causal_check(answer: str) -> bool:
         "That isn't proof the internship caused the change.",
         "This is not a causal estimate of the effect of internship.",
         "The internship didn't cause it by itself; many things changed.",
+        # From an eval answer (2026-09-27) the check wrongly failed:
+        "This should not be read as proof that internship caused the decrease.",
+        "It shouldn't be taken as evidence that the internship caused it.",
     ],
 )
 def test_a_disclaimer_isnt_a_causal_claim(disclaimer):
@@ -233,6 +236,9 @@ def test_a_disclaimer_isnt_a_causal_claim(disclaimer):
         "as the internship caused stress.",
         "It is not possible to say anything except that the internship reduced mood.",
         "We cannot establish anything other than that mood fell because of the internship.",
+        # "Evidence against" isn't a disclaimer, and "anything but" isn't a negation:
+        "It shouldn't be taken as evidence against the internship having caused the drop.",
+        "This should not be read as anything but proof that the internship caused it.",
     ],
 )
 def test_a_causal_claim_with_a_disclaimer_elsewhere(claim):

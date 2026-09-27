@@ -1,0 +1,45 @@
+{
+  "task": "oura_2024",
+  "mode": "extraction",
+  "prompt": "How many Oura daily activity records does the 2024 cohort have?",
+  "tests": "a table the cohort doesn't have",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says the table isn't there",
+      "passed": true,
+      "detail": "IHS_2024 has no Oura tables at all: no count to give"
+    }
+  ],
+  "answer": "I understood this as: count Oura daily activity records in the `IHS_2024` cohort schema.\n\nResult: **there is no accessible `IHS_2024.OURADAILYACTIVITY` table in the catalog, so the 2024 cohort has no Oura daily activity records available to count in that schema.**\n\nCatalog evidence:\n- `search_catalog(\"oura\", cohorts=[\"IHS_2024\"])`: no matches.\n- `find_concept(\"Oura\", cohorts=[\"IHS_2024\"])`: no candidates.\n- `search_catalog(\"oura\")` across schemas found `OURADAILYACTIVITY` only in `IHS_2025` and `IHS_2026`.\n- `describe_table(\"IHS_2025.OURADAILYACTIVITY\")` confirmed the Oura daily activity table name and columns, and its `also_in` list included `IHS_2026`, not `IHS_2024`.\n- `describe_table(\"IHS_2024.OURADAILYACTIVITY\")` failed because that table is not in the catalog.\n\nSQL run:\n```sql\nSELECT COUNT(*) AS matching_tables\nFROM all_tables\nWHERE owner = :schema_name\n  AND table_name = :table_name\n```\nPurpose: verify the 2024 table\u2019s existence in Oracle metadata.  \nResult: rejected by the query guard because non-cohort-qualified catalog tables are not allowed.\n\nNo result CSV was produced, and no `/work/outputs` file was created because this was a metadata lookup rather than a dataset extraction. The main caveat is that this means \u201cnot available as an Oura daily activity table in `IHS_2024`,\u201d not necessarily that no 2024 participants ever used Oura outside the current database schema.",
+  "finished": true,
+  "seconds": 51.79342317581177,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS matching_tables\nFROM all_tables\nWHERE owner = :schema_name\n  AND table_name = :table_name"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 145738,
+        "inputTokens": 143002,
+        "cachedInputTokens": 101888,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2736,
+        "reasoningOutputTokens": 1404
+      },
+      "last": {
+        "totalTokens": 18370,
+        "inputTokens": 17480,
+        "cachedInputTokens": 11264,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 890,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_3692c851c5e25c0e",
+  "attempt": 1
+}

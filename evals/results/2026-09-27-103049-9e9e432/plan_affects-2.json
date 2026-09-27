@@ -1,0 +1,129 @@
+{
+  "task": "plan_affects",
+  "mode": "analysis",
+  "prompt": "Does sleeping less make interns' mood worse in the 2025 cohort?",
+  "tests": "plan type: an 'affects' question, with the intended claim made explicit (or asked about)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Association or estimation (proposed association)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, repeated_observations, sensitivity, temporal_alignment"
+    },
+    {
+      "name": "says what claim is intended",
+      "passed": true,
+      "detail": "the plan says whether it's a causal claim or an association"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"association\",\n  \"analysis_type_label\": \"Association or estimation\",\n  \"rationale\": \"The question asks whether less sleep relates to worse mood, which is best treated as an observational within-person association rather than a causal effect unless a stronger causal design is specified.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 intern cohort, are interns' moods worse after nights when they sleep less? Purpose: estimate the direction and size of the sleep-mood relationship to inform whether short sleep periods are associated with lower next-day mood during internship, without claiming that sleep causes mood changes.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025 only. Population: 2025 cohort participants with linkable sleep and mood data. Unit of analysis: person-day or person-night paired observations, depending on available timestamp/date columns. Exposure: nightly sleep duration from the relevant 2025 sleep table, to be identified from the catalog and verified with describe_table before use. Outcome: mood rating from the relevant 2025 mood/survey/EMA table, also catalog-identified and verified before use. Primary alignment assumption: sleep from the prior night will be paired with the following day's mood when date/time fields support this; if only same-day dates exist, I will document the mapping and treat it as same-day association. Exclusions: observations without a valid participant ID, sleep duration, mood value, or alignable date; impossible or out-of-range values will be flagged before any exclusion decisions are finalized.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before modeling I will check table definitions, join paths, duplicate participant-date records, unmatched sleep or mood rows, date ranges, impossible sleep durations and mood values, missingness, participant/day coverage, and whether participants contribute within-person variation in sleep and mood. Main limitations: this observational analysis cannot by itself show that sleep causes mood changes; mood and sleep may both reflect workload, rotation, calendar time, health, or response/device availability. Repeated observations within participants require uncertainty estimates that account for within-person dependence. Sparse participants and uneven app/device use may make estimates less representative of the full cohort.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"I will first run a small reproducible pilot and report its scope, sample flow, data-quality checks, run time, and expected full-run size, then ask before scaling to the full cohort. After full-run approval, I will produce a concise static HTML report in /work/outputs with aggregate tables/figures only, plus the complete analysis source in /work. The report will include the SQL provenance, table/column definitions used, sample sizes, exclusions, model estimate with uncertainty interval, sensitivity checks, and limitations.\"\n    },\n    {\n      \"kind\": \"target_quantity\",\n      \"label\": \"Target quantity (estimand)\",\n      \"content\": \"Primary estimand: the within-person association between shorter nightly sleep duration and next-day mood among 2025 interns who have paired sleep and mood observations. I will express this as the expected difference in mood for a 1-hour lower nightly sleep duration, comparing nights within the same intern. A secondary between-person descriptive contrast may summarize whether interns who sleep less on average also report worse average mood, clearly separated from the within-person estimate. This is not a causal estimand unless we later specify and justify a causal design.\"\n    },\n    {\n      \"kind\": \"measures\",\n      \"label\": \"Measures and summaries\",\n      \"content\": \"Sleep duration: nightly total sleep duration, preferably in hours, from the catalog-identified sleep source for IHS_2025 after verifying units, device/source, date fields, and plausible range. Mood: the catalog-identified mood measure for IHS_2025 after verifying scale direction, range, timing, and whether higher values mean better or worse mood. If multiple plausible mood or sleep measures exist, I will present the options and choose the one closest to nightly sleep and contemporaneous/daily mood, documenting the choice rather than substituting an unexplained proxy.\"\n    },\n    {\n      \"kind\": \"method\",\n      \"label\": \"Method and adjustment\",\n      \"content\": \"Primary model: a participant fixed-effect regression or equivalent within-person model of mood on prior-night sleep duration, with calendar/time adjustment if supported by the data (for example day-of-internship or date) to reduce confounding by secular time. Uncertainty: cluster-robust standard errors by participant, or a mixed model with participant effects if fixed effects are not feasible after the pilot. I will report effect size and 95% confidence interval, with p-values secondary if included. No demographic adjustment is planned for the within-person estimand because time-invariant participant characteristics are controlled by participant fixed effects.\"\n    },\n    {\n      \"kind\": \"repeated_observations\",\n      \"label\": \"Repeated observations\",\n      \"content\": \"The analysis will distinguish observation count from participant count. I will report total paired observations, number of participants, median/IQR paired days per participant, and the number of participants with at least two paired observations and nonzero within-person variation in sleep and mood who can contribute to the within-person estimate.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Preferred alignment: sleep episode/night ending on day D is paired with mood reported on day D. I will verify date/time fields and time zones where available. If there are multiple sleep or mood records per participant-day, I will aggregate using pre-specified rules after inspecting metadata: sleep summed or selected as the main nightly sleep episode if the table already provides nightly totals; mood averaged within day if repeated same-day mood ratings represent the same construct. Gaps remain unpaired rather than imputed.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"I will summarize missing and unmatched sleep and mood records by participant and date, including participants with only sleep, only mood, or neither after joining. The primary analysis will use complete paired observations; I will describe how this may bias results if low mood or short sleep affects survey/device adherence.\"\n    },\n    {\n      \"kind\": \"sensitivity\",\n      \"label\": \"Sensitivity analyses\",\n      \"content\": \"Sensitivity checks will include: alternative sleep duration treatment if needed after range checks (continuous hours versus categories such as <6 hours), excluding implausible-but-not-impossible sleep values using documented thresholds, and comparing prior-night versus same-day alignment if both can be constructed. These are exploratory sensitivity checks supporting robustness, not separate discoveries.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 0,\n    \"tables\": [],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 28.00566291809082,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_d34fb99cdb5cc2cf",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "association",
+        "analysis_type_label": "Association or estimation",
+        "rationale": "The question asks whether less sleep relates to worse mood, which is best treated as an observational within-person association rather than a causal effect unless a stronger causal design is specified.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 intern cohort, are interns' moods worse after nights when they sleep less? Purpose: estimate the direction and size of the sleep-mood relationship to inform whether short sleep periods are associated with lower next-day mood during internship, without claiming that sleep causes mood changes."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025 only. Population: 2025 cohort participants with linkable sleep and mood data. Unit of analysis: person-day or person-night paired observations, depending on available timestamp/date columns. Exposure: nightly sleep duration from the relevant 2025 sleep table, to be identified from the catalog and verified with describe_table before use. Outcome: mood rating from the relevant 2025 mood/survey/EMA table, also catalog-identified and verified before use. Primary alignment assumption: sleep from the prior night will be paired with the following day's mood when date/time fields support this; if only same-day dates exist, I will document the mapping and treat it as same-day association. Exclusions: observations without a valid participant ID, sleep duration, mood value, or alignable date; impossible or out-of-range values will be flagged before any exclusion decisions are finalized."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before modeling I will check table definitions, join paths, duplicate participant-date records, unmatched sleep or mood rows, date ranges, impossible sleep durations and mood values, missingness, participant/day coverage, and whether participants contribute within-person variation in sleep and mood. Main limitations: this observational analysis cannot by itself show that sleep causes mood changes; mood and sleep may both reflect workload, rotation, calendar time, health, or response/device availability. Repeated observations within participants require uncertainty estimates that account for within-person dependence. Sparse participants and uneven app/device use may make estimates less representative of the full cohort."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "I will first run a small reproducible pilot and report its scope, sample flow, data-quality checks, run time, and expected full-run size, then ask before scaling to the full cohort. After full-run approval, I will produce a concise static HTML report in /work/outputs with aggregate tables/figures only, plus the complete analysis source in /work. The report will include the SQL provenance, table/column definitions used, sample sizes, exclusions, model estimate with uncertainty interval, sensitivity checks, and limitations."
+          },
+          {
+            "kind": "target_quantity",
+            "label": "Target quantity (estimand)",
+            "content": "Primary estimand: the within-person association between shorter nightly sleep duration and next-day mood among 2025 interns who have paired sleep and mood observations. I will express this as the expected difference in mood for a 1-hour lower nightly sleep duration, comparing nights within the same intern. A secondary between-person descriptive contrast may summarize whether interns who sleep less on average also report worse average mood, clearly separated from the within-person estimate. This is not a causal estimand unless we later specify and justify a causal design."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Sleep duration: nightly total sleep duration, preferably in hours, from the catalog-identified sleep source for IHS_2025 after verifying units, device/source, date fields, and plausible range. Mood: the catalog-identified mood measure for IHS_2025 after verifying scale direction, range, timing, and whether higher values mean better or worse mood. If multiple plausible mood or sleep measures exist, I will present the options and choose the one closest to nightly sleep and contemporaneous/daily mood, documenting the choice rather than substituting an unexplained proxy."
+          },
+          {
+            "kind": "method",
+            "label": "Method and adjustment",
+            "content": "Primary model: a participant fixed-effect regression or equivalent within-person model of mood on prior-night sleep duration, with calendar/time adjustment if supported by the data (for example day-of-internship or date) to reduce confounding by secular time. Uncertainty: cluster-robust standard errors by participant, or a mixed model with participant effects if fixed effects are not feasible after the pilot. I will report effect size and 95% confidence interval, with p-values secondary if included. No demographic adjustment is planned for the within-person estimand because time-invariant participant characteristics are controlled by participant fixed effects."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "The analysis will distinguish observation count from participant count. I will report total paired observations, number of participants, median/IQR paired days per participant, and the number of participants with at least two paired observations and nonzero within-person variation in sleep and mood who can contribute to the within-person estimate."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Preferred alignment: sleep episode/night ending on day D is paired with mood reported on day D. I will verify date/time fields and time zones where available. If there are multiple sleep or mood records per participant-day, I will aggregate using pre-specified rules after inspecting metadata: sleep summed or selected as the main nightly sleep episode if the table already provides nightly totals; mood averaged within day if repeated same-day mood ratings represent the same construct. Gaps remain unpaired rather than imputed."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "I will summarize missing and unmatched sleep and mood records by participant and date, including participants with only sleep, only mood, or neither after joining. The primary analysis will use complete paired observations; I will describe how this may bias results if low mood or short sleep affects survey/device adherence."
+          },
+          {
+            "kind": "sensitivity",
+            "label": "Sensitivity analyses",
+            "content": "Sensitivity checks will include: alternative sleep duration treatment if needed after range checks (continuous hours versus categories such as <6 hours), excluding implausible-but-not-impossible sleep values using documented thresholds, and comparing prior-night versus same-day alignment if both can be constructed. These are exploratory sensitivity checks supporting robustness, not separate discoveries."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 35231,
+        "inputTokens": 33571,
+        "cachedInputTokens": 23040,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1660,
+        "reasoningOutputTokens": 138
+      },
+      "last": {
+        "totalTokens": 14024,
+        "inputTokens": 12820,
+        "cachedInputTokens": 9216,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1204,
+        "reasoningOutputTokens": 18
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_13773dc8bab12d8a",
+  "attempt": 2
+}

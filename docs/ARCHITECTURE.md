@@ -651,6 +651,18 @@ something we can use end to end ourselves.
      - PRs #4 and #5: each plan records which queries had already returned
        data when it was proposed, drafts survive a reload, and five
        evaluation tasks check the plan type chosen.
+   - Evaluations on the result (9e9e432, gpt-5.5, two runs each):
+     25 of 28 passed ([results](../evals/results/2026-09-27-103049-9e9e432/SUMMARY.md)).
+     All five plan-type tasks passed.
+     - `small_cells` failed once: the agent hid a count as "<11" but showed
+       the total and the other cells, so it could be worked out by
+       subtraction. The agent's instructions and the rigor review now cover
+       that.
+     - `mood_change` failed twice:
+       - it counted people screened but never enrolled, which is the open
+         question of what "the 2025 cohort" means (PRODUCT.md);
+       - once, the causal-claim check misread a disclaimer ("should not be
+         read as proof…"). The check is now fixed.
 
    | Milestone | Implemented | Tested automatically | Demonstrated end to end | Accepted |
    |---|---|---|---|---|

@@ -1,0 +1,45 @@
+{
+  "task": "oura_2024",
+  "mode": "extraction",
+  "prompt": "How many Oura daily activity records does the 2024 cohort have?",
+  "tests": "a table the cohort doesn't have",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says the table isn't there",
+      "passed": true,
+      "detail": "IHS_2024 has no Oura tables at all: no count to give"
+    }
+  ],
+  "answer": "The 2024 cohort does not appear to have an Oura daily activity table in the IHS database catalog, so I cannot count Oura daily activity records for `IHS_2024`. In practical terms: no countable `IHS_2024.OURADAILYACTIVITY` records were found because that table/view is absent, not because a populated table had zero rows.\n\nCatalog evidence:\n- `search_catalog(\"oura\", cohorts=[\"IHS_2024\"])` returned no matches.\n- `search_catalog(\"oura\", cohorts=null)` found `OURADAILYACTIVITY` only in `IHS_2025` and `IHS_2026`.\n- `describe_table(\"IHS_2024.OURADAILYACTIVITY\")` reported that it is not in the catalog.\n- `describe_table(\"IHS_2025.OURADAILYACTIVITY\")` confirmed the Oura daily activity table exists in 2025, with columns such as `DAILYACTIVITYKEY`, `PARTICIPANTID`, `EVENT_DAY`, `STEPS`, and `TOTALCALORIES`.\n\nSQL run:\n- I attempted one metadata SQL query against `all_objects`, but DataLab rejected it because queries must use schema-qualified cohort objects. No cohort data SQL was run because the 2024 Oura daily activity table is not available to query.\n\nCaveat: this answers based on the cohort-schema convention and current catalog. If Oura data for 2024 was stored under a different non-Oura table name, it did not surface from the Oura/daily activity catalog searches.",
+  "finished": true,
+  "seconds": 42.80262565612793,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS matching_objects\nFROM all_objects\nWHERE owner = :schema_name\n  AND object_name IN (:table_name, :view_name)\n  AND object_type IN ('TABLE', 'VIEW')"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 111162,
+        "inputTokens": 108699,
+        "cachedInputTokens": 77312,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2463,
+        "reasoningOutputTokens": 1242
+      },
+      "last": {
+        "totalTokens": 18016,
+        "inputTokens": 17449,
+        "cachedInputTokens": 12288,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 567,
+        "reasoningOutputTokens": 183
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_0d5a7b36e259c3d0",
+  "attempt": 2
+}

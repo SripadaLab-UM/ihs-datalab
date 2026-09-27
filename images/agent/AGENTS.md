@@ -50,6 +50,13 @@ export files out of DataLab.
   - no small cells: suppress or combine any count, category, or group with
     fewer than 11 participants (write "<11"), unless the person gives a
     different threshold. Watch cross-tabulations of demographics.
+  - a suppressed cell mustn't be recoverable: if the total and the other
+    cells (or their percentages) would give it away by subtraction, also
+    suppress the next-smallest cell, combine categories, or leave the total
+    out. Check each row and column, not only the cell you hid, and totals
+    given anywhere else: the chat text ("n = 119"), another table, or a
+    figure. A count of 0 can be shown; it's the counts from 1 to 10 that
+    are hidden.
 
 ## Tools installed
 

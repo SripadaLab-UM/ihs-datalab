@@ -1,0 +1,52 @@
+{
+  "task": "empty_hrv",
+  "mode": "extraction",
+  "prompt": "How many nights of Garmin HRV data does the 2026 cohort have?",
+  "tests": "a table that exists but is empty (a feed not loaded yet)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "says it's empty",
+      "passed": true,
+      "detail": "IHS_2026.GARMINHRVSUMMARY has 0 rows"
+    },
+    {
+      "name": "missing data, not a finding",
+      "passed": true,
+      "detail": "the cohort has 9 Garmin users: the HRV feed just isn't loaded"
+    }
+  ],
+  "answer": "The 2026 cohort currently has **0 nights of Garmin HRV data**, using this definition: distinct `PARTICIPANTIDENTIFIER` + `CALENDARDATE` records in `IHS_2026.GARMINHRVSUMMARY` with non-missing `LASTNIGHTAVG`.\n\nCatalog evidence: `search_catalog` found `IHS_2026.GARMINHRVSUMMARY` and `IHS_2026.VGARMINHRVSUMMARY`. `describe_table` confirmed `CALENDARDATE` is `DATE`, and HRV fields include `LASTNIGHTAVG` and `LASTNIGHT5MINHIGH`.\n\nSQL run:\n\n```sql\n-- Profile base table\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN lastnightavg IS NOT NULL THEN 1 END) AS rows_with_lastnightavg,\n  COUNT(CASE WHEN lastnight5minhigh IS NOT NULL THEN 1 END) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT participantidentifier) AS distinct_participants,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY\n```\n\nResult row count: 1 summary row. Values: `TOTAL_ROWS = 0`, `ROWS_WITH_LASTNIGHTAVG = 0`.\n\n```sql\n-- Sanity check view\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN lastnightavg IS NOT NULL THEN 1 END) AS rows_with_lastnightavg,\n  COUNT(DISTINCT participantidentifier) AS distinct_participants,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY\n```\n\nResult row count: 1 summary row. Values: `TOTAL_ROWS = 0`, `ROWS_WITH_LASTNIGHTAVG = 0`.\n\n```sql\n-- Final extraction\nSELECT\n  COUNT(*) AS hrv_nights,\n  COUNT(DISTINCT participantidentifier) AS participants_with_hrv,\n  MIN(calendardate) AS first_calendar_date,\n  MAX(calendardate) AS last_calendar_date\nFROM (\n  SELECT DISTINCT\n    participantidentifier,\n    calendardate\n  FROM IHS_2026.GARMINHRVSUMMARY\n  WHERE lastnightavg IS NOT NULL\n    AND participantidentifier IS NOT NULL\n    AND calendardate IS NOT NULL\n)\n```\n\nFinal output: `/work/outputs/ihs_2026_garmin_hrv_nights_summary.csv`  \nData dictionary: `/work/outputs/ihs_2026_garmin_hrv_nights_summary_dictionary.md`\n\nCaveat: this assumes `LASTNIGHTAVG` is the required HRV signal for counting a valid HRV night. The 2026 Garmin HRV table and view are currently empty, so the answer is zero under any row-based definition too.",
+  "finished": true,
+  "seconds": 45.780786991119385,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN lastnightavg IS NOT NULL THEN 1 END) AS rows_with_lastnightavg,\n  COUNT(CASE WHEN lastnight5minhigh IS NOT NULL THEN 1 END) AS rows_with_lastnight5minhigh,\n  COUNT(DISTINCT participantidentifier) AS distinct_participants,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date\nFROM IHS_2026.GARMINHRVSUMMARY",
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN lastnightavg IS NOT NULL THEN 1 END) AS rows_with_lastnightavg,\n  COUNT(DISTINCT participantidentifier) AS distinct_participants,\n  MIN(calendardate) AS min_calendar_date,\n  MAX(calendardate) AS max_calendar_date\nFROM IHS_2026.VGARMINHRVSUMMARY",
+    "SELECT\n  COUNT(*) AS hrv_nights,\n  COUNT(DISTINCT participantidentifier) AS participants_with_hrv,\n  MIN(calendardate) AS first_calendar_date,\n  MAX(calendardate) AS last_calendar_date\nFROM (\n  SELECT DISTINCT\n    participantidentifier,\n    calendardate\n  FROM IHS_2026.GARMINHRVSUMMARY\n  WHERE lastnightavg IS NOT NULL\n    AND participantidentifier IS NOT NULL\n    AND calendardate IS NOT NULL\n)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 116593,
+        "inputTokens": 113701,
+        "cachedInputTokens": 72192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2892,
+        "reasoningOutputTokens": 704
+      },
+      "last": {
+        "totalTokens": 16520,
+        "inputTokens": 15823,
+        "cachedInputTokens": 8192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 697,
+        "reasoningOutputTokens": 67
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_f6b2998faf04b232",
+  "attempt": 1
+}

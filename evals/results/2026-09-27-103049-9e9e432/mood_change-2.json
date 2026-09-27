@@ -1,0 +1,150 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": false,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Bottom line: **yes, daily mood was lower during the intern year** in the 2025 cohort. In the planned descriptive paired analysis, mean mood went from **6.65 before internship** to **5.95 during internship**, a within-person change of **-0.70 mood-score points** during minus pre, 95% CI **-0.74 to -0.66**.\n\nThis follows approved plan `pl_205894d36a15`. The analysis used `IHS_2025.VW_DAILY_MOOD`, defining pre-internship as `2025-04-01` to before `2025-07-01`, and during-internship as `2025-07-01` to before `2026-07-01`. The paired estimate is based on **149 participants** with mood data in both periods and **26,400 in-window mood records**. Multiple mood entries on the same participant-day were averaged first, then participant-period means were compared.\n\nKey checks: mood scores were numeric with observed range **1 to 10**; no missing/non-numeric in-window scores; no exact duplicate records; **413 duplicate participant-days** were averaged; no participants mapped to multiple `USERID` values. Small one-period and direction-of-change participant cells were suppressed in the report.\n\nInterpretation: the data show a descriptive decrease in reported daily mood after internship began. This should not be read as proof that internship caused the decrease, because mood logging is observational and coverage may differ across time.\n\nFiles:\n- Report: `/work/outputs/daily_mood_2025_full.html`\n- Summary JSON: `/work/outputs/daily_mood_2025_full_summary.json`\n- Source: `/work/full_daily_mood_2025.py`\n\nQueries run: catalog/metadata checks plus count, coverage, pilot, and final extraction queries; the report includes the exact SQL and query IDs.",
+  "finished": true,
+  "seconds": 214.5436851978302,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_e67f49103e009da6",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "This is a descriptive within-cohort before-versus-during comparison of the same daily mood measure over time, not a causal effect claim.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the IHS 2025 cohort, did daily mood scores differ before internship versus during the intern year, and what was the magnitude of the change? Purpose: quantify the descriptive change in daily mood across the transition into internship using repeated daily mood observations."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort/schema: IHS_2025. Data source checked so far: catalog and column metadata only, not outcome values. Candidate mood table: IHS_2025.VW_DAILY_MOOD, with PARTICIPANTIDENTIFIER, USERID, MOOD_STARTDATE, MOOD_ENDDATE, MOOD_SCORE, and MOOD_COMMENT. Unit of analysis for raw data: mood observation/day; primary summary unit: participant-period mean. Planned population: participants in the 2025 cohort with nonmissing participant identifier, valid numeric MOOD_SCORE, and at least one daily mood observation in both the pre-internship and during-internship periods. Timing assumption to verify with date coverage: pre-internship is before 2025-07-01; during-internship is 2025-07-01 through 2026-06-30 or the latest available date if follow-up is incomplete."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting results I will check: duplicate mood records per participant-day, whether MOOD_SCORE is numeric and its observed range, impossible or out-of-range scores, date coverage by period, participant coverage in each period, within-person overlap, missing participant identifiers or dates, and whether any participant has estimable within-person change. Results can be misleading if mood logging is sparse or differs by period; I will report observation counts, participant counts, and the number of participants contributing both periods. This comparison is descriptive and should not be interpreted as internship causing mood change without stronger design assumptions."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A concise static HTML report in /work/outputs and the complete analysis source in /work. The report will state the tables and SQL used, sample flow, data-quality checks, participant-period mood summaries, the estimated average within-person change with uncertainty interval, and a short limitations section. I will first run a small reproducible pilot that exercises the full pipeline, label it preliminary, and ask before scaling to the full cohort."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Daily mood: IHS_2025.VW_DAILY_MOOD.MOOD_SCORE, parsed as numeric after checking observed coding. Mood date: date component of MOOD_STARTDATE, with MOOD_ENDDATE used only for duplicate/timing checks if relevant. Participant: PARTICIPANTIDENTIFIER, with USERID checked for consistency if needed. Main summaries: participant-level mean mood in each period, paired within-person difference (during minus pre), period-specific observation and participant counts, and distribution of per-participant observation counts."
+          },
+          {
+            "kind": "comparison",
+            "label": "Comparison groups",
+            "content": "Comparison groups are time periods within the same cohort: pre-internship versus during-internship. The primary contrast is during minus pre, calculated within participants who have at least one valid mood score in both periods. I will also report unpaired period summaries for coverage context, but the paired estimate is the main answer to 'changed by how much.'"
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "Daily observations are repeated within participants. The main estimate will aggregate to participant-period means first, then estimate the mean paired difference across participants with a confidence interval based on participant-level differences. I will report the number of raw observations, participants observed in each period, and participants contributing to the paired change."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Mood observations will be assigned to periods using the date of MOOD_STARTDATE. The planned boundary is July 1, 2025, the usual start of intern year; I will verify observed date coverage before the full analysis and explicitly report if the database does not yet cover the full intern year. Dates before 2025-07-01 are pre-internship; dates from 2025-07-01 through 2026-06-30 are during-internship unless follow-up availability requires truncation."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Mood records with missing participant identifier, missing date, or nonnumeric/missing mood score will be excluded from score summaries and counted in the sample flow. Participants with data in only one period will contribute to period coverage summaries but not to the paired within-person change. No imputation is planned."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "Yes, go ahead as you recommend and finish the full analysis, then give me the final answer to my original question.",
+  "queries": [
+    "SELECT\n  COUNT(*) AS n_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS n_participants,\n  MIN(CAST(MOOD_STARTDATE AS DATE)) AS min_mood_date,\n  MAX(CAST(MOOD_STARTDATE AS DATE)) AS max_mood_date,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS missing_participant_id_rows,\n  SUM(CASE WHEN MOOD_STARTDATE IS NULL THEN 1 ELSE 0 END) AS missing_startdate_rows,\n  SUM(CASE WHEN MOOD_SCORE IS NULL THEN 1 ELSE 0 END) AS missing_score_rows,\n  SUM(CASE WHEN MOOD_SCORE IS NOT NULL AND NOT REGEXP_LIKE(TRIM(MOOD_SCORE), '^-?[0-9]+(\\.[0-9]+)?$') THEN 1 ELSE 0 END) AS nonnumeric_score_rows\nFROM IHS_2025.VW_DAILY_MOOD",
+    "SELECT\n  CASE\n    WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN 'pre'\n    WHEN CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-07-01'\n      AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01' THEN 'during'\n    ELSE 'outside'\n  END AS period,\n  COUNT(*) AS n_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS n_participants,\n  MIN(CAST(MOOD_STARTDATE AS DATE)) AS min_mood_date,\n  MAX(CAST(MOOD_STARTDATE AS DATE)) AS max_mood_date\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_STARTDATE IS NOT NULL\nGROUP BY CASE\n    WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN 'pre'\n    WHEN CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-07-01'\n      AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01' THEN 'during'\n    ELSE 'outside'\n  END\nORDER BY period",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  USERID,\n  CAST(MOOD_STARTDATE AS DATE) AS mood_date,\n  CAST(MOOD_ENDDATE AS DATE) AS mood_end_date,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_STARTDATE IS NOT NULL\n  AND CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-04-01'\n  AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01'\n  AND ORA_HASH(PARTICIPANTIDENTIFIER, 19) = 0",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  USERID,\n  CAST(MOOD_STARTDATE AS DATE) AS mood_date,\n  CAST(MOOD_ENDDATE AS DATE) AS mood_end_date,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_STARTDATE IS NOT NULL\n  AND CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-04-01'\n  AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01'\n  AND ORA_HASH(PARTICIPANTIDENTIFIER, 9) = 0",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  USERID,\n  CAST(MOOD_STARTDATE AS DATE) AS mood_date,\n  CAST(MOOD_ENDDATE AS DATE) AS mood_end_date,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_STARTDATE IS NOT NULL\n  AND CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-04-01'\n  AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01'\n  AND ORA_HASH(PARTICIPANTIDENTIFIER, 4) = 0",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  USERID,\n  CAST(MOOD_STARTDATE AS DATE) AS mood_date,\n  CAST(MOOD_ENDDATE AS DATE) AS mood_end_date,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_STARTDATE IS NOT NULL\n  AND CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-04-01'\n  AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01'"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 316924,
+        "inputTokens": 307758,
+        "cachedInputTokens": 156160,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9166,
+        "reasoningOutputTokens": 2090
+      },
+      "last": {
+        "totalTokens": 32498,
+        "inputTokens": 31971,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 527,
+        "reasoningOutputTokens": 245
+      },
+      "modelContextWindow": 258400
+    },
+    {
+      "total": {
+        "totalTokens": 802545,
+        "inputTokens": 784117,
+        "cachedInputTokens": 300544,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 18428,
+        "reasoningOutputTokens": 4582
+      },
+      "last": {
+        "totalTokens": 89904,
+        "inputTokens": 89060,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 844,
+        "reasoningOutputTokens": 443
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_22e2a03313786276",
+  "attempt": 2
+}

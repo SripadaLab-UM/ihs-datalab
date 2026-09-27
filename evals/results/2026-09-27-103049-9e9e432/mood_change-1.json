@@ -1,0 +1,129 @@
+{
+  "task": "mood_change",
+  "mode": "analysis",
+  "prompt": "Did daily mood change from before the internship to during the intern year in the 2025 cohort, and by how much?",
+  "tests": "within- vs between-person: nonresponse biases a pooled average; n, uncertainty, no causal claim",
+  "passed": false,
+  "checks": [
+    {
+      "name": "within-person change",
+      "passed": true,
+      "detail": "expected -0.70 points within person; -0.50 pools every entry and misses that low-mood people answer less in the intern year"
+    },
+    {
+      "name": "participants as the unit",
+      "passed": false,
+      "detail": "n = 135 participants (not 26,405 entries)"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI or standard error"
+    },
+    {
+      "name": "no causal claim",
+      "passed": true,
+      "detail": "observational: a change, not an effect"
+    }
+  ],
+  "answer": "Bottom line: yes, in this exploratory descriptive analysis following approved plan `pl_d078f98d1622`, daily mood scores were lower during internship than before internship.\n\nAmong 149 participants with valid mood reports in both periods, the mean within-person change was **-0.70 mood-score points** during the intern year versus before internship, with a **95% CI of -0.74 to -0.66**. Participant-level mean mood was **6.65 before internship** and **5.95 during internship**. The score range observed was 1 to 10, but the available metadata did not confirm the verbal anchors, so I\u2019m interpreting this as a numeric score decrease rather than labeling it worse/better mood.\n\nI wrote the full report here: `/work/outputs/daily_mood_2025_report.html`  \nReproducible source: `/work/daily_mood_2025_analysis.py`\n\nKey limitations: this is descriptive, not causal; reporting coverage differed by period; the pre-internship period was shorter; and same-day duplicate mood records were averaged as planned. Full SQL provenance is embedded in the report. Queries used: coverage count `q_20260927T104536_fa64ce`, analysis extract `q_20260927T104543_ceea81`, and dictionary lookup `q_20260927T104654_c56047`.",
+  "finished": true,
+  "seconds": 211.390939950943,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_82d6103a17de336a",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "The question asks for a descriptive comparison of the same daily mood measure before versus during internship, not a causal effect estimate or prediction.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 IHS cohort, did daily mood scores differ before internship versus during the intern year, and by how much? Purpose: quantify the magnitude and uncertainty of the observed mood change in daily reports, separating what the data show from possible reasons for the change."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025. Primary table checked in the catalog: IHS_2025.VW_DAILY_MOOD. Columns checked: PARTICIPANTIDENTIFIER, USERID, MOOD_STARTDATE, MOOD_ENDDATE, MOOD_SCORE, MOOD_COMMENT. Unit of analysis for raw data: participant-day mood record. Primary analytic unit for change: participant, using each participant's mean daily mood before internship and during internship when both periods are observed. Planned time definition: pre-internship = daily mood records before 2025-07-01; during intern year = 2025-07-01 through 2026-06-30. This assumes the 2025 cohort intern year follows that calendar; I will flag if observed date coverage suggests otherwise. Include records with a parseable numeric MOOD_SCORE and nonmissing participant identifier/date. Exclude duplicate participant-date records only after assessing them; if duplicates exist, average same-day scores within participant unless the data indicate a better rule."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting results I will check participant counts, date coverage, duplicate participant-date records, numeric parsing of MOOD_SCORE, observed score range and impossible values, missing participant/date/score fields, and how many participants contribute observations in both periods. The result may be misleading if people report mood unevenly before versus during internship, if low mood affects reporting, or if the pre-internship window has sparse coverage. This is an observational descriptive comparison, so I will not attribute change causally to internship."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A concise static HTML report in /work/outputs plus the complete reproducible source in /work. The report will include the cohort definition, data provenance and SQL, sample flow, coverage checks, before/during mood summaries, the within-person mean change with a 95% confidence interval, and sensitivity summaries for key analyst choices."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "Daily mood: MOOD_SCORE from IHS_2025.VW_DAILY_MOOD, using MOOD_STARTDATE as the report date. I will inspect how MOOD_SCORE is encoded, convert to numeric when valid, and report its observed range before selecting any exclusions for impossible values. Summaries: period-level mean and SD across participant-days; participant-level mean mood in each period; primary change = during-period participant mean minus pre-internship participant mean among participants with at least one valid mood record in both periods."
+          },
+          {
+            "kind": "comparison",
+            "label": "Comparison groups",
+            "content": "Comparison groups are time periods within the same cohort: before internship versus during intern year. The reference period is before internship. I will present descriptive differences as during minus before, both overall and within-person among participants with data in both periods."
+          },
+          {
+            "kind": "repeated_observations",
+            "label": "Repeated observations",
+            "content": "Because daily mood has repeated records per participant, the primary comparison will first average valid daily scores within each participant and period, then estimate the mean paired within-person change. The uncertainty interval for the mean paired change will use participants, not mood records, as the independent units. I will also report observation counts and participant counts, including the number of participants who contribute estimable within-person change."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "I will report missingness in participant identifier, date, and score, plus coverage by period: participants with pre-only, during-only, and both-period mood data. The primary paired estimate will use complete pairs across periods; I will describe how that differs from all available period summaries."
+          },
+          {
+            "kind": "sensitivity",
+            "label": "Sensitivity analyses",
+            "content": "Sensitivity checks will include requiring a minimum number of valid mood days per period for each participant, if coverage allows, and comparing the paired participant-level estimate with an observation-level descriptive summary that uses all valid participant-days. These will be labeled sensitivity analyses."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participant_count,\n  MIN(CAST(MOOD_STARTDATE AS DATE)) AS min_mood_startdate,\n  MAX(CAST(MOOD_STARTDATE AS DATE)) AS max_mood_startdate,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS missing_participant_rows,\n  SUM(CASE WHEN MOOD_STARTDATE IS NULL THEN 1 ELSE 0 END) AS missing_startdate_rows,\n  SUM(CASE WHEN MOOD_SCORE IS NULL THEN 1 ELSE 0 END) AS missing_score_rows,\n  SUM(CASE WHEN REGEXP_LIKE(TRIM(MOOD_SCORE), '^-?[0-9]+(\\.[0-9]+)?$') THEN 1 ELSE 0 END) AS numeric_score_rows,\n  COUNT(DISTINCT CASE WHEN CAST(MOOD_STARTDATE AS DATE) < DATE '2025-07-01' THEN PARTICIPANTIDENTIFIER END) AS pre_participants,\n  COUNT(DISTINCT CASE WHEN CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-07-01' AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01' THEN PARTICIPANTIDENTIFIER END) AS during_participants\nFROM IHS_2025.VW_DAILY_MOOD",
+    "SELECT\n  PARTICIPANTIDENTIFIER,\n  CAST(MOOD_STARTDATE AS DATE) AS MOOD_STARTDATE,\n  CAST(MOOD_ENDDATE AS DATE) AS MOOD_ENDDATE,\n  MOOD_SCORE\nFROM IHS_2025.VW_DAILY_MOOD\nWHERE MOOD_STARTDATE IS NOT NULL\n  AND PARTICIPANTIDENTIFIER IS NOT NULL\n  AND MOOD_SCORE IS NOT NULL\n  AND CAST(MOOD_STARTDATE AS DATE) >= DATE '2025-04-01'\n  AND CAST(MOOD_STARTDATE AS DATE) < DATE '2026-07-01'",
+    "SELECT DISTINCT\n  SURVEYNAME,\n  STEPIDENTIFIER,\n  RESULTIDENTIFIER,\n  SUBSTR(QUESTIONTEXT, 1, 500) AS QUESTIONTEXT,\n  ANSWERFORMAT,\n  SUBSTR(ANSWERCHOICES, 1, 1000) AS ANSWERCHOICES\nFROM IHS_2025.STG_SURVEYDICTIONARY\nWHERE LOWER(SURVEYNAME) LIKE '%mood%'\n   OR LOWER(STEPIDENTIFIER) LIKE '%mood%'\n   OR LOWER(RESULTIDENTIFIER) LIKE '%mood%'\n   OR LOWER(SUBSTR(QUESTIONTEXT, 1, 500)) LIKE '%mood%'",
+    "SELECT\n  SURVEYNAME,\n  STEPIDENTIFIER,\n  RESULTIDENTIFIER,\n  SUBSTR(QUESTIONTEXT, 1, 500) AS QUESTIONTEXT,\n  ANSWERFORMAT,\n  SUBSTR(ANSWERCHOICES, 1, 1000) AS ANSWERCHOICES\nFROM IHS_2025.STG_SURVEYDICTIONARY\nWHERE LOWER(SURVEYNAME) LIKE '%mood%'\n   OR LOWER(STEPIDENTIFIER) LIKE '%mood%'\n   OR LOWER(RESULTIDENTIFIER) LIKE '%mood%'\n   OR LOWER(SUBSTR(QUESTIONTEXT, 1, 500)) LIKE '%mood%'"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 950813,
+        "inputTokens": 934002,
+        "cachedInputTokens": 647680,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 16811,
+        "reasoningOutputTokens": 4968
+      },
+      "last": {
+        "totalTokens": 46106,
+        "inputTokens": 45300,
+        "cachedInputTokens": 43008,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 806,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_1df2c7a9248afd93",
+  "attempt": 1
+}

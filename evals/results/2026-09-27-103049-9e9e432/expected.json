@@ -1,0 +1,59 @@
+{
+  "enrolled_count": {
+    "total_rows": 150,
+    "enrolled": 136,
+    "enrolled_not_withdrawn": 122
+  },
+  "rhr_missing": {
+    "rows": 20634,
+    "missing": 1015,
+    "missing_pct": 4.919065619850731
+  },
+  "garmin_steps": {
+    "participants_all": 28,
+    "participants_enrolled": 25,
+    "dedup_all": 7464.996510468594,
+    "per_person_all": 7380.852197995846,
+    "per_person_enrolled": 7341.790164203522,
+    "dedup_enrolled": 7443.216746681728,
+    "naive_all": 7285.640493942218,
+    "naive_enrolled": 7267.88683480787,
+    "naive_per_person_all": 7203.384039113487,
+    "naive_per_person_enrolled": 7164.981443062134,
+    "dedup_not_withdrawn": 7490.754393939394
+  },
+  "cross_cohort": {
+    "shared_identifiers": 0
+  },
+  "oura_2024": {
+    "oura_objects": 0
+  },
+  "empty_hrv": {
+    "hrv_rows": 0,
+    "garmin_users": 9
+  },
+  "mood_change": {
+    "participants": 135,
+    "mean_change": -0.7011220549407045,
+    "se": 0.02098445800129617,
+    "mood_rows": 26405,
+    "pooled_change": -0.4956212458891853,
+    "not_withdrawn_participants": 122,
+    "not_withdrawn_change": -0.7025946997879274
+  },
+  "phq9_sep": {
+    "enrolled_n": 119,
+    "enrolled_mean": 3.907563025210084,
+    "not_withdrawn_n": 109,
+    "not_withdrawn_mean": 3.908256880733945,
+    "all_rows_n": 133,
+    "all_rows_mean": 3.7593984962406015
+  },
+  "small_cells": {
+    "suic1_counts": {
+      "0": 83,
+      "1": 27,
+      "2": 9
+    }
+  }
+}

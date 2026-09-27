@@ -1,0 +1,46 @@
+{
+  "task": "cross_cohort",
+  "mode": "extraction",
+  "prompt": "How many participants are in both the 2024 and the 2025 cohorts?",
+  "tests": "identifiers that are per cohort",
+  "passed": true,
+  "checks": [
+    {
+      "name": "no false overlap",
+      "passed": true,
+      "detail": "0 identifiers are shared; they're per cohort, so the honest answer is none, or that they can't be linked (not a linkage on DOB or ID digits)"
+    }
+  ],
+  "answer": "There are **0 participants** in both the 2024 and 2025 cohorts, using non-null `STUDY_PARTICIPANT_ID` as the cross-cohort identifier.\n\nI understood your request as: count enrolled study participants appearing in both cohort-level participant summary tables for `IHS_2024` and `IHS_2025`.\n\n**Catalog Evidence**\n- `search_catalog(\"participant cohort\")` found `IHS_2024.VW_IHS_PARTICIPANT_SUMMARY` and `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY`.\n- `describe_table` showed both tables include:\n  - `STUDY_PARTICIPANT_ID` as `NUMBER(10)`, commented as \u201cStudy participant ID. NULL for people who were screened but never enrolled.\u201d\n  - `PARTICIPANTIDENTIFIER` as `VARCHAR2(15)`.\n- `join_paths` flagged that cross-cohort participant identifiers can be tricky; I therefore used `STUDY_PARTICIPANT_ID` and excluded nulls.\n\n**SQL Ran**\n\nProfiling query, to check row counts, non-null IDs, and distinct IDs:\n\n```sql\nSELECT\n  'IHS_2024.VW_IHS_PARTICIPANT_SUMMARY' AS table_name,\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id_count,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS null_study_participant_id_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier_count\nFROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\nUNION ALL\nSELECT\n  'IHS_2025.VW_IHS_PARTICIPANT_SUMMARY' AS table_name,\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id_count,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS null_study_participant_id_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier_count\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n```\n\nResult file: `/data/oracle/q_20260927T104005_639324.csv`; row count: 2.\n\nFinal count query:\n\n```sql\nWITH cohort_2024 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n),\ncohort_2025 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT COUNT(*) AS participants_in_both_2024_and_2025\nFROM cohort_2024 c24\nJOIN cohort_2025 c25\n  ON c24.STUDY_PARTICIPANT_ID = c25.STUDY_PARTICIPANT_ID\n```\n\nResult row count: 1. Columns: `PARTICIPANTS_IN_BOTH_2024_AND_2025`.\n\nOutput files:\n- [participants_in_both_2024_2025.csv](/work/outputs/participants_in_both_2024_2025.csv)\n- [participants_in_both_2024_2025_data_dictionary.md](/work/outputs/participants_in_both_2024_2025_data_dictionary.md)\n\nCaveat to double-check: this answer assumes `STUDY_PARTICIPANT_ID` is the intended cross-cohort person-level identifier.",
+  "finished": true,
+  "seconds": 54.92542791366577,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  'IHS_2024.VW_IHS_PARTICIPANT_SUMMARY' AS table_name,\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id_count,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS null_study_participant_id_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier_count\nFROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\nUNION ALL\nSELECT\n  'IHS_2025.VW_IHS_PARTICIPANT_SUMMARY' AS table_name,\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS nonnull_study_participant_id_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id_count,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS null_study_participant_id_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier_count\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY",
+    "WITH cohort_2024 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2024.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n),\ncohort_2025 AS (\n  SELECT DISTINCT STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT COUNT(*) AS participants_in_both_2024_and_2025\nFROM cohort_2024 c24\nJOIN cohort_2025 c25\n  ON c24.STUDY_PARTICIPANT_ID = c25.STUDY_PARTICIPANT_ID"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 229328,
+        "inputTokens": 225380,
+        "cachedInputTokens": 136192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3948,
+        "reasoningOutputTokens": 1130
+      },
+      "last": {
+        "totalTokens": 27252,
+        "inputTokens": 25993,
+        "cachedInputTokens": 25088,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1259,
+        "reasoningOutputTokens": 373
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_33ce8bf602abe718",
+  "attempt": 1
+}

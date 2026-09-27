@@ -1,0 +1,98 @@
+{
+  "task": "phq9_sep",
+  "mode": "analysis",
+  "prompt": "What was the mean PHQ-9 total in the 2025 cohort's September survey?",
+  "tests": "who counts as a participant (the denominator); uncertainty",
+  "passed": true,
+  "checks": [
+    {
+      "name": "enrolled respondents only",
+      "passed": true,
+      "detail": "expected mean 3.91 over n = 119 enrolled participants; 3.76 over 133 includes people screened but never enrolled"
+    },
+    {
+      "name": "uncertainty given",
+      "passed": true,
+      "detail": "a CI, SD, or standard error"
+    }
+  ],
+  "answer": "Bottom line: In the approved descriptive analysis (`pl_d24674ec6c79`), the mean PHQ-9 total in the 2025 cohort\u2019s September survey was **3.91** among **119 enrolled participants** with complete, valid PHQ-9 item responses.\n\nBasic checks: `IHS_2025.VW_SEP_SURVEY` had 133 rows, 119 enrolled participants, no duplicate enrolled participant records, and all 119 enrolled participants contributed a complete valid PHQ-9 total. The PHQ-9 total was summed from the nine item columns. SD was **3.50**, median **3**, observed range **0-16**, and the approximate 95% CI for the mean was **3.28 to 4.54**.\n\nI saved the static report and query provenance here:\n\n- [phq9_sep_2025_report.html](/work/outputs/phq9_sep_2025_report.html)\n- [phq9_sep_2025_source.md](/work/outputs/phq9_sep_2025_source.md)\n\nLimitation: this is a descriptive complete-responder summary, so it may not represent all 2025 interns if September survey participation was selective.",
+  "finished": true,
+  "seconds": 103.23843693733215,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": true,
+      "status": 204,
+      "id": "ap_4aec9e3cad8e60ae",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "describe",
+        "analysis_type_label": "Describe or compare",
+        "rationale": "This is a descriptive question asking for the mean of one measure in one cohort survey, without comparison, association, prediction, or causal interpretation.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: What was the mean PHQ-9 total score in the 2025 cohort's September survey?\n\nPurpose: Provide a simple descriptive summary of depressive symptom burden at the September survey time point for the 2025 cohort."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025.\n\nSource table checked in the catalog and described before outcome querying: IHS_2025.VW_SEP_SURVEY.\n\nUnit of analysis: one September survey record per participant. I will check whether participants have duplicate survey records and report how duplicates, if any, affect the summary.\n\nPopulation: enrolled participants with non-null STUDY_PARTICIPANT_ID in the September survey. The primary mean will include participants with all nine PHQ-9 items present and in the expected 0-3 range.\n\nMeasure assumption checked from metadata: the table includes the nine PHQ-9-like item columns interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, and suic1, but no precomputed PHQ-9 total column. I will calculate total as the sum of these nine items."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before interpreting the mean, I will check number of rows, number of participants, duplicate participant records, missingness of each PHQ-9 item, number contributing a complete PHQ-9 total, item ranges, and total score range. If duplicates exist, I will use one record per participant only after describing the rule used.\n\nLimitations: this is a descriptive summary among people with complete September PHQ-9 item responses, so it may not represent all 2025 interns if survey nonresponse or item missingness is selective. No causal or longitudinal claim will be made."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A concise answer with the mean PHQ-9 total, number of contributing participants, basic range/check results, and the SQL used. I will also save a short reproducible analysis note and source code in /work/outputs."
+          },
+          {
+            "kind": "measures",
+            "label": "Measures and summaries",
+            "content": "PHQ-9 total: computed from IHS_2025.VW_SEP_SURVEY as interest1 + down1 + asleep1 + tired1 + appetite1 + failure1 + concentr1 + activity1 + suic1. Each item is expected to be scored 0-3, giving a total range of 0-27. Summary: mean total score among complete, valid item responses; I will also report count contributing to the mean and basic missingness/range checks."
+          }
+        ],
+        "proposed_after": {
+          "queries": 0,
+          "tables": [],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS enrolled_row_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS enrolled_participant_count,\n  COUNT(STUDY_PARTICIPANT_ID) - COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS duplicate_enrolled_rows,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS rows_without_study_participant_id,\n  SUM(CASE WHEN interest1 IS NULL THEN 1 ELSE 0 END) AS missing_interest1,\n  SUM(CASE WHEN down1 IS NULL THEN 1 ELSE 0 END) AS missing_down1,\n  SUM(CASE WHEN asleep1 IS NULL THEN 1 ELSE 0 END) AS missing_asleep1,\n  SUM(CASE WHEN tired1 IS NULL THEN 1 ELSE 0 END) AS missing_tired1,\n  SUM(CASE WHEN appetite1 IS NULL THEN 1 ELSE 0 END) AS missing_appetite1,\n  SUM(CASE WHEN failure1 IS NULL THEN 1 ELSE 0 END) AS missing_failure1,\n  SUM(CASE WHEN concentr1 IS NULL THEN 1 ELSE 0 END) AS missing_concentr1,\n  SUM(CASE WHEN activity1 IS NULL THEN 1 ELSE 0 END) AS missing_activity1,\n  SUM(CASE WHEN suic1 IS NULL THEN 1 ELSE 0 END) AS missing_suic1,\n  SUM(CASE WHEN interest1 NOT BETWEEN 0 AND 3 OR down1 NOT BETWEEN 0 AND 3 OR asleep1 NOT BETWEEN 0 AND 3 OR tired1 NOT BETWEEN 0 AND 3 OR appetite1 NOT BETWEEN 0 AND 3 OR failure1 NOT BETWEEN 0 AND 3 OR concentr1 NOT BETWEEN 0 AND 3 OR activity1 NOT BETWEEN 0 AND 3 OR suic1 NOT BETWEEN 0 AND 3 THEN 1 ELSE 0 END) AS rows_with_item_out_of_range,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND interest1 IS NOT NULL AND down1 IS NOT NULL AND asleep1 IS NOT NULL AND tired1 IS NOT NULL AND appetite1 IS NOT NULL AND failure1 IS NOT NULL AND concentr1 IS NOT NULL AND activity1 IS NOT NULL AND suic1 IS NOT NULL AND interest1 BETWEEN 0 AND 3 AND down1 BETWEEN 0 AND 3 AND asleep1 BETWEEN 0 AND 3 AND tired1 BETWEEN 0 AND 3 AND appetite1 BETWEEN 0 AND 3 AND failure1 BETWEEN 0 AND 3 AND concentr1 BETWEEN 0 AND 3 AND activity1 BETWEEN 0 AND 3 AND suic1 BETWEEN 0 AND 3 THEN 1 ELSE 0 END) AS complete_valid_enrolled_rows,\n  COUNT(DISTINCT CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND interest1 IS NOT NULL AND down1 IS NOT NULL AND asleep1 IS NOT NULL AND tired1 IS NOT NULL AND appetite1 IS NOT NULL AND failure1 IS NOT NULL AND concentr1 IS NOT NULL AND activity1 IS NOT NULL AND suic1 IS NOT NULL AND interest1 BETWEEN 0 AND 3 AND down1 BETWEEN 0 AND 3 AND asleep1 BETWEEN 0 AND 3 AND tired1 BETWEEN 0 AND 3 AND appetite1 BETWEEN 0 AND 3 AND failure1 BETWEEN 0 AND 3 AND concentr1 BETWEEN 0 AND 3 AND activity1 BETWEEN 0 AND 3 AND suic1 BETWEEN 0 AND 3 THEN STUDY_PARTICIPANT_ID END) AS complete_valid_enrolled_participants\nFROM IHS_2025.VW_SEP_SURVEY",
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(STUDY_PARTICIPANT_ID) AS enrolled_row_count,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS enrolled_participant_count,\n  COUNT(STUDY_PARTICIPANT_ID) - COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS duplicate_enrolled_rows,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS rows_without_study_participant_id,\n  SUM(CASE WHEN \"interest1\" IS NULL THEN 1 ELSE 0 END) AS missing_interest1,\n  SUM(CASE WHEN \"down1\" IS NULL THEN 1 ELSE 0 END) AS missing_down1,\n  SUM(CASE WHEN \"asleep1\" IS NULL THEN 1 ELSE 0 END) AS missing_asleep1,\n  SUM(CASE WHEN \"tired1\" IS NULL THEN 1 ELSE 0 END) AS missing_tired1,\n  SUM(CASE WHEN \"appetite1\" IS NULL THEN 1 ELSE 0 END) AS missing_appetite1,\n  SUM(CASE WHEN \"failure1\" IS NULL THEN 1 ELSE 0 END) AS missing_failure1,\n  SUM(CASE WHEN \"concentr1\" IS NULL THEN 1 ELSE 0 END) AS missing_concentr1,\n  SUM(CASE WHEN \"activity1\" IS NULL THEN 1 ELSE 0 END) AS missing_activity1,\n  SUM(CASE WHEN \"suic1\" IS NULL THEN 1 ELSE 0 END) AS missing_suic1,\n  SUM(CASE WHEN \"interest1\" NOT BETWEEN 0 AND 3 OR \"down1\" NOT BETWEEN 0 AND 3 OR \"asleep1\" NOT BETWEEN 0 AND 3 OR \"tired1\" NOT BETWEEN 0 AND 3 OR \"appetite1\" NOT BETWEEN 0 AND 3 OR \"failure1\" NOT BETWEEN 0 AND 3 OR \"concentr1\" NOT BETWEEN 0 AND 3 OR \"activity1\" NOT BETWEEN 0 AND 3 OR \"suic1\" NOT BETWEEN 0 AND 3 THEN 1 ELSE 0 END) AS rows_with_item_out_of_range,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"interest1\" IS NOT NULL AND \"down1\" IS NOT NULL AND \"asleep1\" IS NOT NULL AND \"tired1\" IS NOT NULL AND \"appetite1\" IS NOT NULL AND \"failure1\" IS NOT NULL AND \"concentr1\" IS NOT NULL AND \"activity1\" IS NOT NULL AND \"suic1\" IS NOT NULL AND \"interest1\" BETWEEN 0 AND 3 AND \"down1\" BETWEEN 0 AND 3 AND \"asleep1\" BETWEEN 0 AND 3 AND \"tired1\" BETWEEN 0 AND 3 AND \"appetite1\" BETWEEN 0 AND 3 AND \"failure1\" BETWEEN 0 AND 3 AND \"concentr1\" BETWEEN 0 AND 3 AND \"activity1\" BETWEEN 0 AND 3 AND \"suic1\" BETWEEN 0 AND 3 THEN 1 ELSE 0 END) AS complete_valid_enrolled_rows,\n  COUNT(DISTINCT CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"interest1\" IS NOT NULL AND \"down1\" IS NOT NULL AND \"asleep1\" IS NOT NULL AND \"tired1\" IS NOT NULL AND \"appetite1\" IS NOT NULL AND \"failure1\" IS NOT NULL AND \"concentr1\" IS NOT NULL AND \"activity1\" IS NOT NULL AND \"suic1\" IS NOT NULL AND \"interest1\" BETWEEN 0 AND 3 AND \"down1\" BETWEEN 0 AND 3 AND \"asleep1\" BETWEEN 0 AND 3 AND \"tired1\" BETWEEN 0 AND 3 AND \"appetite1\" BETWEEN 0 AND 3 AND \"failure1\" BETWEEN 0 AND 3 AND \"concentr1\" BETWEEN 0 AND 3 AND \"activity1\" BETWEEN 0 AND 3 AND \"suic1\" BETWEEN 0 AND 3 THEN STUDY_PARTICIPANT_ID END) AS complete_valid_enrolled_participants\nFROM IHS_2025.VW_SEP_SURVEY",
+    "WITH scored AS (\n  SELECT\n    STUDY_PARTICIPANT_ID,\n    (\"interest1\" + \"down1\" + \"asleep1\" + \"tired1\" + \"appetite1\" + \"failure1\" + \"concentr1\" + \"activity1\" + \"suic1\") AS phq9_total\n  FROM IHS_2025.VW_SEP_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND \"interest1\" IS NOT NULL AND \"down1\" IS NOT NULL AND \"asleep1\" IS NOT NULL\n    AND \"tired1\" IS NOT NULL AND \"appetite1\" IS NOT NULL AND \"failure1\" IS NOT NULL\n    AND \"concentr1\" IS NOT NULL AND \"activity1\" IS NOT NULL AND \"suic1\" IS NOT NULL\n    AND \"interest1\" BETWEEN 0 AND 3 AND \"down1\" BETWEEN 0 AND 3 AND \"asleep1\" BETWEEN 0 AND 3\n    AND \"tired1\" BETWEEN 0 AND 3 AND \"appetite1\" BETWEEN 0 AND 3 AND \"failure1\" BETWEEN 0 AND 3\n    AND \"concentr1\" BETWEEN 0 AND 3 AND \"activity1\" BETWEEN 0 AND 3 AND \"suic1\" BETWEEN 0 AND 3\n)\nSELECT\n  COUNT(*) AS n_participants,\n  AVG(phq9_total) AS mean_phq9_total,\n  STDDEV_SAMP(phq9_total) AS sd_phq9_total,\n  MIN(phq9_total) AS min_phq9_total,\n  MEDIAN(phq9_total) AS median_phq9_total,\n  MAX(phq9_total) AS max_phq9_total,\n  AVG(phq9_total) - 1.96 * STDDEV_SAMP(phq9_total) / SQRT(COUNT(*)) AS mean_ci95_lower_normal,\n  AVG(phq9_total) + 1.96 * STDDEV_SAMP(phq9_total) / SQRT(COUNT(*)) AS mean_ci95_upper_normal\nFROM scored"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 240267,
+        "inputTokens": 230954,
+        "cachedInputTokens": 136192,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9313,
+        "reasoningOutputTokens": 1405
+      },
+      "last": {
+        "totalTokens": 26292,
+        "inputTokens": 25283,
+        "cachedInputTokens": 16384,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1009,
+        "reasoningOutputTokens": 752
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_db9cc5e0d40afbb5",
+  "attempt": 1
+}

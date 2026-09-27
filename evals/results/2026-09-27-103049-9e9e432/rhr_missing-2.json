@@ -1,0 +1,53 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "You asked: \u201cHow complete is resting heart rate in the 2025 cohort\u2019s Fitbit daily data?\u201d\n\nShort answer: in `IHS_2025.VFITBITDAILYDATA`, `RESTINGHEARTRATE` is present on **19,619 of 20,634 Fitbit daily rows**, or **95.1% complete**. The data span **2025-04-01 to 2026-06-30**, cover **65 participants**, and I found **0 duplicate participant-date rows**.\n\nCatalog evidence: `search_catalog` found `IHS_2025.FITBITDAILYDATA` and `IHS_2025.VFITBITDAILYDATA` with matching column `RESTINGHEARTRATE`. I used the view `IHS_2025.VFITBITDAILYDATA`. `describe_table` confirmed `PARTICIPANTIDENTIFIER` is `VARCHAR2(15)`, `RECORD_DATE` is `DATE`, and `RESTINGHEARTRATE` is `NUMBER`.\n\nFiles created:\n- `/work/outputs/fitbit_2025_resting_hr_completeness_by_month.csv`\n- `/work/outputs/fitbit_2025_resting_hr_completeness_data_dictionary.md`\n\nDelivered dataset: **16 rows**: 15 monthly rows plus 1 overall row. Columns are `PERIOD`, `DAILY_ROWS`, `PARTICIPANTS_WITH_DAILY_ROWS`, `ROWS_WITH_RESTING_HR`, `ROWS_MISSING_RESTING_HR`, `PCT_ROWS_WITH_RESTING_HR`.\n\nSQL run:\n\n```sql\n-- Overall profiling: row count, participants, date range, RHR missingness\nSELECT COUNT(*) AS daily_rows, COUNT(DISTINCT participantidentifier) AS participants,\nMIN(record_date) AS min_record_date, MAX(record_date) AS max_record_date,\nSUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\nSUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\n```\nResult: 1 row, `/data/oracle/q_20260927T103331_9ae9f5.csv`.\n\n```sql\n-- Duplicate participant-date check\nSELECT COUNT(*) AS duplicate_participant_date_rows\nFROM (\n  SELECT participantidentifier, record_date, COUNT(*) AS n_rows\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier, record_date\n  HAVING COUNT(*) > 1\n)\n```\nResult: 1 row, duplicate rows = 0, `/data/oracle/q_20260927T103331_30d159.csv`.\n\n```sql\n-- Small population check using bind variable :sample_n\nSELECT COUNT(*) AS nonempty_rows_checked,\nSUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\nCOUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\nWHERE ROWNUM <= :sample_n\n```\nResult: 1 row with `sample_n = 1000`, `/data/oracle/q_20260927T103331_3b22a6.csv`.\n\n```sql\n-- Final aggregate extraction by month plus overall\nSELECT CASE WHEN GROUPING(record_month) = 1 THEN 'OVERALL' ELSE TO_CHAR(record_month, 'YYYY-MM') END AS period,\nCOUNT(*) AS daily_rows,\nCOUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\nSUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\nSUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\nROUND(100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END), 1) AS pct_rows_with_resting_hr\nFROM (\n  SELECT participantidentifier, TRUNC(record_date, 'MM') AS record_month, restingheartrate\n  FROM IHS_2025.VFITBITDAILYDATA\n)\nGROUP BY GROUPING SETS ((record_month), ())\nORDER BY CASE WHEN GROUPING(record_month) = 1 THEN 1 ELSE 0 END, period\n```\nResult: 16 rows, `/data/oracle/q_20260927T103339_7824bd.csv`, copied to `/work/outputs/fitbit_2025_resting_hr_completeness_by_month.csv`.\n\nCaveat to double-check: this measures completeness **among Fitbit daily records that exist**. It does not test whether every enrolled 2025 participant has a Fitbit row for every expected study day.",
+  "finished": true,
+  "seconds": 57.869515895843506,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS daily_rows,\n  COUNT(DISTINCT participantidentifier) AS participants,\n  MIN(record_date) AS min_record_date,\n  MAX(record_date) AS max_record_date,\n  SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n  SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA",
+    "SELECT\n  COUNT(*) AS duplicate_participant_date_rows\nFROM (\n  SELECT participantidentifier, record_date, COUNT(*) AS n_rows\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier, record_date\n  HAVING COUNT(*) > 1\n)",
+    "SELECT\n  COUNT(*) AS nonempty_rows_checked,\n  SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS resting_hr_nonnull_rows,\n  COUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\nWHERE ROWNUM <= :sample_n",
+    "SELECT\n  CASE WHEN GROUPING(record_month) = 1 THEN 'OVERALL' ELSE TO_CHAR(record_month, 'YYYY-MM') END AS period,\n  COUNT(*) AS daily_rows,\n  COUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\n  SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n  SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\n  ROUND(100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END), 1) AS pct_rows_with_resting_hr\nFROM (\n  SELECT\n    participantidentifier,\n    TRUNC(record_date, 'MM') AS record_month,\n    restingheartrate\n  FROM IHS_2025.VFITBITDAILYDATA\n)\nGROUP BY GROUPING SETS ((record_month), ())\nORDER BY CASE WHEN GROUPING(record_month) = 1 THEN 1 ELSE 0 END, period"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 178944,
+        "inputTokens": 175051,
+        "cachedInputTokens": 117248,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3893,
+        "reasoningOutputTokens": 999
+      },
+      "last": {
+        "totalTokens": 22056,
+        "inputTokens": 20808,
+        "cachedInputTokens": 18944,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1248,
+        "reasoningOutputTokens": 236
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_b593aaa10b1d0a31",
+  "attempt": 2
+}

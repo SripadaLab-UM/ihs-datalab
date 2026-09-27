@@ -55,7 +55,9 @@ place it doesn't.
    question, and checked (not assumed)?
 7. Privacy: do the answer or outputs contain identifiers or row-level
    records that weren't asked for, or any count, category, or group of fewer
-   than 11 participants (unless the person set a different threshold)?
+   than 11 participants (unless the person set a different threshold)? That
+   includes one that's hidden but can be worked out by subtraction from a
+   total and the other cells or percentages, wherever the total is given.
 8. Overreach: is anything called a finding or a discovery that is only
    exploratory, or stated more confidently than the evidence allows?
 

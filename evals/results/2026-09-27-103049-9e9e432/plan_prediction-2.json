@@ -1,0 +1,126 @@
+{
+  "task": "plan_prediction",
+  "mode": "analysis",
+  "prompt": "Can Fitbit sleep in the first four weeks of the internship predict the September PHQ-9 total in the 2025 cohort?",
+  "tests": "plan type: prediction, with validation and what's known at prediction time",
+  "passed": true,
+  "checks": [
+    {
+      "name": "type",
+      "passed": true,
+      "detail": "Prediction (proposed prediction)"
+    },
+    {
+      "name": "add-ons only where they apply",
+      "passed": true,
+      "detail": "proposed: missing_data, sensitivity, temporal_alignment"
+    }
+  ],
+  "answer": "{\n  \"schema_version\": 2,\n  \"analysis_type\": \"prediction\",\n  \"analysis_type_label\": \"Prediction\",\n  \"rationale\": \"The wording asks whether early Fitbit sleep can predict a later PHQ-9 total, so the primary question is out-of-sample prediction rather than causal effect estimation.\",\n  \"sections\": [\n    {\n      \"kind\": \"question_and_purpose\",\n      \"label\": \"Question and purpose\",\n      \"content\": \"Question: In the 2025 IHS cohort, can Fitbit sleep measured during the first four weeks of internship predict the September PHQ-9 total score? Purpose: estimate whether early wearable sleep data contain useful predictive signal for later depressive symptom burden, without treating the association as causal.\"\n    },\n    {\n      \"kind\": \"data_and_scope\",\n      \"label\": \"Data and scope\",\n      \"content\": \"Cohort: IHS_2025 only. Unit of analysis: participant. Candidate tables checked in the catalog and with describe_table: IHS_2025.VFITBITSLEEPLOGS for Fitbit sleep and IHS_2025.VW_SEP_SURVEY for September PHQ-9 items; IHS_2025.VW_BASELINE_SURVEY has baseline PHQ-9 items if used for comparison. Join path checked: participantidentifier links sleep and survey tables; sleep must be aggregated to one participant-level record before joining. Counts already checked before this plan: VFITBITSLEEPLOGS has 20,401 rows for 65 participants overall, with 1,418 rows for 65 participants in 2025-07-01 through 2025-07-28; VW_SEP_SURVEY has 133 participant records. Assumption to confirm: \\u201cfirst four weeks of internship\\u201d is 2025-07-01 through 2025-07-28. Include participants with a September survey and at least a minimum number of valid Fitbit main-sleep nights in the first four weeks; the primary threshold will be set after a coverage pilot, with sensitivity checks for reasonable alternatives.\"\n    },\n    {\n      \"kind\": \"checks_and_limitations\",\n      \"label\": \"Checks and limitations\",\n      \"content\": \"Before modeling: verify ID matching, duplicate September survey rows, duplicate or overlapping sleep logs, main-sleep coding, date parsing, sleep range plausibility, impossible PHQ-9 item values, PHQ-9 item missingness, and observation coverage per participant. Limitations: the Fitbit sample is likely small and not random; prediction estimates may be unstable; missing wearable data may reflect behavior or clinical state; and results cannot support causal claims about sleep causing later PHQ-9 symptoms. Validation must avoid leakage from September outcomes into feature construction or model tuning.\"\n    },\n    {\n      \"kind\": \"deliverables\",\n      \"label\": \"Deliverables\",\n      \"content\": \"A concise static HTML report in /work/outputs plus reproducible source code in /work. The report will state the exact SQL queries and result files, sample flow, coverage checks, model specifications, validation approach, predictive performance with uncertainty, and limitations. No participant identifiers or row-level data will be included in outputs.\"\n    },\n    {\n      \"kind\": \"prediction_target\",\n      \"label\": \"Prediction target and horizon\",\n      \"content\": \"Outcome: September PHQ-9 total score in IHS_2025.VW_SEP_SURVEY, computed as the sum of the nine September items interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, and suic1 when item values are valid. Target population for modeling: participants with September PHQ-9 data and eligible first-four-week Fitbit sleep. Horizon: prediction from July 1-28 Fitbit sleep to September survey completion, roughly 5-12 weeks later depending on the survey date.\"\n    },\n    {\n      \"kind\": \"available_information\",\n      \"label\": \"Information available at prediction time\",\n      \"content\": \"Primary predictors available at prediction time: participant-level summaries of Fitbit main sleep from 2025-07-01 through 2025-07-28, including mean minutes asleep, mean time in bed, mean efficiency, variability of minutes asleep, and number/proportion of covered nights. Sleep records will use VFITBITSLEEPLOGS columns STARTDATE, ENDDATE, ISMAINSLEEP, MINUTESASLEEP, TIMEINBED, EFFICIENCY, and related duration/awake columns after plausibility checks. Comparator models may include an intercept-only/null model and, if baseline survey data are sufficiently complete, baseline PHQ-9 total from VW_BASELINE_SURVEY to assess whether sleep adds predictive information beyond a simpler known baseline measure.\"\n    },\n    {\n      \"kind\": \"validation\",\n      \"label\": \"Validation and performance\",\n      \"content\": \"Because the expected sample is small, use participant-level repeated cross-validation or leave-one-out cross-validation for out-of-sample prediction, with all feature preprocessing and model tuning performed within each training fold. Primary performance measures: cross-validated RMSE and MAE for PHQ-9 total, compared with a null/intercept-only model; report bootstrap or resampling uncertainty where feasible. Use a simple pre-specified model first, likely linear regression or ridge regression if the number of sleep features is high relative to sample size. Avoid dichotomizing PHQ-9 unless requested, because that would reduce information in this small sample.\"\n    },\n    {\n      \"kind\": \"temporal_alignment\",\n      \"label\": \"Timing and alignment\",\n      \"content\": \"Primary sleep window: sleep logs with STARTDATE calendar date from 2025-07-01 through 2025-07-28, interpreted as the first four weeks of internship unless you specify a different official start date. Sleep will be aggregated before joining to September survey data. Survey dates will be used only to confirm that outcomes occur after the sleep window; records before or during the sleep window, if any, will be flagged and excluded from the predictive analysis.\"\n    },\n    {\n      \"kind\": \"missing_data\",\n      \"label\": \"Missing data\",\n      \"content\": \"Report missingness separately for Fitbit coverage, PHQ-9 items, and baseline covariates if used. Primary PHQ-9 total will require all nine valid items unless missingness is very small and a reviewed scoring rule supports prorating; any prorating would require a plan revision. Sleep coverage threshold will be chosen after the pilot coverage check and sensitivity analyses will show whether conclusions change under looser/tighter thresholds.\"\n    },\n    {\n      \"kind\": \"sensitivity\",\n      \"label\": \"Sensitivity analyses\",\n      \"content\": \"Planned sensitivity checks: vary the minimum valid sleep-night threshold, compare mean minutes asleep alone versus a small multi-feature sleep model, and compare Fitbit-only prediction with and without baseline PHQ-9 if baseline data are complete enough. These are predictive-performance sensitivity checks, not causal adjustment analyses.\"\n    }\n  ],\n  \"proposed_after\": {\n    \"queries\": 3,\n    \"tables\": [\n      \"IHS_2025.VFITBITSLEEPLOGS\",\n      \"IHS_2025.VW_SEP_SURVEY\"\n    ],\n    \"more_tables\": 0\n  }\n}",
+  "finished": true,
+  "seconds": 55.20246124267578,
+  "approvals": [
+    {
+      "kind": "analysis_plan",
+      "approved": false,
+      "status": 204,
+      "id": "ap_5d1b5f95a9fce925",
+      "plan": {
+        "schema_version": 2,
+        "analysis_type": "prediction",
+        "analysis_type_label": "Prediction",
+        "rationale": "The wording asks whether early Fitbit sleep can predict a later PHQ-9 total, so the primary question is out-of-sample prediction rather than causal effect estimation.",
+        "sections": [
+          {
+            "kind": "question_and_purpose",
+            "label": "Question and purpose",
+            "content": "Question: In the 2025 IHS cohort, can Fitbit sleep measured during the first four weeks of internship predict the September PHQ-9 total score? Purpose: estimate whether early wearable sleep data contain useful predictive signal for later depressive symptom burden, without treating the association as causal."
+          },
+          {
+            "kind": "data_and_scope",
+            "label": "Data and scope",
+            "content": "Cohort: IHS_2025 only. Unit of analysis: participant. Candidate tables checked in the catalog and with describe_table: IHS_2025.VFITBITSLEEPLOGS for Fitbit sleep and IHS_2025.VW_SEP_SURVEY for September PHQ-9 items; IHS_2025.VW_BASELINE_SURVEY has baseline PHQ-9 items if used for comparison. Join path checked: participantidentifier links sleep and survey tables; sleep must be aggregated to one participant-level record before joining. Counts already checked before this plan: VFITBITSLEEPLOGS has 20,401 rows for 65 participants overall, with 1,418 rows for 65 participants in 2025-07-01 through 2025-07-28; VW_SEP_SURVEY has 133 participant records. Assumption to confirm: \u201cfirst four weeks of internship\u201d is 2025-07-01 through 2025-07-28. Include participants with a September survey and at least a minimum number of valid Fitbit main-sleep nights in the first four weeks; the primary threshold will be set after a coverage pilot, with sensitivity checks for reasonable alternatives."
+          },
+          {
+            "kind": "checks_and_limitations",
+            "label": "Checks and limitations",
+            "content": "Before modeling: verify ID matching, duplicate September survey rows, duplicate or overlapping sleep logs, main-sleep coding, date parsing, sleep range plausibility, impossible PHQ-9 item values, PHQ-9 item missingness, and observation coverage per participant. Limitations: the Fitbit sample is likely small and not random; prediction estimates may be unstable; missing wearable data may reflect behavior or clinical state; and results cannot support causal claims about sleep causing later PHQ-9 symptoms. Validation must avoid leakage from September outcomes into feature construction or model tuning."
+          },
+          {
+            "kind": "deliverables",
+            "label": "Deliverables",
+            "content": "A concise static HTML report in /work/outputs plus reproducible source code in /work. The report will state the exact SQL queries and result files, sample flow, coverage checks, model specifications, validation approach, predictive performance with uncertainty, and limitations. No participant identifiers or row-level data will be included in outputs."
+          },
+          {
+            "kind": "prediction_target",
+            "label": "Prediction target and horizon",
+            "content": "Outcome: September PHQ-9 total score in IHS_2025.VW_SEP_SURVEY, computed as the sum of the nine September items interest1, down1, asleep1, tired1, appetite1, failure1, concentr1, activity1, and suic1 when item values are valid. Target population for modeling: participants with September PHQ-9 data and eligible first-four-week Fitbit sleep. Horizon: prediction from July 1-28 Fitbit sleep to September survey completion, roughly 5-12 weeks later depending on the survey date."
+          },
+          {
+            "kind": "available_information",
+            "label": "Information available at prediction time",
+            "content": "Primary predictors available at prediction time: participant-level summaries of Fitbit main sleep from 2025-07-01 through 2025-07-28, including mean minutes asleep, mean time in bed, mean efficiency, variability of minutes asleep, and number/proportion of covered nights. Sleep records will use VFITBITSLEEPLOGS columns STARTDATE, ENDDATE, ISMAINSLEEP, MINUTESASLEEP, TIMEINBED, EFFICIENCY, and related duration/awake columns after plausibility checks. Comparator models may include an intercept-only/null model and, if baseline survey data are sufficiently complete, baseline PHQ-9 total from VW_BASELINE_SURVEY to assess whether sleep adds predictive information beyond a simpler known baseline measure."
+          },
+          {
+            "kind": "validation",
+            "label": "Validation and performance",
+            "content": "Because the expected sample is small, use participant-level repeated cross-validation or leave-one-out cross-validation for out-of-sample prediction, with all feature preprocessing and model tuning performed within each training fold. Primary performance measures: cross-validated RMSE and MAE for PHQ-9 total, compared with a null/intercept-only model; report bootstrap or resampling uncertainty where feasible. Use a simple pre-specified model first, likely linear regression or ridge regression if the number of sleep features is high relative to sample size. Avoid dichotomizing PHQ-9 unless requested, because that would reduce information in this small sample."
+          },
+          {
+            "kind": "temporal_alignment",
+            "label": "Timing and alignment",
+            "content": "Primary sleep window: sleep logs with STARTDATE calendar date from 2025-07-01 through 2025-07-28, interpreted as the first four weeks of internship unless you specify a different official start date. Sleep will be aggregated before joining to September survey data. Survey dates will be used only to confirm that outcomes occur after the sleep window; records before or during the sleep window, if any, will be flagged and excluded from the predictive analysis."
+          },
+          {
+            "kind": "missing_data",
+            "label": "Missing data",
+            "content": "Report missingness separately for Fitbit coverage, PHQ-9 items, and baseline covariates if used. Primary PHQ-9 total will require all nine valid items unless missingness is very small and a reviewed scoring rule supports prorating; any prorating would require a plan revision. Sleep coverage threshold will be chosen after the pilot coverage check and sensitivity analyses will show whether conclusions change under looser/tighter thresholds."
+          },
+          {
+            "kind": "sensitivity",
+            "label": "Sensitivity analyses",
+            "content": "Planned sensitivity checks: vary the minimum valid sleep-night threshold, compare mean minutes asleep alone versus a small multi-feature sleep model, and compare Fitbit-only prediction with and without baseline PHQ-9 if baseline data are complete enough. These are predictive-performance sensitivity checks, not causal adjustment analyses."
+          }
+        ],
+        "proposed_after": {
+          "queries": 3,
+          "tables": [
+            "IHS_2025.VFITBITSLEEPLOGS",
+            "IHS_2025.VW_SEP_SURVEY"
+          ],
+          "more_tables": 0
+        }
+      },
+      "compare_to": null
+    }
+  ],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS sleep_rows,\n  COUNT(DISTINCT participantidentifier) AS sleep_participants,\n  MIN(SUBSTR(startdate, 1, 10)) AS min_startdate_text,\n  MAX(SUBSTR(startdate, 1, 10)) AS max_startdate_text\nFROM IHS_2025.VFITBITSLEEPLOGS\nWHERE participantidentifier IS NOT NULL",
+    "SELECT\n  COUNT(*) AS sleep_rows,\n  COUNT(DISTINCT participantidentifier) AS sleep_participants\nFROM IHS_2025.VFITBITSLEEPLOGS\nWHERE participantidentifier IS NOT NULL\n  AND SUBSTR(startdate, 1, 10) BETWEEN :start_date AND :end_date",
+    "SELECT\n  COUNT(*) AS sep_survey_rows,\n  COUNT(DISTINCT participantidentifier) AS sep_survey_participants,\n  MIN(startdate1) AS min_startdate1,\n  MAX(startdate1) AS max_startdate1\nFROM IHS_2025.VW_SEP_SURVEY\nWHERE participantidentifier IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 122193,
+        "inputTokens": 118584,
+        "cachedInputTokens": 67584,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3609,
+        "reasoningOutputTokens": 1002
+      },
+      "last": {
+        "totalTokens": 24564,
+        "inputTokens": 22843,
+        "cachedInputTokens": 21504,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1721,
+        "reasoningOutputTokens": 452
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_98b37c79c62ddc13",
+  "attempt": 2
+}

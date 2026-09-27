@@ -266,9 +266,13 @@ Decided (2026-09-26), to pick up later:
 - [ ] **Attached folders that contain credentials files** (`.env`,
       `auth.json`, …): today DataLab attaches them and lists what it found
       as a warning. Refuse such folders instead?
-- [ ] **Full claim-to-evidence provenance** (each number linked to its
-      query, script, and output; the "How was this made?" view): placed in
-      milestone 8. Sooner?
+- [x] **Full claim-to-evidence provenance** (each number linked to its
+      query, script, and output; the "How was this made?" view): brought
+      forward from milestone 8 (decided 2026-09-27); built alongside
+      milestones 4–7.
+- [x] **The knowledge base in a session** (decided 2026-09-27): an editable
+      copy at `/work/kb` that DataLab diffs after each turn into
+      proposed-edit cards, not a read-only mount.
 - [ ] **The enrolment rule on the real database.** In the synthetic data a
       NULL study ID (`SECONDARYIDENTIFIER`, `STUDY_PARTICIPANT_ID`) means
       screened, never enrolled. Is that true of the real IHS data? It goes

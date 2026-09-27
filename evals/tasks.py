@@ -292,7 +292,8 @@ _KNOWING = (
 )
 DISCLAIMER = re.compile(
     rf"{_NEGATION}(?:[\s,]+{_FILLER}\b){{0,4}}[\s,]+{_KNOWING}"
-    rf"|(?:{_NEGATION}|\bno\b)(?:\s+(?:a|an|any|causal|direct|strong|good|clear))*\s+(?:evidence|proof)\b"
+    rf"|(?:{_NEGATION}|\bno\b)(?:\s+be\s+(?:read|taken|interpreted|seen|treated|understood)\s+as)?"
+    r"(?:\s+(?:a|an|any|causal|direct|strong|good|clear))*\s+(?:evidence|proof)\b(?!\s+against\b)"
     r"|\bnot (?:a )?causal\b",
     re.IGNORECASE,
 )

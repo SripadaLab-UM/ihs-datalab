@@ -1,0 +1,53 @@
+{
+  "task": "rhr_missing",
+  "mode": "extraction",
+  "prompt": "How complete is resting heart rate in the 2025 cohort's Fitbit daily data?",
+  "tests": "a missingness share, and what it's a share of",
+  "passed": true,
+  "checks": [
+    {
+      "name": "missing share",
+      "passed": true,
+      "detail": "expected 4.92% missing (95.08% complete)"
+    },
+    {
+      "name": "denominator stated",
+      "passed": true,
+      "detail": "a share of what: 20,634 Fitbit daily rows"
+    }
+  ],
+  "answer": "**Answer**\nI understood the request as: estimate completeness of `RESTINGHEARTRATE` in the 2025 cohort Fitbit daily data.\n\nUsing `IHS_2025.VFITBITDAILYDATA`, resting heart rate is highly complete: `19,619 / 20,634` daily Fitbit rows have non-missing `RESTINGHEARTRATE`, or `95.08%` complete. Missingness is `1,015 / 20,634`, or `4.92%`.\n\nThere are `65` participants with Fitbit daily rows, and all `65` have at least one resting heart rate value. Participant-level completeness is also strong: median `95.12%`, range `91.49%` to `97.20%`; all `65` participants are at least `90%` complete.\n\n**Catalog Evidence**\nCatalog search for \u201cFitbit daily resting heart rate\u201d in `IHS_2025` found `IHS_2025.FITBITDAILYDATA` and `IHS_2025.VFITBITDAILYDATA`, both with `RESTINGHEARTRATE`. I used the view. `describe_table` confirmed:\n`PARTICIPANTIDENTIFIER VARCHAR2(15)`, `RECORD_DATE DATE`, `RESTINGHEARTRATE NUMBER`.\n\n**Caveats**\nCompleteness is defined over rows already present in Fitbit daily data, not over every possible calendar day for every intern. The data span `2025-04-01` to `2026-06-30`. No duplicate participant-date rows were found.\n\n**SQL Run**\nPurpose: overall completeness. Row count: `1`.\n\n```sql\nSELECT COUNT(*) AS total_daily_rows,\n       COUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\n       MIN(record_date) AS min_record_date,\n       MAX(record_date) AS max_record_date,\n       SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n       SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\n       COUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_any_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\n```\n\nPurpose: participant-date grain check. Row count: `1`.\n\n```sql\nWITH participant_days AS (\n  SELECT participantidentifier, record_date, COUNT(*) AS rows_per_participant_day\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier, record_date\n)\nSELECT COUNT(*) AS participant_day_groups,\n       SUM(rows_per_participant_day) AS total_rows,\n       SUM(CASE WHEN rows_per_participant_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_duplicate_rows,\n       MAX(rows_per_participant_day) AS max_rows_per_participant_day\nFROM participant_days\n```\n\nPurpose: participant-level completeness summary. Row count: `1`.\n\n```sql\nWITH participant_completeness AS (\n  SELECT participantidentifier,\n         COUNT(*) AS daily_rows,\n         SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS days_with_resting_hr,\n         100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS pct_days_with_resting_hr\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier\n)\nSELECT COUNT(*) AS participants,\n       MIN(daily_rows), PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY daily_rows),\n       MEDIAN(daily_rows), PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY daily_rows),\n       MAX(daily_rows),\n       MIN(pct_days_with_resting_hr), PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY pct_days_with_resting_hr),\n       MEDIAN(pct_days_with_resting_hr), PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY pct_days_with_resting_hr),\n       MAX(pct_days_with_resting_hr),\n       SUM(CASE WHEN days_with_resting_hr > 0 THEN 1 ELSE 0 END),\n       SUM(CASE WHEN pct_days_with_resting_hr >= 90 THEN 1 ELSE 0 END)\nFROM participant_completeness\n```\n\nPurpose: monthly completeness. Row count: `15`.\n\n```sql\nSELECT TRUNC(record_date, 'MM') AS record_month,\n       COUNT(*) AS total_daily_rows,\n       COUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\n       SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n       SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\n       COUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_any_resting_hr,\n       ROUND(100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END), 2) AS pct_rows_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\nGROUP BY TRUNC(record_date, 'MM')\nORDER BY record_month\n```\n\n**Output Files**\nAggregate CSVs and dictionary are saved here:\n\n`/work/outputs/fitbit_2025_resting_hr_overall_completeness.csv`  \n`/work/outputs/fitbit_2025_resting_hr_grain_check.csv`  \n`/work/outputs/fitbit_2025_resting_hr_participant_completeness_summary.csv`  \n`/work/outputs/fitbit_2025_resting_hr_monthly_completeness.csv`  \n`/work/outputs/fitbit_2025_resting_hr_completeness_data_dictionary.md`",
+  "finished": true,
+  "seconds": 72.40022706985474,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_daily_rows,\n  COUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\n  MIN(record_date) AS min_record_date,\n  MAX(record_date) AS max_record_date,\n  SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n  SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\n  COUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_any_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA",
+    "WITH participant_days AS (\n  SELECT\n    participantidentifier,\n    record_date,\n    COUNT(*) AS rows_per_participant_day\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier, record_date\n)\nSELECT\n  COUNT(*) AS participant_day_groups,\n  SUM(rows_per_participant_day) AS total_rows,\n  SUM(CASE WHEN rows_per_participant_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_duplicate_rows,\n  MAX(rows_per_participant_day) AS max_rows_per_participant_day\nFROM participant_days",
+    "WITH participant_completeness AS (\n  SELECT\n    participantidentifier,\n    COUNT(*) AS daily_rows,\n    SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS days_with_resting_hr,\n    SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS days_missing_resting_hr,\n    100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS pct_days_with_resting_hr\n  FROM IHS_2025.VFITBITDAILYDATA\n  GROUP BY participantidentifier\n)\nSELECT\n  COUNT(*) AS participants,\n  MIN(daily_rows) AS min_daily_rows_per_participant,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY daily_rows) AS p25_daily_rows_per_participant,\n  MEDIAN(daily_rows) AS median_daily_rows_per_participant,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY daily_rows) AS p75_daily_rows_per_participant,\n  MAX(daily_rows) AS max_daily_rows_per_participant,\n  MIN(pct_days_with_resting_hr) AS min_pct_days_with_resting_hr,\n  PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY pct_days_with_resting_hr) AS p25_pct_days_with_resting_hr,\n  MEDIAN(pct_days_with_resting_hr) AS median_pct_days_with_resting_hr,\n  PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY pct_days_with_resting_hr) AS p75_pct_days_with_resting_hr,\n  MAX(pct_days_with_resting_hr) AS max_pct_days_with_resting_hr,\n  SUM(CASE WHEN days_with_resting_hr > 0 THEN 1 ELSE 0 END) AS participants_with_any_resting_hr,\n  SUM(CASE WHEN pct_days_with_resting_hr >= 90 THEN 1 ELSE 0 END) AS participants_with_at_least_90pct_resting_hr\nFROM participant_completeness",
+    "SELECT\n  TRUNC(record_date, 'MM') AS record_month,\n  COUNT(*) AS total_daily_rows,\n  COUNT(DISTINCT participantidentifier) AS participants_with_daily_rows,\n  SUM(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_resting_hr,\n  SUM(CASE WHEN restingheartrate IS NULL THEN 1 ELSE 0 END) AS rows_missing_resting_hr,\n  COUNT(DISTINCT CASE WHEN restingheartrate IS NOT NULL THEN participantidentifier END) AS participants_with_any_resting_hr,\n  ROUND(100 * AVG(CASE WHEN restingheartrate IS NOT NULL THEN 1 ELSE 0 END), 2) AS pct_rows_with_resting_hr\nFROM IHS_2025.VFITBITDAILYDATA\nGROUP BY TRUNC(record_date, 'MM')\nORDER BY record_month"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 210283,
+        "inputTokens": 204338,
+        "cachedInputTokens": 151040,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5945,
+        "reasoningOutputTokens": 1265
+      },
+      "last": {
+        "totalTokens": 23691,
+        "inputTokens": 22137,
+        "cachedInputTokens": 15360,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1554,
+        "reasoningOutputTokens": 326
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_725150b78e72b6e2",
+  "attempt": 1
+}
