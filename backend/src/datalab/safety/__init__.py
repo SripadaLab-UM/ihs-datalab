@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 import secrets
 import shutil
@@ -39,6 +40,7 @@ import httpx
 from datalab.config import Settings
 from datalab.credentials import MissingCredential, oracle_password
 from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
+from datalab.repos.github import saved_token_values
 from datalab.safety import policy
 from datalab.safety.canary import Canaries
 from datalab.sessions.checkpoints import Checkpoints
@@ -102,7 +104,10 @@ class SafetyCheck:
         model_key: Callable[[], str],
         containers: type[SessionContainers] = SessionContainers,
         previews: Previews | None = None,
+        # The saved GitHub tokens, to look for (never shown).
+        github_tokens: Callable[[], list[str]] = saved_token_values,
     ) -> None:
+        self._github_tokens = github_tokens
         self._settings = settings
         self._tokens = tokens
         self._canaries = canaries
@@ -289,6 +294,7 @@ class SafetyCheck:
         )
 
         results.append(await self._no_secrets_in(probe))
+        results.append(await self._no_github_token_in(probe, kind="data"))
         results.append(await self._locked_down(probe, kind="data"))
         return results
 
@@ -352,6 +358,7 @@ class SafetyCheck:
                 else "The host, private networks, and data tools are refused.",
             )
         )
+        results.append(await self._no_github_token_in(probe, kind="research"))
         results.append(await self._locked_down(probe, kind="research"))
         return results
 
@@ -384,6 +391,50 @@ class SafetyCheck:
             "A key was found in the container's environment or files."
             if found
             else "Checked the environment and every mounted file.",
+        )
+
+    async def _no_github_token_in(self, probe: _Probe, *, kind: str) -> CheckResult:
+        """The GitHub token is used only by git in DataLab's own process. It
+        must not be in the container's environment, command, or any file it
+        can see, the lab repos' clones must not be mounted, and the token
+        must not be in the clones in plain text either."""
+        check_id = f"no_github_token_in_{kind}_session"
+        label = f"Your GitHub sign-in never reaches a {kind} session"
+        try:
+            known = [s for s in self._github_tokens() if len(s) >= 8]
+        except Exception:  # no usable keychain: nothing saved to look for
+            known = []
+        if not known:
+            return CheckResult(
+                check_id,
+                PROMISE_NETWORK,
+                label,
+                "skip",
+                "Not signed in to GitHub, so there's no token to look for.",
+                required=False,
+            )
+        inspect = await probe.inspect()
+        config = inspect.get("Config", {})
+        started_with = json.dumps([config.get("Env"), config.get("Cmd"), inspect.get("Args")])
+        repos = Path(os.path.realpath(self._settings.data_dir / "repos"))
+        problems = []
+        if any(s in started_with for s in known):
+            problems.append("in the container's environment or command")
+        if any(_holds(path, known) for path in _files(probe.paths.root)):
+            problems.append("in a file the container can see")
+        sources = [Path(m.get("Source", "/")) for m in inspect.get("Mounts", [])]
+        if any(source == repos or repos in source.parents for source in sources):
+            problems.append("the lab repos' clones are mounted in it")
+        if any(_holds(path, known) for path in _files(repos)):
+            problems.append("stored in plain text in the lab repos' clones")
+        return _result(
+            check_id,
+            PROMISE_NETWORK,
+            label,
+            not problems,
+            "Found: " + "; ".join(problems)
+            if problems
+            else "Checked its environment, command, mounts and files, and the repo clones.",
         )
 
     async def _locked_down(self, probe: _Probe, *, kind: str) -> CheckResult:
@@ -778,6 +829,16 @@ def _result(check_id: str, promise: str, label: str, ok: bool, detail: str) -> C
 
 def _files(root: Path) -> list[Path]:
     return [p for p in root.rglob("*") if p.is_file() and not p.is_symlink()]
+
+
+def _holds(path: Path, secrets: list[str], limit: int = 64 * 1024**2) -> bool:
+    try:
+        if path.stat().st_size > limit:
+            return False
+        content = path.read_bytes()
+    except OSError:
+        return False
+    return any(s.encode() in content for s in secrets)
 
 
 def _quote(text: str) -> str:

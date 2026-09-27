@@ -197,6 +197,10 @@ class Checkpoints:
             for rel, e in self._contents(number)["entries"].items()
         }
 
+    def links(self, number: int) -> dict[str, str]:
+        """The links in checkpoint `number`: path -> target, never followed."""
+        return dict(self._contents(number).get("links", {}))
+
     def open_object(self, entry: Entry) -> int:
         """Open a file's saved content (in DataLab's own store) for reading."""
         return os.open(self._object_path(entry.sha256), os.O_RDONLY | _BINARY)

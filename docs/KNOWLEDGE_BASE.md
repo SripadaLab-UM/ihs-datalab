@@ -1,7 +1,8 @@
 # Lab knowledge base
 
-Status: **draft** for v1. This is a proposal under discussion and has not been
-implemented.
+Status: the backend is **implemented** (milestone 5, 2026-09-27): sign-in,
+the clone, each conversation's copy, proposed edits, Save & share, and the
+check. The Knowledge tab and the move of the Spine's content come next.
 
 The knowledge base holds the lab's shared, durable knowledge about IHS data:
 what tables and variables mean, device quirks, cleaning and QC rules, how
@@ -50,7 +51,8 @@ generated/schema/    Oracle catalog metadata (tables, columns, types, comments),
                      refreshed by DataLab. Metadata only, never values
 generated/drift.md   cross-year differences: tables and columns added,
                      removed, or renamed between cohorts
-.agents/skills/      how agents use and maintain the knowledge base (below)
+skills/              lab skills, one folder each (skills/<name>/SKILL.md): the
+                     lab's own procedures, which Codex loads from the copy
 .github/workflows/   runs DataLab's knowledge-base check on every push (the check
                      itself ships with DataLab; it is not a script in this repo)
 ```
@@ -110,12 +112,14 @@ demand. It doesn't need a search server at this size.
 
 - **`AGENTS.md`** (always loaded) tells the agent the knowledge base exists at
   `/work/kb`, what the rules are, and to start from `index.md`.
-- **Skills** carry the procedures. Each is loaded only when relevant:
+- **Skills** carry the procedures. Each is loaded only when relevant. These
+  three are app skills, shipped in the agent image, because they describe
+  DataLab's own flow; the lab's own skills live in the repo's `skills/`:
   - `kb-use`: find relevant pages via `index.md` and grep, prefer `reviewed`,
     and cite page ids in answers.
   - `kb-propose`: when the agent learns something durable (a quirk, a rule,
-    a verified query), write or update a page in the proposed format and run
-    the check.
+    a verified query), write or update a page in the proposed format. The
+    check runs on it after the turn, and its findings are on the card.
   - `kb-maintain`: find contradictions, stale pages, broken links, and
     tables referenced but not in `generated/schema`. Used on demand.
 - The **verified queries** in `queries/` are the most valuable pages for data
@@ -148,6 +152,52 @@ Other sessions only see a change after it has been saved and pushed. That is
 also what keeps data-session material from reaching research sessions
 unreviewed (see [SAFETY.md](SAFETY.md)).
 
+### How it's built (`backend/src/datalab/knowledge/`, `repos/`)
+
+- **Signing in** uses the lab's GitHub App (`[repos] client_id` in
+  `settings.toml`) and GitHub's device flow; there is no client secret or key
+  in DataLab. The tokens live in the OS keychain (`datalab-github`). The
+  8-hour user token is refreshed ten minutes before it expires, and the
+  refresh token (about six months) is replaced by GitHub on every use, so
+  both new tokens are saved before either is used. When the refresh token
+  runs out, the person signs in again. The practice profile never signs in.
+- **Git** runs in DataLab's process with a fixed configuration on every
+  command (no hooks, no signing, no line-ending conversion, links as plain
+  files). Git gets the token from DataLab's credential helper, named on the
+  command line of the commands that reach GitHub, after an empty value that
+  switches off the person's own helpers; nothing is written to any git
+  config. The app can't read team membership, so missing access is a 404
+  from the repository, and DataLab says whom to ask (`[repos]
+  access_contact`).
+- **The copy** is GitHub's `main` as last synced (synced first if that was
+  over ten minutes ago), written as plain files: no `.git`, no `.github/`,
+  no links. If there's no clone yet, `/work/kb` holds a note saying so.
+- **Proposals.** After each turn the copy in the turn's checkpoint is
+  compared with the conversation's base. Paths outside the layout,
+  `index.md`, `generated/`, links, binaries, and files over 256 KB are
+  refused, with the reason, instead of proposed. Changes to `reviewed_by`
+  and `reviewed_on` are dropped (and flagged); status changes are flagged.
+  The proposal is a `kb_proposal` event in the conversation's log, with the
+  diff (capped at 64 KB a file and 256 KB in all; the full diff is in the
+  API) and the check's counts.
+- **Save & share** checks the change, commits it on the conversation's base
+  as the person (their GitHub name, their private noreply address, and
+  trailers `DataLab-Conversation` and `DataLab-Proposal`), fetches, rebases
+  onto `main`, then fills in `reviewed_by` and `reviewed_on` on the reviewed
+  pages it changed and rewrites `index.md`, checks again, and pushes exactly
+  that commit. It never forces. If `main` moved during the push, it rebases
+  and checks again. A conflict stops with the files and GitHub's version of
+  each; the person's text for them (written against that version) is used
+  on the next try. A failed check stops with the findings.
+- **The base moves on.** After a proposal is saved or discarded, the
+  conversation's base becomes its old base plus the agent's files as they
+  were (a local commit under `refs/datalab/kb-bases/`). So the next proposal
+  shows only what's new, and saving it replays only that onto `main`,
+  keeping the person's edits and others' changes.
+- The API is `/api/knowledge/…`: `status`, `sync`, `sign-in` (start, poll,
+  cancel), `sign-out`, and `proposals` (list, get, `edits`, `accept`,
+  `reject`). The tables are migration 0007.
+
 ## The check
 
 The check is **DataLab's own code**, never a script from this repo. That
@@ -166,6 +216,34 @@ push. There it uses the same published check.
 - Status changes, and edits to `reviewed_by` or `reviewed_on` that didn't
   come from DataLab's save flow, are flagged.
 - It regenerates `index.md`.
+- Also: only the layout's folders and files, text only (256 KB a page, 1 MB
+  a schema file), no links; `generated/schema` files hold only catalog
+  metadata fields; lab skills have a `name` matching their folder and a
+  `description`.
+
+It's `datalab.knowledge.check` in DataLab, and `datalab kb-check <folder>`
+on the command line (`--fix` rewrites `index.md`; `--format github` gives
+GitHub Actions annotations). Each finding is an error, possible participant
+data (a person confirms or fixes it), or a warning.
+
+### Installing the check on GitHub
+
+The workflow is a template in the DataLab repo,
+[`kb/github-workflow.yml`](../kb/github-workflow.yml). DataLab can't install
+it: its GitHub App may change contents but not workflows, and GitHub refuses
+any push that touches `.github/workflows/` with the app's token. A
+maintainer installs it once with their own credentials:
+
+1. Set `DATALAB_REF` in the template to the DataLab release the lab runs (a
+   tag, or a full commit id).
+2. Commit it to `ihs-knowledge` as `.github/workflows/kb-check.yml`, with
+   the maintainer's own git credentials (or GitHub's web editor), and push
+   to `main`.
+3. Update `DATALAB_REF` when the lab moves to a new DataLab release.
+
+In Actions, possible participant data is reported as warnings, since
+DataLab only saves a hit after the person saving confirmed it; errors fail
+the run.
 
 ## Codex memories: off
 

@@ -109,6 +109,23 @@ async def test_a_turn_completes_and_config_is_outside_the_agent_folders(tmp_path
     await runtime.close()
 
 
+async def test_the_lab_skills_in_the_knowledge_base_copy_are_a_skill_root(tmp_path):
+    containers = FakeContainers(tmp_path / "log.jsonl")
+    runtime, _ = make(tmp_path, containers)
+    runtime.begin_turn()
+    await runtime.send("hi")
+    requests = containers.requests()
+    # Before the thread starts, so its skills include them.
+    assert requests.index("skills/extraRoots/set") < requests.index("thread/start")
+    [sent] = [
+        json.loads(line)["params"]
+        for line in containers.log.read_text().splitlines()
+        if json.loads(line)["method"] == "skills/extraRoots/set"
+    ]
+    assert sent == {"extraRoots": ["/work/kb/skills"]}
+    await runtime.close()
+
+
 async def test_stop_while_starting_prevents_the_turn(tmp_path):
     containers = FakeContainers(tmp_path / "log.jsonl", start_delay=0.3)
     runtime, events = make(tmp_path, containers)

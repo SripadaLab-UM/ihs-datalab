@@ -325,6 +325,11 @@ access. It never gains it.
   sessions, and the shared repo, only see it once it is saved.
 - Git operations run in DataLab's host process with the user's GitHub token,
   which is stored in the OS keychain. The token never enters a container.
+  Git gets it from DataLab's credential helper, named on each command (never
+  in a git config file), which switches off the person's own helpers so none
+  of them stores it. The Safety check looks for the token in both session
+  types' containers (environment, command, mounts, files) and, in plain
+  text, in the repo clones.
 - Before sharing, DataLab scans the diff for things that look like row-level
   data, such as participant IDs, per-person dates, or pasted tables, and warns
   the user. The scan is an aid; the human review is the control.

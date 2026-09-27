@@ -88,18 +88,26 @@ class PlaygroundSettings:
 class RepoSettings:
     """`[repos]`: the lab's git repositories (milestones 5 and 6).
 
-    None means not configured: nothing is cloned or synced. To come: the
-    GitHub App's client id, how often to sync, and the branch to follow.
+    None means not configured: nothing is cloned or synced. Both follow
+    `main`. To come: how often to sync.
     """
 
     # e.g. "SripadaLab-UM/ihs-knowledge"
     knowledge: str | None = None
     # e.g. "SripadaLab-UM/ihs-pipelines"
     pipelines: str | None = None
+    # The lab's GitHub App, for signing in with the device flow. Its client
+    # id isn't a secret; DataLab holds no client secret or key for it.
+    client_id: str | None = None
+    # Whom to ask for access to the repos, shown when GitHub says no
+    # (e.g. "Ali, the DataLab maintainer").
+    access_contact: str | None = None
 
     def __post_init__(self) -> None:
         for key in ("knowledge", "pipelines"):
             _check_repo(f"repos.{key}", getattr(self, key))
+        if self.client_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]{8,64}", self.client_id):
+            raise ValueError("repos.client_id must be a GitHub App client id, such as Iv23li…")
 
 
 @dataclass(frozen=True)

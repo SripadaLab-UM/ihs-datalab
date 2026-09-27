@@ -245,5 +245,12 @@ MODES = {
 }
 
 
+# Every mode, both session types (the kb-* skills say how).
+KNOWLEDGE = (
+    "\nThe lab's knowledge base is at /work/kb: use it through the kb-use skill, "
+    "and suggest durable additions with kb-propose.\n"
+)
+
+
 def instructions(mode_id: str) -> str:
-    return MODES[mode_id].instructions
+    return MODES[mode_id].instructions + KNOWLEDGE

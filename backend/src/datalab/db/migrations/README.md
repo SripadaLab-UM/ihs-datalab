@@ -12,6 +12,6 @@ after these for anything else.
 |---|---|---|
 | 0001–0005 | queries, conversations, attachments, exports, rigor | in use |
 | 0006 | `queries.origin`: conversation, playground, or run | in use |
-| 0007 | knowledge: proposed edits and Save & share records (milestone 5) | reserved |
+| 0007 | knowledge: proposed edits, each conversation's base, repo sync state (milestone 5) | in use |
 | 0008 | workflow runs and their steps (milestone 6) | reserved |
 | 0009 | update metadata: installed versions and backups (milestone 7) | reserved |

@@ -15,6 +15,13 @@ from datalab.sessions.tokens import SessionKind
 CODEX_VERSION = "0.157.1"
 TOKEN_ENV = "DATALAB_SESSION_TOKEN"
 
+# Skill folders besides the image's app skills (/etc/codex/skills): the lab's
+# skills, in the conversation's copy of the knowledge base. config.toml has no
+# setting for extra roots, so the runtime sends them with the app-server's
+# `skills/extraRoots/set` when it starts (checked with Codex 0.157.1: skills
+# there are listed as the user's; a folder that doesn't exist is ignored).
+SKILL_ROOTS = ("/work/kb/skills",)
+
 # Codex features that are off in every session.
 _FEATURES_OFF = (
     "memories",

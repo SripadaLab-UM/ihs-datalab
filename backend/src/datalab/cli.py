@@ -52,7 +52,29 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--from-export", type=Path, help="a CSV metadata export folder")
     source.add_argument("--from-database", action="store_true", help="read the configured database")
 
+    kb_check = commands.add_parser(
+        "kb-check", help="check a knowledge base folder (the check GitHub Actions runs)"
+    )
+    kb_check.add_argument("path", type=Path, help="the knowledge base's folder")
+    kb_check.add_argument("--fix", action="store_true", help="rewrite index.md if it's stale")
+    kb_check.add_argument("--format", choices=["text", "github", "json"], default="text")
+    kb_check.add_argument(
+        "--allow-data-hits",
+        action="store_true",
+        help="report possible participant data without failing (people confirmed them on save)",
+    )
+
     args = parser.parse_args(argv)
+    if args.command == "kb-check":
+        # Needs no settings: it runs in GitHub Actions too.
+        from datalab.knowledge.check import run as run_kb_check
+
+        if not args.path.is_dir():
+            print(f"{args.path} isn't a folder.", file=sys.stderr)
+            return 2
+        return run_kb_check(
+            args.path, fix=args.fix, output=args.format, allow_data=args.allow_data_hits
+        )
     settings = load_settings(args.profile)
 
     if args.command == "serve":

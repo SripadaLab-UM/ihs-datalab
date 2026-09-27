@@ -1,0 +1,41 @@
+# The knowledge-base check, for the lab's `ihs-knowledge` repo.
+#
+# A template: it lives in the DataLab repo and is installed by hand as
+# `.github/workflows/kb-check.yml` in `SripadaLab-UM/ihs-knowledge`. DataLab
+# can't push it: its GitHub App may change repository contents but not
+# workflows. See docs/KNOWLEDGE_BASE.md, "Installing the check on GitHub".
+#
+# It runs DataLab's own check, from the public DataLab repo at a pinned
+# release, never a script from the knowledge base itself, so an edit to the
+# knowledge base can't change what runs. Possible participant data is
+# reported as warnings here: DataLab blocks a save until the person saving
+# has confirmed each hit, so a hit that reaches GitHub was confirmed.
+
+name: Knowledge base check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # The DataLab release whose check this runs (a tag or a full commit
+      # id). Update it together with the lab's DataLab version.
+      DATALAB_REF: main
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+      - name: Run DataLab's knowledge-base check
+        run: >-
+          uvx --from "git+https://github.com/SripadaLab-UM/ihs_datalab@${DATALAB_REF}#subdirectory=backend"
+          datalab kb-check . --format github --allow-data-hits

@@ -68,10 +68,17 @@ def _run(app, containers) -> dict[str, str]:
     return {r.id: r.status for r in report.results}
 
 
-def test_a_sealed_session_passes(app):
+def test_a_sealed_session_passes(app, github_keychain):
+    # Signed in to GitHub (a made-up token, in a stand-in keychain): the
+    # check looks for it in both kinds of container.
+    from datalab.repos.github import Tokens, TokenStore
+
+    TokenStore().save(Tokens("ghu_not_a_real_token_0123", None, "ghr_not_real_0123", None))
     results = _run(app, SessionContainers)
     failures = {k: v for k, v in results.items() if v == "fail" and k != "model_reachable"}
     assert failures == {}
+    assert results["no_github_token_in_data_session"] == "pass"
+    assert results["no_github_token_in_research_session"] == "pass"
 
 
 def test_a_leaky_session_is_caught(app):

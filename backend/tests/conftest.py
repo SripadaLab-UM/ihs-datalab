@@ -52,6 +52,37 @@ def lock_data_folders_for_create_app(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+class MemoryKeychain:
+    """Stands in for the OS keychain, for the GitHub sign-in."""
+
+    def __init__(self) -> None:
+        self.saved: dict[tuple[str, str], str] = {}
+        self.writes = 0
+
+    def get_password(self, service: str, account: str) -> str | None:
+        return self.saved.get((service, account))
+
+    def set_password(self, service: str, account: str, value: str) -> None:
+        self.writes += 1
+        self.saved[(service, account)] = value
+
+    def delete_password(self, service: str, account: str) -> None:
+        from keyring.errors import PasswordDeleteError
+
+        if self.saved.pop((service, account), None) is None:
+            raise PasswordDeleteError("not saved")
+
+
+@pytest.fixture(autouse=True)
+def github_keychain(monkeypatch: pytest.MonkeyPatch) -> MemoryKeychain:
+    """No test reads or writes a real GitHub sign-in in this computer's keychain."""
+    from datalab.repos import github
+
+    fake = MemoryKeychain()
+    monkeypatch.setattr(github, "keyring", fake)
+    return fake
+
+
 @pytest.fixture(autouse=True)
 def release_data_folder_locks() -> Iterator[None]:
     """No test keeps a data folder locked for the rest of the run."""

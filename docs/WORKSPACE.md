@@ -63,7 +63,7 @@ Everything uses native Codex mechanisms, arranged in four layers:
 | `reproducible-report` | App skill | Merge with `artifact-contract`. |
 | `artifact-contract` | App skill | Merged into `reproducible-report` and the base `AGENTS.md`. |
 | `ihs-feature-factory` | Lab skill, rewritten | Remove the dependencies on the Spine and the custom servers. |
-| (new) `kb-use`, `kb-propose`, `kb-maintain` | Lab skills | See [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md). |
+| (new) `kb-use`, `kb-propose`, `kb-maintain` | App skills | They describe DataLab's own flow for the knowledge base, so they ship in the image. The lab's own skills load from `/work/kb/skills`. See [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md). |
 | (new) `sql-extraction` | App skill | The good parts of the prototype's SQL Playground mode: catalog first, check columns, profiling separate from delivery, show the SQL. |
 | (new) `research-helper` | App skill | When to ask, how to phrase a question that contains no data, and to ask sparingly. |
 

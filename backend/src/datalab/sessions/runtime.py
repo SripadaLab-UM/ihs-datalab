@@ -293,7 +293,17 @@ class SessionRuntime:
             process, on_notification=self._on_notification, on_server_request=self._on_request
         )
         await self._client.initialize()
+        await self._add_skill_roots()
         await self._open_thread()
+
+    async def _add_skill_roots(self) -> None:
+        assert self._client is not None
+        try:
+            roots = list(codex_config.SKILL_ROOTS)
+            await self._client.request("skills/extraRoots/set", {"extraRoots": roots})
+        except AppServerError as error:
+            # The session works without the lab's skills; the app skills remain.
+            log.warning("couldn't add the lab's skills for %s: %s", self.session_id, error)
 
     async def _open_thread(self) -> None:
         assert self._client is not None

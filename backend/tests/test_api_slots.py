@@ -24,10 +24,10 @@ def test_areas_not_built_yet_say_so(client, area):
 
 def test_knowledge_says_its_repo_isnt_configured(client):
     client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
-    assert client.get("/api/knowledge/status").json() == {
-        "available": False,
-        "repo": "not configured",
-    }
+    status = client.get("/api/knowledge/status").json()
+    assert (status["available"], status["repo"]) == (False, "not configured")
+    # The tests' profile is practice, which never uses the lab's repos.
+    assert "Practice" in status["message"]
 
 
 def test_the_status_routes_need_the_browser_session(client):

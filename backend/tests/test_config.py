@@ -68,6 +68,7 @@ def test_sections_are_frozen(settings_file):
         ('[repos]\nknowledge = "lab/.."\n', "owner/name"),
         ('[repos]\nknowledge = "https://github.com/lab/kb"\n', "owner/name"),
         ('[updates]\nrepository = "lab"\n', "owner/name"),
+        ('[repos]\nclient_id = "Iv23 x; rm"\n', "client id"),
         ("[playground]\npreview_rows = 1.5\n", "playground.preview_rows"),
     ],
 )

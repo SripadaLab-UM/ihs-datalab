@@ -31,6 +31,7 @@ from datalab.credentials import (
     save_model_api_key,
     save_oracle_password,
 )
+from datalab.repos import github
 
 AGENT_IMAGE_REPOSITORIES = ("datalab-agent", "ghcr.io/sripadalab-um/datalab-agent")
 
@@ -91,6 +92,7 @@ def uninstall(*, delete_data: bool | None) -> int:
 
     print("Removing DataLab's saved keys from the keychain…")
     _forget(MODEL_KEY_SERVICE, MODEL_KEY_ACCOUNT)
+    _forget(github.KEYCHAIN_SERVICE, github.KEYCHAIN_ACCOUNT)
     _forget(PRACTICE_ORACLE.keychain_service, PRACTICE_ORACLE.user)
     for profile in ("real", "practice"):
         oracle = load_settings(profile).oracle  # type: ignore[arg-type]

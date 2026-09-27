@@ -476,7 +476,10 @@ own slot, and the shared modules offer extension points:
   kept in sync with the **git CLI**. The installer makes sure Git is present.
 - Credentials come from the GitHub App's user token, which is kept in the
   keychain and passed to git through a credential helper. The token never goes
-  on disk in plain text, and never enters a container.
+  on disk in plain text, and never enters a container. (Implemented in
+  `repos/`: the device flow and refresh in `github.py`, the helper in
+  `credential_helper.py`, git and the clones in `git.py`; see
+  KNOWLEDGE_BASE.md, "How it's built".)
 - **The checks are DataLab's own code.** The knowledge-base check and the
   workflow-file check ship with DataLab. DataLab never runs a script taken
   from a repo on the host. Repo tests, such as `ihsDataR`'s R tests, run in a
@@ -737,6 +740,11 @@ something we can use end to end ourselves.
    - GitHub App sign-in and repo sync.
    - The Knowledge tab, proposed-edit cards, and Save & share.
    - The check script, and moving the Spine content over.
+   - 5a done 2026-09-27 (backend): sign-in, the clone and sync, each
+     conversation's copy and its proposals, Save & share, the check
+     (`datalab kb-check`, and a workflow template for `ihs-knowledge`), the
+     kb-* skills, and a Safety check row for the GitHub token. To come: the
+     Knowledge tab and cards, and the Spine's content.
 6. **Workflows and Pipelines.**
    - The runner and both tabs.
    - Moving `ihsDataR` over, with its history.
