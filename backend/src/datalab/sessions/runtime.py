@@ -70,6 +70,7 @@ class SessionRuntime:
         self._thread_id: str | None = self._saved_thread_id()
         self._turn: _Turn | None = None
         self._stop_requested = False
+        self._turns_begun = 0  # which turn is current, for the relay's retries
         self._lock = asyncio.Lock()
         self._approvals = approvals
         self._requests: dict[Any, str] = {}  # Codex request id -> approval id
@@ -84,6 +85,7 @@ class SessionRuntime:
     def begin_turn(self) -> None:
         """Call before scheduling `send`, so a Stop that arrives early still counts."""
         self._stop_requested = False
+        self._turns_begun += 1
 
     async def send(self, text: str, *, effort: str | None = None) -> TurnResult:
         """Run one turn and wait for it to finish, emitting events as it goes."""
@@ -150,6 +152,12 @@ class SessionRuntime:
     @property
     def stop_requested(self) -> bool:
         return self._stop_requested
+
+    @property
+    def turn_number(self) -> int:
+        """Counts `begin_turn` calls: a model request belongs to the turn that
+        was current when it arrived."""
+        return self._turns_begun
 
     def _collect_evidence(self, item: dict[str, Any]) -> None:
         # A command's whole output, and the data tool's query results. Not other
@@ -306,6 +314,15 @@ class SessionRuntime:
                     task = asyncio.get_running_loop().create_task(self._interrupt(self._turn))
                     self._background.add(task)
                     task.add_done_callback(self._background.discard)
+        if self._stop_requested:
+            # Stopping. A model request Codex sent before the interrupt reached
+            # it is refused by the relay (its turn is over), and Codex reports
+            # that as an error and a failed turn. It was the person's Stop.
+            if method == "error":
+                return
+            turn = params.get("turn") or {}
+            if method == "turn/completed" and turn.get("status") == "failed":
+                params = {**params, "turn": {**turn, "status": "interrupted", "error": None}}
         event = _to_event(method, params)
         if event:
             await self._emit(*event)

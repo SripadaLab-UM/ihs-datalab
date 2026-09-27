@@ -12,7 +12,13 @@ from pydantic import BaseModel, Field, field_validator
 
 from datalab.relay.policy import model_allowed
 from datalab.sessions.approvals import Unshowable
-from datalab.sessions.manager import CONTINUE_TEXT, Busy, NothingToReview, SessionManager
+from datalab.sessions.manager import (
+    CONTINUE_TEXT,
+    Busy,
+    NothingToContinue,
+    NothingToReview,
+    SessionManager,
+)
 from datalab.sessions.modes import MODES
 from datalab.sessions.plans import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
@@ -228,7 +234,7 @@ def build_conversations_router(
             )
         try:
             await sessions.send(conversation, CONTINUE_TEXT, None, continues=True)
-        except Busy as error:
+        except (Busy, NothingToContinue) as error:
             raise HTTPException(409, str(error)) from error
         return out(conversation)
 
@@ -236,6 +242,16 @@ def build_conversations_router(
     async def rerun_review(conversation_id: str) -> ConversationOut:
         """Run the last turn's rigor review again, after it couldn't finish."""
         conversation = get_or_404(conversation_id)
+        if not model_allowed(conversation.model, allowed_models):
+            raise HTTPException(
+                409, "This conversation's model isn't approved for DataLab any more."
+            )
+        if not conversation.rigor_review:
+            raise HTTPException(
+                409,
+                "The rigor review is switched off for this conversation. "
+                "Switch it on to run the review again.",
+            )
         try:
             await sessions.rerun_review(conversation)
         except (Busy, NothingToReview) as error:

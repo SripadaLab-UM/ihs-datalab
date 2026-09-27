@@ -3,6 +3,8 @@
 It speaks the same JSON-RPC-over-lines protocol. FAKE_MODE picks a behaviour:
 - normal: a turn streams one answer and completes;
 - slow: a turn keeps running until interrupted;
+- stop_race: like slow, but a model request lands before the interrupt, so
+  the relay refuses it and the turn ends failed, with Codex's error;
 - crash: the process exits in the middle of a turn;
 - no_resume: thread/resume fails;
 - elicit: a turn asks for a research-helper approval and answers with the reply;
@@ -104,6 +106,11 @@ for line in sys.stdin:
         send({"id": request_id, "result": {}})
         if MODE in ("slow_review", "late_review"):
             notify("turn/completed", turn={"id": "turn-r", "status": "interrupted"})
+            continue
+        if MODE == "stop_race":
+            refused = {"message": "unexpected status 409 Conflict: this request's turn is over"}
+            notify("error", error=refused, willRetry=False)
+            notify("turn/completed", turn={"id": "turn-1", "status": "failed", "error": refused})
             continue
         if MODE == "elicit":
             notify("serverRequest/resolved", requestId=900)

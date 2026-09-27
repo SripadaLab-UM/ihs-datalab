@@ -14,7 +14,7 @@ import logging
 import os
 import shutil
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from datalab.config import Settings, default_data_dir
@@ -47,6 +47,29 @@ CONTINUE_TEXT = (
 
 class NothingToReview(RuntimeError):
     """There's no unfinished rigor review to run again."""
+
+
+class NothingToContinue(RuntimeError):
+    """The last turn didn't fail, so Continue has nothing to pick up."""
+
+
+# What the chat reads a turn from (frontend transcript.ts), for Continue.
+# During a review, the review's own events aren't the turn's.
+_REVIEW_TURN_EVENTS = frozenset(
+    {
+        "answer_started", "answer_delta", "answer", "turn_started", "turn_finished",
+        "reasoning_delta", "command_started", "command_output", "command_finished",
+        "tool_call", "files_changed", "web_search", "model_status", "error",
+    }
+)  # fmt: skip
+# The agent doing anything means its model requests went through again.
+_ACTIVITY = frozenset(
+    {"answer_started", "answer_delta", "reasoning_delta", "command_started", "tool_call"}
+)
+# Shown by the chat as a turn of their own, after the one that failed.
+_OWN_TURN_EVENTS = frozenset({"exported", "files_restored", "input_attached", "input_removed"})
+# Model trouble that picking up again won't fix.
+_NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
 
 
 class Busy(RuntimeError):
@@ -101,10 +124,15 @@ class SessionManager:
     async def send(
         self, conversation: Conversation, text: str, effort: str | None, *, continues: bool = False
     ) -> None:
-        """Start a turn. `continues`: it picks up a turn that failed or was stopped
-        (Continue), so its review reads that turn's question and work too."""
+        """Start a turn. `continues`: it picks up a turn that failed (Continue), so
+        its review reads that turn's question and work too."""
         if self.is_busy(conversation.id):
             raise Busy("The agent is still working on the previous message.")
+        if continues and not self._last_turn_failed(conversation.id):
+            raise NothingToContinue(
+                "There's nothing to continue: Continue picks up a turn that failed, "
+                "and the last one didn't."
+            )
         # Reserved before the first await, so nothing else starts meanwhile.
         self._starting.add(conversation.id)
         try:
@@ -174,9 +202,39 @@ class SessionManager:
                 del self._turns[conversation_id]
             self._store.append(conversation_id, "turn_done", {})
 
+    def _last_turn_failed(self, conversation_id: str) -> bool:
+        """Whether the chat offers Continue for the last turn: it failed, and not
+        because of model trouble that waiting can't fix (a used-up allowance, a
+        refused key, a bad request). The same rule as the chat's canContinue."""
+        asked = self._store.last(conversation_id, "user_message")
+        if asked is None:
+            return False
+        status = None
+        trouble = None
+        reviewing = False
+        for event in self._store.all_events_after(conversation_id, asked.seq):
+            if reviewing and event.type in _REVIEW_TURN_EVENTS:
+                reviewing = event.type != "turn_finished"
+                continue
+            if event.type in _ACTIVITY:
+                trouble = None
+            if event.type in _OWN_TURN_EVENTS:
+                return False
+            if event.type == "review_started":
+                reviewing = True
+            elif event.type == "review_finished":
+                reviewing = False
+            elif event.type == "model_status":
+                state = event.data.get("state")
+                if state in ("retrying", "recovered", "failed"):
+                    trouble = event.data.get("kind") if state == "failed" else None
+            elif event.type == "turn_finished":
+                status = event.data.get("status")
+        return status == "failed" and trouble not in _NOT_CONTINUABLE
+
     def _work_began(self, conversation_id: str, asked: Event) -> Event:
         """The question a turn answers: a turn that Continue started picks up the
-        one before it (which failed or was stopped), and so on back."""
+        one before it (which failed), and so on back."""
         messages = [
             e
             for e in self._store.events_of_types_after(conversation_id, 0, ("user_message",))
@@ -287,11 +345,26 @@ class SessionManager:
             answered["question"] = value
         self._store.append(conversation_id, "approval_answered", answered)
 
-    def stopping(self, session_id: str) -> bool:
-        """Whether the person stopped this conversation's current turn (the
-        relay checks this before retrying a model request)."""
+    def watch_turn(self, session_id: str) -> Callable[[], bool]:
+        """For a model request arriving now: a check, made by the relay before
+        each attempt, that is true once this request's turn is over. That is,
+        the person pressed Stop, or the conversation was shut down, reaped or
+        deleted. Tied to this turn: a new turn clearing the Stop doesn't make
+        an old request's check false again. Other sessions (research helpers,
+        safety probes) have no turns here; revoking their token ends them."""
         runtime = self._runtimes.get(session_id)
-        return runtime is not None and runtime.stop_requested
+        if runtime is None:
+            return lambda: False
+        turn = runtime.turn_number
+
+        def over() -> bool:
+            return (
+                self._runtimes.get(session_id) is not runtime
+                or runtime.turn_number != turn
+                or runtime.stop_requested
+            )
+
+        return over
 
     async def stop(self, conversation_id: str) -> None:
         if self.helper is not None:

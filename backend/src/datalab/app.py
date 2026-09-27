@@ -147,7 +147,7 @@ def create_app(
             model_http,
             settings.allowed_models,
             on_status=model_status,
-            stopped=sessions.stopping,
+            watch_turn=sessions.watch_turn,
         )
     )
 

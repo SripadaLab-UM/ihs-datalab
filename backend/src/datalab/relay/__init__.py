@@ -42,9 +42,11 @@ _PASS_BACK = (
 # Tells a session how its model requests are going (session ID, event data):
 # the chat shows "busy, retrying in 20 s" instead of a raw error.
 StatusCallback = Callable[[str, dict], None]
-# Whether a session's turn was stopped: then nothing is retried, even if
-# Codex's connection is still open (it may stay open through the gateway).
-StoppedCheck = Callable[[str], bool]
+# For a request arriving now from a session (by ID): a check that is true once
+# that request's turn is over (Stopped, or the conversation shut down). Then
+# nothing more is sent, even if Codex's connection is still open (it may stay
+# open through the gateway).
+TurnWatch = Callable[[str], Callable[[], bool]]
 
 
 def build_relay_router(
@@ -54,7 +56,7 @@ def build_relay_router(
     client: httpx.AsyncClient,
     allowed_models: tuple[str, ...] | None = None,
     on_status: StatusCallback | None = None,
-    stopped: StoppedCheck | None = None,
+    watch_turn: TurnWatch | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/relay/v1", include_in_schema=False)
     base_url = base_url.rstrip("/")
@@ -84,9 +86,12 @@ def build_relay_router(
 
     @router.post("/responses")
     async def responses(request: Request) -> Response:
-        access = tokens.resolve(bearer_token(request.headers.get("authorization")))
+        token = bearer_token(request.headers.get("authorization"))
+        access = tokens.resolve(token)
         if access is None:
             return _refused(401, "unknown session")
+        # Taken as the request arrives, so it belongs to the turn current now.
+        turn_over = watch_turn(access.session_id) if watch_turn is not None else None
         raw = await request.body()
         try:
             body = parse_request(raw)
@@ -107,7 +112,9 @@ def build_relay_router(
                 on_status(access.session_id, {**data, "model": body.get("model")})
 
         def gone() -> bool:
-            return stopped is not None and stopped(access.session_id)
+            # A revoked token is the kill switch: the session ended, was
+            # deleted, or its helper was cancelled.
+            return tokens.resolve(token) is None or (turn_over is not None and turn_over())
 
         return await _forward(
             client,
@@ -140,7 +147,8 @@ async def _forward(
 
     A failure before any of the answer has streamed is retried here, within
     recovery's bounds, honouring the server's wait. The same checked bytes are
-    sent each time. Nothing is retried once Codex has stopped waiting.
+    sent each time. Nothing is sent once the request is `gone` (checked before
+    every attempt, the first too) or Codex has stopped waiting.
     """
     headers = {
         "authorization": f"Bearer {key}",
@@ -150,7 +158,10 @@ async def _forward(
     waited = 0.0
     attempt = 0
     trouble: recovery.Trouble | None = None
+    failure: Response = _refused(409, "this request's turn is over")
     while True:
+        if gone():
+            return failure  # the last failure, if there was one: not reported as failed
         attempt += 1
         try:
             upstream = await client.send(
@@ -158,7 +169,7 @@ async def _forward(
             )
         except httpx.HTTPError as error:
             trouble = recovery.connection_trouble(error)
-            failure: Response = _refused(502, f"couldn't reach U-M GPT ({type(error).__name__})")
+            failure = _refused(502, f"couldn't reach U-M GPT ({type(error).__name__})")
         else:
             if upstream.status_code < 400:
                 if trouble is not None:
