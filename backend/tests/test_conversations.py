@@ -536,6 +536,21 @@ def test_continue_reads_the_turn_not_its_review_or_later_notices(app):
     assert not manager._last_turn_failed(cid)
 
 
+def test_continue_counts_an_export_made_while_the_turn_ran(app):
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    cid = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5").id
+    store.append(cid, "user_message", {"text": "how many?"})
+    # Exported while the agent worked: still the same turn in the chat.
+    store.append(cid, "exported", {"folder": "/x", "files": 1})
+    store.append(cid, "turn_finished", {"status": "failed"})
+    store.append(cid, "turn_done", {})
+    assert manager._last_turn_failed(cid)
+    # Exported after it: shown on its own, after the failed turn.
+    store.append(cid, "exported", {"folder": "/x", "files": 1})
+    assert not manager._last_turn_failed(cid)
+
+
 def test_continue_while_busy_is_refused(app):
     hold = asyncio.Event()
     use_fake_runtime(app, hold=hold, outcomes=["failed"])

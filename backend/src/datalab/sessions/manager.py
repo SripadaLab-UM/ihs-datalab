@@ -67,8 +67,10 @@ _REVIEW_TURN_EVENTS = frozenset(
 _ACTIVITY = frozenset(
     {"answer_started", "answer_delta", "reasoning_delta", "command_started", "tool_call"}
 )
-# Shown by the chat as a turn of their own, after the one that failed.
-_OWN_TURN_EVENTS = frozenset({"exported", "files_restored", "input_attached", "input_removed"})
+# Shown by the chat as a turn of their own, after the one that failed. An
+# export is too, but only between turns: one made while the turn is going
+# (exporting doesn't wait for the agent) is part of it.
+_OWN_TURN_EVENTS = frozenset({"files_restored", "input_attached", "input_removed"})
 # Model trouble that picking up again won't fix.
 _NOT_CONTINUABLE = frozenset({"quota", "auth", "request"})
 
@@ -213,14 +215,17 @@ class SessionManager:
         status = None
         trouble = None
         reviewing = False
+        done = False
         for event in self._store.all_events_after(conversation_id, asked.seq):
             if reviewing and event.type in _REVIEW_TURN_EVENTS:
                 reviewing = event.type != "turn_finished"
                 continue
             if event.type in _ACTIVITY:
                 trouble = None
-            if event.type in _OWN_TURN_EVENTS:
+            if event.type in _OWN_TURN_EVENTS or (event.type == "exported" and done):
                 return False
+            if event.type == "turn_done":
+                done = True
             if event.type == "review_started":
                 reviewing = True
             elif event.type == "review_finished":

@@ -1,4 +1,5 @@
-import { buildTranscript, finalAnswer, type ConversationEvent } from "./transcript";
+import { answerOf } from "./activity";
+import { buildTranscript, canContinue, finalAnswer, type ConversationEvent } from "./transcript";
 
 let seq = 0;
 const e = (type: string, data: Record<string, unknown> = {}): ConversationEvent => ({ seq: ++seq, type, data });
@@ -89,6 +90,100 @@ describe("workspace events", () => {
     expect(turns[0].items).toEqual([{ kind: "files", paths: ["/work/a.R", "/work/b.R"] }]);
     expect(turns[1].items[0]).toMatchObject({ kind: "notice", text: expect.stringContaining("after turn 1") });
   });
+});
+
+describe("exports", () => {
+  const exported = e("exported", { folder: "/Users/me/Exports/Sleep", files: 2 });
+  const notice = { kind: "notice", tone: "info", text: "You exported 2 file(s) to /Users/me/Exports/Sleep." };
+
+  it("keeps a turn whole when files are exported while it runs", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "Plot sleep" }),
+      e("turn_started"),
+      e("command_started", { id: "c1", command: "Rscript plot.R" }),
+      exported,
+      e("command_output", { id: "c1", text: "ok\n" }),
+      e("command_finished", { id: "c1", exit_code: 0, status: "completed" }),
+      e("files_changed", { paths: ["/work/outputs/sleep.png"] }),
+      e("answer_started", { id: "m1", phase: "final_answer" }),
+      e("answer", { id: "m1", phase: "final_answer", text: "Here is the plot." }),
+      e("turn_finished", { status: "completed" }),
+      e("turn_done", {}),
+    ]);
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    expect(turn.status).toBe("completed");
+    expect(turn.items.map((i) => i.kind)).toEqual(["command", "notice", "files", "message"]);
+    expect(turn.items[1]).toEqual(notice);
+    // The notice isn't an answer: the answer-first view shows the agent's.
+    expect(finalAnswer(turn)).toBe("Here is the plot.");
+    expect(answerOf(turn)).toBe("Here is the plot.");
+  });
+
+  it("offers Continue on the turn itself when it fails after an export", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "Plot sleep" }),
+      e("answer_started", { id: "m1", phase: "commentary" }),
+      exported,
+      e("answer_delta", { id: "m1", text: "Reading the data." }),
+      e("model_status", { state: "failed", kind: "busy" }),
+      e("turn_finished", { status: "failed", error: "exceeded retry limit" }),
+      e("turn_done", {}),
+    ]);
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    expect(turn.status).toBe("failed");
+    expect(canContinue(turn)).toBe(true);
+    expect(answerOf(turn)).toBe(""); // its narration isn't an answer
+  });
+
+  it("keeps an export during the checkpoint or the review with the turn", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "q" }),
+      e("answer", { id: "m1", phase: "final_answer", text: "The mean was 7.2." }),
+      e("turn_finished", { status: "completed" }),
+      exported,
+      e("trace", { numbers: 1, untraced: [] }),
+      e("review_started", {}),
+      exported,
+      e("review", { text: "1. Traced claims: yes." }),
+      e("review_finished", { status: "completed" }),
+      e("notice", { text: "DataLab couldn't save a checkpoint of the files after this turn." }),
+      e("turn_done", {}),
+    ]);
+    expect(turns).toHaveLength(1);
+    const [turn] = turns;
+    expect(turn.trace).toEqual({ numbers: 1, untraced: [] });
+    expect(turn.items.map((i) => i.kind)).toEqual(["message", "notice", "review", "notice", "notice"]);
+    expect(turn.items.find((i) => i.kind === "review")).toMatchObject({ status: "done" });
+    expect(answerOf(turn)).toBe("The mean was 7.2.");
+  });
+
+  it("shows an export between turns on its own, and a failed turn before it offers no Continue", () => {
+    const turns = buildTranscript([
+      e("user_message", { text: "q" }),
+      e("turn_finished", { status: "failed", error: "stopped" }),
+      e("turn_done", {}),
+      exported,
+      e("user_message", { text: "next" }),
+    ]);
+    expect(turns.map((t) => t.userText)).toEqual(["q", "", "next"]);
+    expect(turns[1]).toEqual({ userText: "", items: [notice], status: "completed" });
+    // Continue is offered on the last entry only: the export's, here.
+    expect(canContinue(turns[1])).toBe(false);
+  });
+});
+
+it("shows a restore and attaching inputs on their own after turn_done", () => {
+  const turns = buildTranscript([
+    e("user_message", { text: "q" }),
+    e("turn_finished", { status: "completed" }),
+    e("turn_done", {}),
+    e("files_restored", { label: "After turn 1" }),
+    e("input_attached", { items: [{ path: "/inputs/data.csv", kind: "file" }] }),
+    e("input_removed", { items: [{ path: "/inputs/data.csv", kind: "file" }] }),
+  ]);
+  expect(turns.map((t) => [t.userText, t.items.length])).toEqual([["q", 0], ["", 1], ["", 1], ["", 1]]);
 });
 
 it("shows attaching and removing inputs between turns", () => {

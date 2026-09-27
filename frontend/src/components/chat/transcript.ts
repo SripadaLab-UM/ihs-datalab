@@ -68,6 +68,9 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   const approvals = new Map<string, Approval>();
   // During a rigor review, Codex's messages are the review, not the answer.
   let review: Extract<Item, { kind: "review" }> | undefined;
+  // DataLab is still on the turn, from the question to turn_done (its
+  // checkpoint, trace, and review come after the agent finishes).
+  let busy = false;
 
   const current = (): Turn => {
     if (!turn) {
@@ -94,6 +97,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
     if (turn?.model && ACTIVITY.has(event.type)) turn.model = undefined;
     switch (event.type) {
       case "review_started":
+        // A review run again is DataLab's work too, until its turn_done.
+        busy = true;
         review = { kind: "review", text: "", status: "running" };
         add(review);
         break;
@@ -136,6 +141,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
+        busy = true;
         turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true };
         turns.push(turn);
         byId.clear();
@@ -267,21 +273,25 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       case "input_unavailable":
         add({ kind: "notice", tone: "error", text: `Not attached this time: ${text(data.reason)}.` });
         break;
-      case "exported":
-        turn = {
-          userText: "",
-          items: [{ kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` }],
-          status: "completed",
-        };
-        turns.push(turn);
+      case "exported": {
+        const notice: Item = { kind: "notice", tone: "info", text: `You exported ${String(data.files)} file(s) to ${text(data.folder)}.` };
+        // Exporting doesn't wait for the agent. While a turn is going, the
+        // notice is part of it, so what the turn does next stays with it.
+        if (busy) add(notice);
+        else {
+          turn = { userText: "", items: [notice], status: "completed" };
+          turns.push(turn);
+        }
         break;
+      }
       case "files_changed": {
         const paths = Array.isArray(data.paths) ? data.paths.filter((p): p is string => typeof p === "string") : [];
         if (paths.length) add({ kind: "files", paths });
         break;
       }
       case "files_restored": {
-        // Between turns: shown on its own, after the turn it follows.
+        // Between turns (DataLab refuses a restore while busy, as it does
+        // attaching and removing inputs): shown on its own, after the turn it follows.
         const label = text(data.label).toLowerCase() || "an earlier checkpoint";
         const leftAlone = Array.isArray(data.left_alone) ? data.left_alone.length : 0;
         const notRestored = Array.isArray(data.not_restored) ? data.not_restored.length : 0;
@@ -310,6 +320,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
       }
       case "turn_done":
         // DataLab has finished the turn, with its checkpoint and review.
+        busy = false;
         if (review?.status === "running") review.status = "failed";
         if (turn?.status === "running") turn.status = "completed";
         break;

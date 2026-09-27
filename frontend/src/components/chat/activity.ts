@@ -327,7 +327,8 @@ export function activityRows(items: Item[], running: boolean): Row[] {
  * never more specific than the events say.
  */
 export function nowLine(rows: Row[], reasoning: string): string {
-  const last = rows.at(-1);
+  // A notice (an export, "Stopping…") isn't the agent's work: the step still running is.
+  const last = rows.findLast((row) => row.type !== "notice");
   if (last?.type === "step" && last.step.tone === "now") return `${last.step.title}…`;
   const heading = reasoning
     .split("\n")

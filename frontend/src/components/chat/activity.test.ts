@@ -78,6 +78,15 @@ describe("activityRows", () => {
     const live = activityRows([{ kind: "command", id: "c", command: "python a.py", output: "", exitCode: null, status: "running" }], true);
     expect(live[0].type === "step" && live[0].step.tone).toBe("now");
     expect(nowLine(live, "")).toBe("Ran a.py…");
+    // Exporting while it runs doesn't hide the step that's running.
+    const exported = activityRows(
+      [
+        { kind: "command", id: "c", command: "python a.py", output: "", exitCode: null, status: "running" },
+        { kind: "notice", tone: "info", text: "You exported 1 file(s) to /Users/me/Exports." },
+      ],
+      true,
+    );
+    expect(nowLine(exported, "")).toBe("Ran a.py…");
     // From the design review: the live line repeated the narration above it.
     const talking = activityRows([{ kind: "message", id: "m", phase: "commentary", text: "I'll check the catalog first." }], true);
     expect(nowLine(talking, "")).toBe("Thinking about the next step…");
