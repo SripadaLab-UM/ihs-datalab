@@ -3,6 +3,7 @@
 // honest: a number "appears in" a command's output or a query's result, not
 // "was computed by" it; a file was written "by one of these commands" when no
 // single one names it. Nothing here carries query rows or command output.
+import { createContext } from "react";
 
 /** Where a number appears: a command (by its event id), a query (by its Data accessed id), or an output file. */
 export interface NumberSource {
@@ -108,3 +109,6 @@ export const SHOW_QUERY = "datalab:show-query";
 export function showQuery(id: string): void {
   window.dispatchEvent(new CustomEvent(SHOW_QUERY, { detail: { id } }));
 }
+
+/** How to show a query, on a page with a Queries tab (the workspace); null elsewhere, such as the SQL page's chat. */
+export const ShowQueryContext = createContext<((id: string) => void) | null>(null);

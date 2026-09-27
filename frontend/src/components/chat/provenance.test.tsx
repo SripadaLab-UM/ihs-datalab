@@ -67,12 +67,45 @@ it("shows where a number appears, and says it only appears there", () => {
   const dialog = screen.getByRole("dialog", { name: "Where 81 appears" });
   expect(dialog).toHaveTextContent("python analysis.py");
   expect(dialog).toHaveTextContent("which doesn't show it was computed there");
+  // Opening what it names closes it, so it isn't left open behind what opened.
   fireEvent.click(screen.getByRole("button", { name: "in the Queries tab" }));
   expect(links.openQuery).toHaveBeenCalledWith("q_0001");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "81" }));
   fireEvent.click(screen.getByRole("button", { name: "outputs/table.csv" }));
   expect(links.openFile).toHaveBeenCalledWith("outputs/table.csv");
-  fireEvent.keyDown(document, { key: "Escape" });
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("closes on Escape only while focus is in it, leaving Escape elsewhere alone", () => {
+  render(
+    <>
+      <NumberSources text="81" sources={[{ kind: "query", ref: "q_0001" }]} links={links} />
+      <input aria-label="elsewhere" />
+    </>,
+  );
+  const outside = vi.fn();
+  document.addEventListener("keydown", outside);
+  fireEvent.click(screen.getByRole("button", { name: "81" }));
+  // Focus somewhere else (a file viewer, say): its Escape is its own.
+  screen.getByRole("textbox", { name: "elsewhere" }).focus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(outside).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  // In it, Escape closes it and goes no further; focus goes back to the number.
+  screen.getByRole("button", { name: "in the Queries tab" }).focus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(outside).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "81" })).toHaveFocus();
+  document.removeEventListener("keydown", outside);
+});
+
+it("names a query without a link where there's no Queries tab (the SQL page's chat)", () => {
+  render(<NumberSources text="81" sources={[{ kind: "query", ref: "q_0001" }]} links={{ commandText: () => undefined }} />);
+  fireEvent.click(screen.getByRole("button", { name: "81" }));
+  expect(screen.getByRole("dialog")).toHaveTextContent("The result of query q_0001");
+  expect(screen.queryByRole("button", { name: "in the Queries tab" })).toBeNull();
 });
 
 it("says plainly when a number appears nowhere", () => {

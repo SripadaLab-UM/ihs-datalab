@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from "react-router";
 
 import { api, type Conversation, type Mode } from "@/api/client";
 import { DockedChat } from "@/components/chat/DockedChat";
-import { SHOW_QUERY } from "@/components/chat/provenance";
+import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
 import { Button, Icon, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
@@ -163,28 +163,30 @@ export function WorkspacePage() {
       <main className="min-h-0">
         {current ? (
           <OpenFileContext value={setOpen}>
-            <DockedChat
-              key={current.id}
-              mode={current.mode}
-              conversationId={current.id}
-              headerStart={showRail}
-              headerActions={
-                <>
-                  <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
-                    <Icon name="export" size={14} /> Export
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className="px-1 text-[13px] xl:hidden"
-                    onClick={() => openDrawer("panel")}
-                    aria-expanded={panelOpen}
-                    aria-controls="conversation-files"
-                  >
-                    <Icon name="folder" size={14} /> Files
-                  </Button>
-                </>
-              }
-            />
+            <ShowQueryContext value={showQuery}>
+              <DockedChat
+                key={current.id}
+                mode={current.mode}
+                conversationId={current.id}
+                headerStart={showRail}
+                headerActions={
+                  <>
+                    <Button variant="ghost" className="px-1 text-[13px]" onClick={() => setExportingReport(true)}>
+                      <Icon name="export" size={14} /> Export
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className="px-1 text-[13px] xl:hidden"
+                      onClick={() => openDrawer("panel")}
+                      aria-expanded={panelOpen}
+                      aria-controls="conversation-files"
+                    >
+                      <Icon name="folder" size={14} /> Files
+                    </Button>
+                  </>
+                }
+              />
+            </ShowQueryContext>
           </OpenFileContext>
         ) : (
           <div className="mx-auto flex h-full max-w-[40rem] flex-col justify-center gap-5 px-6 sm:px-8">

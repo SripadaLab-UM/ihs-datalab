@@ -9,7 +9,7 @@ import { OpenFileContext, workspaceFile } from "@/lib/files";
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
-import { showQuery } from "./provenance";
+import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
@@ -604,6 +604,7 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 /** The answer, set apart from the work behind it. */
 function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace: Turn["trace"]; streaming: boolean; turn: Turn }) {
   const openFile = use(OpenFileContext);
+  const openQuery = use(ShowQueryContext);
   // Where each number appears, once the turn's provenance has arrived.
   const numbers = useMemo(() => {
     if (!turn.provenance || streaming) return undefined;
@@ -612,7 +613,8 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
       sources: new Map(turn.provenance.numbers.map((n) => [n.text, n.sources])),
       links: {
         commandText: (id: string) => commands.get(id),
-        openQuery: showQuery,
+        // Only where there's a Queries tab to show it in; elsewhere, just its id.
+        openQuery: openQuery ?? undefined,
         openFile: openFile
           ? (path: string) => {
               const file = workspaceFile(`/work/${path}`);
@@ -621,7 +623,7 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
           : undefined,
       },
     };
-  }, [turn, streaming, openFile]);
+  }, [turn, streaming, openFile, openQuery]);
   return (
     <section className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">

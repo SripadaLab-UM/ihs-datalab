@@ -29,10 +29,10 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
     const away = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     };
-    // Escape closes this first, and goes no further: nothing else on the page
-    // (a drawer, the viewer) closes with it. Focus goes back to the number.
+    // Escape, while focus is in it, closes this first and goes no further: the
+    // drawer it's in doesn't close with it. Focus goes back to the number.
     const escape = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || !box.current?.contains(document.activeElement)) return;
       e.stopPropagation();
       setOpen(false);
       button.current?.focus();
@@ -50,7 +50,11 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
       <button
         ref={button}
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          // Safari doesn't focus a clicked button; Escape needs focus here.
+          button.current?.focus();
+        }}
         aria-expanded={open}
         aria-controls={panel}
         title={traced ? "Where this number appears" : "This number doesn't appear in anything the turn produced"}
@@ -74,7 +78,7 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
               <span className="block text-muted">{text} appears in:</span>
               <span className="mt-1.5 flex flex-col gap-1.5">
                 {sources.map((source, i) => (
-                  <Place key={i} source={source} links={links} />
+                  <Place key={i} source={source} links={links} onUse={() => setOpen(false)} />
                 ))}
               </span>
               <span className="mt-2 block text-[12px] text-muted">
@@ -94,7 +98,8 @@ export function NumberSources({ text, sources, links }: { text: string; sources:
   );
 }
 
-function Place({ source, links }: { source: NumberSource; links: SourceLinks }) {
+/** Where it appears. Opening one closes the popover, so it isn't left open behind what opened. */
+function Place({ source, links, onUse }: { source: NumberSource; links: SourceLinks; onUse: () => void }) {
   if (source.kind === "query") {
     return (
       <span className="block">
@@ -102,7 +107,14 @@ function Place({ source, links }: { source: NumberSource; links: SourceLinks }) 
         {links.openQuery && (
           <>
             {" "}
-            <LinkButton onClick={() => links.openQuery?.(source.ref)}>in the Queries tab</LinkButton>
+            <LinkButton
+              onClick={() => {
+                onUse();
+                links.openQuery?.(source.ref);
+              }}
+            >
+              in the Queries tab
+            </LinkButton>
           </>
         )}
       </span>
@@ -113,7 +125,14 @@ function Place({ source, links }: { source: NumberSource; links: SourceLinks }) 
       <span className="block">
         The output file{" "}
         {links.openFile ? (
-          <LinkButton onClick={() => links.openFile?.(source.ref)}>{source.ref}</LinkButton>
+          <LinkButton
+            onClick={() => {
+              onUse();
+              links.openFile?.(source.ref);
+            }}
+          >
+            {source.ref}
+          </LinkButton>
         ) : (
           <span className="font-mono text-[12px]">{source.ref}</span>
         )}
