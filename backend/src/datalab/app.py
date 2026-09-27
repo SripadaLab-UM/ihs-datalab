@@ -27,6 +27,7 @@ from datalab.api.provenance import ProvenanceServices, build_provenance_router
 from datalab.api.safety import build_safety_router
 from datalab.api.settings import SettingsServices, build_settings_router
 from datalab.api.sql import SqlServices, build_sql_router
+from datalab.api.textguard import RefuseNonText
 from datalab.api.workflows import WorkflowServices, build_workflows_router
 from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
@@ -303,6 +304,7 @@ def create_app(
             )
         )
     )
+    app.add_middleware(RefuseNonText)
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)

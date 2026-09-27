@@ -7,6 +7,7 @@ deletion, as on GitHub), and its API a mock transport.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import shutil
 import subprocess
@@ -395,6 +396,24 @@ def test_the_persons_edits_are_what_gets_shared(lab):
         lab.remote.show("qc/other.md")  # left out
     # The agent's own versions are settled: nothing comes back next turn.
     assert turn(lab, cid, {}) is None
+
+
+def test_an_edit_that_isnt_text_is_refused_not_a_server_error(lab):
+    # /api refuses these before the route (test_textguard.py); the service
+    # refuses them too, for any other caller. This app has no guard.
+    synced(lab)
+    proposal = turn(lab, conversation(lab), {"qc/wear-time.md": NEW_PAGE})
+    assert proposal is not None
+    url = f"/api/knowledge/proposals/{proposal.id}/edits"
+    for files in ({"qc/wear-time.md": NEW_PAGE + "\ud800\n"}, {"qc/\udc00.md": "x"}):
+        refused = lab.client.put(
+            url,
+            content=json.dumps({"files": files}),
+            headers={"content-type": "application/json"},
+        )
+        assert refused.status_code == 409, refused.text
+        assert "isn't text" in refused.json()["detail"]
+    assert lab.knowledge.get(proposal.id).edits == {}
 
 
 def test_discarding_shares_nothing_and_isnt_proposed_again(lab):

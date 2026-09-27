@@ -8,10 +8,14 @@ word, which lets a second `status: reviewed` line hide behind the first.
 
 `load` reads the event stream first and refuses, before anything is built:
 
+- text that can't be written as UTF-8 (a lone surrogate, which JSON can
+  carry), whether in the text or from a double-quoted `"\\ud800"` escape;
 - text over `max_bytes`, or nested deeper than `max_depth`;
 - anchors (`&a`) and aliases (`*a`), and so merge keys (`<<: *a`);
 - then, on the composed nodes: a key that isn't a plain scalar (a merge
-  key, or a mapping or list used as a key), and a key given twice.
+  key, or a mapping or list used as a key), and a key given twice, as the
+  same text or as text that means the same (`1` and `0x1`, `yes` and
+  `true`, `~` and `null`), which would also leave only the last.
 
 What's left is plain data, built by the safe loader.
 """
@@ -21,6 +25,9 @@ from __future__ import annotations
 from typing import Any
 
 import yaml
+from yaml.constructor import SafeConstructor
+
+from datalab.textcheck import lone_surrogate, size_text
 
 MAX_DEPTH = 32
 
@@ -36,10 +43,17 @@ class YamlRefused(ValueError):
 
 def load(text: str, *, max_bytes: int, max_depth: int = MAX_DEPTH) -> Any:
     """The data in `text`, or YamlRefused (yaml.YAMLError if it isn't YAML)."""
+    if (not_text := lone_surrogate(text)) is not None:
+        raise YamlRefused(not_text.message, not_text.line)
     if len(text.encode()) > max_bytes:
-        raise YamlRefused(f"It's larger than {max_bytes // 1024} KB.")
+        raise YamlRefused(f"It's larger than {size_text(max_bytes)}.")
     depth = 0
     for event in yaml.parse(text, Loader=yaml.SafeLoader):
+        if (
+            isinstance(event, yaml.ScalarEvent)
+            and (not_text := lone_surrogate(event.value)) is not None
+        ):
+            raise YamlRefused(not_text.message, _line(event))
         if isinstance(event, yaml.AliasEvent) or getattr(event, "anchor", None) is not None:
             raise YamlRefused(
                 "Don't use YAML anchors or aliases (& and *): write each value out.",
@@ -51,25 +65,40 @@ def load(text: str, *, max_bytes: int, max_depth: int = MAX_DEPTH) -> Any:
                 raise YamlRefused(f"It's nested more than {max_depth} levels deep.", _line(event))
         elif isinstance(event, yaml.MappingEndEvent | yaml.SequenceEndEvent):
             depth -= 1
-    for document in yaml.compose_all(text, Loader=yaml.SafeLoader):
-        if document is not None:
-            _check_keys(document)
-    return yaml.safe_load(text)
+    try:
+        for document in yaml.compose_all(text, Loader=yaml.SafeLoader):
+            if document is not None:
+                _check_keys(document)
+        return yaml.safe_load(text)
+    except YamlRefused:
+        raise
+    except ValueError as error:
+        # What PyYAML doesn't catch: Python's limit on an integer's digits,
+        # or a date that doesn't exist (2025-13-45).
+        if "digits" in str(error):
+            raise YamlRefused("A number in it is too long to read.") from None
+        raise YamlRefused(f"A value in it can't be read ({error}).") from None
 
 
 def _check_keys(root: yaml.Node) -> None:
+    # Keys are compared as the values they become, as the dict built from
+    # them will compare them: 1, 0x1, 1.0 and true are one key there.
+    constructor = SafeConstructor()
     stack = [root]
     while stack:
         node = stack.pop()
         if isinstance(node, yaml.MappingNode):
-            seen: set[str] = set()
+            seen: dict[object, str] = {}
             for key, value in node.value:
                 if not isinstance(key, yaml.ScalarNode) or key.tag == "tag:yaml.org,2002:merge":
                     message = "Keys must be plain names (no <<, lists or maps)."
                     raise YamlRefused(message, _line(key))
-                if key.value in seen:
-                    raise YamlRefused(f"{key.value!r} is given twice.", _line(key))
-                seen.add(key.value)
+                resolved = constructor.construct_object(key, deep=True)
+                if resolved in seen:
+                    first = seen[resolved]
+                    same = "" if first == key.value else f" (as {first!r} too: both mean the same)"
+                    raise YamlRefused(f"{key.value!r} is given twice{same}.", _line(key))
+                seen[resolved] = key.value
                 stack.append(value)
         elif isinstance(node, yaml.SequenceNode):
             stack.extend(node.value)

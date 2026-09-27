@@ -31,6 +31,7 @@ from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
 from datalab.sessions.plans import Outcome, PlanDesk
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
+from datalab.textcheck import lone_surrogate, size_text
 from datalab.workflows.model import MAX_FILE_BYTES as MAX_WORKFLOW_BYTES
 from datalab.workflows.model import WorkflowInvalid, problem_positions
 
@@ -412,8 +413,11 @@ def _draft_problems(text: str) -> list[dict[str, Any]] | None:
     """A problem found before the full check reads the text, or None to go
     on to it. The check's own YAML reading refuses anchors, aliases,
     repeated keys and deep nesting (workflows/model.py: parse_yaml)."""
+    if (not_text := lone_surrogate(text)) is not None:
+        line = not_text.line
+        return [{"where": f"line {line}", "line": line, "message": not_text.message}]
     if len(text.encode()) > MAX_WORKFLOW_BYTES:
-        return [_whole(f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB.")]
+        return [_whole(f"The file is larger than {size_text(MAX_WORKFLOW_BYTES)}.")]
     return None
 
 

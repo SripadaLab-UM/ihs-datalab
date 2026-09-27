@@ -331,3 +331,10 @@ def test_pipeline_problems_check_the_name_and_name_no_host_path(tmp_path):
     [problem] = [p for p in refused.value.problems if p.pipeline is not None]
     assert problem.pipeline == "x'."
     assert problem == Problem(problem.path, problem.message)  # not part of equality
+
+
+def test_a_file_that_isnt_text_is_a_problem_not_an_error():
+    # JSON can carry a lone surrogate into the text; encoding it would raise.
+    [problem] = problems(WEEKLY.replace("\n", "\n# \ud800\n", 1))
+    assert "line 2" in problem and "isn't text (U+D800" in problem
+    assert problem_position(WEEKLY + "\udfff", "steps[0]") is None

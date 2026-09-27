@@ -632,3 +632,21 @@ def test_save_as_workflow_refuses_an_alias_bomb(api):
     assert "anchors or aliases" in str(saved.json()["detail"]["problems"])
     assert checked.status_code == 200 and checked.json()["valid"] is False
     assert not (h.folder / "bomb.yaml").exists()
+
+
+def test_a_yaml_escape_that_isnt_text_is_refused_by_the_file_check(api):
+    # Written raw in the JSON, /api refuses it first (test_textguard.py); as a
+    # YAML escape the request is plain ASCII and the file check refuses it.
+    client, h = api
+    draft = drafted(client, queries=playground(BY_DEVICE, start_date="2025-01-01", skip_device="x"))
+    escaped = draft["text"] + 'extra: "\\ud800"\n'
+    validated = client.post("/api/workflows/validate", json={"text": escaped}).json()
+    assert validated["valid"] is False
+    [problem] = validated["problems"]
+    assert "isn't text" in problem["message"]
+    assert problem["line"] == escaped.count("\n")
+    checked = client.post("/api/workflows/drafts/check", json={"text": escaped})
+    assert checked.status_code == 200 and checked.json()["valid"] is False
+    saved = client.post("/api/workflows/saves", json={"text": escaped})
+    assert saved.status_code == 422 and "isn't text" in str(saved.json()["detail"])
+    assert list(h.folder.glob("*.yaml")) == []

@@ -459,6 +459,20 @@ async def test_a_pipeline_name_never_reads_or_names_anything_outside_the_package
         assert "Pipeline names are lower case letters" in text
 
 
+def test_check_workflow_says_text_that_isnt_utf8_is_a_problem():
+    # The agent's JSON can carry a lone surrogate (the MCP client here can't
+    # send one, so this is the tool's own function). Encoding it would raise.
+    from datalab.data.agent_tools import _check_problems
+
+    def check(text: str) -> None:
+        raise AssertionError("not reached")
+
+    [problem] = _check_problems(check, "name: x\n# \ud800\n")
+    assert problem["line"] == 2 and "isn't text (U+D800" in problem["message"]
+    [big] = _check_problems(check, "#" * 300_000)
+    assert big["message"] == "The file is larger than 256 KB."
+
+
 async def test_check_workflow_refuses_an_alias_bomb_at_once(server, tmp_path):
     import time
 
