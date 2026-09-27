@@ -1,13 +1,16 @@
-"""Where workflow files come from: a folder, for now.
+"""Where workflow files come from: the synced `ihs-pipelines` repo, or a folder.
 
-The folder is laid out like the lab's `ihs-pipelines` repo:
+`workflows_root` picks it: `[workflows] folder` if set in settings.toml;
+else the clone of `repos.pipelines` (`<data folder>/repos/ihs-pipelines`,
+synced from the Pipelines tab), when that's set; else
+`<data folder>/workflows-local/`. Either way it's laid out like the lab's
+`ihs-pipelines` repo:
 
     workflows/*.yaml                          the workflow files
     ihsDataR/                                 the pipelines package
     ihsDataR/inst/pipelines/<name>/pipeline.yaml, run.R
 
-or simply holds the YAML files. Milestone 5 swaps in the synced repo
-(`repos/ihs-pipelines`) with the same layout.
+or simply holds the YAML files.
 
 For each file DataLab records where it came from: when the folder is a git
 checkout and the file is committed as it is, the commit and the file's git
@@ -27,6 +30,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from datalab.config import Settings
+from datalab.repos.git import git_env
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
     Pipeline,
@@ -48,6 +53,19 @@ _MAX_PACKAGE_BYTES = 50 * 1024**2
 
 class SourceError(RuntimeError):
     pass
+
+
+def workflows_root(settings: Settings) -> Path:
+    """The folder workflow files and the pipelines package are read from
+    (see the module docstring). The default folder is made if it's missing;
+    the pipelines clone isn't, until its first sync."""
+    if settings.workflows.folder:
+        return Path(settings.workflows.folder).expanduser()
+    if settings.repos.pipelines and settings.profile != "practice":
+        return settings.data_dir / "repos" / settings.repos.pipelines.split("/")[1]
+    local = settings.data_dir / "workflows-local"
+    local.mkdir(parents=True, exist_ok=True)
+    return local
 
 
 @dataclass(frozen=True)
@@ -238,7 +256,8 @@ def _git(root: Path, *args: str) -> str:
             capture_output=True,
             text=True,
             timeout=10,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"},
+            # Only the repo's own config (the synced clone's is DataLab's).
+            env=git_env({"GIT_OPTIONAL_LOCKS": "0"}),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise SourceError(f"git isn't available: {error}") from error

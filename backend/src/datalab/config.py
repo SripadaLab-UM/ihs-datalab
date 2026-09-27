@@ -114,8 +114,7 @@ class RepoSettings:
 class WorkflowSettings:
     """`[workflows]`: the workflow runner (milestone 6).
 
-    To come: how long run folders are kept, and the pipelines repo in place
-    of `folder` (milestone 5's `repos.pipelines`).
+    To come: how long run folders are kept.
     """
 
     # Workflow runs going at once. Their SQL steps also share the data
@@ -123,7 +122,8 @@ class WorkflowSettings:
     max_concurrent_runs: int = 1
     # Where workflow files are read from: a folder laid out like the
     # ihs-pipelines repo (`workflows/*.yaml`, `ihsDataR/`), or holding the
-    # YAML files directly. Unset: `<data folder>/workflows-local`.
+    # YAML files directly. Unset: the clone of `repos.pipelines` when that's
+    # set, else `<data folder>/workflows-local` (workflows/source.py).
     folder: str | None = None
     # Each R, pipeline, or custom QC step's container.
     step_timeout_seconds: float = 30 * 60

@@ -6,9 +6,9 @@ the audit log attributed to the run; R, pipeline and custom QC steps run in
 no-network containers (see workflows/runner.py). Run records are migration
 0008.
 
-Workflow files are read from `[workflows] folder` in settings.toml, or
-`<data folder>/workflows-local/`; milestone 5 swaps in the synced
-`ihs-pipelines` repo.
+Workflow files are read from the synced `ihs-pipelines` repo, `[workflows]
+folder` in settings.toml, or `<data folder>/workflows-local/`
+(`workflows_root` in workflows/source.py).
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
@@ -45,7 +44,7 @@ from datalab.workflows.model import (
 from datalab.workflows.records import RunStore
 from datalab.workflows.runner import ReplayNotExact, RunRefused, WorkflowRunner
 from datalab.workflows.sandbox import DockerSandbox, Sandbox, StepLimits
-from datalab.workflows.source import SourceError, WorkflowFolder
+from datalab.workflows.source import SourceError, WorkflowFolder, workflows_root
 
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
@@ -60,11 +59,6 @@ class WorkflowServices:
     access_log: AccessLog  # a run's queries: `for_origin("run", run_id)`
     # Where container steps run: Docker, unless a test gives another.
     sandbox: Sandbox | None = None
-
-
-def workflows_folder(settings: Settings) -> Path:
-    configured = settings.workflows.folder
-    return Path(configured).expanduser() if configured else settings.data_dir / "workflows-local"
 
 
 # ------------------------------------------------------------------ models
@@ -260,9 +254,7 @@ class SetDestinationKey(BaseModel):
 
 def build_workflows_router(services: WorkflowServices) -> APIRouter:
     settings = services.settings
-    folder = WorkflowFolder(workflows_folder(settings))
-    if settings.workflows.folder is None:
-        folder.root.mkdir(parents=True, exist_ok=True)
+    folder = WorkflowFolder(workflows_root(settings))
     destinations = DestinationStore(services.database)
     limits = settings.workflows
     sandbox = services.sandbox or DockerSandbox(
