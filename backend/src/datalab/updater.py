@@ -758,7 +758,7 @@ class Relaunch:
     sleep: Callable[[float], None] = time.sleep
 
     def run(self) -> str:
-        """ "finished", "went-back", "stuck" or "old-still-running"."""
+        """How it went: "finished", "went-back", "stuck" or "old-still-running"."""
         if not self._wait(lambda: not self.alive(self.old_pid), QUIT_SECONDS):
             self._note("the old DataLab didn't quit; not restarting")
             return "old-still-running"
@@ -775,7 +775,7 @@ class Relaunch:
         self._note(f"DataLab {self.to_version} didn't start; opening {self.from_version} again")
         pointer = self.layout.pointer()
         if pointer[0] != self.from_version and self.layout.complete(self.from_version):
-            self.layout.restore((self.from_version, pointer[1]))
+            self.layout.restore((self.from_version, self.to_version))
         self._open()
         return "went-back"
 

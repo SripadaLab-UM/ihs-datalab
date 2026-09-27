@@ -515,7 +515,7 @@ def test_a_new_version_that_doesnt_start_means_going_back(switched):
     fake.on_launch = lambda: None  # never takes the data folder
     assert fake.relaunch().run() == "went-back"
     assert len(fake.launched) == 2  # the new one, then the old one again
-    assert switched.layout.pointer() == (OLD, OLD)
+    assert switched.layout.pointer() == (OLD, NEW)
     # The old version's startup recovery sorts out the marker.
     recovery = updates.recover(
         switched.data_dir,
