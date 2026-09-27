@@ -290,10 +290,19 @@ DISCLAIMER = re.compile(
     re.IGNORECASE,
 )
 # Where a disclaimer stops applying: "We can't say how large; the internship
-# caused it" still claims a cause.
+# caused it" still claims a cause, and so does "we don't know the exact size
+# - the internship lowered mood". "As" and "because" start a clause after a
+# comma; "because" does anywhere, except in "because of".
 _CLAUSE_BREAK = re.compile(
-    r"[;:]|,\s*(?:and|but|yet|so|although|though|however|whereas|while)\b"
-    r"|\b(?:but|however|although|though|whereas)\b",
+    r"[;:—–]|\s-\s|,\s*(?:and|but|yet|so|as|although|though|however|whereas|while)\b"
+    r"|\b(?:but|however|although|though|whereas)\b|\bbecause\b(?!\s+of\b)",
+    re.IGNORECASE,
+)
+# A negation that only limits the claim: "we cannot say anything except that
+# the internship reduced mood", "the data don't show any other cause".
+_NOT_A_DISCLAIMER = re.compile(
+    r"\bexcept\b|\bother than\b|\banything but\b|\bany other (?:caus\w*|explanations?)\b"
+    r"|\bthe exact (?:size|amount|magnitude)\b",
     re.IGNORECASE,
 )
 
@@ -310,9 +319,13 @@ def _claims_cause(answer: str) -> bool:
         # causal estimate" and "the internship didn't cause X but caused Y".
         for pattern in CAUSAL + tuple(re.sub(r"(\{\d+,\d+\})", r"\1?", p) for p in CAUSAL):
             for match in re.finditer(pattern, sentence, re.IGNORECASE):
+                # A disclaimer covers the claim when it comes first, with no
+                # clause break before the causal word and no "except" or
+                # "other than" between them.
                 if any(
                     end <= match.start()
-                    and not _CLAUSE_BREAK.search(sentence, start, match.start())
+                    and not _CLAUSE_BREAK.search(sentence, start, match.end())
+                    and not _NOT_A_DISCLAIMER.search(sentence, end, match.end())
                     for start, end in disclaimers
                 ):
                     continue

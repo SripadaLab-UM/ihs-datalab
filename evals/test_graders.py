@@ -163,6 +163,14 @@ def test_a_disclaimer_isnt_a_causal_claim(disclaimer):
         "The drop was caused by the internship, which cannot be ignored.",
         "The internship caused mood to fall; this is not a causal estimate of anything else.",
         "The internship did not cause stress but caused the mood decline.",
+        # From the review of the disclaimer rule.
+        "We don't know the exact size - the internship lowered mood by 0.4 points.",
+        "The data don't show any other cause — the internship caused the drop.",
+        "We don't know of any other explanation—the internship caused it.",
+        "We cannot fully determine why mood dropped when the internship began, "
+        "as the internship caused stress.",
+        "It is not possible to say anything except that the internship reduced mood.",
+        "We cannot establish anything other than that mood fell because of the internship.",
     ],
 )
 def test_a_causal_claim_with_a_disclaimer_elsewhere(claim):
