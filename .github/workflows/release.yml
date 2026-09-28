@@ -3,7 +3,9 @@ name: Release
 # Push a tag like v0.1.0 to publish a release:
 # 0. run all of CI on the tagged commit; stop if anything fails;
 # 1. build the agent image for Intel/AMD and Apple Silicon and push it to the
-#    GitHub Container Registry;
+#    GitHub Container Registry, unless images/agent is unchanged since an
+#    image already there (job `reuse`, keyed by its git tree id): then that
+#    image is used as it is, and installed DataLabs have nothing new to pull;
 # 2. build the DataLab package with that image pinned by digest inside it;
 # 3. gather the release's files: the package, every dependency pinned by
 #    hash (requirements.txt), the installers, the exact images (images.json)
@@ -68,8 +70,42 @@ jobs:
             -e 's/-(alpha|a)\.?([0-9]+)$/a\2/' -e 's/-(beta|b)\.?([0-9]+)$/b\2/' -e 's/-rc\.?([0-9]+)$/rc\1/')
           test "$tag" = "$version" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
 
-  image:
+  reuse:
+    # The agent image depends only on images/agent (its base images are pinned
+    # by digest), so it's keyed by that folder's git tree id. If an image for
+    # this tree is in the registry already, the release uses it as it is:
+    # nothing is rebuilt, and installed DataLabs have nothing new to pull.
     needs: [checks, version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tree: ${{ steps.find.outputs.tree }}
+      image: ${{ steps.find.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Look for an image built from this images/agent
+        id: find
+        run: |
+          tree=$(git rev-parse HEAD:images/agent)
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          if digest=$(docker buildx imagetools inspect "$IMAGE:tree-$tree" --format '{{json .Manifest.Digest}}' 2>/dev/null | tr -d '"') && [ -n "$digest" ]; then
+            echo "image=$IMAGE@$digest" >> "$GITHUB_OUTPUT"
+            echo "Reusing $IMAGE@$digest (images/agent unchanged, tree $tree)."
+          else
+            echo "No image for tree $tree yet: building one."
+          fi
+
+  image:
+    needs: [checks, version, reuse]
+    if: needs.reuse.outputs.image == ''
     strategy:
       matrix:
         include:
@@ -107,12 +143,15 @@ jobs:
           path: /tmp/digests/*
 
   manifest:
-    needs: image
+    needs: [reuse, image]
+    # Runs after a build, or with none when the image is reused.
+    if: ${{ !cancelled() && needs.reuse.result == 'success' && (needs.image.result == 'success' || needs.image.result == 'skipped') }}
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.pin.outputs.image }}
     steps:
       - uses: actions/download-artifact@v4
+        if: needs.reuse.outputs.image == ''
         with:
           pattern: digest-*
           path: /tmp/digests
@@ -123,10 +162,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Combine both platforms under the version tag
+      - name: Combine both platforms under the version and tree tags
+        if: needs.reuse.outputs.image == ''
+        env:
+          TREE: ${{ needs.reuse.outputs.tree }}
         run: |
-          docker buildx imagetools create -t "$IMAGE:${GITHUB_REF_NAME}" \
+          docker buildx imagetools create -t "$IMAGE:${GITHUB_REF_NAME}" -t "$IMAGE:tree-$TREE" \
             $(printf "$IMAGE@sha256:%s " $(ls /tmp/digests))
+      - name: Tag the reused image with this version
+        if: needs.reuse.outputs.image != ''
+        env:
+          REUSED: ${{ needs.reuse.outputs.image }}
+        run: docker buildx imagetools create -t "$IMAGE:${GITHUB_REF_NAME}" "$REUSED"
       - name: Pin the combined image by digest
         id: pin
         run: |
@@ -138,6 +185,7 @@ jobs:
     # build (with their dependencies' install scripts), so it never sees the
     # signing key: the `sign` job signs, on a fresh runner.
     needs: manifest
+    if: ${{ !cancelled() && needs.manifest.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -198,6 +246,8 @@ jobs:
     # sign-release.py and the pinned keys) and its locked Python
     # dependencies, and hands back only SHA256SUMS.sig.
     needs: package
+    # Explicit, since an upstream image build may be skipped (image reused).
+    if: ${{ !cancelled() && needs.package.result == 'success' }}
     runs-on: ubuntu-latest
     environment: release
     permissions:
@@ -232,6 +282,7 @@ jobs:
 
   publish:
     needs: [package, sign]
+    if: ${{ !cancelled() && needs.package.result == 'success' && needs.sign.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

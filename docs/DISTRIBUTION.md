@@ -655,7 +655,10 @@ Windows specifics).
   - run all checks, including the upgrade-and-rollback test;
   - build the app with the frontend included;
   - build and push the agent image (the gateway and research proxy are
-    upstream images, pinned by digest in the code);
+    upstream images, pinned by digest in the code). If `images/agent` hasn't
+    changed since an image already in the registry (tagged `tree-<its git
+    tree id>`), that image is reused as it is, so a release that changes only
+    the app installs without a new image to pull;
   - publish a release that lists the exact image digests (also in
     `images.json`), with the installers, `requirements.txt` (every
     dependency by hash, then the package by its checksum), a `SHA256SUMS`

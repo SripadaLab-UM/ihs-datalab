@@ -49,3 +49,17 @@ def test_publishing_waits_for_the_signature_and_nothing_else_publishes():
     creating = [n for n, j in all_jobs.items() if "gh release create" in yaml.safe_dump(j)]
     assert creating == ["publish"]
     assert all_jobs["package"]["permissions"] == {"contents": "read"}
+
+
+def test_the_agent_image_is_reused_when_its_folder_is_unchanged():
+    all_jobs = jobs()
+    reuse = all_jobs["reuse"]
+    assert "git rev-parse HEAD:images/agent" in yaml.safe_dump(reuse)
+    # Built only when no image exists for this images/agent tree...
+    assert all_jobs["image"]["if"] == "needs.reuse.outputs.image == ''"
+    # ...and whichever it was, the release pins one image by digest.
+    manifest = yaml.safe_dump(all_jobs["manifest"])
+    assert "tree-$TREE" in manifest and "imagetools inspect" in manifest
+    # Jobs after a skipped build still run, but never after a failure.
+    for name in ("manifest", "package", "sign", "publish"):
+        assert "!cancelled()" in all_jobs[name]["if"]
