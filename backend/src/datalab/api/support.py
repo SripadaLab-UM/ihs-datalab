@@ -34,7 +34,6 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from datalab import diagnostics, export_folders, support
@@ -509,17 +508,34 @@ def _sha256(data: bytes) -> str:
 
 
 def _route_template(app: Any, method: str, path: str) -> str | None:
-    """The API route a path belongs to, by its shape ("/api/conversations/{conversation_id}"):
-    never the IDs, names or file paths in it."""
-    path = path.split("?", 1)[0].split("#", 1)[0]
-    for route in getattr(app, "routes", []):
-        if (
-            isinstance(route, APIRoute)
-            and method in (route.methods or ())
-            and route.path_regex.fullmatch(path)
-        ):
-            return route.path
-    return None
+    """A request's path by its shape, such as "/api/conversations/{…}/files/{…}/{…}":
+    only the fixed words of DataLab's own API routes are kept (from its
+    OpenAPI schema), and every other part, an ID, a name or a file's path,
+    becomes {…}. None for a path that isn't one of DataLab's API routes."""
+    del method  # the shape is the same whatever the method
+    parts = path.split("?", 1)[0].split("#", 1)[0].split("/")[1:]
+    words = _api_words(app)
+    if len(parts) < 2 or parts[0] != "api" or parts[1] not in words:
+        return None
+    shown = [part if part in words else "{…}" for part in parts[:12]]
+    return "/" + "/".join(shown) + ("/…" if len(parts) > 12 else "")
+
+
+def _api_words(app: Any) -> frozenset[str]:
+    cached = getattr(app.state, "support_api_words", None)
+    if cached is None:
+        try:
+            paths = app.openapi().get("paths", {})
+        except Exception:  # a schema that can't be built: keep nothing but "api"
+            paths = {}
+        cached = frozenset(
+            part
+            for template in paths
+            for part in template.split("/")
+            if part and not part.startswith("{")
+        ) | {"api"}
+        app.state.support_api_words = cached
+    return cached
 
 
 def _contents(files: list[tuple[str, bytes]]) -> ContentsOut:

@@ -999,6 +999,8 @@ def repo_paths(report: dict[str, Any]) -> tuple[str, str]:
 def check_repo(api: GitHubApi, repo: str) -> None:
     """The support repository must be private, and the person able to write to it."""
     response = _call(api, "GET", f"/repos/{repo}")
+    if _rate_limited(response):
+        _raise_for(response)
     if response.status_code in (403, 404):
         raise Pending(
             f"GitHub says your account can't open {repo}. Ask the maintainer to give you "
@@ -1082,13 +1084,18 @@ def _call(api: GitHubApi, method: str, path: str, **kwargs: Any) -> httpx.Respon
         ) from None
 
 
+def _rate_limited(response: httpx.Response) -> bool:
+    code = response.status_code
+    return code == 429 or (code == 403 and response.headers.get("x-ratelimit-remaining") == "0")
+
+
 def _raise_for(response: httpx.Response) -> None:
     code = response.status_code
     if code < 400:
         return
     if code == 401:
         raise Pending("GitHub didn't accept the sign-in. Sign in again in Settings → Connections.")
-    if code == 429 or (code == 403 and response.headers.get("x-ratelimit-remaining") == "0"):
+    if _rate_limited(response):
         raise Pending("GitHub is limiting requests for now. Try again in a while.")
     if code in (403, 404):
         raise Pending("GitHub says your account can't add files there. Ask the maintainer.")
