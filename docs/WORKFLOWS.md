@@ -327,7 +327,16 @@ unknown outcome: check the destination.
 **Destinations.** `deliver: destination:` is a key each computer maps to one
 of its export folders (`export_destinations.key`, set with `PUT
 /api/workflows/destinations/<key>`). The practice profile always delivers to
-its own practice folder.
+its own practice folder. A folder turned off in Settings (`offered`) or not
+ready (missing, not writable, online-only, refused) fails the delivery with
+the reason. A delivery says where it went without claiming a sync:
+`delivery_message` is "Saved to <name> (on this computer): 3 files." plus,
+for a Dropbox folder, "Dropbox will upload them when its app is running and
+signed in. DataLab can't confirm the upload." Each delivery record also has
+`destination_name`, `sync_provider`, `saved_to` and `sync_note` (0011 keeps
+the folder's name and sync app as they were then). To choose among folders,
+list `GET /api/export-destinations` and offer those with `available` true, by
+`name`; see `DestinationOut` in api/exports.py.
 
 **Run again** runs the current file with the original parameters and seed,
 extracting afresh. **Replay** reruns the kept definition, extracts, image,

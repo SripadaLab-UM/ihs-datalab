@@ -17,8 +17,9 @@ export function ExportResult({ queryId, practice, onClose }: { queryId: string; 
     <Modal title="Export the result" onClose={onClose}>
       {run.data ? (
         <div className="flex flex-col gap-3 font-sans text-[13.5px]">
-          <p>Exported the result, with a manifest of the query that made it, to:</p>
+          <p role="status">{run.data.saved_to}: the result, with a manifest of the query that made it, in</p>
           <p className="rounded-[3px] bg-sunken px-3 py-2 font-mono text-[12px] break-all">{run.data.folder}</p>
+          {run.data.sync_note && <p className="text-muted">{run.data.sync_note}</p>}
           {!practice && <p className="text-research">This file contains study data. Keep it on approved storage.</p>}
           <div className="flex justify-end">
             <Button variant="primary" onClick={onClose}>

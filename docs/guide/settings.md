@@ -61,8 +61,9 @@ follows your computer again next time it opens.
 
 ## Export folders
 
-The folders results can be exported to, with **Add a folder** and **Remove**,
-and **Workflow destinations**: which of your folders each workflow's
+The folders results can be exported to, such as one in your Dropbox, with a
+name for each, **Test folder** (saves and removes a synthetic file),
+**Rename** and **Remove** (which only forgets the folder), and **Workflow destinations**: which of your folders each workflow's
 destination key means on this computer. See [Export results](exporting.md)
 and [Run a workflow](running-a-workflow.md). The practice DataLab exports only
 to its own practice folder.

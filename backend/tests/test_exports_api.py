@@ -107,7 +107,7 @@ def test_real_destinations_come_from_the_picker(real_settings, catalog, monkeypa
     dropbox.mkdir(parents=True)
     monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())
 
-    async def chosen(kind):
+    async def chosen(kind, **_):
         assert kind == "folder"
         return [dropbox]
 
@@ -154,7 +154,7 @@ def test_real_destinations_come_from_the_picker(real_settings, catalog, monkeypa
 
 
 def test_datalab_folders_cant_be_destinations(real_settings, catalog, monkeypatch):
-    async def chosen(kind):
+    async def chosen(kind, **_):
         return [real_settings.data_dir]
 
     monkeypatch.setattr(picker, "pick", chosen)
@@ -170,7 +170,7 @@ def test_a_destination_replaced_by_a_link_is_refused(real_settings, catalog, mon
     monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())
     monkeypatch.setattr("datalab.sessions.inputs._CONTAINERS_POSIX", ())
 
-    async def chosen(kind):
+    async def chosen(kind, **_):
         return [dropbox]
 
     monkeypatch.setattr(picker, "pick", chosen)

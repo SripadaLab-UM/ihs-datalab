@@ -115,7 +115,7 @@ def test_real_profile_uses_the_picker_and_refuses_private_places(
     study.mkdir()
     (study / "data.csv").write_text("a\n1\n")
 
-    async def chosen(kind):
+    async def chosen(kind, **_):
         assert kind == "files"
         return [study / "data.csv", real_settings.data_dir]
 

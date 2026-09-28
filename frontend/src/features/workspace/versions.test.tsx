@@ -37,7 +37,7 @@ const checkpoint = (number: number) => ({
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
 
 beforeEach(() => {
-  vi.mocked(api.destinations).mockResolvedValue([{ id: "d", name: "Folder", path: "/x", available: true }]);
+  vi.mocked(api.destinations).mockResolvedValue([{ id: "d", name: "Folder", path: "/x", available: true }] as never);
   vi.mocked(api.health).mockResolvedValue({ profile: "real" } as never);
   vi.mocked(api.export).mockReset().mockResolvedValue({ folder: "/x", files: ["report.html"] } as never);
   vi.mocked(api.preview).mockReset();

@@ -15,7 +15,7 @@ export { ApiError, type FeatureStatus, SIGNED_OUT } from "./http";
 export type { Health } from "./health";
 export type { Conversation, Effort, Mode, Models, PlanSchema, QueryRecord } from "./conversations";
 export type { Attachment, AttachResult, Checkpoint, FileRoot, RestoreResult, WorkspaceFile } from "./files";
-export type { Destination, ExportResult } from "./exports";
+export type { Destination, DestinationPlace, DestinationPlaces, ExportResult, FolderTest } from "./exports";
 export type { CheckResult, SafetyReport } from "./safety";
 
 export const api = {

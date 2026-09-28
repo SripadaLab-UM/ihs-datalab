@@ -406,8 +406,31 @@ export interface paths {
         /**
          * Add Destination
          * @description Choose a folder in the computer's picker and add it as a destination.
+         *
+         *     The browser never names the path: it can only say which found sync
+         *     folder the picker opens in, and give the folder a name.
          */
         post: operations["add_destination_api_export_destinations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/export-destinations/places": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Places
+         * @description Sync apps' folders found on this computer, by name, for the picker to open in.
+         */
+        get: operations["places_api_export_destinations_places_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -426,9 +449,36 @@ export interface paths {
         post?: never;
         /**
          * Remove Destination
-         * @description Forget a destination. Files already exported there are untouched.
+         * @description Forget a destination. The folder, and files already exported there, are untouched.
          */
         delete: operations["remove_destination_api_export_destinations__destination_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Change Destination
+         * @description Rename a folder, or turn it on or off as a destination.
+         */
+        patch: operations["change_destination_api_export_destinations__destination_id__patch"];
+        trace?: never;
+    };
+    "/api/export-destinations/{destination_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Destination
+         * @description Save a small synthetic file there, read it back, and remove it.
+         *
+         *     That shows DataLab can save there on this computer. It says nothing
+         *     about whether a sync app has uploaded anything.
+         */
+        post: operations["test_destination_api_export_destinations__destination_id__test_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1742,6 +1792,13 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** AddDestination */
+        AddDestination: {
+            /** Name */
+            name?: string | null;
+            /** Start In */
+            start_in?: string | null;
+        };
         /** ApprovalAnswer */
         ApprovalAnswer: {
             /** Approve */
@@ -1916,6 +1973,13 @@ export interface components {
             /** Names File */
             names_file: boolean;
         };
+        /** ChangeDestination */
+        ChangeDestination: {
+            /** Name */
+            name?: string | null;
+            /** Offered */
+            offered?: boolean | null;
+        };
         /** CheckOut */
         CheckOut: {
             /** Ok */
@@ -2048,7 +2112,12 @@ export interface components {
             /** Files */
             files: string[];
         };
-        /** DeliveryOut */
+        /**
+         * DeliveryOut
+         * @description One delivery. Show `saved_to`, then `sync_note` when there is one:
+         *     DataLab saved the files on this computer; it can't know whether a sync
+         *     app has uploaded them.
+         */
         DeliveryOut: {
             /** Id */
             id: string;
@@ -2066,6 +2135,14 @@ export interface components {
             manifest_sha256: string;
             /** Delivered At */
             delivered_at: string;
+            /** Destination Name */
+            destination_name?: string;
+            /** Sync Provider */
+            sync_provider?: string | null;
+            /** Saved To */
+            saved_to?: string;
+            /** Sync Note */
+            sync_note?: string | null;
         };
         /** DeliveryStatusOut */
         DeliveryStatusOut: {
@@ -2094,7 +2171,13 @@ export interface components {
             /** Available */
             available: boolean;
         };
-        /** DestinationOut */
+        /**
+         * DestinationOut
+         * @description An export folder, and how it stands right now.
+         *
+         *     The Workflows Deliver stage and every export chooser offer the folders
+         *     with `available` true, by `name`.
+         */
         DestinationOut: {
             /** Id */
             id: string;
@@ -2102,8 +2185,37 @@ export interface components {
             name: string;
             /** Path */
             path: string;
+            /** Where */
+            where: string;
             /** Available */
             available: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "online_only" | "refused";
+            /** Status Message */
+            status_message: string | null;
+            /**
+             * Location
+             * @enum {string}
+             */
+            location: "this_computer" | "sync_folder" | "external_drive";
+            /** Sync Provider */
+            sync_provider: ("dropbox" | "onedrive" | "box" | "google_drive" | "icloud") | null;
+            /** Sync Provider Name */
+            sync_provider_name: string | null;
+            /** Location Note */
+            location_note: string;
+            /** Offered */
+            offered: boolean;
+            /** Workflow Keys */
+            workflow_keys: string[];
+            /**
+             * Practice
+             * @default false
+             */
+            practice: boolean;
         };
         /** DiagnosticOut */
         DiagnosticOut: {
@@ -2212,12 +2324,25 @@ export interface components {
             /** Destination Id */
             destination_id: string;
         };
-        /** ExportOut */
+        /**
+         * ExportOut
+         * @description A finished export. Show `saved_to`, then `sync_note` when there is one.
+         */
         ExportOut: {
             /** Folder */
             folder: string;
             /** Files */
             files: string[];
+            /** Destination Id */
+            destination_id: string;
+            /** Destination Name */
+            destination_name: string;
+            /** Saved To */
+            saved_to: string;
+            /** Sync Provider */
+            sync_provider: ("dropbox" | "onedrive" | "box" | "google_drive" | "icloud") | null;
+            /** Sync Note */
+            sync_note: string | null;
         };
         /** FileDetail */
         FileDetail: {
@@ -2369,6 +2494,27 @@ export interface components {
             message: string;
             /** Line */
             line?: number | null;
+        };
+        /** FolderTestOut */
+        FolderTestOut: {
+            /** Ok */
+            ok: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "online_only" | "refused";
+            /** Message */
+            message: string | null;
+            /** Test File */
+            test_file: string | null;
+            /** Removed */
+            removed: boolean;
+            /** Saved To */
+            saved_to: string | null;
+            /** Sync Note */
+            sync_note: string | null;
+            destination: components["schemas"]["DestinationOut"];
         };
         /** GitHubAccountOut */
         GitHubAccountOut: {
@@ -3014,6 +3160,34 @@ export interface components {
             behind: number;
             /** Message */
             message?: string | null;
+        };
+        /**
+         * PlaceOut
+         * @description A sync app's folder found on this computer, by name: where the picker can open.
+         */
+        PlaceOut: {
+            /** Id */
+            id: string;
+            /**
+             * Provider
+             * @enum {string}
+             */
+            provider: "dropbox" | "onedrive" | "box" | "google_drive" | "icloud";
+            /** Provider Name */
+            provider_name: string;
+            /** Label */
+            label: string;
+            /** Where */
+            where: string;
+        };
+        /** PlacesOut */
+        PlacesOut: {
+            /** Can Add */
+            can_add: boolean;
+            /** Why Not */
+            why_not: string | null;
+            /** Places */
+            places: components["schemas"]["PlaceOut"][];
         };
         /** PlanLimitsOut */
         PlanLimitsOut: {
@@ -4688,7 +4862,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AddDestination"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             201: {
@@ -4697,6 +4875,35 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DestinationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    places_api_export_destinations_places_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlacesOut"];
                 };
             };
         };
@@ -4718,6 +4925,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_destination_api_export_destinations__destination_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeDestination"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_destination_api_export_destinations__destination_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderTestOut"];
+                };
             };
             /** @description Validation Error */
             422: {

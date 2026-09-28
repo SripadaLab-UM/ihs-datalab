@@ -30,14 +30,15 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from datalab import safeyaml
+from datalab import export_folders, safeyaml
 from datalab.api.pipelines import PipelineFindingOut
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, check_owner
@@ -231,7 +232,23 @@ class StepOut(BaseModel):
     message: str | None
 
 
+_DELIVERY_WORDING = ("destination_name", "sync_provider", "saved_to", "sync_note")
+
+
+def _optional_in_schema(names: tuple[str, ...]):
+    def edit(schema: dict[str, Any]) -> None:
+        required = schema.get("required")
+        if isinstance(required, list):
+            schema["required"] = [n for n in required if n not in names]
+
+    return edit
+
+
 class DeliveryOut(BaseModel):
+    """One delivery. Show `saved_to`, then `sync_note` when there is one:
+    DataLab saved the files on this computer; it can't know whether a sync
+    app has uploaded them."""
+
     id: str
     destination_key: str
     destination_path: str
@@ -239,6 +256,18 @@ class DeliveryOut(BaseModel):
     files: list[dict[str, Any]]
     manifest_sha256: str
     delivered_at: str
+    # The export folder's friendly name then (the key, for deliveries made
+    # before names were recorded).
+    destination_name: str
+    # dropbox, onedrive, box, google_drive, icloud, or None: a plain folder.
+    sync_provider: str | None
+    saved_to: str  # "Saved to Lab Dropbox (on this computer)"
+    sync_note: str | None  # "Dropbox will upload them when its app is running and signed in. …"
+
+    # Always sent. Marked optional in the API types for now, so the Workflows
+    # page (built on another branch) can adopt them without its fixtures
+    # breaking first. Make them required once it does.
+    model_config = ConfigDict(json_schema_extra=_optional_in_schema(_DELIVERY_WORDING))
 
 
 class RunDetailOut(WorkflowRunOut):
@@ -588,7 +617,15 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     destination_id=destination.id if destination else None,
                     name=name,
                     path=where,
-                    available=practice or bool(destination and destination.available),
+                    available=practice
+                    or bool(
+                        destination
+                        and destination.offered
+                        and export_folders.check_folder(
+                            Path(destination.path),
+                            protected=export_folders.protected_folders(settings),
+                        ).ready
+                    ),
                 )
             )
         return out
@@ -869,12 +906,26 @@ def _workflow_out(path: str, workflow: Workflow, runner: WorkflowRunner, file: A
     )
 
 
+def _delivery_fields(delivery: dict[str, Any]) -> dict[str, Any]:
+    name = delivery.get("destination_name") or delivery["destination_key"]
+    provider = delivery.get("sync_provider")
+    return {
+        **delivery,
+        "destination_name": name,
+        "sync_provider": provider,
+        "saved_to": export_folders.saved_to(name),
+        "sync_note": export_folders.sync_note(provider, files=len(delivery.get("files") or [])),
+    }
+
+
 def _run_fields(run: dict[str, Any]) -> dict[str, Any]:
     out = dict(run)
     for key in ("replay_exact", "reproduced", "inputs_kept"):
         if out.get(key) is not None:
             out[key] = bool(out[key])
     out["replay_notes"] = out.get("replay_notes") or []
+    if "deliveries" in out:
+        out["deliveries"] = [_delivery_fields(d) for d in out["deliveries"]]
     if "steps" in out:
         out["steps"] = [
             {

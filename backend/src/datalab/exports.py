@@ -66,6 +66,9 @@ class Destination:
     added_at: str
     # What workflow files call it (`deliver: destination:`), set per computer.
     key: str | None = None
+    # Offered for exports and workflow deliveries (Settings → Export folders).
+    # Off: kept, but nothing is written there.
+    offered: bool = True
 
     @property
     def available(self) -> bool:
@@ -100,9 +103,10 @@ class DestinationStore:
     def list(self) -> list[Destination]:
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, name, path, added_at, key FROM export_destinations ORDER BY rowid"
+                "SELECT id, name, path, added_at, key, offered FROM export_destinations "
+                "ORDER BY rowid"
             ).fetchall()
-        return [Destination(*row) for row in rows]
+        return [Destination(*row[:5], offered=bool(row[5])) for row in rows]
 
     def get(self, destination_id: str) -> Destination | None:
         return next((d for d in self.list() if d.id == destination_id), None)
@@ -145,7 +149,23 @@ class DestinationStore:
             )
         return destination
 
+    def rename(self, destination_id: str, name: str) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE export_destinations SET name = ? WHERE id = ?", (name, destination_id)
+            )
+        return cursor.rowcount > 0
+
+    def set_offered(self, destination_id: str, offered: bool) -> bool:
+        with self._lock:
+            cursor = self._db.execute(
+                "UPDATE export_destinations SET offered = ? WHERE id = ?",
+                (int(offered), destination_id),
+            )
+        return cursor.rowcount > 0
+
     def remove(self, destination_id: str) -> bool:
+        """Forget a destination. The folder and everything in it stay as they are."""
         with self._lock:
             cursor = self._db.execute(
                 "DELETE FROM export_destinations WHERE id = ?", (destination_id,)

@@ -13,11 +13,36 @@ them.
 
 ## Before your first export
 
-Add a folder to export to: **Settings & Safety → Export folders → Add a
-folder…**, then choose it in your computer's own file window. A folder in
-your Dropbox works like any other. Some places can't be chosen, such as a
-whole home folder or system folders. The practice DataLab exports only to
-its own practice folder.
+Add a folder to export to in **Settings & Safety → Export folders → Add a
+folder**: give it a name if you like (such as "Lab Dropbox"), then press
+**Choose folder…** and choose it in your computer's own file window.
+
+**Dropbox.** DataLab uses the Dropbox folder on your computer that the
+Dropbox app keeps in sync; there's no Dropbox account or key to set up. If
+DataLab finds your Dropbox (or OneDrive, Box, Google Drive) folder, it offers
+**Choose in Dropbox…**, which opens the file window there. Choose a folder
+inside it, such as `IHS exports`.
+
+Then press **Test folder**. DataLab saves a small synthetic test file there,
+reads it back and removes it, and says **Saved locally ✓**. That shows
+DataLab can save there. It doesn't show that Dropbox has uploaded anything:
+the Dropbox app uploads files when it's running and signed in, and DataLab
+can't see whether it has. After every export DataLab says "Saved to *your
+folder's name* (on this computer)", and for a Dropbox folder adds that
+Dropbox will upload it.
+
+A folder that can't be used says why: it isn't there (Dropbox not installed
+or signed in, the folder moved, or a separate drive unplugged), your account
+can't save in it, it's online-only in your sync app, or it's somewhere
+DataLab never writes (system folders, a whole home folder, DataLab's own
+data folder, or a link that leads out of your Dropbox). **Rename** changes
+the name exports and workflows show; **Remove** only makes DataLab forget
+the folder, and never deletes it or anything in it. Untick **Offer for
+exports and workflow deliveries** to keep a folder without anything being
+saved there.
+
+The practice DataLab exports only to its own practice folder, which you can
+test too; Dropbox setup is available on the real DataLab.
 
 ## Export from a conversation
 

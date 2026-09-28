@@ -24,7 +24,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from datalab import exports
-from datalab.api.exports import ExportOut, export_folder
+from datalab.api.exports import ExportOut, export_out, export_target
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, QueryRecord
 from datalab.data.catalog import Catalog, TableInfo
@@ -322,7 +322,8 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         path = playground.result_file(record)
         if path is None:
             raise HTTPException(404, "That query has no result to export.")
-        folder = export_folder(settings, services.destinations, body.destination_id)
+        target = export_target(settings, services.destinations, body.destination_id)
+        folder = target.path
         practice = settings.profile == "practice"
         header = playground.page(record, 0, 0)
         columns = _columns(header.columns, header.column_types) if header else []
@@ -363,7 +364,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             contains_study_data=not practice,
             query_id=record.id,
         )
-        return ExportOut(folder=str(done.folder), files=done.files)
+        return export_out(target, done)
 
     return router
 

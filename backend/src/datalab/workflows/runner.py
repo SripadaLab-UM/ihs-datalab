@@ -49,14 +49,13 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from datalab import __version__, exports
-from datalab.config import Settings, default_data_dir
+from datalab import __version__, export_folders, exports
+from datalab.config import Settings
 from datalab.data.access_log import AccessLog
 from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
 from datalab.exports import DestinationStore, ExportError, ExportSource
-from datalab.sessions.inputs import NotAttachable, check_attachable
 from datalab.sessions.titles import scrub_title
 from datalab.workflows.model import (
     ORACLE_INPUT,
@@ -171,6 +170,14 @@ class _Plan:
 
 # A cohort year: 2000 to 2029.
 _YEAR = re.compile(r"20[012]\d")
+
+
+def delivery_message(destination: export_folders.Target, files: int) -> str:
+    """What a finished delivery says: saved on this computer, never "synced"."""
+    count = "1 file" if files == 1 else f"{files} files"
+    message = f"{export_folders.saved_to(destination.name)}: {count}."
+    note = export_folders.sync_note(destination.sync_provider, files=files)
+    return f"{message} {note}" if note else message
 
 
 def delivery_title(name: str) -> str:
@@ -1130,7 +1137,8 @@ class WorkflowRunner:
             )
             return
         try:
-            destination_id, folder = self._destination(spec.destination)
+            destination = self._destination(spec.destination)
+            folder = destination.path
             target = folder / exports.safe_name(spec.folder)
             target.mkdir(exist_ok=True)
             if os.path.realpath(target) != os.path.join(os.path.realpath(folder), target.name):
@@ -1178,8 +1186,10 @@ class WorkflowRunner:
                 "id": f"dl_{secrets.token_hex(6)}",
                 "run_id": plan.run_id,
                 "destination_key": spec.destination,
-                "destination_id": destination_id,
+                "destination_id": destination.id,
                 "destination_path": str(folder),
+                "destination_name": destination.name,
+                "sync_provider": destination.sync_provider,
                 "folder": str(result.folder),
                 "files": [{k: f[k] for k in ("path", "bytes", "sha256")} for f in written],
                 "manifest_sha256": sha256_file(manifest),
@@ -1195,37 +1205,16 @@ class WorkflowRunner:
         self.store.update_run(
             plan.run_id,
             delivery_status="delivered",
-            delivery_message=(
-                "1 file delivered."
-                if len(result.files) == 1
-                else f"{len(result.files)} files delivered."
-            ),
+            delivery_message=delivery_message(destination, len(result.files)),
         )
 
-    def _destination(self, key: str) -> tuple[str | None, Path]:
-        """The folder a destination key names on this computer.
+    def _destination(self, key: str) -> export_folders.Target:
+        """The folder a destination key names on this computer, checked now.
 
         The practice profile delivers only to its own practice folder, so
         nothing from it can end up somewhere real.
         """
-        if self.settings.profile == "practice":
-            folder = self.settings.data_dir / "practice-exports"
-            folder.mkdir(parents=True, exist_ok=True)
-            return None, folder
-        destination = self.destinations.by_key(key)
-        if destination is None:
-            raise ExportError(
-                f"No export folder is set for {key!r} on this computer. Choose one in Settings."
-            )
-        folder = Path(destination.path)
-        if os.path.realpath(folder) != str(folder):
-            raise ExportError("That export folder now points somewhere else. Add it again.")
-        protected = [self.settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
-        try:
-            check_attachable(folder, protected=protected)
-        except NotAttachable as error:
-            raise ExportError(f"DataLab can't deliver there any more: {error}") from error
-        return destination.id, folder
+        return export_folders.target_for_key(self.settings, self.destinations, key)
 
     def _manifest_about(self, plan: _Plan, chosen: list[_Output]) -> dict[str, Any]:
         run = self.store.get_run(plan.run_id) or {}
