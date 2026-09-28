@@ -12,6 +12,7 @@
 param([switch]$DeleteData, [switch]$KeepData)
 $ErrorActionPreference = "Stop"
 $Env:Path = (Join-Path $Env:USERPROFILE ".local\bin") + ";$Env:Path"
+$StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
 
 # The installer's leftovers, first, so an install waiting for a restart can't
 # start again after this. The names and checks match install.ps1.
@@ -133,8 +134,11 @@ Remove-RecordedAdminFolder $MySid
 
 # DataLab itself: the versions installed side by side (see install.ps1), or
 # the copy an earlier installer made with uv.
-$Root = if ($Env:DATALAB_INSTALL_DIR) { $Env:DATALAB_INSTALL_DIR } else { Join-Path $Env:LOCALAPPDATA "DataLab\app" }
+$Root = if ($Env:DATALAB_INSTALL_DIR) { $Env:DATALAB_INSTALL_DIR } else { Join-Path $StateDir "app" }
 $Shim = Join-Path $Root "bin\datalab.cmd"
+# The uv install.ps1 pins (in DataLab's own folder), else one on PATH.
+$PinnedUv = Join-Path $StateDir "uv\uv.exe"
+$UvCommand = if (Test-Path -LiteralPath $PinnedUv) { $PinnedUv } else { (Get-Command uv -ErrorAction SilentlyContinue).Source }
 $choice = @()
 if ($DeleteData) { $choice = @("--delete-data") } elseif ($KeepData) { $choice = @("--keep-data") }
 $uninstalled = $false
@@ -142,19 +146,30 @@ if ((Test-Path -LiteralPath $Shim) -and (Test-Path -LiteralPath (Join-Path $Root
     & $Shim uninstall @choice
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $uninstalled = $true
-    Remove-Tree $Root
-    if (Test-Path -LiteralPath $Root) { Write-Host "Some of DataLab's program files ($Root) couldn't be removed; delete that folder later." }
+    # Only what install.ps1 puts there; anything else in the folder stays.
+    foreach ($name in "versions", "bin") { Remove-Tree (Join-Path $Root $name) }
+    foreach ($name in "current", "previous") {
+        $file = Join-Path $Root $name
+        $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        if ($item -and -not $item.PSIsContainer) { Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue }
+    }
+    $left = @(Get-ChildItem -LiteralPath $Root -Force -ErrorAction SilentlyContinue)
+    if ($left.Count -eq 0) { Remove-Tree $Root }
+    else { Write-Host "Left in $Root, as it isn't DataLab's: $(($left | ForEach-Object Name) -join ', ')" }
 }
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    $OldDataLab = Join-Path (uv tool dir --bin) "datalab.exe"
+if ($UvCommand) {
+    $OldDataLab = Join-Path (& $UvCommand tool dir --bin) "datalab.exe"
     if (Test-Path -LiteralPath $OldDataLab) {
         if (-not $uninstalled) {
             & $OldDataLab uninstall @choice
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         }
-        uv tool uninstall datalab
+        & $UvCommand tool uninstall datalab
     }
 }
+# The installer's staging folder, if a run stopped part way, and its uv.
+Remove-Tree (Join-Path $StateDir "install")
+Remove-Tree (Join-Path $StateDir "uv")
 $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
     $Link = Join-Path $StartMenu $name
@@ -170,8 +185,9 @@ Write-Host "  - WSL (Windows Subsystem for Linux): Settings > Apps > Installed a
 Write-Host "    Subsystem for Linux > Uninstall. The Windows features it turned on stay on until an"
 Write-Host "    administrator turns them off in 'Turn Windows features on or off' (Virtual Machine"
 Write-Host "    Platform, Windows Subsystem for Linux)."
-Write-Host "  - uv (the tool that installed DataLab), in PowerShell:"
-Write-Host "      uv cache clean; Remove-Item -Recurse (uv python dir), (uv tool dir)"
-Write-Host "      Remove-Item `"$(Join-Path $Env:USERPROFILE '.local\bin')\uv*.exe`""
+Write-Host "  - uv's downloads (its cache and the Python it installed), in PowerShell:"
+Write-Host "      Remove-Item -Recurse `"$(Join-Path $Env:LOCALAPPDATA 'uv')`", `"$(Join-Path $Env:APPDATA 'uv')`""
+Write-Host "    (DataLab's own copy of uv was removed. An older installer may also have put uv in"
+Write-Host "    $(Join-Path $Env:USERPROFILE '.local\bin'); remove uv.exe, uvx.exe and uvw.exe there too.)"
 Write-Host "  - Your account's membership of the docker-users group, which an administrator can"
 Write-Host "    remove in Computer Management > Local Users and Groups (IT, on a managed computer)."

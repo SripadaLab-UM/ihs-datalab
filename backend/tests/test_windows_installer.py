@@ -87,3 +87,56 @@ def test_the_uninstaller_says_what_stays_and_how_to_remove_it():
     for thing in ("Docker Desktop", "Windows", "Subsystem for Linux", "uv", "docker-users"):
         assert thing in UNINSTALL[UNINSTALL.index('Write-Host "DataLab has been removed."') :]
     assert '"DataLab (practice).lnk"' in UNINSTALL
+
+
+def test_uv_is_the_pinned_release_checked_and_used_by_full_path():
+    import re
+
+    pins = dict(re.findall(r'(?m)^\$(Uv\w+) = "([^"]*)"$', INSTALL))
+    assert re.fullmatch(r"\d+\.\d+\.\d+", pins["UvVersion"])
+    assert pins["UvZipUrl"] == (
+        f"https://github.com/astral-sh/uv/releases/download/{pins['UvVersion']}/"
+        "uv-x86_64-pc-windows-msvc.zip"
+    )
+    assert re.fullmatch(r"[0-9a-f]{64}", pins["UvZipSha256"])
+    assert pins["UvPublisher"]
+    body = code(INSTALL)
+    assert "irm " not in body and "| iex" not in body and "Invoke-Expression" not in body
+    assert "& $Uv venv" in body and "& $Uv pip install" in body
+    # Never a uv looked up on PATH.
+    assert not re.search(r"(?m)^\s*uv\s", body) and "Get-Command uv" not in body
+
+
+def test_the_shims_ask_python_for_utf8():
+    assert "set PYTHONUTF8=1" in INSTALL
+    mac = (WINDOWS.parent / "macos" / "install.sh").read_text(encoding="utf-8")
+    assert "export PYTHONUTF8=1" in mac
+
+
+def test_the_start_menu_path_is_escaped_for_any_single_quote():
+    assert "EscapeSingleQuotedStringContent($DataLab)" in INSTALL
+
+
+@pytest.mark.parametrize(
+    ("name", "ok"),
+    [
+        ("datalab-0.1.0a3-py3-none-any.whl", True),
+        ("datalab-7-py3-none-any.whl", True),
+        ("datalab-1.-py3-none-any.whl", False),
+        ("datalab-.1-py3-none-any.whl", False),
+        ("datalab-latest-py3-none-any.whl", False),
+    ],
+)
+def test_the_package_name_must_carry_a_version(name, ok):
+    import re
+
+    pattern = re.search(r"-notmatch '(\^datalab-[^']+)'", INSTALL)
+    assert pattern is not None
+    assert bool(re.match(pattern.group(1), name)) is ok
+
+
+def test_the_uninstaller_removes_only_what_the_installer_put_in_the_app_folder():
+    body = code(UNINSTALL)
+    assert 'foreach ($name in "versions", "bin")' in body
+    assert "$left.Count -eq 0) { Remove-Tree $Root }" in body
+    assert 'Remove-Tree (Join-Path $StateDir "install")' in body

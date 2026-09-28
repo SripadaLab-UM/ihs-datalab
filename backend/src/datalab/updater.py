@@ -876,6 +876,12 @@ def _known_migrations() -> set[str]:
 
 
 def _find_uv(platform: str) -> str | None:
+    """uv, to install a new version: on Windows, the pinned one the installer
+    puts in DataLab's own folder (install.ps1), first; else one on PATH."""
+    if platform == "win32":
+        pinned = default_data_dir("real").parent / "uv" / "uv.exe"
+        if pinned.is_file():
+            return str(pinned)
     found = shutil.which("uv")
     if found:
         return found

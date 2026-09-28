@@ -1078,3 +1078,15 @@ async def test_conversations_that_wont_stop_abandon_the_update(world):
     assert world.gate.closed_for is None  # open again: DataLab carries on
     assert_nothing_changed(world)
     assert world.backups() == [] and "venv" not in world.events
+
+
+def test_on_windows_the_installers_pinned_uv_comes_first(tmp_path, monkeypatch):
+    base = tmp_path / "DataLab"
+    (base / "uv").mkdir(parents=True)
+    (base / "uv" / "uv.exe").write_text("")
+    monkeypatch.setattr(updater, "default_data_dir", lambda profile: base / profile)
+    monkeypatch.setattr(updater.shutil, "which", lambda name: "/elsewhere/uv")
+    assert updater._find_uv("win32") == str(base / "uv" / "uv.exe")
+    assert updater._find_uv("darwin") == "/elsewhere/uv"
+    (base / "uv" / "uv.exe").unlink()
+    assert updater._find_uv("win32") == "/elsewhere/uv"

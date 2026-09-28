@@ -19,7 +19,7 @@
 #      it asks Windows for permission once and does all of it together. If Windows
 #      then needs a restart, it offers one and carries on by itself after you sign in.
 #   2. Starts Docker Desktop.
-#   3. Installs uv (a Python installer) for you, if it isn't there already.
+#   3. Installs uv (a Python installer), a pinned version checked by SHA-256 and signature.
 #   4. Installs DataLab, with its own Python, in your user account (no admin rights).
 #      Each version gets its own folder, so an update installs beside the one in use
 #      and the previous version is kept (docs/DISTRIBUTION.md).
@@ -73,7 +73,15 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
 $ScriptText = $MyInvocation.MyCommand.ScriptContents
 # The installer's own folder, where the package is looked for without -Package.
 $ScriptFolder = $PSScriptRoot
+# uv, which installs DataLab: its release for 64-bit Windows, pinned by
+# version and by the SHA-256 in that release's published .sha256 file, and
+# its uv.exe checked for its publisher's signature. To move to a newer uv,
+# change all three from the new release's page on GitHub
+# (docs/DISTRIBUTION.md, "Windows specifics").
 $UvVersion = "0.12.19"
+$UvZipUrl = "https://github.com/astral-sh/uv/releases/download/0.12.19/uv-x86_64-pc-windows-msvc.zip"
+$UvZipSha256 = "6dbb02d79e419522f1c500f0adb1cddcff0cda7d59b0d66ea7f5e3b4a1b2f5f0"
+$UvPublisher = "OpenAI OpCo, LLC"
 # Pinned downloads, checked (SHA-256 and publisher's signature) before they run.
 $WslVersion = "2.7.14"
 $WslMsiUrl = "https://github.com/microsoft/WSL/releases/download/2.7.14/wsl.2.7.14.0.x64.msi"
@@ -88,6 +96,10 @@ $DockerAgreement = "https://www.docker.com/legal/docker-subscription-service-agr
 
 $StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
 $ResumeFile = Join-Path $StateDir "installer-resume.json"
+# The pinned uv, in a folder of DataLab's own, used by full path (never a uv
+# found on PATH). DataLab's updater looks for it here too.
+$UvDir = Join-Path $StateDir "uv"
+$Uv = Join-Path $UvDir "uv.exe"
 # The administrator part's folders this account's installer made, one per line,
 # so that exactly those (and nothing else in ProgramData) are removed later.
 $AdminRecord = Join-Path $StateDir "installer-admin-folder.txt"
@@ -338,11 +350,20 @@ function Save-Download($url, $sha256, $publisher, $file) {
 }
 
 # The organisation (O=) a certificate was issued to, exactly as written in it.
+# A value with a comma in it ("OpenAI OpCo, LLC") may come back quoted, as
+# O="OpenAI OpCo, LLC" (with any quote inside doubled): that's unquoted, so
+# the comparison stays exact.
 function Get-Organisation($certificate) {
     if (-not $certificate) { return "" }
-    $name = $certificate.SubjectName.Format($true)  # one "KEY=value" per line, unescaped
+    $name = $certificate.SubjectName.Format($true)  # one "KEY=value" per line
     foreach ($line in $name -split "\r?\n") {
-        if ($line -match '^\s*O=(.*)$') { return $Matches[1].Trim() }
+        if ($line -match '^\s*O=(.*)$') {
+            $value = $Matches[1].Trim()
+            if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+                $value = $value.Substring(1, $value.Length - 2).Replace('""', '"')
+            }
+            return $value
+        }
     }
     return ""
 }
@@ -369,20 +390,27 @@ function Disable-QuickEdit {
             @("GetConsoleMode", [bool], [Type[]]@([IntPtr], [uint32].MakeByRefType())),
             @("SetConsoleMode", [bool], [Type[]]@([IntPtr], [uint32])))
         foreach ($call in $calls) {
-            $null = $type.DefinePInvokeMethod($call[0], "kernel32.dll",
+            $method = $type.DefinePInvokeMethod($call[0], "kernel32.dll",
                 [System.Reflection.MethodAttributes]"Public, Static, PinvokeImpl",
                 [System.Reflection.CallingConventions]::Standard, $call[1], $call[2],
                 [System.Runtime.InteropServices.CallingConvention]::Winapi,
                 [System.Runtime.InteropServices.CharSet]::Auto)
+            # Without this, the call's result is dropped (every call returns 0).
+            $method.SetImplementationFlags([System.Reflection.MethodImplAttributes]::PreserveSig)
         }
         $native = $type.CreateType()
         $console = $native::GetStdHandle(-10)  # the console's input
+        if ($console -eq [IntPtr]::Zero -or $console -eq [IntPtr]-1) { throw "no console input handle" }
         $mode = [uint32]0
-        if ($native::GetConsoleMode($console, [ref]$mode)) {
-            # ENABLE_QUICK_EDIT_MODE (0x40) off; ENABLE_EXTENDED_FLAGS (0x80) makes that apply.
-            $null = $native::SetConsoleMode($console, [uint32](($mode -band (-bnot 0x40)) -bor 0x80))
+        if (-not $native::GetConsoleMode($console, [ref]$mode)) { throw "GetConsoleMode failed" }
+        # ENABLE_QUICK_EDIT_MODE (0x40) off; ENABLE_EXTENDED_FLAGS (0x80) makes that apply.
+        if (-not $native::SetConsoleMode($console, [uint32](($mode -band (-bnot 0x40)) -bor 0x80))) {
+            throw "SetConsoleMode failed"
         }
-    } catch { Write-Verbose "Couldn't turn off QuickEdit: $_" }
+    } catch {
+        # Not a problem for the install, just a note in the log.
+        Write-Host "   (QuickEdit stays on in this window ($_): if a click pauses it, press Esc.)"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -573,7 +601,10 @@ if ($Prepare) {
         if (-not (Get-LocalGroup -Name $DockerUsers -ErrorAction SilentlyContinue)) {
             throw "Docker Desktop's '$DockerUsers' group isn't on this computer, so your account can't be added to it. Reinstall Docker Desktop, or ask IT."
         }
-        $members = @(Get-LocalGroupMember -Group $DockerUsers -ErrorAction SilentlyContinue)
+        # Any trouble listing the members just means trying to add (below).
+        $members = @()
+        try { $members = @(Get-LocalGroupMember -Group $DockerUsers -ErrorAction SilentlyContinue) }
+        catch { Write-Verbose "Couldn't list $DockerUsers members: $_" }
         if ($members | Where-Object { $_.SID.Value -eq $sid }) {
             Good "You're already in the $DockerUsers group."
         } else {
@@ -662,6 +693,49 @@ function Unregister-Resume {
         Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
     }
     Remove-Item $ResumeShortcut -ErrorAction SilentlyContinue
+}
+
+# Puts the pinned uv in $UvDir, as the person: the release zip is checked for
+# its SHA-256 and uv.exe for its publisher's signature before it's used. A
+# uv already there is used only if it's that version and still signed.
+function Install-PinnedUv {
+    $marker = Join-Path $UvDir "datalab-pinned.txt"
+    $want = "$UvVersion $UvZipSha256"
+    if ((Test-Path -LiteralPath $Uv) -and (Test-Path -LiteralPath $marker) -and
+        ((Get-Content -LiteralPath $marker -TotalCount 1) -eq $want)) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Uv
+        if ($signature.Status -eq "Valid" -and (Get-Organisation $signature.SignerCertificate) -ceq $UvPublisher) {
+            Good "uv $UvVersion is installed already."
+            return
+        }
+    }
+    if (Test-Path -LiteralPath $UvDir) { Remove-Tree $UvDir }
+    if (Test-Path -LiteralPath $UvDir) { Stop-Install "The folder $UvDir couldn't be replaced. Close anything using it, then run the installer again." }
+    $download = Join-Path $StateDir ("uv-download-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force $download | Out-Null
+    try {
+        $zip = Join-Path $download "uv.zip"
+        Say "Downloading uv $UvVersion (from github.com/astral-sh/uv)..."
+        $ProgressPreference = "SilentlyContinue"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -UseBasicParsing -Uri $UvZipUrl -OutFile $zip
+        if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -ne $UvZipSha256) {
+            Stop-Install "The download of uv didn't match its expected checksum, so it wasn't used."
+        }
+        $unpacked = Join-Path $download "uv"
+        Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+        $signature = Get-AuthenticodeSignature -LiteralPath (Join-Path $unpacked "uv.exe")
+        $signedBy = Get-Organisation $signature.SignerCertificate
+        if ($signature.Status -ne "Valid" -or $signedBy -cne $UvPublisher) {
+            Stop-Install "uv.exe isn't signed by its publisher ($UvPublisher), so it wasn't used."
+        }
+        Say "Checked: SHA-256 and signature ($signedBy)"
+        Move-Item -LiteralPath $unpacked -Destination $UvDir
+        Set-Content -LiteralPath $marker -Value $want -Encoding ASCII
+    } finally {
+        Remove-Tree $download
+    }
+    Good "uv $UvVersion is ready."
 }
 
 # What of DataLab is running, in words, or "" if nothing: a DataLab process
@@ -757,7 +831,7 @@ if (-not $Requirements) { Write-Host "requirements.txt (every dependency, pinned
 $Requirements = (Resolve-Path -LiteralPath $Requirements).ProviderPath
 # The package's file name carries its version: datalab-<version>-py3-none-any.whl
 $FileName = [System.IO.Path]::GetFileName(($Package -split '\?')[0])
-if ($FileName -notmatch '^datalab-([0-9][A-Za-z0-9.+!]*)-py3-none-any\.whl$') {
+if ($FileName -notmatch '^datalab-([0-9](?:[A-Za-z0-9.+!]*[A-Za-z0-9])?)-py3-none-any\.whl$') {
     Write-Host "The package must be a datalab-<version>-py3-none-any.whl file."; exit 2
 }
 $Version = $Matches[1]
@@ -1031,12 +1105,8 @@ Step "Step 3 of 8: Installing uv (the tool that installs DataLab)"
 # turned off) or Python.
 @(Get-ChildItem Env: | Where-Object { $_.Name -match '^(UV|PIP)_' -or $_.Name -in 'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV' }) |
     ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
-$LocalBin = Join-Path $Env:USERPROFILE ".local\bin"
-$Env:Path = "$LocalBin;$Env:Path"
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-    powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/$UvVersion/install.ps1 | iex"
-}
-uv --version
+Install-PinnedUv
+& $Uv --version
 
 Step "Step 4 of 8: Installing DataLab"
 # Beside the data folders: versions\<version>\, current, previous, bin\datalab.cmd.
@@ -1088,12 +1158,12 @@ if ((Test-Path -LiteralPath $Complete) -and ((Get-Content -LiteralPath $Complete
     if (Test-Path -LiteralPath $Target) { Remove-Tree $Target }
     if (Test-Path -LiteralPath $Target) { Stop-Install "The folder $Target couldn't be replaced. Close DataLab, then run the installer again." }
     New-Item -ItemType Directory -Force -Path (Join-Path $Root "versions") | Out-Null
-    uv venv -q --no-config --python 3.13 $Target
+    & $Uv venv -q --no-config --python 3.13 $Target
     if ($LASTEXITCODE -ne 0) { Stop-Install "Making DataLab's Python environment didn't work (see the messages above)." }
     # Every file checked against requirements.txt's hashes, only wheels, and only from PyPI.
     Push-Location $Stage
     try {
-        uv pip install -q --no-config --require-hashes --only-binary :all: `
+        & $Uv pip install -q --no-config --require-hashes --only-binary :all: `
             --default-index https://pypi.org/simple `
             --python (Join-Path $Target "Scripts\python.exe") -r requirements.txt
     } finally { Pop-Location }
@@ -1119,6 +1189,8 @@ $Shim = @'
 @echo off
 rem Runs the DataLab version the launcher opens (named in ..\current).
 setlocal
+rem UTF-8 for Python's own text files and console, whatever the code page.
+set PYTHONUTF8=1
 set /p DATALAB_VERSION=<"%~dp0..\current"
 "%~dp0..\versions\%DATALAB_VERSION%\Scripts\datalab.exe" %*
 exit /b %ERRORLEVEL%
@@ -1135,7 +1207,7 @@ $DataLab = Join-Path $Bin "datalab.cmd"
 # running (checked above), so its files can go.
 if (Test-Path -LiteralPath (Join-Path $Env:APPDATA "uv\tools\datalab")) {
     # (Invoke-Quiet: uv's messages on its error output would stop this script.)
-    $code = Invoke-Quiet (Get-Command uv).Source @("tool", "uninstall", "datalab") 120
+    $code = Invoke-Quiet $Uv @("tool", "uninstall", "datalab") 120
     if ($code -eq 0) { Say "(Removed the copy of DataLab an earlier installer made.)" }
 }
 
@@ -1181,7 +1253,7 @@ $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 $LinkName = if ($Practice) { "DataLab (practice)" } else { "DataLab" }
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "$LinkName.lnk"))
 $Shortcut.TargetPath = $WindowsPowerShell
-$Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$($DataLab -replace "'", "''")' --profile $DataLabProfile serve`""
+$Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$([System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab))' --profile $DataLabProfile serve`""
 $Shortcut.Description = if ($Practice) { "IHS DataLab (practice: synthetic data only)" } else { "IHS DataLab" }
 $Shortcut.Save()
 Good "Added $LinkName to the Start menu."

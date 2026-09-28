@@ -145,20 +145,73 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile("installer/windows/$file", [ref]$null, [ref]$errors) | Out-Null
             if ($errors) { $errors | ForEach-Object { Write-Host "${file}: $_" }; exit 1 }
           }
-      - name: Without -Package, the package beside the installer is used
+      - name: Without -Package, the one package beside the installer is used (and only one)
         shell: powershell
         run: |
-          $dir = New-Item -ItemType Directory -Path (Join-Path $Env:RUNNER_TEMP "beside")
-          Set-Content (Join-Path $dir "datalab-0.0.0-py3-none-any.whl") "x"
-          Set-Content (Join-Path $dir "requirements.txt") "x"
           $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
           $start = $script.IndexOf('if (-not $Package) {')
           $end = $script.IndexOf('if (-not $Requirements) { Write-Host')
-          $ScriptFolder = $dir.FullName; $Package = ""; $Requirements = ""
-          Invoke-Expression $script.Substring($start, $end - $start)
-          if ($Package -ne (Join-Path $dir "datalab-0.0.0-py3-none-any.whl")) { Write-Host "Package: '$Package'"; exit 1 }
-          if ($Requirements -ne (Join-Path $dir "requirements.txt")) { Write-Host "Requirements: '$Requirements'"; exit 1 }
-          Write-Host "Found $Package and $Requirements"
+          $slice = $script.Substring($start, $end - $start)
+          # Each case runs in a PowerShell of its own, as the lines exit on a problem.
+          function Run-Case($name, [string[]]$wheels) {
+            $dir = New-Item -ItemType Directory -Force -Path (Join-Path $Env:RUNNER_TEMP "beside-$name")
+            foreach ($wheel in $wheels) { Set-Content (Join-Path $dir $wheel) "x" }
+            Set-Content (Join-Path $dir "requirements.txt") "x"
+            $case = Join-Path $Env:RUNNER_TEMP "case-$name.ps1"
+            Set-Content $case ("`$ScriptFolder = '$($dir.FullName)'; `$Package = ''; `$Requirements = ''`n" + $slice + "`n'PACKAGE=' + `$Package")
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $case 2>&1 | Out-String
+            return @{ Code = $LASTEXITCODE; Out = $out; Dir = $dir.FullName }
+          }
+          $one = Run-Case "one" @("datalab-0.0.0-py3-none-any.whl")
+          if ($one.Code -ne 0 -or $one.Out -notmatch [regex]::Escape("PACKAGE=" + (Join-Path $one.Dir "datalab-0.0.0-py3-none-any.whl"))) { Write-Host $one.Out; exit 1 }
+          $none = Run-Case "none" @()
+          if ($none.Code -ne 2 -or $none.Out -notmatch "isn't in the installer's folder") { Write-Host $none.Out; exit 1 }
+          $two = Run-Case "two" @("datalab-0.0.0-py3-none-any.whl", "datalab-0.0.1-py3-none-any.whl")
+          if ($two.Code -ne 2 -or $two.Out -notmatch "more than one DataLab package") { Write-Host $two.Out; exit 1 }
+          Write-Host "One package: used. None, or two: refused, saying why."
+      - name: Only package names with a version are accepted
+        shell: powershell
+        run: |
+          $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
+          $start = $script.IndexOf('$IsUrl =')
+          $marker = '$Version = $Matches[1]'
+          $slice = $script.Substring($start, $script.IndexOf($marker) + $marker.Length - $start)
+          $cases = @{ "datalab-0.1.0a3-py3-none-any.whl" = 0; "datalab-7-py3-none-any.whl" = 0
+            "datalab-1.-py3-none-any.whl" = 2; "datalab-latest-py3-none-any.whl" = 2; "datalab-.1-py3-none-any.whl" = 2 }
+          foreach ($name in $cases.Keys) {
+            $dir = New-Item -ItemType Directory -Force -Path (Join-Path $Env:RUNNER_TEMP ("name-" + [guid]::NewGuid()))
+            Set-Content (Join-Path $dir $name) "x"; Set-Content (Join-Path $dir "requirements.txt") "x"
+            $case = Join-Path $dir "case.ps1"
+            Set-Content $case ("Set-Location '$($dir.FullName)'; `$Package = '$name'; `$Requirements = ''`n" + $slice + "`n'VERSION=' + `$Version")
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $case 2>&1 | Out-String
+            if ($LASTEXITCODE -ne $cases[$name]) { Write-Host "$name -> exit $LASTEXITCODE`n$out"; exit 1 }
+            Write-Host "$name -> exit $LASTEXITCODE"
+          }
+      - name: The pinned uv downloads, matches its SHA-256, and is signed by its publisher
+        # The installer's own function, run on its own: this checks the pins
+        # (and how Windows names the publisher) before anyone installs.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
+          $ast = [System.Management.Automation.Language.Parser]::ParseInput($script, [ref]$null, [ref]$null)
+          foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+            if ($f.Name -in "Say", "Good", "Stop-Install", "Remove-Tree", "Get-Organisation", "Install-PinnedUv") {
+              . ([scriptblock]::Create($f.Extent.Text))
+            }
+          }
+          foreach ($pin in "UvVersion", "UvZipUrl", "UvZipSha256", "UvPublisher") {
+            $line = [regex]::Match($script, "(?m)^\`$$pin = .*$").Value
+            Invoke-Expression $line
+          }
+          $StateDir = Join-Path $Env:RUNNER_TEMP "DataLab"
+          $UvDir = Join-Path $StateDir "uv"; $Uv = Join-Path $UvDir "uv.exe"
+          New-Item -ItemType Directory -Force $StateDir | Out-Null
+          Install-PinnedUv
+          $said = & $Uv --version
+          if ($said -notmatch "^uv $([regex]::Escape($UvVersion))( |$)") { Write-Host "uv says: $said"; exit 1 }
+          Install-PinnedUv  # a second run reuses it
+          Write-Host "Pinned $said is fine."
       - name: A bare package file name finds requirements.txt beside it
         shell: powershell
         run: |

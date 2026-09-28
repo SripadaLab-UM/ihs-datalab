@@ -581,6 +581,26 @@ Windows specifics).
     person to close it and waits; with `-Yes` it stops and says so. It never
     stops DataLab itself. (Re-running an older installer while DataLab ran
     failed with "Access is denied" removing uv's copy.)
+    - **For IT:** under `-Yes`, *anything* listening on 127.0.0.1 or any
+      address at port 8765 or 8766 stops the install, with a message saying
+      which, even if it isn't DataLab. Free the port or run it interactively.
+  - uv comes from its own release, pinned: step 3 downloads
+    `uv-x86_64-pc-windows-msvc.zip` for the version in `install.ps1`
+    (`$UvVersion`) from `github.com/astral-sh/uv/releases`, checks it
+    against the pinned SHA-256 (`$UvZipSha256`), unpacks it as the person
+    into `%LOCALAPPDATA%\DataLab\uv`, and checks that `uv.exe` is
+    Authenticode-signed by `$UvPublisher` ("OpenAI OpCo, LLC" for uv
+    0.12.19). Steps 4 onward use that `uv.exe` by full path, never one on
+    `PATH` (DataLab's updater uses it too). No script is piped from the
+    web. **To move to a newer uv**, change `$UvVersion` and `$UvZipUrl`
+    together, set `$UvZipSha256` from that release's
+    `uv-x86_64-pc-windows-msvc.zip.sha256` file (it should match GitHub's
+    digest for the zip), and check the signer's organisation hasn't changed
+    (CI's windows-installer job downloads the pinned zip and checks all
+    three).
+  - `bin\datalab.cmd` (and the Mac `bin/datalab`) set `PYTHONUTF8=1`, so
+    DataLab's Python reads and writes UTF-8 whatever the code page: a
+    Windows smoke test hit cp1252 errors without it.
   - After the keys, it offers the GitHub sign-in and syncs the lab repos
     (step 7), as the person, never elevated; skipped with `-Practice`,
     `-NoGitHub` or `-Yes`. `-Practice` and `-NoGitHub` are kept across the
@@ -596,9 +616,11 @@ Windows specifics).
     quietly), so the expected cases (no group yet, already a member) don't
     show up in logs as errors.
   - `uninstall.ps1` removes every installed version and both Start menu
-    entries, and ends by saying what it leaves installed (Docker Desktop,
-    WSL and its Windows features, uv, `docker-users` membership) and how to
-    remove each.
+    entries: only `versions`, `bin`, `current` and `previous` in the app
+    folder (the folder itself only if nothing else is left in it), the
+    installer's staging folder and DataLab's own uv. It ends by saying what
+    it leaves installed (Docker Desktop, WSL and its Windows features, uv's
+    downloads, `docker-users` membership) and how to remove each.
 - Credentials go in Windows Credential Manager, and paths use
   `%LOCALAPPDATA%`.
 - **Updating on Windows is UNTESTED on a real machine.** It follows the
