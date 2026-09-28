@@ -46,6 +46,7 @@ export function DockedChat({
   placeholder,
   sendLabel,
   onSending,
+  active = true,
 }: {
   /** The mode a new conversation starts in: "extraction", "engineering"... */
   mode: string;
@@ -61,6 +62,8 @@ export function DockedChat({
   sendLabel?: string;
   /** Called as Send is pressed (or a starter picked), before anything is sent. */
   onSending?: () => void;
+  /** False while the tab keeps the chat but doesn't show it (closed): it stops following the conversation until shown. */
+  active?: boolean;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
   // The first message, shown in the new conversation until its event arrives.
@@ -115,6 +118,7 @@ export function DockedChat({
         placeholder={placeholder}
         sendLabel={sendLabel}
         pending={started?.id === conversation.id ? firstMessage : undefined}
+        active={active}
       />
     );
   }

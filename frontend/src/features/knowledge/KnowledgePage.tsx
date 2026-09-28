@@ -9,7 +9,9 @@ import { InternalLinks, Markdown } from "@/components/chat/Markdown";
 import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
-import { useMediaQuery, useOverlay } from "@/components/ui/overlay";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
+import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
 import { KnowledgeTree } from "./KnowledgeTree";
@@ -17,13 +19,17 @@ import { findPage, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
 import { settingsLink } from "@/features/settings/highlight";
 
-const WIDE = "(min-width: 1280px)";
-// Below these widths the list and the chat are shown over the page.
-const LIST_BESIDE = "(min-width: 1024px)";
 // Knowledge writing (sessions/modes.py): helps write or tidy a page or skill,
 // with the catalog tools that table and query pages cite, and no queries. Its
 // edits to /work/kb come back as proposed-edit cards in this chat.
 export const CHAT_MODE = "knowledge";
+
+/** Space either side of the reading column, growing with the page between the panels: never under 16px
+ *  (16px where the browser has no container units). */
+export const READING_GUTTER = "px-4 supports-[width:1cqi]:px-[clamp(16px,4cqi,48px)]";
+/** The reading column: centred, as wide as a comfortable line of the page's text (running text is kept to 72ch
+ *  within it, `.dl-reading`); title, facts and body share its left edge. */
+export const READING_COLUMN = "dl-reading mx-auto w-full min-w-0 max-w-[46rem]";
 
 /** Knowledge pages, lab skills and their change history, with a chat that helps write or tidy a page or skill. */
 export function KnowledgePage() {
@@ -65,19 +71,24 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   const [drawer, setDrawer] = useState(false);
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
     "datalab:kb:chat-open",
-    typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
+    typeof window !== "undefined" && window.matchMedia?.(CHAT_DOCK).matches ? "open" : "closed",
   );
   const [chatId, setChatId] = useTabState("datalab:kb:chat", "");
   const [chatKey, setChatKey] = useState(0);
   // Over the page, each is a dialog: focus in it and kept there, Escape closes it.
-  const listBeside = useMediaQuery(LIST_BESIDE);
-  const chatBeside = useMediaQuery(WIDE);
+  // Below NAV_DOCK and CHAT_DOCK the list and the chat are shown over the page.
+  const panels = usePanels("knowledge", { chatOpen: chatOpen === "open" });
+  const chatKept = useKeptOnceOpen(chatOpen === "open");
+  const listBeside = panels.navDocked;
+  const chatBeside = panels.chatDocked;
   const drawerBox = useRef<HTMLElement>(null);
   const chatBox = useRef<HTMLElement>(null);
+  // Docked again (the window widened), the list is no longer a drawer to close.
+  if (drawer && listBeside) setDrawer(false);
   const drawerOver = drawer && !listBeside;
   const chatOver = chatOpen === "open" && !chatBeside;
   useOverlay(drawerBox, drawerOver, () => setDrawer(false));
-  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-kb-ask]"));
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-kb-ask]"), messageBox);
 
   const sync = useMutation({
     mutationFn: knowledgeApi.sync,
@@ -123,32 +134,28 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   );
 
   return (
-    <div
-      className={clsx(
-        "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)]",
-        chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
-      )}
-    >
-      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+    <div ref={panels.ref} data-panels="knowledge" style={panels.style} className="relative grid h-full min-h-0">
+      {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
       <aside
         ref={drawerBox}
+        id={panels.navId}
         aria-label="Pages and skills"
         role={drawerOver ? "dialog" : undefined}
         aria-modal={drawerOver || undefined}
         tabIndex={-1}
-        className={clsx(
-          "min-h-0 overflow-hidden border-r border-line bg-rail",
-          drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
-        )}
+        className={navClass(listBeside, drawer)}
       >
         <KnowledgeTree entries={entries} selected={found?.path ?? path} reveal={Boolean(selected)} onOpen={open} loading={pages.isPending} />
       </aside>
 
-      <main className="flex min-h-0 min-w-0 flex-col">
+      {/* A size container: the reading column's margins follow the page's own width, as the panels beside it change. */}
+      <main className="@container flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show pages and skills">
-            <Icon name="menu" size={16} />
-          </Button>
+          {!listBeside && (
+            <Button variant="ghost" className="-ml-2 px-2" onClick={() => setDrawer(true)} aria-label="Show pages and skills">
+              <Icon name="menu" size={16} />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">Knowledge</h1>
             <RepoLine status={status} onSync={() => sync.mutate()} syncing={sync.isPending} error={sync.error?.message} />
@@ -167,9 +174,16 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
           value={view}
           onChange={setView}
         />
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <div data-reading-scroll className={clsx("min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-5", READING_GUTTER)}>
           {view === "history" ? (
             <History repo={status.name} entries={entries} onOpen={open} />
+          ) : pages.isPending ? (
+            // Never "Nothing here yet" before the pages are in.
+            <LoadingRows label="Loading the knowledge base…" rows={4} className={READING_COLUMN} />
+          ) : pages.isError && !pages.data ? (
+            <div className={READING_COLUMN}>
+              <LoadFailed message={`The pages couldn't be read: ${pages.error.message}`} onRetry={() => void pages.refetch()} retrying={pages.isFetching} />
+            </div>
           ) : !head ? (
             <EmptyNote icon="book" title="Nothing here yet">
               {status.signed_in ? "Press Sync to download the knowledge base from GitHub." : <SignInFirst />}
@@ -188,28 +202,31 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         </div>
       </main>
 
-      {chatOpen === "open" && (
-        <>
-          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
-          <aside
-            ref={chatBox}
-            aria-label="Knowledge chat"
-            role={chatOver ? "dialog" : undefined}
-            aria-modal={chatOver || undefined}
-            tabIndex={-1}
-            className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
-          >
-            <DockedChat
-              key={chatKey}
-              mode={CHAT_MODE}
-              conversationId={chatId || undefined}
-              onConversation={(conversation) => setChatId(conversation.id)}
-              context={context}
-              headerActions={chatActions}
-            />
-          </aside>
-        </>
+      {chatOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />}
+      {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
+      {chatKept && (
+        <aside
+          ref={chatBox}
+          id={panels.chatId}
+          aria-label="Knowledge chat"
+          hidden={chatOpen !== "open"}
+          role={chatOver ? "dialog" : undefined}
+          aria-modal={chatOver || undefined}
+          tabIndex={-1}
+          className={chatClass(chatBeside)}
+        >
+          <DockedChat
+            key={chatKey}
+            mode={CHAT_MODE}
+            conversationId={chatId || undefined}
+            onConversation={(conversation) => setChatId(conversation.id)}
+            context={context}
+            headerActions={chatActions}
+            active={chatOpen === "open"}
+          />
+        </aside>
       )}
+      {panels.dividers}
     </div>
   );
 }
@@ -269,7 +286,7 @@ function PageView({ page, entries, repo, onOpen }: { page: KbPage; entries: KbEn
   const github = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? `https://github.com/${repo}/blob/${page.head}/${page.path}` : null;
   const markdown = page.path.endsWith(".md");
   return (
-    <article className="mx-auto flex max-w-[46rem] flex-col gap-5">
+    <article data-reading-column className={clsx(READING_COLUMN, "flex flex-col gap-5")}>
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-[12.5px] text-muted">{page.path}</span>
         {github && (
@@ -390,7 +407,7 @@ function History({ repo, entries, onOpen }: { repo: string | null | undefined; e
     );
   }
   return (
-    <ol className="mx-auto flex max-w-[46rem] flex-col">
+    <ol className={clsx(READING_COLUMN, "flex flex-col")}>
       {history.data.map((commit) => (
         <CommitRow key={commit.commit} commit={commit} repo={repo} entries={entries} onOpen={onOpen} />
       ))}

@@ -288,11 +288,16 @@ body {
     padding: 0;
     font-size: 0.72em;
   }
-  /* A wide table scrolls within itself, never the chat. */
-  .prose-datalab table {
-    display: block;
+  /* A wide table (in its Markdown wrapper) or code block scrolls within
+     itself, never the chat or the page. */
+  .prose-datalab .dl-scroll-x {
     max-width: 100%;
     overflow-x: auto;
+  }
+  .prose-datalab pre {
+    max-width: 100%;
+  }
+  .prose-datalab table {
     border-collapse: collapse;
     font-family: var(--font-mono);
     font-size: 0.72em;
@@ -311,6 +316,10 @@ body {
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--color-faint);
+  }
+  /* The Knowledge tab's reading column: running text keeps a shorter line. */
+  .dl-reading .prose-datalab :where(p, li, h1, h2, h3, blockquote) {
+    max-width: 72ch;
   }
   .prose-datalab a {
     text-decoration: underline;

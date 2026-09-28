@@ -534,3 +534,107 @@ it("points to the chat's change waiting for review in Pipelines", async () => {
   expect(await screen.findByText("Pipelines tab")).toBeInTheDocument();
   expect(sessionStorage.getItem("datalab:pipelines:proposal")).toBe("p_mine");
 });
+
+it("shows a loading state while the list loads, never the empty call to action, then the list", async () => {
+  let resolve!: (value: Workflow[]) => void;
+  vi.mocked(workflowsApi.list).mockReturnValue(new Promise((r) => (resolve = r)));
+  show("/workflows");
+  const loading = await screen.findByRole("status");
+  expect(loading).toHaveTextContent("Loading workflows…");
+  expect(loading).toHaveAttribute("aria-live", "polite");
+  expect(screen.queryByText("Make your first workflow")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /New workflow/ })).not.toBeInTheDocument();
+  await act(async () => resolve([workflow()]));
+  expect(await screen.findByRole("list", { name: "Workflows" })).toBeInTheDocument();
+  expect(screen.queryByText("Loading workflows…")).not.toBeInTheDocument();
+});
+
+it("shows the empty state only once the list has loaded and is empty", async () => {
+  vi.mocked(workflowsApi.list).mockResolvedValue([]);
+  show("/workflows");
+  expect(await screen.findByText("Make your first workflow")).toBeInTheDocument();
+  expect(screen.queryByText("Loading workflows…")).not.toBeInTheDocument();
+});
+
+it("says when the list couldn't be read, and Retry reads it again", async () => {
+  vi.mocked(workflowsApi.list).mockRejectedValueOnce(new Error("DataLab couldn't be reached.")).mockResolvedValue([workflow()]);
+  show("/workflows");
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("DataLab couldn't be reached.");
+  expect(screen.queryByText("Make your first workflow")).not.toBeInTheDocument();
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByRole("list", { name: "Workflows" })).toBeInTheDocument();
+  expect(workflowsApi.list).toHaveBeenCalledTimes(2);
+});
+
+it("puts New workflow and Ask for help in one header action area, New workflow last, with no padding kept for them", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "closed");
+  show("/workflows");
+  const link = await screen.findByRole("link", { name: /New workflow/ });
+  const area = link.parentElement!;
+  expect(area).toHaveAttribute("data-header-actions");
+  expect(area.className).toMatch(/\bml-auto\b/);
+  expect(area.className).toMatch(/\bflex-wrap\b/);
+  expect(area.className).toMatch(/\bjustify-end\b/);
+  const ask = within(area).getByRole("button", { name: /Ask for help/ });
+  expect(area.lastElementChild).toBe(link);
+  expect(area.firstElementChild).toBe(ask);
+  const header = area.closest("header")!;
+  expect(header).toHaveAttribute("data-page-header");
+  expect(header.className).toMatch(/\bflex-wrap\b/);
+  expect(header.className).not.toMatch(/\bpr-\d/);
+  // The header spans the same column as the list below it: no padding of its own on the right.
+  expect(header.parentElement).toBe(screen.getByRole("list", { name: "Workflows" }).parentElement);
+  // No second, floating Ask for help over the page.
+  expect(screen.getAllByRole("button", { name: /Ask for help/ })).toHaveLength(1);
+
+  // With the chat open, New workflow stays at the end of the same area.
+  fireEvent.click(ask);
+  expect(screen.queryByRole("button", { name: /Ask for help/ })).not.toBeInTheDocument();
+  expect(link.parentElement).toBe(area);
+  expect(area.lastElementChild).toBe(link);
+});
+
+it("gives New workflow's page the same header, with Ask for help at its right", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "closed");
+  show("/workflows/new");
+  const heading = await screen.findByRole("heading", { level: 1, name: "New workflow" });
+  const header = heading.closest("header")!;
+  expect(header).toHaveAttribute("data-page-header");
+  expect(header.className).not.toMatch(/\bpr-\d/);
+  const area = header.querySelector("[data-header-actions]")!;
+  expect(within(area as HTMLElement).getByRole("button", { name: /Ask for help/ })).toBeInTheDocument();
+});
+
+it("on a narrow window, the files drawer takes focus, keeps it, closes on Escape and gives focus back", async () => {
+  show("/workflows");
+  const menu = await screen.findByRole("button", { name: "Show workflow files" });
+  menu.focus();
+  fireEvent.click(menu);
+  const drawer = screen.getByRole("dialog", { name: "Workflow files" });
+  const links = within(drawer).getAllByRole("link");
+  await waitFor(() => expect(links[0]).toHaveFocus());
+  links.at(-1)!.focus();
+  fireEvent.keyDown(links.at(-1)!, { key: "Tab" });
+  expect(links[0]).toHaveFocus();
+  fireEvent.keyDown(links[0], { key: "Tab", shiftKey: true });
+  expect(links.at(-1)).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(menu).toHaveFocus());
+  expect(screen.queryByRole("dialog", { name: "Workflow files" })).toBeNull();
+});
+
+it("on a narrow window, the chat is a dialog; closed with Escape it's kept but inactive, and focus returns to Ask for help", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "closed");
+  show("/workflows");
+  const ask = await screen.findByRole("button", { name: /Ask for help/ });
+  ask.focus();
+  fireEvent.click(ask);
+  const box = screen.getByRole("dialog", { name: "Workflow authoring chat" });
+  await waitFor(() => expect(box).toContainElement(document.activeElement as HTMLElement));
+  expect((chatProps.mock.lastCall![0] as { active: boolean }).active).toBe(true);
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(screen.getByRole("button", { name: /Ask for help/ })).toHaveFocus());
+  expect(box).not.toBeVisible();
+  expect((chatProps.mock.lastCall![0] as { active: boolean }).active).toBe(false);
+});

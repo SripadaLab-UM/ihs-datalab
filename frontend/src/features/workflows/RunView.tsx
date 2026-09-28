@@ -10,6 +10,7 @@ import { runKey, useRun } from "./hooks";
 import { ReplayDialog } from "./ReplayDialog";
 import { RunSteps } from "./Steps";
 import { delivering, isLive, MODE, runPath, runStatus, short, when, workflowPath } from "./words";
+import { PageHeader } from "./PageHeader";
 
 /** One run's page: its steps as they go, what it pinned, its delivery, and Run again and Replay. */
 export function RunPage({ runId }: { runId: string }) {
@@ -28,21 +29,23 @@ export function RunPage({ runId }: { runId: string }) {
   const detail = run.data;
   return (
     <div className="flex flex-col gap-7 px-6 pt-4 pb-10">
-      <header className="flex flex-col gap-1">
-        <p className="font-sans text-[12.5px] text-muted">
-          <Link to="/workflows" className="hover:text-ink">
-            Workflows
-          </Link>{" "}
-          ·{" "}
-          <Link to={workflowPath(detail.workflow_path)} className="hover:text-ink">
-            {detail.workflow_name}
-          </Link>
-        </p>
-        <h1 className="font-serif text-[23px] leading-tight">
-          {MODE[detail.mode]} of {detail.workflow_name}
-        </h1>
-        <RunLine run={detail} />
-      </header>
+      <PageHeader>
+        <div className="flex flex-col gap-1">
+          <p className="font-sans text-[12.5px] text-muted">
+            <Link to="/workflows" className="hover:text-ink">
+              Workflows
+            </Link>{" "}
+            ·{" "}
+            <Link to={workflowPath(detail.workflow_path)} className="hover:text-ink">
+              {detail.workflow_name}
+            </Link>
+          </p>
+          <h1 className="font-serif text-[23px] leading-tight">
+            {MODE[detail.mode]} of {detail.workflow_name}
+          </h1>
+          <RunLine run={detail} />
+        </div>
+      </PageHeader>
       <RunProgress run={detail} />
       {detail.mode === "replay" && <ReplayOutcome run={detail} />}
       <section aria-labelledby="delivery-title" className="flex flex-col gap-2">

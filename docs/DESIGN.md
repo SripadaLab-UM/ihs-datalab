@@ -151,9 +151,12 @@ arrow, so without them nothing shows the hand):
   drawer, chat or dialog, which Escape also closes), `data-row` (the results
   grid, keyboard on the grid) and `data-tree-row` (keyboard on the parent
   treeitem).
-- There are no drag handles or resizers yet. When one is added, it gets
-  `cursor-col-resize` / `cursor-row-resize`, or `cursor-grab` with
-  `active:cursor-grabbing`.
+- Drag handles and resizers get `cursor-col-resize` / `cursor-row-resize`,
+  or `cursor-grab` with `active:cursor-grabbing`. The panel dividers
+  (`components/layout/panels.tsx`) are focusable `role="separator"`
+  window splitters: the lint counts a separator with a tabIndex as a
+  control, and it handles its own keys (arrows, Shift+arrows, Home, End,
+  Enter to reset).
 
 ## Writing
 

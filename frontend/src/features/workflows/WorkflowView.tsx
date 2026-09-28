@@ -19,6 +19,7 @@ import { DeliveryBlocked } from "./Delivery";
 import { useRun } from "./hooks";
 import { NoRunsYet, RunLine, RunProgress } from "./RunView";
 import { byLine, isLive, MODE, problemWhere, runPath, runStatus, STEP_KIND, when } from "./words";
+import { PageHeader } from "./PageHeader";
 
 /** One workflow: its file (read-only), its checks, a form to run it, the run as it goes, and its history. */
 export function WorkflowView({ workflow }: { workflow: Workflow }) {
@@ -37,30 +38,32 @@ export function WorkflowView({ workflow }: { workflow: Workflow }) {
 
   return (
     <div className="flex flex-col gap-7 px-6 pt-4 pb-10">
-      <header className="flex flex-col gap-1">
-        <p className="font-sans text-[12.5px] text-muted">
-          <Link to="/workflows" className="hover:text-ink">
-            Workflows
-          </Link>
-        </p>
-        <h1 className="font-serif text-[23px] leading-tight">{workflow.name ?? workflow.path}</h1>
-        {workflow.description && <p className="max-w-[46rem] font-serif text-[16px] text-ink">{workflow.description}</p>}
-        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-[12.5px] text-muted">
-          <span className="font-mono text-[12px]">{workflow.path}</span>
-          {workflow.valid ? (
-            <Chip tone="good">passes its checks</Chip>
-          ) : (
-            <Chip tone="bad">{workflow.problems.length === 1 ? "1 problem" : `${workflow.problems.length} problems`}</Chip>
-          )}
-          {workflow.source === "git" ? (
-            <span className="font-mono text-[12px]" title={workflow.blob ?? ""}>
-              commit {workflow.commit?.slice(0, 10)}
-            </span>
-          ) : (
-            workflow.source === "file" && <span>not committed to git</span>
-          )}
-        </p>
-      </header>
+      <PageHeader>
+        <div className="flex flex-col gap-1">
+          <p className="font-sans text-[12.5px] text-muted">
+            <Link to="/workflows" className="hover:text-ink">
+              Workflows
+            </Link>
+          </p>
+          <h1 className="font-serif text-[23px] leading-tight">{workflow.name ?? workflow.path}</h1>
+          {workflow.description && <p className="max-w-[46rem] font-serif text-[16px] text-ink">{workflow.description}</p>}
+          <p className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-[12.5px] text-muted">
+            <span className="font-mono text-[12px]">{workflow.path}</span>
+            {workflow.valid ? (
+              <Chip tone="good">passes its checks</Chip>
+            ) : (
+              <Chip tone="bad">{workflow.problems.length === 1 ? "1 problem" : `${workflow.problems.length} problems`}</Chip>
+            )}
+            {workflow.source === "git" ? (
+              <span className="font-mono text-[12px]" title={workflow.blob ?? ""}>
+                commit {workflow.commit?.slice(0, 10)}
+              </span>
+            ) : (
+              workflow.source === "file" && <span>not committed to git</span>
+            )}
+          </p>
+        </div>
+      </PageHeader>
 
       {!workflow.valid && <Problems problems={workflow.problems} />}
       <DeliveryBlocked workflow={workflow} />

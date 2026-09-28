@@ -30,6 +30,7 @@ and records the commit it came from.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import os
 import re
@@ -374,11 +375,14 @@ class WorkflowFolder:
             known = self._ids.get(full.relative_to(self.root).as_posix())
             return known if known is not None and known[0] == git_blob_id(data) else (None, None)
         try:
-            top = _git(self.root, "rev-parse", "--show-toplevel")
-            commit = _git(self.root, "rev-parse", "--verify", "HEAD^{commit}")
+            # One git call per file (where it was three): the repo, and the commit checked out.
+            found = _git(self.root, "rev-parse", "--show-toplevel", "HEAD^{commit}")
+            top, commit = found.splitlines()
             in_repo = full.resolve().relative_to(Path(top).resolve()).as_posix()
-            committed = _git(self.root, "rev-parse", f"HEAD:{in_repo}")
+            committed = _committed_blobs(top, commit).get(in_repo)
         except (SourceError, ValueError):
+            return None, None
+        if committed is None:
             return None, None
         # Line endings: git may check out LF files as CRLF on Windows.
         current = {git_blob_id(data), git_blob_id(data.replace(b"\r\n", b"\n"))}
@@ -490,6 +494,22 @@ def _read_limited(path: Path, limit: int) -> bytes:
     if len(data) > limit:
         raise SourceError(f"{path.name} is larger than {size_text(limit)}.")
     return data
+
+
+@functools.lru_cache(maxsize=16)
+def _committed_blobs(top: str, commit: str) -> dict[str, str]:
+    """Every file's blob id in `commit`, by its path in the repo. A commit never
+    changes, so this is read once per commit (one git call) and kept, however
+    many workflow files are looked up in it: listing the workflows no longer
+    runs git three times per file."""
+    listing = _git(Path(top), "ls-tree", "-r", "-z", "--full-tree", commit)
+    blobs: dict[str, str] = {}
+    for entry in listing.split("\0"):
+        meta, _, path = entry.partition("\t")
+        parts = meta.split()
+        if len(parts) == 3 and parts[1] == "blob" and path:
+            blobs[path] = parts[2]
+    return blobs
 
 
 def _git(root: Path, *args: str) -> str:

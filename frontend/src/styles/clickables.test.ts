@@ -26,6 +26,8 @@ const NATIVE = new Set(["button", "a", "input", "select", "textarea", "summary",
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "checkbox",
   "radio", "treeitem", "gridcell", "row", "slider", "spinbutton", "combobox",
+  // Focusable, a separator is a widget (a window splitter: the panel dividers in components/layout/panels.tsx).
+  "separator",
 ]); // prettier-ignore
 
 /**
@@ -99,6 +101,10 @@ function problem(el: Found): string | null {
     const handler = el.attrs.get("onClick")?.initializer?.getText() ?? "";
     if (/^\{\s*\(\w*\)\s*=>\s*\w+\.stopPropagation\(\)\s*\}$/.test(handler)) return null;
   }
+  // A splitter says where it is and moves from the keyboard too.
+  if (role === "separator" && !(el.attrs.has("aria-valuenow") && el.attrs.has("onKeyDown"))) {
+    return 'role="separator" needs aria-valuenow and onKeyDown';
+  }
   if (role && INTERACTIVE_ROLES.has(role) && el.attrs.has("tabIndex")) return null;
   return role && !INTERACTIVE_ROLES.has(role) ? `role="${role}" isn't a control's role` : "no interactive role and tabIndex";
 }
@@ -126,7 +132,9 @@ it("catches the ways a handler can hide, and lets the marked exceptions through"
     const ok3 = <div data-tree-row onClick={go} />;
     const ok4 = <div role="dialog" onClick={(e) => e.stopPropagation()} />;
     const ok5 = <button onClick={go} />;
+    const f = <div role="separator" tabIndex={0} onPointerDown={go} />;
+    const ok6 = <div role="separator" tabIndex={0} aria-valuenow={1} onKeyDown={key} onPointerDown={go} />;
   `;
   const flagged = elements(join(__dirname, "sample.tsx"), sample).filter((el) => problem(el) !== null);
-  expect(flagged.map((el) => el.tag)).toEqual(["div", "li", "span", "section", "custom-el"]);
+  expect(flagged.map((el) => el.tag)).toEqual(["div", "li", "span", "section", "custom-el", "div"]);
 });
