@@ -498,10 +498,26 @@ def catalog_problem(
     )
 
 
-def _practice_database_ready(lazy: _LazyOracle | None, build: CatalogAutoBuild | None) -> None:
+# After practice's database is set up, the first sessions can meet a
+# passing error (MarkerNotVerified): the catalog build is tried again at
+# these intervals, then at the next query as usual (autocatalog.py).
+CATALOG_RETRY_DELAYS = (2.0, 5.0, 10.0, 20.0, 40.0)
+
+
+def _practice_database_ready(
+    lazy: _LazyOracle | None,
+    build: CatalogAutoBuild | None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
     _password_changed(lazy, build)
-    if build is not None:
-        build.ensure()
+    if build is None:
+        return
+    for delay in (*CATALOG_RETRY_DELAYS, None):
+        # Stopped (a wrong password, or truly not the synthetic database): no more tries.
+        if build.ensure() or build.stopped or delay is None:
+            return
+        sleep(delay)
+        build.try_again_soon()
 
 
 def _practice_busy(

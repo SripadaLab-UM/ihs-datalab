@@ -52,7 +52,14 @@ class LimitExceeded(QueryFailed):
 
 
 class NotSyntheticDatabase(QueryFailed):
-    pass
+    """The practice port's database has no marker table: not the synthetic one."""
+
+
+class MarkerNotVerified(QueryFailed):
+    """The marker couldn't be checked just now (the database answered with
+    another error). Refused like NotSyntheticDatabase, since no query runs
+    without a verified marker, but worth trying again: it isn't known to be
+    another database."""
 
 
 @dataclass
@@ -352,10 +359,20 @@ def _dates_only(path: Path, columns: list[int], stopped: Callable[[], None]) -> 
 
 
 def _require_marker(cursor: oracledb.Cursor) -> None:
+    """Fail closed: a query runs only once the marker is seen. Only "no
+    such table" (ORA-00942, which is also what a table this user can't read
+    looks like) says it isn't the synthetic database; any other error means
+    it couldn't be checked, which is refused too."""
     try:
         cursor.execute(f"SELECT COUNT(*) FROM {SYNTHETIC_MARKER}")
         (count,) = cursor.fetchone() or (0,)
-    except oracledb.Error:
+    except oracledb.Error as error:
+        code = getattr(error.args[0], "full_code", None) if error.args else None
+        if code != "ORA-00942":
+            raise MarkerNotVerified(
+                "DataLab couldn't check that this is the local synthetic database "
+                f"({code or type(error).__name__}), so no query was run. Try again in a moment."
+            ) from None
         count = 0
     if not count:
         raise NotSyntheticDatabase(

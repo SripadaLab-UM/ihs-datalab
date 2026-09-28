@@ -243,7 +243,7 @@ def check_database(
     """
     import oracledb
 
-    from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
+    from datalab.data.oracle import MarkerNotVerified, NotSyntheticDatabase, OracleDatabase
 
     try:
         password = oracle_password(oracle)
@@ -251,7 +251,7 @@ def check_database(
         return DatabaseCheck(False, str(missing))
     try:
         privileges = OracleDatabase(oracle, password, limits).session_privileges(timeout=timeout)
-    except NotSyntheticDatabase as error:
+    except (NotSyntheticDatabase, MarkerNotVerified) as error:
         return DatabaseCheck(False, str(error))
     except oracledb.Error as error:
         return DatabaseCheck(False, _database_problem(error, practice=practice))

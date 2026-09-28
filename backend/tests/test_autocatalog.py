@@ -435,3 +435,98 @@ def test_only_practice_looks_after_a_synthetic_database(tmp_path: Path) -> None:
     datalock.release_all()
     health = TestClient(create_app(settings, manage_containers=False)).get("/api/health").json()
     assert health["practice_database"] is None
+
+
+# ------------------------------------------------ the marker check fails closed
+
+
+class MarkerCursor:
+    """A cursor whose marker query answers with `error`, or `count` rows."""
+
+    def __init__(self, error: Exception | None = None, count: int = 1) -> None:
+        self.error, self.count = error, count
+
+    def execute(self, sql: str) -> None:
+        if self.error is not None:
+            raise self.error
+
+    def fetchone(self):
+        return (self.count,)
+
+
+def test_only_a_missing_marker_table_means_not_the_synthetic_database() -> None:
+    from datalab.data.oracle import MarkerNotVerified, _require_marker
+
+    _require_marker(MarkerCursor())  # seen: queries may run
+    for missing in (
+        MarkerCursor(_oracle_error("ORA-00942: table or view does not exist")),
+        MarkerCursor(count=0),
+    ):
+        with pytest.raises(NotSyntheticDatabase):
+            _require_marker(missing)  # type: ignore[arg-type]
+    # Any other error: still refused (no query without a verified marker),
+    # but not called "not synthetic", so the catalog build tries again.
+    for passing in (
+        _oracle_error("ORA-04021: timeout occurred while waiting to lock object"),
+        _oracle_error("DPY-4011: the database or network closed the connection"),
+    ):
+        with pytest.raises(MarkerNotVerified) as refused:
+            _require_marker(MarkerCursor(passing))  # type: ignore[arg-type]
+        assert not isinstance(refused.value, NotSyntheticDatabase)
+        assert isinstance(refused.value, QueryFailed)
+        assert "no query was run" in str(refused.value)
+
+
+def test_an_unverified_marker_is_tried_again_not_stopped(tmp_path: Path) -> None:
+    from datalab.data.oracle import MarkerNotVerified
+
+    clock, tries = Clock(), []
+
+    def build() -> Catalog:
+        tries.append(1)
+        if len(tries) == 1:
+            raise MarkerNotVerified("DataLab couldn't check that this is the synthetic database.")
+        return sample_catalog()
+
+    auto = CatalogAutoBuild(Catalog([]), tmp_path / "catalog", build, clock=clock)
+    assert auto.ensure() is False
+    assert not auto.stopped and auto.state == "waiting-for-database"
+    clock.now += RETRY_SECONDS
+    assert auto.ensure() is True and auto.state == "ready"
+
+
+def test_after_a_first_load_the_catalog_build_is_retried_with_backoff(tmp_path: Path) -> None:
+    from datalab.app import CATALOG_RETRY_DELAYS, _practice_database_ready
+    from datalab.data.oracle import MarkerNotVerified
+
+    clock, tries, slept = Clock(), [], []
+
+    def build() -> Catalog:
+        tries.append(1)
+        if len(tries) < 3:
+            raise MarkerNotVerified("couldn't check the marker (ORA-04021)")
+        return sample_catalog()
+
+    auto = CatalogAutoBuild(Catalog([]), tmp_path / "catalog", build, clock=clock)
+    _practice_database_ready(None, auto, sleep=slept.append)
+    assert auto.state == "ready" and len(tries) == 3
+    assert slept == list(CATALOG_RETRY_DELAYS[:2])
+
+    # A true "not synthetic" still stops at once, without retries.
+    def not_synthetic() -> Catalog:
+        raise NotSyntheticDatabase("not the synthetic database")
+
+    slept.clear()
+    stopped = CatalogAutoBuild(Catalog([]), tmp_path / "other", not_synthetic, clock=clock)
+    _practice_database_ready(None, stopped, sleep=slept.append)
+    assert stopped.stopped and slept == []
+
+    # And a passing error that doesn't pass: a few tries, then left for the next query.
+    def never() -> Catalog:
+        raise MarkerNotVerified("still can't check")
+
+    slept.clear()
+    waiting = CatalogAutoBuild(Catalog([]), tmp_path / "third", never, clock=clock)
+    _practice_database_ready(None, waiting, sleep=slept.append)
+    assert slept == list(CATALOG_RETRY_DELAYS)
+    assert not waiting.stopped and waiting.state == "waiting-for-database"
