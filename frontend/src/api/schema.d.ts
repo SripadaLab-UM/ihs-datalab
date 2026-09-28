@@ -2798,6 +2798,10 @@ export interface components {
             status: string | null;
             /** Kind */
             kind: string | null;
+            /** Related */
+            related: string[];
+            /** Cohorts */
+            cohorts: string[];
         };
         /** KbPageOut */
         KbPageOut: {

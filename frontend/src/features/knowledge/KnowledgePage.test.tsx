@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
@@ -30,7 +30,7 @@ const status = (more: Partial<KnowledgeStatus> = {}): KnowledgeStatus => ({
   last_error: null, ahead: 0, behind: 0, message: null, ...more,
 }); // prettier-ignore
 const entry = (path: string, place: string, title: string, more: Partial<KbEntry> = {}): KbEntry => ({
-  path, place, title, summary: "", size: 10, status: null, kind: null, ...more,
+  path, place, title, summary: "", size: 10, status: null, kind: null, related: [], cohorts: [], ...more,
 }); // prettier-ignore
 const ENTRIES = [
   entry("AGENTS.md", "top", "AGENTS.md"),
@@ -75,6 +75,7 @@ function show(at = "/knowledge") {
 beforeEach(() => {
   chat.props = null;
   sessionStorage.clear();
+  localStorage.clear();
   window.matchMedia = vi.fn(() => ({ matches: true })) as never; // wide: the chat starts open
   vi.mocked(knowledgeApi.status).mockReset().mockResolvedValue(status());
   vi.mocked(knowledgeApi.pages).mockReset().mockResolvedValue({ head: "abc1234def", pages: ENTRIES });
@@ -93,17 +94,21 @@ it("says why there's nothing, when the knowledge base isn't set up (practice)", 
   expect(screen.queryByText("docked chat")).toBeNull();
 });
 
-it("lists pages and skills by folder, opening on the index", async () => {
+it("lists pages and skills by section, opening on the index", async () => {
   show();
   expect(await screen.findByRole("heading", { name: "Knowledge base index" })).toBeTruthy();
-  const groups = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
-  expect(groups).toEqual(["About", "Data sources", "QC rules", "Lab skills"]);
-  expect(screen.getByRole("button", { name: /index.md/ }).getAttribute("aria-current")).toBe("page");
+  const tree = screen.getByRole("tree", { name: "Pages and skills" });
+  expect(within(tree).getAllByRole("treeitem").map((el) => el.getAttribute("aria-label"))).toEqual([
+    "Study documentation, 2 pages", "Data sources, 1 page", "Quality checks, 1 page", "Workflows and pipelines, 2 pages",
+  ]); // prettier-ignore
+  fireEvent.click(screen.getByRole("treeitem", { name: "Study documentation, 2 pages" }).firstElementChild!);
+  expect(screen.getByRole("treeitem", { name: "index.md" }).getAttribute("aria-selected")).toBe("true");
+  fireEvent.click(screen.getByRole("treeitem", { name: "Quality checks, 1 page" }).firstElementChild!);
   // Drafts say so in the list; reviewed pages don't need to.
-  expect(screen.getByRole("button", { name: /midnight-sleep/ }).textContent).toContain("draft");
-  fireEvent.change(screen.getByLabelText("Filter pages and skills"), { target: { value: "trackers" } });
-  expect(screen.queryByRole("button", { name: /midnight-sleep/ })).toBeNull();
-  expect(screen.getByRole("button", { name: /Fitbit trackers/ })).toBeTruthy();
+  expect(screen.getByRole("treeitem", { name: "midnight-sleep, draft" }).textContent).toContain("draft");
+  fireEvent.change(screen.getByLabelText("Search pages and skills"), { target: { value: "trackers" } });
+  expect(screen.queryByRole("treeitem", { name: /midnight-sleep/ })).toBeNull();
+  expect(screen.getByRole("treeitem", { name: "fitbit" }).textContent).toContain("Fitbit trackers.");
 });
 
 it("shows a page's front matter as facts and its text as Markdown, and follows links between pages", async () => {
@@ -177,7 +182,7 @@ it("opens a page from an address without .md", async () => {
   show("/knowledge/qc/midnight-sleep");
   expect(await screen.findByRole("heading", { name: "Midnight-spanning sleep" })).toBeTruthy();
   expect(knowledgeApi.page).toHaveBeenCalledWith("qc/midnight-sleep.md");
-  expect(screen.getByRole("button", { name: /midnight-sleep/ }).getAttribute("aria-current")).toBe("page");
+  expect(screen.getByRole("treeitem", { name: "midnight-sleep, draft" }).getAttribute("aria-selected")).toBe("true");
 });
 
 it("never runs what a page's text or front matter holds", async () => {
@@ -225,7 +230,7 @@ it("over a narrow page, the chat and the list are dialogs: focus in, kept there,
   menu.focus();
   fireEvent.click(menu);
   const drawer = await screen.findByRole("dialog", { name: "Pages and skills" });
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Filter pages and skills")));
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Search pages and skills")));
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(drawer.getAttribute("role")).toBeNull();
   expect(document.activeElement).toBe(menu);
