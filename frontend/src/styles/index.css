@@ -60,10 +60,11 @@
   --color-rail: #1b1a17;
   --color-field: #1d1c19;
   --color-sunken: #1f1e1b;
-  --color-line: #2e2d29;
+  --color-line: #3a3934;
+  --color-edge: #7b786f;
   --color-ink: #e9e6de;
-  --color-muted: #a39f94;
-  --color-faint: #8f8b81;
+  --color-muted: #b3afa4;
+  --color-faint: #9d998e;
   --color-accent: #e9e6de;
   --color-accent-soft: #26251f;
   --color-accent-ink: #161614;
