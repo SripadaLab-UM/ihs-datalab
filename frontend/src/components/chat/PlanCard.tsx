@@ -27,7 +27,7 @@ import {
 } from "./plan";
 
 const BOX =
-  "mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink disabled:opacity-60";
+  "mt-1.5 w-full resize-y border border-line bg-transparent px-3 py-2 font-serif text-[16px] leading-relaxed outline-none focus:border-ink";
 
 function rows(text: string): number {
   return Math.max(2, Math.ceil(text.length / 90) + text.split("\n").length - 1);
@@ -187,7 +187,7 @@ function PlanChanges({ before, after }: { before: PlanComparison; after: PlanV2 
   if (!diff.comparable) {
     return (
       <details className="mt-3 border border-line px-3 py-2.5">
-        <summary className="dl-label cursor-pointer">{heading}: it used the earlier plan format, shown in full</summary>
+        <summary className="dl-label hover:text-ink">{heading}: it used the earlier plan format, shown in full</summary>
         <PlanText plan={before.plan} />
       </details>
     );
@@ -530,7 +530,7 @@ function Editing({
             type="button"
             onClick={() => setOtherType("")}
             disabled={decided}
-            className="mr-auto font-sans text-[13px] text-muted underline decoration-faint underline-offset-4 hover:text-ink"
+            className="mr-auto font-sans text-[13px] text-muted underline decoration-faint underline-offset-4 enabled:hover:text-ink"
           >
             A different kind of analysis?
           </button>

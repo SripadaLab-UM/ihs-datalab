@@ -10,7 +10,7 @@ import { Button, Chip, Icon } from "@/components/ui";
 export type Edit = (edits: StageEdits, chosen?: DestinationChoice) => void;
 
 const FIELD =
-  "w-full rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13px] text-ink outline-none focus:border-ink disabled:opacity-60";
+  "w-full rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13px] text-ink outline-none focus:border-ink";
 const MONO = "font-mono text-[12.5px]";
 
 /** A draft as the three stages a workflow has: Extract → Process & QC → Deliver, each with plain fields. */

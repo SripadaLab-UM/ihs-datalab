@@ -75,7 +75,7 @@ export function FileViewer({
           {newer && (
             <span className="inline-flex items-center gap-2 rounded-full bg-attn-soft px-2.5 py-0.5 text-attn">
               A newer version has been saved.
-              <button type="button" className="font-medium underline" onClick={() => setChosen(latest)}>
+              <button type="button" className="font-medium underline hover:decoration-2" onClick={() => setChosen(latest)}>
                 Show the newest
               </button>
             </span>

@@ -14,11 +14,11 @@ export function Button({
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-[3px] px-3 py-1.5 font-sans text-[13.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-55",
-        variant === "primary" && "bg-accent text-accent-ink hover:opacity-85",
-        variant === "secondary" && "border border-line bg-transparent text-ink hover:border-ink",
-        variant === "danger" && "border border-danger/40 bg-transparent text-danger hover:border-danger",
-        variant === "ghost" && "text-muted hover:text-ink",
+        "inline-flex items-center justify-center gap-1.5 rounded-[3px] px-3 py-1.5 font-sans text-[13.5px] font-medium transition-colors",
+        variant === "primary" && "bg-accent text-accent-ink enabled:hover:opacity-85",
+        variant === "secondary" && "border border-line bg-transparent text-ink enabled:hover:border-ink",
+        variant === "danger" && "border border-danger/40 bg-transparent text-danger enabled:hover:border-danger",
+        variant === "ghost" && "text-muted enabled:hover:text-ink",
         className,
       )}
     />

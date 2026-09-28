@@ -2,7 +2,7 @@ import clsx from "clsx";
 import { type ReactNode, useState } from "react";
 
 import type { RunStep } from "@/api/workflows";
-import { Marker } from "@/components/chat/Story";
+import { HOVER_TITLE, Marker, Pressable } from "@/components/chat/Story";
 import { Chip } from "@/components/ui";
 
 import { duration, plural, short, STEP_KIND, stepStatus } from "./words";
@@ -39,17 +39,15 @@ function StepItem({ step }: { step: RunStep }) {
   const tone = step.status === "running" ? "now" : step.status === "failed" ? "error" : "done";
   return (
     <div>
-      <button
-        type="button"
-        disabled={!hasDetail}
-        onClick={() => setOpen(!open)}
-        aria-expanded={hasDetail ? open : undefined}
-        className="group flex w-full items-start gap-3 py-2.5 text-left disabled:cursor-default"
+      <Pressable
+        open={hasDetail ? open : null}
+        onToggle={() => setOpen(!open)}
+        className="flex w-full items-start gap-3 py-2.5 text-left"
       >
         <Marker tone={tone} open={hasDetail ? open : null} />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 font-sans text-[14px]">
-            <span className={clsx("font-mono text-[13px]", step.status === "failed" ? "text-danger" : "text-ink")}>
+            <span className={clsx("font-mono text-[13px]", HOVER_TITLE, step.status === "failed" ? "text-danger" : "text-ink")}>
               {step.step_id}
             </span>
             <span className="text-muted">{STEP_KIND[step.kind]}</span>
@@ -69,7 +67,7 @@ function StepItem({ step }: { step: RunStep }) {
             </span>
           )}
         </span>
-      </button>
+      </Pressable>
       {open && hasDetail && (
         <div className="flex flex-col gap-3 pb-4 pl-[19px]">
           <StepDetail step={step} checks={checks} />

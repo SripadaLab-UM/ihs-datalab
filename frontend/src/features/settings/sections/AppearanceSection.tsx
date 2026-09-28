@@ -25,7 +25,7 @@ export function AppearanceSection() {
               <label
                 key={choice.value}
                 className={clsx(
-                  "flex cursor-pointer items-start gap-2.5 rounded-[3px] border px-3 py-2.5 text-sm transition-colors focus-within:outline focus-within:outline-[1.5px] focus-within:outline-offset-2 focus-within:outline-ink",
+                  "flex cursor-pointer items-start gap-2.5 rounded-[3px] border px-3 py-2.5 text-sm transition-colors has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-ink",
                   chosen ? "border-ink" : "border-line hover:border-muted",
                 )}
               >

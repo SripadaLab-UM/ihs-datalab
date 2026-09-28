@@ -48,7 +48,7 @@ export function GuideMarkdown({
         const to = href ? resolveGuideLink(href, page) : null;
         if (to) {
           return (
-            <Link to={to} onClick={onNavigate}>
+            <Link to={to} onClick={onNavigate} className="hover:decoration-ink">
               {children}
             </Link>
           );

@@ -148,7 +148,7 @@ export function InfoTip({
         }}
         className={clsx(
           children
-            ? "inline-flex items-center rounded-[2px] text-left"
+            ? "inline-flex items-center rounded-[2px] text-left hover:underline hover:decoration-dotted hover:underline-offset-4"
             : "inline-flex size-[18px] items-center justify-center rounded-full text-faint hover:text-ink",
         )}
       >

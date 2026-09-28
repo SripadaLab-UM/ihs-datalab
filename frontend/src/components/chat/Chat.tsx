@@ -13,7 +13,7 @@ import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { type CheckLine, checkLines, failureChip, failures } from "./checks";
-import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
+import { GroupRow, HOVER_TITLE, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
@@ -333,7 +333,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
         />
         <span
           aria-hidden="true"
-          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink peer-disabled:opacity-70 after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
         />
         Rigor review
       </label>
@@ -400,8 +400,8 @@ export function EmptyState({
                   disabled={starting}
                   className="group flex w-full items-baseline gap-4 py-3.5 text-left font-serif text-[18.5px] leading-snug text-ink"
                 >
-                  <span className="flex-1 group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">{starter}</span>
-                  <Icon name="chevron" size={14} className="shrink-0 text-faint group-hover:text-ink" />
+                  <span className="flex-1 group-enabled:group-hover:underline group-enabled:group-hover:decoration-faint group-enabled:group-hover:underline-offset-4">{starter}</span>
+                  <Icon name="chevron" size={14} className="shrink-0 text-faint group-enabled:group-hover:text-ink" />
                 </button>
               </li>
             ))}
@@ -588,7 +588,9 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
       <button type="button" data-tour="how-made" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
         <Marker tone="done" open={open} />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
+          <span className="font-sans text-[14.5px] text-ink">
+            <span className={HOVER_TITLE}>How this answer was made</span>
+          </span>
           <span className="flex flex-wrap gap-1.5">
             {facts.map((fact) => (
               <Chip key={fact}>{fact}</Chip>
@@ -799,7 +801,9 @@ function ReviewBox({
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex flex-1 items-start gap-3 text-left">
         {reviewing ? <Marker tone="now" open={null} /> : <Marker tone="done" open={open} />}
         <span className="flex-1">
-          <span className="block font-sans text-[14.5px] text-ink">Rigor review</span>
+          <span className="block font-sans text-[14.5px] text-ink">
+            <span className={HOVER_TITLE}>Rigor review</span>
+          </span>
           <span className="block font-serif text-[15.5px] text-muted italic">
             {reviewing
               ? "The agent is checking its own work against the lab's checklist…"
@@ -820,7 +824,7 @@ function ReviewBox({
             type="button"
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger disabled:opacity-55"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 enabled:hover:text-danger"
           >
             Stop the review
           </button>
@@ -830,7 +834,7 @@ function ReviewBox({
             type="button"
             onClick={() => again.mutate()}
             disabled={running || again.isPending || again.isSuccess}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink disabled:opacity-55"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 enabled:hover:decoration-ink"
           >
             Run the review again
           </button>
@@ -1014,7 +1018,7 @@ function EffortSelect({ effort, onChange }: { effort: Effort; onChange: (effort:
       onChange={(e) => onChange(e.target.value as Effort)}
       aria-label="How hard the agent thinks"
       title="How hard the agent thinks, for the next message you send"
-      className="bg-transparent font-sans text-[12px] text-muted hover:text-ink"
+      className="bg-transparent font-sans text-[12px] text-muted enabled:hover:text-ink"
     >
       <option value="low">Quick</option>
       <option value="medium">Balanced</option>

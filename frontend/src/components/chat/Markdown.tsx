@@ -57,7 +57,7 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
             if (answer && language) {
               return (
                 <details className="font-sans text-[13px] text-muted">
-                  <summary className="cursor-pointer">SQL the answer quotes (the queries that ran are in the Queries tab)</summary>
+                  <summary className="hover:text-ink">SQL the answer quotes (the queries that ran are in the Queries tab)</summary>
                   <InBlock value={true}>
                     <pre>{children}</pre>
                   </InBlock>
@@ -103,7 +103,7 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
             const follow = href && internal ? internal(href) : null;
             if (follow) {
               return (
-                <button type="button" onClick={follow} className="text-accent underline" title={href}>
+                <button type="button" onClick={follow} className="text-accent underline decoration-faint underline-offset-[3px] hover:decoration-ink" title={href}>
                   {children}
                 </button>
               );
@@ -115,13 +115,13 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
               const link = files.get(containerOf(href ?? ""));
               if (!link || !openFile) return <span title={href}>{children}</span>;
               return (
-                <button type="button" onClick={() => openFile(link.file)} className="text-accent underline" title={link.path}>
+                <button type="button" onClick={() => openFile(link.file)} className="text-accent underline decoration-faint underline-offset-[3px] hover:decoration-ink" title={link.path}>
                   {children}
                 </button>
               );
             }
             // A link within the answer itself (a footnote) stays a link.
-            if (href && /^#[\w-]+$/.test(href)) return <a href={href}>{children}</a>;
+            if (href && /^#[\w-]+$/.test(href)) return <a href={href} className="hover:decoration-ink">{children}</a>;
             return <ExternalLink href={href}>{children}</ExternalLink>;
           },
         }}

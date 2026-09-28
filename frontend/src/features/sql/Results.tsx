@@ -124,7 +124,7 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
                   data-row={r}
                   aria-current={current === r ? "true" : undefined}
                   onClick={() => setCurrent(r)}
-                  className={clsx("hover:bg-sunken", current === r && "bg-sunken")}
+                  className={clsx("hover:bg-sunken", current === r ? "bg-sunken" : "cursor-pointer")}
                 >
                   <td className="border-b border-line/70 px-3 py-1 text-right text-faint tabular">{data.offset + r + 1}</td>
                   {row.map((cell, c) => (

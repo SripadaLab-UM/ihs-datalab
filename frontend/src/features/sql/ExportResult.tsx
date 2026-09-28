@@ -38,7 +38,7 @@ export function ExportResult({ queryId, practice, onClose }: { queryId: string; 
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-[12.5px] text-muted">
                 No export folders yet. Add one in{" "}
-                <Link to="/settings/export-folders" className="text-ink underline">
+                <Link to="/settings/export-folders" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
                   Settings
                 </Link>
                 .

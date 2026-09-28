@@ -250,7 +250,7 @@ function FileRoute() {
     return (
       <div className="px-6 py-6 font-sans text-[13px] text-muted">
         <p>There's no workflow file {path ? <span className="font-mono">{path}</span> : ""} in the folder any more.</p>
-        <Link to="/workflows" className="text-ink underline underline-offset-4">
+        <Link to="/workflows" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
           Back to the workflows
         </Link>
       </div>

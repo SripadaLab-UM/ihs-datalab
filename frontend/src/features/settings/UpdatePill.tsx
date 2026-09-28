@@ -17,7 +17,7 @@ export function UpdatePill() {
   if (!check) return null;
   if (installing(check)) {
     return (
-      <Link to={settingsPath("updates")} className={`${PILL} border-attn/50 text-attn`} role="status">
+      <Link to={settingsPath("updates")} className={`${PILL} border-attn/50 text-attn hover:border-attn`} role="status">
         Updating to {check.install.version}…
       </Link>
     );
