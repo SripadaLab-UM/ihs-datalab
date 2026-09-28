@@ -167,6 +167,25 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
         detail: null,
       };
     }
+    case "check_workflow": {
+      // DataLab's workflow check on the agent's draft: a failing one is never folded away as done.
+      const count = typeof s.problem_count === "number" ? s.problem_count : 0;
+      const invalid = item.summary ? s.valid !== true : false;
+      return {
+        ...base,
+        tone: failed ? "error" : invalid ? "attn" : base.tone,
+        icon: "check",
+        title: "Checked the workflow file",
+        chips: failed
+          ? error
+          : !item.summary
+            ? []
+            : invalid
+              ? [{ text: plural(count || 1, "problem"), tone: "attn" }]
+              : [{ text: "passes", tone: "good" }],
+        detail: null,
+      };
+    }
     case "ask_research_helper":
     case "propose_plan":
       return null; // shown by their approval cards

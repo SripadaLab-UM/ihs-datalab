@@ -165,8 +165,8 @@ Reviewed, tested R code in the lab's `ihsDataR` package that does heavy data
 processing, such as combining devices into daily metrics. A workflow can run
 a pipeline as one of its steps.
 
-Pipelines are changed through the Pipelines tab, with the Data engineering
-agent, and saved only after their tests pass. See [Pipelines](pipelines.md).
+Pipelines are changed through the Pipelines tab, with the Pipelines
+assistant, and saved only after their tests pass. See [Pipelines](pipelines.md).
 
 ## Replay
 

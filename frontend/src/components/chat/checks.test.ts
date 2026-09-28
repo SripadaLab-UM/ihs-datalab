@@ -207,3 +207,17 @@ it("waits for a running review, and says when one didn't finish", () => {
   const failed = checkLines({ review: { kind: "review", text: "", status: "failed" }, reviewing: false, failed: [] });
   expect(failed[0].text).toBe("Rigor review (the agent's check of its own work): didn't finish.");
 });
+
+it("marks the rigor review's line for a look when it flags something or didn't finish, after DataLab's own check", () => {
+  const trace = { numbers: 4, untraced: [] };
+  const flags = checkLines({ trace, review: review("1. Traced claims: 12.4 is not in any output."), reviewing: false, failed: [] });
+  expect(flags.map((l) => [l.key, l.tone])).toEqual([["trace", "good"], ["review", "attn"], ["differ", "plain"]]);
+  const clean = checkLines({ trace, review: review("1. Traced claims: Holds."), reviewing: false, failed: [] });
+  expect(clean.find((l) => l.key === "review")?.tone).toBe("plain");
+  const unfinished = checkLines({ trace, review: { ...review(""), status: "failed" }, reviewing: false, failed: [] });
+  expect(unfinished.find((l) => l.key === "review")).toMatchObject({ tone: "attn", text: expect.stringContaining("didn't finish") });
+  const running = checkLines({ trace, review: { ...review(""), status: "running" }, reviewing: true, failed: [] });
+  expect(running.find((l) => l.key === "review")?.tone).toBe("plain");
+  // Nothing here ever says a problem was resolved.
+  expect([...flags, ...unfinished].some((l) => /resolved/i.test(l.text))).toBe(false);
+});

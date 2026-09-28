@@ -179,7 +179,7 @@ it("keeps the draft, per tab, when the chat is hidden and opened again or the ta
 
 it("keeps the draft in a conversation that has started, too", async () => {
   listed = [conversation("c1")];
-  sessionStorage.setItem(draftKeyOf("sql"), "and include Garmin");
+  sessionStorage.setItem(draftKeyOf("sql", "c1"), "and include Garmin");
   const first = show({ mode: "sql", assistant: "sql", conversationId: "c1" });
   expect(await screen.findByRole("button", { name: /Steps in March/ })).toBeInTheDocument();
   expect(box()).toHaveValue("and include Garmin");
@@ -188,8 +188,38 @@ it("keeps the draft in a conversation that has started, too", async () => {
   show({ mode: "sql", assistant: "sql", conversationId: "c1" });
   await screen.findByRole("button", { name: /Steps in March/ });
   expect(box()).toHaveValue("and include Garmin, per week");
-  // The Workspace's own chat keeps nothing: it has no tab to come back to.
   expect(screen.getByRole("heading", { name: "SQL assistant" })).toBeInTheDocument();
+});
+
+it("starts New chat with an empty box: the draft belongs to its conversation", async () => {
+  listed = [conversation("c1")];
+  const first = show({ mode: "sql", assistant: "sql", conversationId: "c1" });
+  await screen.findByRole("button", { name: /Steps in March/ });
+  fireEvent.change(box(), { target: { value: "and per week" } });
+  first.unmount();
+  // New chat: the page forgets the conversation and remounts the chat.
+  const fresh = show({ mode: "sql", assistant: "sql" });
+  await screen.findByTestId("compact-intro");
+  expect(box()).toHaveValue("");
+  fresh.unmount();
+  // Back to the first conversation: its draft is there.
+  show({ mode: "sql", assistant: "sql", conversationId: "c1" });
+  await screen.findByRole("button", { name: /Steps in March/ });
+  expect(box()).toHaveValue("and per week");
+});
+
+it("says so when an older conversation of another mode opens in the tab's chat", async () => {
+  vi.mocked(api.modes).mockResolvedValue([...MODES, { id: "engineering", label: "Data engineering", kind: "data", description: "", starters: [], tab_only: false, queries: true }] as never); // prettier-ignore
+  listed = [{ ...conversation("c1", "engineering"), title: "Old tests chat" }];
+  const view = show({ mode: "pipelines", assistant: "pipelines", conversationId: "c1" });
+  await screen.findByRole("button", { name: /Old tests chat/ });
+  expect(await screen.findByText("Data engineering")).toBeInTheDocument();
+  view.unmount();
+  // Its own mode: no label.
+  listed = [conversation("c2", "pipelines")];
+  show({ mode: "pipelines", assistant: "pipelines", conversationId: "c2" });
+  await screen.findByRole("button", { name: /Steps in March/ });
+  expect(screen.queryByText("Data engineering")).toBeNull();
 });
 
 const page: ChatContext = {
@@ -240,6 +270,57 @@ it("folds a long story in progress to its latest steps, keeping approvals and er
   expect(folded).toBe(3);
   // A short one shows whole.
   expect(latestRows(rows.slice(0, 5))).toEqual({ shown: rows.slice(0, 5), folded: 0 });
+});
+
+it("never folds away DataLab's notices or a step that needs a look, however long the story", () => {
+  const say = (n: number): Row => ({ type: "say", key: `s${n}`, text: `step ${n}` });
+  const notice: Row = { type: "notice", key: "n", text: "Couldn't save a checkpoint: the disk is nearly full.", tone: "info" };
+  const join: Row = {
+    type: "step",
+    step: { key: "j", icon: "link", title: "Looked for a join", tone: "attn", chips: [{ text: "no shared participant ID", tone: "attn" }], detail: null },
+  };
+  const rows = [say(1), notice, say(2), join, say(3), say(4), say(5), say(6), say(7), say(8)];
+  const { shown, folded } = latestRows(rows);
+  expect(shown).toEqual([notice, join, say(5), say(6), say(7), say(8)]);
+  expect(folded).toBe(4);
+});
+
+it("names a failing workflow check, so it isn't folded away as done", async () => {
+  const { activityRows } = await import("./activity");
+  const tool = (id: string, summary: Record<string, unknown>) => ({
+    kind: "tool" as const, id, tool: "check_workflow", server: "ihs-data", status: "completed", arguments: {}, error: null, summary,
+  }); // prettier-ignore
+  const [bad, good] = activityRows([tool("t1", { valid: false, problem_count: 3 }), tool("t2", { valid: true, problem_count: 0 })], false);
+  expect(bad).toMatchObject({ type: "step", step: { tone: "attn", chips: [{ text: "3 problems", tone: "attn" }] } });
+  expect(good).toMatchObject({ type: "step", step: { tone: "done", chips: [{ text: "passes", tone: "good" }] } });
+  // Folded to its latest rows, the failing check stays.
+  const rows = [bad, ...Array.from({ length: 6 }, (_, i): Row => ({ type: "say", key: `s${i}`, text: `${i}` }))];
+  expect(latestRows(rows).shown[0]).toBe(bad);
+});
+
+it("folds the checks in a docked answer, and says on the fold when the rigor review flagged something", async () => {
+  listed = [conversation("c1", "knowledge")];
+  stream.events = [
+    { seq: 1, type: "user_message", data: { text: "How many interns wore a Fitbit?" } },
+    { seq: 2, type: "turn_started", data: {} },
+    { seq: 3, type: "answer", data: { text: "About 40 of them." } },
+    { seq: 4, type: "trace", data: { numbers: 1, untraced: [] } },
+    { seq: 5, type: "review_started", data: {} },
+    { seq: 6, type: "review", data: { text: "1. Traced claims: 40 is not in any output." } },
+    { seq: 7, type: "review_finished", data: { status: "done" } },
+    { seq: 8, type: "turn_finished", data: { status: "completed" } },
+    { seq: 9, type: "turn_done", data: {} },
+  ];
+  await act(async () => {
+    show({ mode: "knowledge", assistant: "knowledge", conversationId: "c1" });
+  });
+  const checks = await screen.findByTestId("answer-checks");
+  const fold = within(checks).getByRole("button", { name: /Checks on this answer/ });
+  expect(fold).toHaveAttribute("aria-expanded", "false");
+  // DataLab's own check passed, but the review didn't: the fold says to look.
+  expect(within(fold).getByText("needs a look")).toBeInTheDocument();
+  fireEvent.click(fold);
+  expect(within(checks).getByText(/all 1|the 1 number matched/)).toBeInTheDocument();
 });
 
 it("shows a docked conversation in the panel's own sizes: the question as a message, the checks folded", async () => {

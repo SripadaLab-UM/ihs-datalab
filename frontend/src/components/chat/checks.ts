@@ -177,7 +177,9 @@ export function checkLines({
           : said
             ? `${who}, on traced numbers: “${quoted(said)}”`
             : `${who}: done; its notes are below.`;
-    lines.push({ key: "review", tone: "plain", text });
+    // A review that flagged something, or didn't finish, needs a look: a folded
+    // Checks line says so. DataLab's own check stays first, and neither is "resolved".
+    lines.push({ key: "review", tone: reviewing || (done && verdict === "clean") ? "plain" : "attn", text });
   }
   if (trace && done && trace.untraced.length > 0) {
     lines.push({

@@ -92,7 +92,7 @@ export function DockedChat({
    *  the first message is typed elsewhere on the page (New workflow's description). */
   handoff?: ReactNode;
 }) {
-  const draftKey = givenDraftKey ?? (assistant ? draftKeyOf(assistant) : undefined);
+
   const [started, setStarted] = useState<Conversation | null>(null);
   // The first message, shown in the new conversation until its event arrives.
   const [firstMessage, setFirstMessage] = useState<PendingMessage | undefined>(undefined);
@@ -108,6 +108,7 @@ export function DockedChat({
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(id) });
   // The list may not have caught up with a conversation just started.
   const conversation = conversations.data?.find((c) => c.id === id) ?? (started?.id === id ? started : undefined);
+  const draftKey = givenDraftKey ?? (assistant ? draftKeyOf(assistant, id) : undefined);
 
   const hasContext = Boolean(context?.text.trim());
   // Called as Send is pressed, so the message is what the person saw then.
@@ -147,6 +148,7 @@ export function DockedChat({
         sendLabel={sendLabel}
         pending={started?.id === conversation.id ? firstMessage : undefined}
         assistant={assistant}
+        tabMode={mode}
         draftKey={draftKey}
       />
     );

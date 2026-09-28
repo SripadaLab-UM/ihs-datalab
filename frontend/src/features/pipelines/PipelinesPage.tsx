@@ -230,7 +230,7 @@ export function PipelinesPage() {
           <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
             ref={chatBox}
-            aria-label="Data engineering chat"
+            aria-label="Pipelines assistant"
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
             <DockedChat

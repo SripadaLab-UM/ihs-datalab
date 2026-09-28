@@ -29,7 +29,7 @@ This has three benefits:
 | What it is | Reviewed, tested R code that does the heavy transformation. Example: `daily_metrics_2025` combines Fitbit, Garmin, and Apple Watch into daily steps, RHR, sleep, HRV, and active minutes | A runnable recipe: pull these data, run these steps, check these things, deliver here |
 | Where it lives | The `ihsDataR` R package, in the lab pipelines repo | A small YAML file, in the same repo |
 | Who owns it | Yu, and whoever works on the package | Anyone in the lab |
-| Edited in | **Pipelines** tab, with the Data engineering agent | **Workflows** tab, with the Workflow authoring agent, or by hand |
+| Edited in | **Pipelines** tab, with the Pipelines assistant | **Workflows** tab, with the Workflow assistant, or by hand |
 
 Many workflows need no pipeline at all. For example, "export Fitbit daily
 data for these dates, drop the body-composition columns, and deliver to

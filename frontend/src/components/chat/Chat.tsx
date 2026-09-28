@@ -36,6 +36,7 @@ export function Chat({
   sendLabel,
   pending: firstPending,
   assistant,
+  tabMode,
   draftKey,
 }: {
   conversation: Conversation;
@@ -55,6 +56,8 @@ export function Chat({
   pending?: PendingMessage;
   /** Docked beside this tab: the compact presentation, with this assistant's title. */
   assistant?: AssistantId;
+  /** The mode the tab starts its chats in: a conversation of another (an older one) says which it is. */
+  tabMode?: string;
   /** Where the message box keeps what's typed (sessionStorage), so hiding the chat doesn't lose it. */
   draftKey?: string;
 }) {
@@ -180,6 +183,7 @@ export function Chat({
             assistant={assistant}
             kind={conversation.kind}
             title={<Title conversation={conversation} compact />}
+            otherMode={tabMode && conversation.mode !== tabMode ? conversation.mode : undefined}
             model={conversation.model}
             effort={effort}
             onEffort={setEffort}
@@ -342,8 +346,11 @@ export function CompactHeader({
   effort,
   onEffort,
   actions,
+  otherMode,
 }: {
   assistant: AssistantId;
+  /** The conversation's mode, when it isn't the tab's own (a Data engineering chat in Pipelines). */
+  otherMode?: string;
   kind: "data" | "research";
   /** The conversation's title, once it has started. */
   title?: ReactNode;
@@ -352,10 +359,17 @@ export function CompactHeader({
   onEffort: (effort: Effort) => void;
   actions?: ReactNode;
 }) {
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes, enabled: Boolean(otherMode) });
+  const otherLabel = otherMode ? (modes.data?.find((m) => m.id === otherMode)?.label ?? otherMode) : null;
   return (
     <header className="@container flex flex-col gap-0.5 border-b border-line px-4 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <h2 className="min-w-0 truncate font-sans text-[14px] font-semibold text-ink">{ASSISTANTS[assistant].title}</h2>
+        {otherLabel && (
+          <span title="This conversation started in another mode, and keeps its instructions and tools">
+            <Chip>{otherLabel}</Chip>
+          </span>
+        )}
         <SessionBadge kind={kind} short />
         <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>
       </div>
@@ -835,8 +849,10 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
 const LATEST_ROWS = 4;
 
 /**
- * The rows a docked chat shows of a story in progress: the latest few, and
- * every approval waiting for the person and every error, wherever they are.
+ * The rows a docked chat shows of a story in progress: the latest few, and,
+ * wherever they are, every approval, every notice (DataLab's own notices carry
+ * no tone, and some say something failed), and every step that errored or
+ * needs a look (a join with no shared participant ID, say).
  */
 export function latestRows(rows: Row[]): { shown: Row[]; folded: number } {
   if (rows.length <= LATEST_ROWS + 1) return { shown: rows, folded: 0 };
@@ -844,8 +860,8 @@ export function latestRows(rows: Row[]): { shown: Row[]; folded: number } {
   const kept = (row: Row, i: number) =>
     i >= cut ||
     row.type === "approval" ||
-    (row.type === "notice" && row.tone === "error") ||
-    (row.type === "step" && row.step.tone === "error");
+    row.type === "notice" ||
+    (row.type === "step" && (row.step.tone === "error" || row.step.tone === "attn"));
   const shown = rows.filter(kept);
   return { shown, folded: rows.length - shown.length };
 }

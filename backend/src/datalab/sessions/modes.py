@@ -586,9 +586,9 @@ MODES = {
                 "Explain how ihsDataR reads the Fitbit daily data.",
                 "Run the package's tests and explain any failures.",
             ),
-            # Engineering's tools but the Workspace's analysis plans: the
-            # catalog, small checks and workflow checks. The repo is its
-            # own copy, so nothing is attached.
+            # Engineering's tools, but not the Workspace's analysis plans
+            # (propose_plan): the catalog, small checks and workflow checks.
+            # The repo is its own copy, so nothing is attached.
             tools=CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"},
             attachments=False,
             tab_only=True,

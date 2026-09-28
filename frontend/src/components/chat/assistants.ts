@@ -60,5 +60,7 @@ export const ASSISTANTS: Record<AssistantId, Assistant> = {
 /** Whether the chat is docked beside a tab (compact) or the Workspace's own (full). */
 export const CompactContext = createContext(false);
 
-/** The composer's draft for a docked chat, kept for this browser tab. */
-export const draftKeyOf = (assistant: AssistantId) => `datalab:${assistant}:chat-message`;
+/** The composer's draft for a docked chat, kept for this browser tab: one per
+ *  conversation, so New chat starts with an empty box ("new" before it starts). */
+export const draftKeyOf = (assistant: AssistantId, conversationId?: string) =>
+  `datalab:${assistant}:chat-message:${conversationId ?? "new"}`;

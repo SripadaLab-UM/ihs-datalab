@@ -1,9 +1,9 @@
 ---
 title: Pipelines
-summary: Browse the lab's R package, ask the Data engineering agent for a change, review it, test it, and save it.
+summary: Browse the lab's R package, ask the Pipelines assistant to explain or change it, review it, test it, and save it.
 order: 23
 screens: /pipelines, /pipelines/*
-keywords: pipelines, ihsDataR, R, package, tests, proposal, diff, data engineering, save and share, code
+keywords: pipelines, ihsDataR, R, package, tests, proposal, diff, data engineering, pipelines assistant, save and share, code
 ---
 
 # Pipelines
@@ -20,10 +20,14 @@ DataLab says GitHub has newer commits.
 
 ## Ask for a change
 
-The chat beside the files is a Data engineering conversation, a
-[data session](glossary.md#data-session). Its agent gets its own copy of the
-repository, works there, and can run the package's tests in its container.
-You can't edit the code in DataLab yourself: ask the agent.
+The chat beside the files is the **Pipelines assistant**, a
+[data session](glossary.md#data-session) in its own Pipelines mode: the Data
+engineering rules, for the code this tab shows. It explains, edits and tests
+the code. Its agent gets its own copy of the repository, works there, and can
+run the package's tests in its container. Nothing is attached to it: it
+doesn't need to be, and the file you're reading can go with a message if you
+tick **Send with message** over the message box. You can't edit the code in
+DataLab yourself: ask the assistant.
 
 After each turn, whatever the agent changed in `ihsDataR/` and `workflows/`
 becomes one [proposal](glossary.md#proposal), shown in the Pipelines tab.
