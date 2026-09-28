@@ -515,9 +515,17 @@ def test_datalab_folders_and_escaping_links_cant_be_added(
     (dropbox / "sneaky").symlink_to(outside)
     app = make_app(real_settings, catalog)
     with TestClient(app) as client:
-        for chosen in (inside, dropbox / "sneaky"):
+        monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ("/usr",))
+        said = []
+        for chosen in (inside, dropbox / "sneaky", Path("/usr/share")):
             monkeypatch.setattr(picker, "pick", lambda kind, c=chosen, **_: _async([c]))
-            assert client.post("/api/export-destinations").status_code == 422
+            refused = client.post("/api/export-destinations")
+            assert refused.status_code == 422
+            said.append(refused.json()["detail"])
+        # Said for an export folder, not in attaching's words.
+        assert said[0].startswith("This is inside DataLab's own data folder")
+        assert "leads out of your Dropbox folder" in said[1]
+        assert said[2] == "This is a system folder, which can't be an export folder."
         assert (
             client.post("/api/export-destinations", json={"start_in": "dropbox:Nope"}).status_code
             == 404
