@@ -31,17 +31,32 @@ def main(argv: list[str] | None = None) -> int:
         "command", choices=["start", "stop", "reset", "status", "generate", "setup", "verify"]
     )
     parser.add_argument("--seed", type=int, help="generate: another seed than the spec's")
-    args = parser.parse_args(argv)
-    from datalab.config import PRACTICE_ORACLE
-
-    container = os.environ.get("DATALAB_PRACTICE_DB_CONTAINER") or DEV_CONTAINER
-    target = Target(
-        container=container,
-        volume=os.environ.get("DATALAB_PRACTICE_DB_VOLUME") or f"{container}-data",
-        port=PRACTICE_ORACLE.port,
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="also look after a container or volume of another name without DataLab's label",
     )
-    # The development container from before DataLab labelled its own is looked after too.
-    database = PracticeDatabase(target, manage_unlabelled=True)
+    args = parser.parse_args(argv)
+    from datalab.config import PRACTICE_ORACLE, practice_db_port_problem
+
+    if practice_db_port_problem():
+        print(practice_db_port_problem(), file=sys.stderr)
+        return 2
+    container = os.environ.get("DATALAB_PRACTICE_DB_CONTAINER") or DEV_CONTAINER
+    try:
+        target = Target(
+            container=container,
+            volume=os.environ.get("DATALAB_PRACTICE_DB_VOLUME") or f"{container}-data",
+            port=PRACTICE_ORACLE.port,
+            legacy=None,
+        )
+    except ValueError as problem:
+        print(problem, file=sys.stderr)
+        return 2
+    # The development container (made before DataLab labelled its own) is
+    # looked after even without the label; any other name only with --force,
+    # so a stale or mistyped name never gets someone else's container removed.
+    database = PracticeDatabase(target, manage_unlabelled=container == DEV_CONTAINER or args.force)
     say = lambda text: print(text, flush=True)  # noqa: E731
     try:
         if args.command == "status":
@@ -56,13 +71,15 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "generate":
                 from datalab.practice_db.generate import build
 
-                build(target.dsn, seed=args.seed, say=say)
+                build(target.dsn, seed=args.seed, replace=True, say=say)
         elif args.command == "reset":
             database.remove(volume=True)
-            database.up(say, show_download=True)
+            if not database.up(say, show_download=True):
+                say(f"Something else answers on 127.0.0.1:{target.port}; left alone.")
+                return 1
             say(f"ready: 127.0.0.1:{target.port}/FREEPDB1 (no data yet: run generate)")
         elif args.command == "setup":
-            say(database.ensure(say, show_download=True))
+            say(database.ensure(say, show_download=True).message)
         elif args.command == "verify":
             from datalab.practice_db.verify import verify
 

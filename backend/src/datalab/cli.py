@@ -204,11 +204,13 @@ def _serve(settings, *, open_browser: bool) -> int:
     browser = BrowserSession(settings.port)
     practice_database = None
     if settings.profile == "practice":
-        from datalab.practice_db import PracticeDatabaseKeeper
+        from datalab.practice_db import PracticeDatabase, PracticeDatabaseKeeper
 
         # Started (and set up, the first time) in the background once DataLab
         # is up; the pages say how it's going.
-        practice_database = PracticeDatabaseKeeper()
+        practice_database = PracticeDatabaseKeeper(
+            PracticeDatabase(lock_dir=settings.data_dir / "practice-db")
+        )
     try:
         app = create_app(
             settings,
@@ -366,28 +368,37 @@ def _pull_images(settings) -> int:
 
 
 def _pull_practice_database_image() -> int:
-    """Practice only: Oracle Database Free, for the synthetic database. From
-    Oracle's registry, which is sometimes busy: tried again a few times."""
+    """Practice only: Oracle Database Free, for the synthetic database, from
+    Oracle's registry (tried again a few times when it's busy). Only for a
+    first setup: an existing practice database already has what it needs,
+    so an update never downloads it again. Never a reason to stop an
+    install or an update either: the practice database's setup downloads it
+    when it creates the container."""
     from datalab import practice_db
 
-    database = practice_db.PracticeDatabase()
     try:
-        if not database.pull(say=lambda text: print(text, flush=True), show=True):
-            print("Oracle Database Free (the practice database) is already downloaded.")
-    except practice_db.DockerUnavailable as problem:
+        database = practice_db.PracticeDatabase()
+        if not database.image_needed():
+            print("Oracle Database Free (the practice database): nothing to download.")
+            return 0
+        database.pull(say=lambda text: print(text, flush=True), show=True)
+    except ValueError as problem:
         print(problem)
-        return 1
     except practice_db.PracticeDatabaseProblem as problem:
         print(problem)
-        if "is busy or didn't answer" not in str(problem):
-            print(_pull_failure_hint(str(problem)))
-        return 1
+        print(
+            "Carrying on: setting up the practice database downloads it, and practice "
+            "DataLab tries again each time it opens."
+        )
     return 0
 
 
 def _practice_db(settings, args) -> int:
     """`datalab --profile practice practice-db ...`. Never for the real profile."""
+    import oracledb
+
     from datalab import practice_db
+    from datalab.practice_db.guard import NotTheSyntheticDatabase
 
     if settings.profile != "practice":
         print(
@@ -395,13 +406,25 @@ def _practice_db(settings, args) -> int:
             f"datalab --profile practice practice-db {args.practice_db_command}"
         )
         return 2
-    database = practice_db.PracticeDatabase()
 
     def say(text: str) -> None:
         print(text, flush=True)
 
+    def use_legacy(name: str) -> bool:
+        if not sys.stdin.isatty():
+            return True
+        print(
+            f"The development synthetic database ({name}) is on this computer, stopped, and "
+            "uses the practice database's port."
+        )
+        answer = input("Start it and use it, rather than set up a second one? [Y/n] ")
+        return answer.strip().lower() in ("", "y", "yes")
+
     command = args.practice_db_command
     try:
+        database = practice_db.PracticeDatabase(
+            lock_dir=settings.data_dir / "practice-db", use_legacy=use_legacy
+        )
         if command == "status":
             say(database.describe())
             return 0
@@ -409,7 +432,13 @@ def _practice_db(settings, args) -> int:
             say(database.stop())
             return 0
         if command in ("setup", "start"):
-            say(database.ensure(say, show_download=True))
+            if _practice_running(settings):
+                say(
+                    "Practice DataLab is running, and it looks after its database itself: "
+                    "Settings → Connections says how it stands."
+                )
+                return 0
+            say(database.ensure(say, show_download=True).message)
             return 0
         # reset: a running practice DataLab would be querying what's removed.
         from datalab.trial import refuse_if_running
@@ -425,11 +454,32 @@ def _practice_db(settings, args) -> int:
             if input("Reset it? [y/N] ").strip().lower() not in ("y", "yes"):
                 say("Nothing was changed.")
                 return 1
-        say(database.reset(say, show_download=True))
+        say(database.reset(say, show_download=True).message)
         return 0
-    except practice_db.PracticeDatabaseProblem as problem:
+    except (practice_db.PracticeDatabaseProblem, NotTheSyntheticDatabase, ValueError) as problem:
         say(str(problem))
         return 1
+    except oracledb.DatabaseError as error:
+        # Only the error's code: the practice database's own, never a secret.
+        code = str(error).split(":", 1)[0].strip()[:20]
+        say(
+            f"The practice database refused a step ({code}). Try again; if it happens "
+            "again, reset it."
+        )
+        return 1
+
+
+def _practice_running(settings) -> bool:
+    """Whether practice DataLab is running on this data folder (or its port)."""
+    import socket
+
+    from datalab import datalock
+
+    if datalock.in_use(settings.data_dir):
+        return True
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        return probe.connect_ex(("127.0.0.1", settings.port)) == 0
 
 
 def _pull_failure_hint(error: str) -> str:

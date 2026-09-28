@@ -12,13 +12,32 @@ from datalab import cli, practice_db, setup
 from datalab.config import PRACTICE_ORACLE
 from datalab.practice_db import (
     LABEL,
+    Outcome,
     PracticeDatabase,
     PracticeDatabaseKeeper,
     PracticeDatabaseProblem,
     Target,
 )
 
-TARGET = Target(container="test-practice-oracle", volume="test-practice-data", port=1599)
+TARGET = Target(
+    container="test-practice-oracle",
+    volume="test-practice-data",
+    port=1599,
+    legacy="test-legacy-oracle",
+)
+DEV_IMAGE = "container-registry.oracle.com/database/free:latest-lite"
+
+
+def other_container(docker, name, *, status="running", image=DEV_IMAGE, labels=None) -> None:
+    """A container DataLab didn't make, publishing the practice port."""
+    docker.containers[name] = {
+        "status": status,
+        "health": "healthy",
+        "labels": labels or {},
+        "publish": f"127.0.0.1:{TARGET.port}:1521",
+        "volume": None,
+        "image": image,
+    }
 
 
 class FakeDocker:
@@ -78,9 +97,22 @@ class FakeDocker:
         if args[0] in ("start", "stop"):
             self.containers[args[-1]]["status"] = "running" if args[0] == "start" else "exited"
             return 0, "", ""
-        if args[:2] == ["rm", "-f"]:
-            self.containers.pop(args[2], None)
+        if args[:3] == ["rm", "-f", "-v"]:
+            self.containers.pop(args[3], None)
             return 0, "", ""
+        if args[0] == "rmi":
+            if any(c["image"] == args[1] for c in self.containers.values()):
+                return 1, "", "image is being used by a container"
+            self.images.discard(args[1])
+            return 0, "", ""
+        if args[:2] == ["ps", "--filter"]:
+            port = args[2].removeprefix("publish=")
+            names = [
+                f"{name}\t{c['image']}"
+                for name, c in self.containers.items()
+                if c["status"] == "running" and c["publish"].split(":")[-2] == port
+            ]
+            return 0, "\n".join(names), ""
         raise AssertionError(f"unexpected docker {args}")
 
     @staticmethod
@@ -92,8 +124,13 @@ class FakeDocker:
         )
         return {
             "State": {"Status": found["status"], "Health": {"Status": found["health"]}},
-            "Config": {"Labels": found["labels"]},
+            "Config": {"Labels": found["labels"], "Image": found["image"]},
             "HostConfig": {"PortBindings": {"1521/tcp": [{"HostIp": ip, "HostPort": port}]}},
+            "Mounts": [
+                {"Type": "volume", "Name": found["volume"], "Destination": "/opt/oracle/oradata"}
+            ]
+            if found.get("volume")
+            else [],
         }
 
 
@@ -135,6 +172,7 @@ def database(docker, oracle, *, port_open: bool = False, **extra) -> PracticeDat
         port_open=lambda _: port_open,
         has_data=oracle.has_data,
         generate=oracle.generate,
+        finds_marker=lambda dsn: False,
         sleep=lambda _: None,
         **extra,
     )
@@ -144,7 +182,7 @@ def test_the_first_setup_downloads_creates_and_loads_the_data(docker, oracle):
     said = []
     phases = []
     done = database(docker, oracle).ensure(said.append, phases.append)
-    assert done == "The practice database is set up, with its made-up data."
+    assert done == Outcome("The practice database is set up, with its made-up data.")
     assert oracle.loads == [TARGET.dsn]
     assert practice_db.IMAGE in docker.images
     assert phases[:3] == ["checking", "downloading", "creating"]
@@ -173,7 +211,7 @@ def test_a_second_launch_starts_it_and_never_loads_again(docker, oracle):
     database(docker, oracle).ensure()
     docker.containers[TARGET.container]["status"] = "exited"  # the computer restarted
     done = database(docker, oracle).ensure()
-    assert done == "The practice database is running, with its made-up data."
+    assert done.message == "The practice database is running, with its made-up data."
     assert oracle.loads == [TARGET.dsn]  # only the first time
     assert ["start", TARGET.container] in docker.calls
 
@@ -204,7 +242,7 @@ def test_reset_only_when_asked_and_from_scratch(docker, oracle):
     phases = []
     db.reset(phase=phases.append)
     assert "resetting" in phases
-    assert ["rm", "-f", TARGET.container] in docker.calls
+    assert ["rm", "-f", "-v", TARGET.container] in docker.calls
     assert ["volume", "rm", TARGET.volume] in docker.calls
     assert len(oracle.loads) == 2
 
@@ -241,27 +279,118 @@ def test_a_container_reachable_from_other_computers_is_stopped(docker, oracle):
     assert docker.containers[TARGET.container]["status"] == "exited"
 
 
+def test_a_container_of_ours_without_its_volume_isnt_used(docker, oracle):
+    database(docker, oracle).ensure()
+    docker.containers[TARGET.container]["volume"] = "elsewhere"
+    with pytest.raises(PracticeDatabaseProblem, match="doesn't keep its data in the volume"):
+        database(docker, oracle).ensure()
+
+
+# ----------------------------------------------- a database DataLab didn't make
+
+
+def no_system_login(dsn, wait=180):
+    raise AssertionError("logged in as SYSTEM to a database DataLab didn't make")
+
+
 def test_another_synthetic_database_on_the_port_is_used_as_it_is(docker, oracle):
     """synthetic/db.sh's development container, or CI's: used, never loaded or reset."""
+    other_container(docker, "datalab-synthetic-oracle")
+    asked = []
     db = database(docker, oracle, port_open=True)
-    db.has_data = lambda dsn, wait=180: True
-    assert db.ensure().startswith("Using the synthetic database already running on port 1599")
+    db.has_data = no_system_login
+    db.finds_marker = lambda dsn: asked.append(dsn) or True
+    done = db.ensure()
+    assert done.adopted and "datalab-synthetic-oracle" in done.message
+    assert asked == [TARGET.dsn]  # the app user, once
     with pytest.raises(PracticeDatabaseProblem, match="won't reset it"):
         db.reset()
     assert oracle.loads == []
-    assert not [c for c in docker.calls if c[0] in ("run", "rm", "pull")]
+    assert not [c for c in docker.calls if c[0] in ("run", "rm", "pull", "start")]
 
 
-def test_something_else_on_the_port_is_a_problem_not_a_takeover(docker, oracle):
+def test_no_login_at_all_to_a_port_no_oracle_free_container_publishes(docker, oracle):
+    """An SSH tunnel to a real database, say: nothing logs in to it, as
+    SYSTEM or anyone, so no account there can be locked or alerted on."""
     db = database(docker, oracle, port_open=True)
+    db.has_data = no_system_login
 
-    def not_oracle(dsn, wait=180):
-        raise OSError("not a database")
+    def no_login(dsn):
+        raise AssertionError("logged in to something that isn't an Oracle Free container")
 
-    db.has_data = not_oracle
+    db.finds_marker = no_login
+    with pytest.raises(PracticeDatabaseProblem, match="Something else on this computer"):
+        db.ensure()
+    # A container publishing the port, but not Oracle Free: no login either.
+    other_container(docker, "tunnel", image="alpine/socat")
     with pytest.raises(PracticeDatabaseProblem, match="Something else on this computer"):
         db.ensure()
     assert not [c for c in docker.calls if c[0] in ("run", "pull")]
+
+
+def test_the_app_user_marker_check_never_retries_and_never_is_system(monkeypatch):
+    import oracledb
+
+    logins = []
+
+    def connect(**options):
+        logins.append(options)
+        raise oracledb.DatabaseError("ORA-01017: invalid username/password")
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    with pytest.raises(oracledb.DatabaseError):
+        practice_db.app_user_finds_marker(TARGET.dsn)
+    assert len(logins) == 1
+    assert logins[0]["user"] == "DATALAB_RO" and logins[0]["retry_count"] == 0
+
+
+def test_a_refused_marker_check_is_a_busy_port(docker, oracle):
+    other_container(docker, "datalab-synthetic-oracle")
+    db = database(docker, oracle, port_open=True)
+    db.has_data = no_system_login
+
+    def refused(dsn):
+        raise OSError("ORA-01017")
+
+    db.finds_marker = refused
+    with pytest.raises(PracticeDatabaseProblem, match="Something else on this computer"):
+        db.ensure()
+
+
+def test_a_stopped_development_container_is_started_not_duplicated(docker, oracle):
+    """Upgrading from synthetic/db.sh: its container, stopped, holds the port.
+    It's started and used, rather than a second database made beside it."""
+    other_container(docker, TARGET.legacy, status="exited")
+    db = database(docker, oracle)
+    db.port_open = lambda _: docker.containers[TARGET.legacy]["status"] == "running"
+    db.has_data = no_system_login
+    db.finds_marker = lambda dsn: True
+    done = db.ensure()
+    assert done.adopted and ["start", TARGET.legacy] in docker.calls
+    assert TARGET.container not in docker.containers
+    assert not [c for c in docker.calls if c[0] in ("run", "pull")]
+    with pytest.raises(PracticeDatabaseProblem, match="won't reset it"):
+        db.reset()
+
+
+def test_a_stopped_development_container_is_left_if_the_person_says_no(docker, oracle):
+    other_container(docker, TARGET.legacy, status="exited")
+    db = database(docker, oracle, use_legacy=lambda name: False)
+    with pytest.raises(PracticeDatabaseProblem, match=r"docker start test-legacy-oracle"):
+        db.ensure()
+    assert docker.containers[TARGET.legacy]["status"] == "exited"
+    assert TARGET.container not in docker.containers
+
+
+def test_a_development_container_on_another_port_is_ignored(docker, oracle):
+    other_container(docker, TARGET.legacy, status="exited")
+    docker.containers[TARGET.legacy]["publish"] = "127.0.0.1:1600:1521"
+    database(docker, oracle).ensure()
+    assert TARGET.container in docker.containers
+    assert ["start", TARGET.legacy] not in docker.calls
+
+
+# ------------------------------------------------------------------ docker
 
 
 def test_a_busy_registry_is_tried_again_then_explained(docker, oracle):
@@ -288,21 +417,116 @@ def test_docker_not_running_says_so(docker, oracle):
         database(docker, oracle).ensure()
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.",
+        "request returned 500 Internal Server Error for API route and version "
+        "http://%2F%2F.%2Fpipe%2FdockerDesktopLinuxEngine/v1.47/containers/json, check if "
+        "the server supports the requested API version",
+        "error during connect: open //./pipe/docker_engine: The system cannot find the file",
+        "open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.",
+    ],
+)
+def test_docker_desktop_starting_counts_as_the_engine_being_down(error):
+    assert practice_db._engine_down(error)
+
+
+def test_other_docker_errors_arent_the_engine_being_down():
+    assert not practice_db._engine_down("Error response from daemon: No such image")
+
+
 def test_names_that_could_reach_docker_as_options_are_refused():
     for name in ("-v", "--privileged", "a b", ""):
         with pytest.raises(ValueError):
             Target(container=name)
 
 
-def test_the_port_override_reaches_practice_settings_and_nothing_else(monkeypatch):
+def test_a_bad_port_override_only_stops_practice(monkeypatch, tmp_path, capsys):
     from datalab import config
 
     monkeypatch.setenv("DATALAB_PRACTICE_DB_PORT", "1532")
     assert config._practice_db_port() == 1532
     monkeypatch.setenv("DATALAB_PRACTICE_DB_PORT", "22; rm")
+    assert config._practice_db_port() == 1522  # never at import
+    assert config.practice_db_port_problem()
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    assert config.load_settings("real").profile == "real"
+    with pytest.raises(ValueError, match="DATALAB_PRACTICE_DB_PORT"):
+        config.load_settings("practice")
     with pytest.raises(ValueError):
-        config._practice_db_port()
+        practice_db.target_from_env()
     assert PRACTICE_ORACLE.host == "127.0.0.1"
+
+
+# ------------------------------------------------------------ one at a time
+
+
+def test_only_one_process_loads_at_a_time(docker, oracle, tmp_path):
+    """The lock in the practice data folder: while one holds it, another
+    `ensure` waits (up to its limit), then says why it didn't."""
+    from datalab import datalock
+
+    lock_dir = tmp_path / "practice-db"
+    held = datalock.hold(lock_dir)
+    try:
+        with pytest.raises(practice_db.LoadingElsewhere, match="setting up the practice database"):
+            database(docker, oracle, lock_dir=lock_dir).ensure()
+        assert oracle.loads == [] and not docker.calls
+    finally:
+        held.release()
+    database(docker, oracle, lock_dir=lock_dir).ensure()
+    assert oracle.loads == [TARGET.dsn]
+
+
+def test_a_load_finished_by_another_process_counts_as_done(docker, oracle):
+    from datalab.practice_db.generate import AlreadyLoaded
+
+    def loaded_meanwhile(dsn, say):
+        raise AlreadyLoaded("The synthetic database has its data already.")
+
+    db = database(docker, oracle)
+    db.generate = loaded_meanwhile
+    assert db.ensure().message == "The practice database is set up, with its made-up data."
+
+
+def test_build_refuses_a_database_that_has_its_data(monkeypatch):
+    from datalab.practice_db import generate
+
+    class Cursor:
+        def __init__(self) -> None:
+            self.sql: list[str] = []
+
+        def execute(self, sql, *args, **binds):
+            self.sql.append(sql)
+            self.result = {"v$version": [("Oracle Database 23ai Free",)]}.get(
+                "v$version" if "v$version" in sql else "", [("FREEPDB1",)]
+            )
+            if "dba_tables" in sql:
+                self.result = [(1,)]
+
+        def __iter__(self):
+            return iter(self.result)
+
+        def fetchone(self):
+            return self.result[0]
+
+    cursor = Cursor()
+
+    class Connection:
+        def cursor(self):
+            return cursor
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+    monkeypatch.setattr(generate, "connect_when_ready", lambda dsn, pwd: Connection())
+    with pytest.raises(generate.AlreadyLoaded):
+        generate.build(TARGET.dsn, say=lambda _: None)
+    assert not [sql for sql in cursor.sql if "DROP" in sql or "CREATE" in sql]
 
 
 # ------------------------------------------------------------------ keeper
@@ -319,18 +543,32 @@ def test_the_keeper_sets_it_up_in_the_background_then_says_ready(docker, oracle)
 
 def test_the_keeper_waits_for_docker_desktop_to_start(docker, oracle):
     db = database(docker, oracle)
-    waits = []
+    phases = []
 
     def sleep(seconds):
-        waits.append(seconds)
-        docker.down = len(waits) < 3
+        phases.append(keeper.phase)
+        docker.down = len(phases) < 3
 
     db.sleep = sleep
     docker.down = True
     keeper = PracticeDatabaseKeeper(db)
     keeper.start()
     keeper._thread.join(5)  # type: ignore[union-attr]
-    assert keeper.phase == "ready" and len(waits) == 3
+    assert keeper.phase == "ready"
+    # While it waits, it isn't "problem": the pages keep asking.
+    assert phases == ["waiting-for-docker"] * 3
+
+
+def test_the_keeper_stops_waiting_for_docker_and_says_so(docker, oracle):
+    db = database(docker, oracle)
+    docker.down = True
+    keeper = PracticeDatabaseKeeper(db)
+    keeper.DOCKER_PATIENCE = 30
+    keeper.start()
+    keeper._thread.join(5)  # type: ignore[union-attr]
+    assert keeper.phase == "problem"
+    assert "stopped waiting" in keeper.message and "Try again" in keeper.message
+    assert "carries on by itself" not in keeper.message
 
 
 def test_the_keeper_reports_a_problem_in_words(docker, oracle):
@@ -339,6 +577,16 @@ def test_the_keeper_reports_a_problem_in_words(docker, oracle):
     keeper.start()
     keeper._thread.join(5)  # type: ignore[union-attr]
     assert keeper.phase == "problem" and "couldn't be downloaded" in keeper.message
+
+
+def test_the_keeper_says_when_it_adopted_one(docker, oracle):
+    other_container(docker, "datalab-synthetic-oracle")
+    db = database(docker, oracle, port_open=True)
+    db.finds_marker = lambda dsn: True
+    keeper = PracticeDatabaseKeeper(db)
+    keeper.start()
+    keeper._thread.join(5)  # type: ignore[union-attr]
+    assert keeper.phase == "ready" and keeper.adopted
 
 
 # -------------------------------------------------------------------- cli
@@ -355,16 +603,63 @@ def test_practice_db_refuses_the_real_profile(monkeypatch, tmp_path, capsys):
 
 def test_practice_db_setup_runs_the_setup(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
-    monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", lambda self, say, **k: "all set")
+    seen = []
+
+    def ensure(self, say, **k):
+        seen.append(self.lock_dir)
+        return Outcome("all set")
+
+    monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", ensure)
     assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 0
     assert "all set" in capsys.readouterr().out
+    assert seen == [tmp_path / "practice-db"]  # the lock in practice's own folder
+
+
+def test_practice_db_setup_leaves_it_to_a_running_practice_datalab(monkeypatch, tmp_path, capsys):
+    from datalab import datalock
+
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    called = []
+    monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(datalock, "in_use", lambda folder: folder == tmp_path)
+    assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 0
+    assert "looks after its database itself" in capsys.readouterr().out
+    assert called == []
+
+
+def test_practice_db_problems_are_one_line_not_a_traceback(monkeypatch, tmp_path, capsys):
+    import oracledb
+
+    from datalab.practice_db.guard import NotTheSyntheticDatabase
+
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    for error in (
+        NotTheSyntheticDatabase("Refusing to run: not Oracle Free."),
+        oracledb.DatabaseError("ORA-12514: listener does not know of service"),
+        ValueError("The practice database's container name '-x' isn't usable."),
+    ):
+
+        def ensure(self, say, error=error, **k):
+            raise error
+
+        monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", ensure)
+        assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 1
+        out = capsys.readouterr().out.strip()
+        assert len(out.splitlines()) == 1 and "Traceback" not in out
+    monkeypatch.undo()  # the real ensure again
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DATALAB_PRACTICE_DB_CONTAINER", "-bad")
+    assert cli.main(["--profile", "practice", "practice-db", "status"]) == 1
+    assert "isn't usable" in capsys.readouterr().out
 
 
 def test_practice_db_reset_asks_first(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
     resets = []
     monkeypatch.setattr(
-        practice_db.PracticeDatabase, "reset", lambda self, say, **k: resets.append(1) or "reset"
+        practice_db.PracticeDatabase,
+        "reset",
+        lambda self, say, **k: resets.append(1) or Outcome("reset"),
     )
     monkeypatch.setattr("builtins.input", lambda _: "n")
     assert cli.main(["--profile", "practice", "practice-db", "reset"]) == 1
@@ -373,21 +668,61 @@ def test_practice_db_reset_asks_first(monkeypatch, tmp_path, capsys):
     assert resets == [1]
 
 
-def test_pull_images_on_practice_also_downloads_oracle(monkeypatch, tmp_path):
+class PullRun:
+    """subprocess.run for `docker pull` of the gateway and proxy images."""
+
+    def __init__(self) -> None:
+        self.pulled: list[str] = []
+
+    def __call__(self, args, **_):
+        self.pulled.append(args[-1])
+        return type("Done", (), {"returncode": 0, "stderr": ""})()
+
+
+def test_pull_images_on_practice_downloads_oracle_for_a_first_setup_only(monkeypatch, tmp_path):
     monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
-    pulled = []
+    run = PullRun()
+    monkeypatch.setattr("subprocess.run", run)
+    needed = [True]
+    monkeypatch.setattr(practice_db.PracticeDatabase, "image_needed", lambda self: needed[0])
     monkeypatch.setattr(
-        "subprocess.run",
-        lambda args, **_: pulled.append(args[-1]) or type("Done", (), {"returncode": 0})(),
-    )
-    monkeypatch.setattr(
-        practice_db.PracticeDatabase, "pull", lambda self, **k: pulled.append("oracle") or True
+        practice_db.PracticeDatabase, "pull", lambda self, **k: run.pulled.append("oracle") or True
     )
     assert cli.main(["--profile", "practice", "pull-images"]) == 0
-    assert pulled[-1] == "oracle"
-    pulled.clear()
+    assert run.pulled[-1] == "oracle"
+    # An existing practice database (an update, a reinstall): not downloaded again.
+    run.pulled.clear()
+    needed[0] = False
+    assert cli.main(["--profile", "practice", "pull-images"]) == 0
+    assert "oracle" not in run.pulled
+    run.pulled.clear()
+    needed[0] = True
     assert cli.main(["--profile", "real", "pull-images"]) == 0
-    assert "oracle" not in pulled
+    assert "oracle" not in run.pulled
+
+
+def test_a_busy_registry_never_stops_an_install_or_an_update(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("subprocess.run", PullRun())
+    monkeypatch.setattr(practice_db.PracticeDatabase, "image_needed", lambda self: True)
+
+    def busy(self, **k):
+        raise PracticeDatabaseProblem(practice_db.registry_busy_message("HTTP status: 503"))
+
+    monkeypatch.setattr(practice_db.PracticeDatabase, "pull", busy)
+    assert cli.main(["--profile", "practice", "pull-images"]) == 0
+    out = capsys.readouterr().out
+    assert "Oracle's side, not yours" in out and "Carrying on" in out
+
+
+def test_the_image_is_needed_only_when_theres_no_practice_database_yet(docker, oracle):
+    assert database(docker, oracle).image_needed()
+    assert not database(docker, oracle, port_open=True).image_needed()
+    database(docker, oracle).ensure()
+    docker.images.clear()  # kept container and volume: nothing to download
+    assert not database(docker, oracle).image_needed()
+    docker.containers.clear()
+    assert not database(docker, oracle).image_needed()  # the volume is there
 
 
 # -------------------------------------------------------------- uninstall
@@ -406,6 +741,46 @@ def test_uninstall_asks_about_the_practice_database(monkeypatch, docker, oracle,
     assert TARGET.volume in docker.volumes
     setup._uninstall_practice_database(True)
     assert TARGET.container not in docker.containers and TARGET.volume not in docker.volumes
+    out = capsys.readouterr().out
+    assert "Removed Oracle Database Free's image." in out
+    assert practice_db.IMAGE not in docker.images
+
+
+def test_uninstall_asks_about_oracles_image_when_asked_about_the_database(
+    monkeypatch, docker, oracle, capsys
+):
+    db = database(docker, oracle)
+    db.ensure()
+    monkeypatch.setattr(practice_db, "PracticeDatabase", lambda: db)
+    answers = iter(["y", "n"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    setup._uninstall_practice_database(None)
+    out = capsys.readouterr().out
+    assert "Deleted." in out and "image was kept" in out
+    assert practice_db.IMAGE in docker.images
+
+
+def test_the_data_folders_answer_isnt_the_practice_databases(monkeypatch, tmp_path, capsys):
+    """Without --delete-data or --keep-data, the practice database gets a
+    question of its own, after the data folders'."""
+    folder = tmp_path / "practice-data"
+    folder.mkdir()
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "settings"))
+    monkeypatch.setattr(setup, "_datalab_running", lambda: False)
+    monkeypatch.setattr(setup, "_docker_quiet", lambda *a, **k: None)
+    monkeypatch.setattr(setup, "_forget", lambda *a: None)
+    monkeypatch.setattr(setup, "default_data_dir", lambda profile: folder)
+    given = []
+    monkeypatch.setattr(setup, "_uninstall_practice_database", given.append)
+    questions = []
+    monkeypatch.setattr("builtins.input", lambda q: questions.append(q) or "y")
+    assert setup.uninstall(delete_data=None) == 0
+    assert given == [None] and len(questions) == 1  # asked about the folders only, here
+    assert not folder.exists()
+    given.clear()
+    folder.mkdir()
+    assert setup.uninstall(delete_data=False) == 0
+    assert given == [False] and folder.exists()
 
 
 def test_uninstall_leaves_a_database_datalab_didnt_make(monkeypatch, docker, oracle, capsys):
@@ -423,6 +798,53 @@ def test_uninstall_leaves_a_database_datalab_didnt_make(monkeypatch, docker, ora
     assert TARGET.container in docker.containers
 
 
+# ----------------------------------------------------------- development
+
+
+def test_db_sh_manages_an_unlabelled_container_only_by_its_own_name(monkeypatch):
+    from datalab.practice_db import __main__ as dev
+
+    made = []
+
+    class Recorder:
+        def __init__(self, target, manage_unlabelled):
+            made.append((target.container, manage_unlabelled, target.legacy))
+
+        def describe(self):
+            return "ok"
+
+    monkeypatch.setattr(dev, "PracticeDatabase", Recorder)
+    monkeypatch.delenv("DATALAB_PRACTICE_DB_CONTAINER", raising=False)
+    assert dev.main(["status"]) == 0
+    monkeypatch.setenv("DATALAB_PRACTICE_DB_CONTAINER", "stale-name")
+    assert dev.main(["status"]) == 0
+    assert dev.main(["status", "--force"]) == 0
+    assert made == [
+        ("datalab-synthetic-oracle", True, None),
+        ("stale-name", False, None),
+        ("stale-name", True, None),
+    ]
+
+
+def test_db_sh_reset_doesnt_say_ready_when_it_isnt(monkeypatch, capsys):
+    from datalab.practice_db import __main__ as dev
+
+    class NotUp:
+        def __init__(self, target, manage_unlabelled):
+            pass
+
+        def remove(self, volume):
+            return []
+
+        def up(self, say, show_download):
+            return False
+
+    monkeypatch.setattr(dev, "PracticeDatabase", NotUp)
+    assert dev.main(["reset"]) == 1
+    out = capsys.readouterr().out
+    assert "ready" not in out and "left alone" in out
+
+
 def test_practice_never_reads_the_real_profiles_settings(monkeypatch, tmp_path):
     """The practice database's commands, and DataLab looking after it, only
     ever load practice's settings; its database is PRACTICE_ORACLE's port."""
@@ -438,7 +860,9 @@ def test_practice_never_reads_the_real_profiles_settings(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cli, "load_settings", load)
     monkeypatch.setattr(setup, "load_settings", load)
-    monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", lambda self, say, **k: "ok")
+    monkeypatch.setattr(
+        practice_db.PracticeDatabase, "ensure", lambda self, say, **k: Outcome("ok")
+    )
     monkeypatch.setattr(practice_db.PracticeDatabase, "describe", lambda self: "ok")
     for command in ("setup", "start", "status"):
         assert cli.main(["--profile", "practice", "practice-db", command]) == 0

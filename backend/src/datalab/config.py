@@ -215,11 +215,19 @@ class Settings:
 
 def _practice_db_port() -> int:
     """The synthetic database's port on this computer: 1522, or
-    DATALAB_PRACTICE_DB_PORT (tests and development, beside another one)."""
+    DATALAB_PRACTICE_DB_PORT (tests and development, beside another one).
+    A value that isn't a port is refused where practice uses it
+    (`practice_db_port_problem`), never at import: the real profile and
+    every other command carry on regardless."""
+    value = os.environ.get("DATALAB_PRACTICE_DB_PORT") or "1522"
+    return int(value) if practice_db_port_problem() is None else 1522
+
+
+def practice_db_port_problem() -> str | None:
     value = os.environ.get("DATALAB_PRACTICE_DB_PORT") or "1522"
     if not value.isdigit() or not 1024 <= int(value) <= 65535:
-        raise ValueError(f"DATALAB_PRACTICE_DB_PORT must be a port number, not {value!r}")
-    return int(value)
+        return f"DATALAB_PRACTICE_DB_PORT must be a port number, not {value!r}"
+    return None
 
 
 # The practice profile always uses the local synthetic database, so its
@@ -300,6 +308,9 @@ def load_settings(profile: Profile | None = None) -> Settings:
     raw = tomllib.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
 
     if profile == "practice":
+        problem = practice_db_port_problem()
+        if problem:
+            raise ValueError(problem)
         oracle: OracleSettings | None = PRACTICE_ORACLE
     else:
         oracle = _oracle_from(raw["oracle"]) if "oracle" in raw else None

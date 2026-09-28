@@ -1220,15 +1220,32 @@ def default_seed() -> int:
     return load_spec()[1]["seed"]
 
 
+def _has_marker(cur) -> bool:
+    cur.execute(
+        "SELECT COUNT(*) FROM dba_tables WHERE owner = :o AND table_name = 'MARKER'",
+        o=MARKER_SCHEMA,
+    )
+    return bool(cur.fetchone()[0])
+
+
+class AlreadyLoaded(RuntimeError):
+    """The database has its data already (the marker is there): nothing was changed."""
+
+
 def build(
     dsn: str,
     *,
     seed: int | None = None,
     admin_pwd: str = ADMIN_PWD,
     ro_pwd: str = RO_PWD,
+    replace: bool = False,
     say: Callable[[str], None] = print,
 ) -> None:
-    """Drop and recreate the synthetic database at `dsn` (this computer only)."""
+    """Drop and recreate the synthetic database at `dsn` (this computer only).
+
+    Refused (AlreadyLoaded) if it has its data already, unless `replace`
+    (synthetic/db.sh generate): a second load started beside a first one
+    must not drop what the first finished."""
     objects, config = load_spec()
     seed = config["seed"] if seed is None else seed
     cohorts = list(config["cohorts"])
@@ -1244,6 +1261,8 @@ def build(
     with connect_when_ready(dsn, admin_pwd) as conn:
         cur = conn.cursor()
         require_synthetic_server(cur)
+        if not replace and _has_marker(cur):
+            raise AlreadyLoaded("The synthetic database has its data already.")
         reset_accounts(cur, cohorts, ro_pwd)
         for cohort in cohorts:
             present = {n: o for n, o in objects.items() if cohort in o["cohorts"]}
