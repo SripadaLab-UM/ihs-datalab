@@ -169,6 +169,7 @@ jobs:
           $two = Run-Case "two" @("datalab-0.0.0-py3-none-any.whl", "datalab-0.0.1-py3-none-any.whl")
           if ($two.Code -ne 2 -or $two.Out -notmatch "more than one DataLab package") { Write-Host $two.Out; exit 1 }
           Write-Host "One package: used. None, or two: refused, saying why."
+          exit 0  # (not the last case's exit code)
       - name: Only package names with a version are accepted
         shell: powershell
         run: |
@@ -187,6 +188,7 @@ jobs:
             if ($LASTEXITCODE -ne $cases[$name]) { Write-Host "$name -> exit $LASTEXITCODE`n$out"; exit 1 }
             Write-Host "$name -> exit $LASTEXITCODE"
           }
+          exit 0  # (not the last case's exit code)
       - name: The pinned uv downloads, matches its SHA-256, and is signed by its publisher
         # The installer's own function, run on its own: this checks the pins
         # (and how Windows names the publisher) before anyone installs.
