@@ -111,7 +111,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     enabled: Boolean(found && head),
   });
   const context = useMemo<ChatContext | undefined>(
-    () => (page.data ? { label: `The page open in the Knowledge tab (${page.data.path})`, text: page.data.text, language: languageOf(page.data.path) } : undefined),
+    () => (page.data ? { label: `The page open in the Knowledge tab (${page.data.path})`, name: page.data.path, text: page.data.text, language: languageOf(page.data.path) } : undefined),
     [page.data],
   );
 
@@ -222,6 +222,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
             headerActions={chatActions}
+            assistant="knowledge"
             active={chatOpen === "open"}
           />
         </aside>

@@ -142,7 +142,7 @@ it("says where the repo stands, and how each change and its tests went", () => {
   expect(testLine({ ...passed, status: "failed", message: "2 of 5 tests failed." }).tone).toBe("bad");
 });
 
-it("browses the package read-only, lists the changes to review, and docks a Data engineering chat", async () => {
+it("browses the package read-only, lists the changes to review, and docks the Pipelines assistant", async () => {
   sessionStorage.setItem("datalab:pipelines:chat-open", "open");
   render(
     <QueryClientProvider client={client()}>
@@ -150,7 +150,7 @@ it("browses the package read-only, lists the changes to review, and docks a Data
     </QueryClientProvider>,
   );
   expect(await screen.findByText(/In sync with GitHub/)).toBeInTheDocument();
-  expect(screen.getByText("The engineering chat")).toBeInTheDocument();
+  expect(screen.getByText("The pipelines chat")).toBeInTheDocument();
   fireEvent.click(await screen.findByRole("button", { name: "steps.R" }));
   await waitFor(() => expect(pipelinesApi.file).toHaveBeenCalledWith("ihsDataR/R/steps.R"));
   expect(await screen.findByText(/Read-only: ask the agent to change it/)).toBeInTheDocument();
@@ -262,10 +262,10 @@ it("closes the files drawer and the chat with Escape, and gives focus back", asy
   const ask = screen.getByRole("button", { name: /Ask the agent/ });
   ask.focus();
   fireEvent.click(ask);
-  expect(await screen.findByText("The engineering chat")).toBeInTheDocument();
+  expect(await screen.findByText("The pipelines chat")).toBeInTheDocument();
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   // Hidden, not gone: reopened, it's the same chat with its draft.
-  await waitFor(() => expect(screen.getByText("The engineering chat")).not.toBeVisible());
+  await waitFor(() => expect(screen.getByText("The pipelines chat")).not.toBeVisible());
   expect(screen.getByRole("button", { name: /Ask the agent/ })).toHaveFocus();
 });
 

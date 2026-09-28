@@ -4,13 +4,29 @@ import { type ReactNode, useId, useRef, useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
 
-import { Chat, ChatHeader, ComposerBox, type ComposerDraft, type ComposerNote, EmptyState, PendingTurn, useEffortChoice } from "./Chat";
+import { Icon } from "@/components/ui";
+
+import { ASSISTANTS, type AssistantId, CompactContext, draftKeyOf } from "./assistants";
+import {
+  Chat,
+  ChatHeader,
+  CompactHeader,
+  CompactIntro,
+  ComposerBox,
+  type ComposerDraft,
+  type ComposerNote,
+  EmptyState,
+  PendingTurn,
+  useEffortChoice,
+} from "./Chat";
 import type { PendingMessage } from "./Pending";
 
 /** Something from the tab beside the chat that goes with each message, such as the SQL being edited. */
 export interface ChatContext {
   /** What it is, as the agent will read it: "The query in the SQL editor". */
   label: string;
+  /** Its short name on the context row ("sources/fitbit.md"); the label if not given. */
+  name?: string;
   text: string;
   /** The code fence's language ("sql", "yaml", "r"...), if it's code. */
   language?: string;
@@ -34,6 +50,10 @@ export function withContext(text: string, context?: ChatContext): string {
  *
  * With `context`, the person can choose to send it along with a message: it's
  * off until they tick it, and they can see exactly what will go.
+ *
+ * With `assistant`, it's the compact presentation of a chat docked beside a
+ * tab: the assistant's title, a short intro, and a message box that keeps
+ * what's typed (per tab) when the chat is hidden or the tab is left.
  */
 export function DockedChat({
   mode,
@@ -47,6 +67,9 @@ export function DockedChat({
   sendLabel,
   onSending,
   active = true,
+  assistant,
+  draftKey: givenDraftKey,
+  handoff,
 }: {
   /** The mode a new conversation starts in: "extraction", "engineering"... */
   mode: string;
@@ -64,6 +87,13 @@ export function DockedChat({
   onSending?: () => void;
   /** False while the tab keeps the chat but doesn't show it (closed): it stops following the conversation until shown. */
   active?: boolean;
+  /** Docked beside this tab: the compact presentation. */
+  assistant?: AssistantId;
+  /** Where the message box keeps what's typed; by default the assistant's own key. */
+  draftKey?: string;
+  /** Before a conversation starts: shown in place of the intro and the message box, when
+   *  the first message is typed elsewhere on the page (New workflow's description). */
+  handoff?: ReactNode;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
   // The first message, shown in the new conversation until its event arrives.
@@ -80,6 +110,7 @@ export function DockedChat({
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(id) });
   // The list may not have caught up with a conversation just started.
   const conversation = conversations.data?.find((c) => c.id === id) ?? (started?.id === id ? started : undefined);
+  const draftKey = givenDraftKey ?? (assistant ? draftKeyOf(assistant, id) : undefined);
 
   const hasContext = Boolean(context?.text.trim());
   // Called as Send is pressed, so the message is what the person saw then.
@@ -89,7 +120,7 @@ export function DockedChat({
   };
   const note = hasContext
     ? (sending: boolean) => (
-        <ContextNote context={context!} included={includeContext} onInclude={setIncludeContext} disabled={sending} />
+        <ContextRow context={context!} included={includeContext} onInclude={setIncludeContext} disabled={sending} />
       )
     : undefined;
 
@@ -119,11 +150,17 @@ export function DockedChat({
         sendLabel={sendLabel}
         pending={started?.id === conversation.id ? firstMessage : undefined}
         active={active}
+        assistant={assistant}
+        tabMode={mode}
+        draftKey={draftKey}
       />
     );
   }
   return (
     <NotStarted
+      assistant={assistant}
+      draftKey={draftKey}
+      handoff={handoff}
       mode={mode}
       model={model}
       prepare={prepare}
@@ -141,10 +178,12 @@ export function DockedChat({
   );
 }
 
-const PREVIEW_LINES = 3;
-
-/** The choice to send the context, and exactly what would be sent. */
-function ContextNote({
+/**
+ * What the tab has open, as one line over the message box: its name, how long
+ * it is, and whether it goes with the message (off until ticked, and it says
+ * so). Exactly what would be sent opens under it, only when asked for.
+ */
+function ContextRow({
   context,
   included,
   onInclude,
@@ -157,54 +196,77 @@ function ContextNote({
 }) {
   const [expanded, setExpanded] = useState(false);
   const previewId = useId();
+  const stateId = useId();
   const lines = context.text.replace(/\n+$/, "").split("\n");
-  const long = lines.length > PREVIEW_LINES;
+  const name = context.name ?? context.label;
   return (
-    <div className="mb-2 px-1 font-sans text-[12.5px] text-muted">
-      <label className={clsx("flex items-baseline gap-2", disabled ? "cursor-not-allowed" : "cursor-pointer hover:text-ink")}>
-        <input
-          type="checkbox"
-          checked={included}
-          disabled={disabled}
-          onChange={(e) => onInclude(e.target.checked)}
-          aria-describedby={previewId}
-          className="translate-y-[2px]"
-        />
-        <span>
-          Send with your message: <span className="text-ink">{context.label}</span>
-        </span>
-      </label>
-      <pre
-        id={previewId}
-        aria-label={`What would be sent: ${context.label}`}
-        className={clsx(
-          "mt-1.5 overflow-auto rounded-[3px] bg-sunken px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink",
-          expanded ? "max-h-60" : "max-h-24",
-          !included && "opacity-60",
-        )}
-      >
-        {expanded ? lines.join("\n") : lines.slice(0, PREVIEW_LINES).join("\n") + (long ? "\n…" : "")}
-      </pre>
-      <p className="mt-1 flex gap-2 text-[11.5px] text-faint">
-        {lines.length} line{lines.length === 1 ? "" : "s"}
-        {long && (
-          <button
-            type="button"
-            onClick={() => setExpanded(!expanded)}
-            aria-expanded={expanded}
-            aria-controls={previewId}
-            className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
-          >
-            {expanded ? "Show less" : `Show all ${lines.length} lines`}
-          </button>
-        )}
+    <div
+      data-testid="context-row"
+      className={clsx(
+        "mb-1.5 rounded-[3px] border px-2 py-1 font-sans text-[12.5px] transition-colors",
+        included ? "border-ink/40 bg-sunken" : "border-line",
+      )}
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          aria-controls={previewId}
+          title={`${expanded ? "Hide" : "Show"} what would be sent: ${context.label}`}
+          className="group flex min-w-0 flex-1 items-center gap-1.5 text-left text-ink"
+        >
+          <Icon name="chevron" size={11} className={clsx("shrink-0 text-faint transition-transform", expanded && "rotate-90")} />
+          <Icon name={context.language === "sql" ? "db" : context.language === "markdown" ? "book" : "code"} size={13} className="shrink-0 text-muted" />
+          <span className="min-w-0 truncate group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">{name}</span>
+          <span className="shrink-0 text-[11.5px] text-faint">
+            {lines.length} line{lines.length === 1 ? "" : "s"}
+          </span>
+        </button>
+        <label
+          className={clsx(
+            "flex shrink-0 items-center gap-1.5",
+            disabled ? "cursor-not-allowed" : "cursor-pointer",
+            included ? "text-ink" : "text-muted hover:text-ink",
+          )}
+        >
+          <input
+            type="checkbox"
+            checked={included}
+            disabled={disabled}
+            onChange={(e) => onInclude(e.target.checked)}
+            aria-label={`Send with message: ${context.label}`}
+            aria-describedby={stateId}
+          />
+          {/* A narrow panel keeps room for the name: the box's own label says the rest. */}
+          <span className="hidden @[24rem]:inline">Send with message</span>
+          <span aria-hidden className="@[24rem]:hidden">Send</span>
+        </label>
+      </div>
+      <p id={stateId} className="pl-[17px] text-[11.5px] text-faint">
+        {included ? "Goes with each message you send, as it is then." : "Not sent. Tick the box to include it."}
       </p>
+      {expanded && (
+        <pre
+          id={previewId}
+          aria-label={`What would be sent: ${context.label}`}
+          className={clsx(
+            "mt-1 mb-0.5 max-h-48 overflow-auto rounded-[3px] bg-sunken px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed whitespace-pre text-ink",
+            !included && "opacity-70",
+          )}
+        >
+          {lines.join("\n")}
+        </pre>
+      )}
     </div>
   );
 }
 
 /** Before the first message: the mode's empty state and a message box that starts the conversation. */
 function NotStarted({
+  assistant,
+  draftKey,
+  handoff,
   mode: modeId,
   model,
   prepare,
@@ -215,6 +277,9 @@ function NotStarted({
   sendLabel,
   onStarted,
 }: {
+  assistant?: AssistantId;
+  draftKey?: string;
+  handoff?: ReactNode;
   mode: string;
   model?: string;
   prepare: (text: string) => string;
@@ -281,6 +346,53 @@ function NotStarted({
   const unknownMode = modes.isSuccess && !mode;
   // Shown once, over the message box, whether a starter or a typed message failed.
   const error = unknownMode ? `DataLab has no “${modeId}” mode.` : start.error?.message;
+
+  if (assistant) {
+    const intro = (
+      <CompactIntro
+        assistant={assistant}
+        mode={modeId}
+        kind={mode?.kind ?? "data"}
+        onPick={(text) => send(text, true).catch(() => undefined)}
+        starting={start.isPending}
+      />
+    );
+    return (
+      <CompactContext value>
+        <div className="flex h-full min-h-0 flex-col">
+          <CompactHeader
+            assistant={assistant}
+            kind={mode?.kind ?? "data"}
+            model={model ?? models.data?.default ?? ""}
+            effort={effort}
+            onEffort={setEffort}
+            actions={headerActions}
+          />
+          <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="flex flex-col gap-8">
+              {pending === null && (handoff ?? (mode && intro))}
+              {pending !== null && <PendingTurn text={pending} />}
+            </div>
+          </div>
+          {!handoff && (
+            <ComposerBox
+              running={false}
+              sending={pending !== null || start.isPending || !mode}
+              error={error}
+              onSend={send}
+              draft={draft}
+              note={note}
+              placeholder={placeholder ?? ASSISTANTS[assistant].placeholder}
+              sendLabel={sendLabel}
+              compact
+              draftKey={draftKey}
+            />
+          )}
+          {handoff && error && <p className="px-4 pb-3 font-sans text-[13px] text-danger">{error}</p>}
+        </div>
+      </CompactContext>
+    );
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">

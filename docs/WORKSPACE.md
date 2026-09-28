@@ -269,9 +269,16 @@ times.)
 | **Workspace** | Conversations, inputs, outputs, history | Full-width chat, any mode |
 | **SQL Playground** | Your own SQL editor, results preview, catalog browser | Data extraction mode, seeded with the current query |
 | **Workflows** | Routines, runs, batches, destinations | Workflow authoring mode |
-| **Pipelines** | `ihsDataR` code browser, agent-proposed changes to review, tests | Data engineering mode |
+| **Pipelines** | `ihsDataR` code browser, agent-proposed changes to review, tests | Pipelines mode: Data engineering's rules, to explain, edit and test the open file |
 | **Knowledge** | Knowledge pages, lab skills, change history | Knowledge writing mode: helps write or tidy a page or skill |
 | **Settings & Safety** | Connections, GitHub sign-in, export destinations, Safety check | none |
+
+Each docked chat is compact: a one-line title ("SQL assistant", "Workflow
+assistant", "Pipelines assistant", "Knowledge assistant"), a sentence, one or
+two starters, and what it can do folded into one line. What the tab has open
+(the query, workflow file, code file or page) sits over the message box as one
+row, sent only when ticked. What's typed is kept per tab while the chat is
+hidden. The Workspace keeps its full presentation.
 
 ## The Workspace tab
 

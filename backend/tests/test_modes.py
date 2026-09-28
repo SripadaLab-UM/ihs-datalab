@@ -22,6 +22,7 @@ def test_every_mode_has_its_label_kind_and_starters():
         "analysis": ("Analysis", "data"),
         "extraction": ("Data extraction", "data"),
         "engineering": ("Data engineering", "data"),
+        "pipelines": ("Pipelines", "data"),
         "workflows": ("Workflow authoring", "data"),
         "knowledge": ("Knowledge writing", "data"),
         "sql": ("SQL drafting", "data"),
@@ -29,7 +30,12 @@ def test_every_mode_has_its_label_kind_and_starters():
     }
     assert all(m.description and m.starters for m in MODES.values())
     # These are docked by their tabs, not offered for a new conversation.
-    assert {m.id for m in MODES.values() if m.tab_only} == {"workflows", "knowledge", "sql"}
+    docked = {m.id for m in MODES.values() if m.tab_only}
+    assert docked == {"workflows", "knowledge", "sql", "pipelines"}
+    # The docked chats' starters are short: one or two, a line each.
+    for mode in (m for m in MODES.values() if m.tab_only):
+        assert 1 <= len(mode.starters) <= 2
+        assert all(len(s) <= 70 for s in mode.starters), mode.id
 
 
 def test_every_mode_gets_the_knowledge_base_note():
@@ -84,7 +90,7 @@ def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
     # Every other mode keeps its tools and attachments, all but the SQL tab's own.
-    for other in set(MODES) - {"knowledge", "sql"}:
+    for other in set(MODES) - {"knowledge", "sql", "pipelines"}:
         assert MODES[other].tools is None and MODES[other].tools_off == ("propose_sql",)
         assert MODES[other].queries and MODES[other].attachments
 
@@ -130,3 +136,36 @@ def test_workflow_authorings_example_passes_the_real_profiles_check():
     example = example.replace("      ...\n", "      out <- x\n")
     workflow = load_workflow(example, allowed_schemas=None, require_small_cells=True)
     assert workflow.read_objects == {"IHS_2025.VFITBITDAILYDATA"}
+
+
+def test_the_pipelines_tabs_chat_explains_edits_and_tests_code():
+    """Its own tab-only mode: Data engineering's rules, word for word, with
+    the file open in the tab; the catalog, small checks and workflow checks,
+    but no analysis plans, no SQL proposals, and nothing attached."""
+    mode = MODES["pipelines"]
+    assert (mode.kind, mode.queries, mode.attachments, mode.tab_only) == ("data", True, False, True)
+    assert mode.allowed_tools == CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"}
+    assert config("pipelines")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
+        "propose_plan", "propose_sql"
+    ]  # fmt: skip
+    assert config("pipelines")["web_search"] == "disabled"
+    text = mode.instructions
+    assert text.endswith(modes.ENGINEERING_RULES)
+    assert MODES["engineering"].instructions.endswith(modes.ENGINEERING_RULES)
+    assert "explain what it does" in text and "change nothing" in text
+    assert "comes back as a proposal" in text and "Only a person saves a change" in text
+    # Engineering's safety rules come along.
+    assert "Never look for credentials" in " ".join(text.split())
+    assert "Add a test for every change" in text
+
+
+def test_each_tabs_chat_works_on_what_the_tab_has_open():
+    sql = " ".join(MODES["sql"].instructions.split())
+    assert "When they ask what a query does, describe it" in sql
+    assert "propose nothing unless they ask" in sql
+    workflows = " ".join(MODES["workflows"].instructions.split())
+    assert '("The workflow file <path>")' in workflows
+    assert "changes that same file, keeping its `name:`" in workflows
+    knowledge = " ".join(MODES["knowledge"].instructions.split())
+    assert '("The page open in the Knowledge tab (<path>)")' in knowledge
+    assert "changes that same file in /work/kb" in knowledge

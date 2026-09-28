@@ -64,6 +64,11 @@ export function WorkflowsPage() {
   useForgetMissingChat(chatId, () => setChatId(""));
   const context = useFileContext();
   const queryClient = useQueryClient();
+  // New workflow, before drafting starts: its description is typed in the page's own form,
+  // and the chat takes over from there. One place asks the question.
+  const location = useLocation();
+  const onNew = /\/workflows\/new\/?$/.test(location.pathname);
+  const describing = onNew && !chatId;
 
   /** New workflow: a Workflow authoring chat, started with the person's description, shown beside the draft. */
   const startDrafting = async (description: string) => {
@@ -218,11 +223,28 @@ export function WorkflowsPage() {
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
             headerActions={chatActions}
+            assistant="workflows"
+            handoff={describing ? <DescribeFirst /> : undefined}
+            // Drafting a new one, the box is for answering its questions.
+            placeholder={onNew ? "Answer, or add a detail" : undefined}
             active={chatOpen === "open"}
           />
         </aside>
       )}
       {panels.dividers}
+    </div>
+  );
+}
+
+/** The side chat on New workflow until drafting starts: the page's form is where it begins. */
+function DescribeFirst() {
+  return (
+    <div data-testid="describe-first" className="flex flex-col gap-2 font-sans text-[13px] text-muted">
+      <p className="font-serif text-[15.5px] leading-snug text-ink">Start with the form on this page.</p>
+      <p>
+        Describe the workflow there and press <span className="font-medium text-ink">Start drafting</span>. The
+        assistant then asks its questions here, drafts the three stages, and you review, test and save them on the page.
+      </p>
     </div>
   );
 }
@@ -364,7 +386,10 @@ function useFileContext(): ChatContext | undefined {
     enabled: Boolean(path),
   });
   return useMemo(
-    () => (path && text.data ? { label: `The workflow file ${path}`, text: text.data.text, language: "yaml" } : undefined),
+    () =>
+      path && text.data
+        ? { label: `The workflow file ${path}`, name: path, text: text.data.text, language: "yaml" }
+        : undefined,
     [path, text.data],
   );
 }

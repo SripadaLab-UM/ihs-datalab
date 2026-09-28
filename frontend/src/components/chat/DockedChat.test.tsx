@@ -133,7 +133,7 @@ it("tries a failed first send again in the same conversation", async () => {
   expect(api.send).toHaveBeenLastCalledWith("new1", "Which tables hold sleep?", "medium");
 });
 
-const include = () => screen.getByRole("checkbox", { name: /Send with your message: The query in the SQL editor/ });
+const include = () => screen.getByRole("checkbox", { name: /Send with message: The query in the SQL editor/ });
 
 /** A send that waits until `finish` is called. */
 function held<T>(value: T) {
@@ -166,14 +166,14 @@ it("sends the latest context, and offers none when it's empty", async () => {
   ask("And now?");
   await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", expect.stringContaining("SELECT 2 FROM dual"), "medium"));
   update({ context: { ...query, text: "  " } });
-  expect(screen.queryByRole("checkbox", { name: /Send with your message/ })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: /Send with message/ })).toBeNull();
 });
 
 it("shows an existing conversation as the Workspace does, with nothing added to messages", async () => {
   listed = [conversation("c1", "Sleep tables")];
   show({ conversationId: "c1" });
   await screen.findByRole("button", { name: /Sleep tables/ });
-  expect(screen.queryByRole("checkbox", { name: /Send with your message/ })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: /Send with message/ })).toBeNull();
   ask("Why is this slow?");
   await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", "Why is this slow?", "medium"));
   expect(api.createConversation).not.toHaveBeenCalled();
@@ -189,18 +189,25 @@ it("unticks the context when it's about something else, but not when it's edited
   expect(include()).toBeChecked();
   // Another file altogether: the person ticks it again if they want it sent.
   update({ context: { label: "ihsDataR/R/steps.R, as on main", text: "x <- 1", language: "r" } });
-  expect(screen.getByRole("checkbox", { name: /Send with your message/ })).not.toBeChecked();
+  expect(screen.getByRole("checkbox", { name: /Send with message/ })).not.toBeChecked();
 });
 
-it("shows exactly what would be sent, the first lines and then all of them", async () => {
-  const long = { ...query, text: "SELECT a,\n  b,\n  c,\n  d\nFROM t\n" };
+it("shows the context as one line, and exactly what would be sent only when asked", async () => {
+  const long = { ...query, name: "The query in the editor", text: "SELECT a,\n  b,\n  c,\n  d\nFROM t\n" };
   show({ context: long });
-  const preview = await screen.findByLabelText("What would be sent: The query in the SQL editor");
-  expect(screen.getByText("5 lines")).toBeTruthy();
-  expect(preview.textContent).toBe("SELECT a,\n  b,\n  c,\n…");
-  fireEvent.click(screen.getByRole("button", { name: "Show all 5 lines" }));
-  expect(preview.textContent).toBe("SELECT a,\n  b,\n  c,\n  d\nFROM t");
-  expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  const row = await screen.findByTestId("context-row");
+  // Its short name, how long it is, and that it isn't sent until ticked.
+  expect(row).toHaveTextContent("The query in the editor");
+  expect(row).toHaveTextContent("5 lines");
+  expect(row).toHaveTextContent("Not sent.");
+  expect(screen.queryByLabelText("What would be sent: The query in the SQL editor")).toBeNull();
+  const opener = screen.getByRole("button", { name: /The query in the editor/ });
+  expect(opener).toHaveAttribute("aria-expanded", "false");
+  fireEvent.click(opener);
+  expect(opener).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByLabelText("What would be sent: The query in the SQL editor").textContent).toBe("SELECT a,\n  b,\n  c,\n  d\nFROM t");
+  fireEvent.click(include());
+  expect(row).toHaveTextContent("Goes with each message you send");
 });
 
 it("sends what was shown as Send was pressed, and holds the choice still while it goes", async () => {

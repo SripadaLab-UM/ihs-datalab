@@ -17,8 +17,11 @@ import { FileTree } from "./FileTree";
 import { ACTIONABLE, languageOf, proposalChip, repoLine, when } from "./pipelines";
 import { ProposalView } from "./ProposalView";
 
+// The Pipelines tab's own chat (backend sessions/modes.py): Data engineering's rules, with
+// the file open here; its changes come back as a proposal to review in this tab.
+export const CHAT_MODE = "pipelines";
 
-/** The ihsDataR code browser, agent-proposed changes to review, and tests, with a Data engineering chat docked beside them. */
+/** The ihsDataR code browser, agent-proposed changes to review, and tests, with the Pipelines assistant docked beside them. */
 export function PipelinesPage() {
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["pipelines-status"], queryFn: pipelinesApi.status });
@@ -73,7 +76,7 @@ export function PipelinesPage() {
   const context = useMemo<ChatContext | undefined>(
     () =>
       file.data?.text != null && !proposalId
-        ? { label: `${path}, as on main`, text: file.data.text, language: languageOf(path) }
+        ? { label: `${path}, as on main`, name: path, text: file.data.text, language: languageOf(path) }
         : undefined,
     [file.data, path, proposalId],
   );
@@ -178,8 +181,8 @@ export function PipelinesPage() {
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">Pipelines</h1>
             <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">
-              The lab's ihsDataR package and workflow files. Ask the Data engineering agent for a change: it works on
-              its own copy, and what it changes comes here to review, test, and save.
+              The lab's ihsDataR package and workflow files. Ask the Pipelines assistant to explain or change them:
+              it works on its own copy, and what it changes comes here to review, test, and save.
             </p>
             <p
               role="status"
@@ -257,7 +260,7 @@ export function PipelinesPage() {
         <aside
           ref={chatBox}
           id={panels.chatId}
-          aria-label="Data engineering chat"
+          aria-label="Pipelines assistant"
           hidden={chatOpen !== "open"}
           role={chatOver ? "dialog" : undefined}
           aria-modal={chatOver || undefined}
@@ -266,7 +269,8 @@ export function PipelinesPage() {
         >
           <DockedChat
             key={chatKey}
-            mode="engineering"
+            mode={CHAT_MODE}
+            assistant="pipelines"
             conversationId={chatId || undefined}
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
@@ -294,8 +298,8 @@ function ProposalList({
   if (proposals.length === 0) {
     return (
       <p className="px-4 py-4 font-sans text-[13px] leading-relaxed text-muted">
-        Nothing proposed yet. When the Data engineering or Workflow authoring agent changes ihsDataR or a workflow
-        file, the change appears here after its turn.
+        Nothing proposed yet. When the Pipelines or Workflow assistant (or a Data engineering conversation) changes
+        ihsDataR or a workflow file, the change appears here after its turn.
       </p>
     );
   }

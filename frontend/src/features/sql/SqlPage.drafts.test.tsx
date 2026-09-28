@@ -263,8 +263,9 @@ it("words the chat for describing data, and opens it from beside the editor, sna
   expect(chatProps).not.toHaveBeenCalled();
   fireEvent.click(await screen.findByRole("button", { name: /Generate SQL with the agent/ }));
   await waitFor(() => expect(chatProps).toHaveBeenCalled());
-  const props = chatProps.mock.lastCall![0] as { mode: string; placeholder: string; sendLabel: string; onSending: () => void };
-  expect(props).toMatchObject({ mode: "sql", placeholder: "Describe the data you want", sendLabel: "Generate SQL" });
+  const props = chatProps.mock.lastCall![0] as { mode: string; assistant: string; sendLabel: string; onSending: () => void };
+  // The SQL assistant's compact chat, with its own short wording (assistants.ts).
+  expect(props).toMatchObject({ mode: "sql", assistant: "sql", sendLabel: "Generate SQL" });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Your question or instruction" })));
   props.onSending();
   expect(JSON.parse(sessionStorage.getItem("datalab:sql:snapshot")!)).toEqual({ sql: MINE, binds: {} });

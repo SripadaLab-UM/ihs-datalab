@@ -562,6 +562,13 @@ def tool_summary(tool: Any, server: Any, result: Any) -> dict[str, Any] | None:
             ],
             "notes": [s(n, 300) for n in (data.get("notes") or [])[:5]],
         }
+    if tool == "check_workflow" and isinstance(data, dict):
+        # Whether it passed and how many problems: the problems' text stays in the tool's own view.
+        problems = data.get("problems")
+        return {
+            "valid": data.get("valid") is True,
+            "problem_count": len(problems) if isinstance(problems, list) else 0,
+        }
     if tool == "query" and isinstance(data, dict):
         count = data.get("row_count")
         return {

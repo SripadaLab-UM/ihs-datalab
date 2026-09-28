@@ -53,17 +53,24 @@ export function Chip({
 }
 
 /** Which kind of session this is: always visible, so nobody is unsure. Its tooltip says what that means. */
-export function SessionBadge({ kind }: { kind: "data" | "research" }) {
+// In a narrow docked panel (its header is a size container), only the icon shows; the name stays for screen readers.
+const SHORT_TEXT = "@max-[22rem]:sr-only";
+
+/** Which kind of session it is. `short`: just its name (a docked chat's header), the rest in the tip. */
+export function SessionBadge({ kind, short = false }: { kind: "data" | "research"; short?: boolean }) {
+  const size = short ? "text-[12px]" : "text-[13px]";
+  // Short, it sits in a narrow panel at the window's right: its tip opens leftwards.
+  const align = short ? "end" : undefined;
   return kind === "data" ? (
-    <InfoTip term="data-session">
-      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-data">
-        <Icon name="lock" size={13} /> Data session · database access, web blocked
+    <InfoTip term="data-session" align={align}>
+      <span className={clsx("inline-flex shrink-0 items-center gap-1.5 font-sans font-medium text-data", size)}>
+        <Icon name="lock" size={short ? 12 : 13} /> {short ? <span className={SHORT_TEXT}>Data session</span> : "Data session · database access, web blocked"}
       </span>
     </InfoTip>
   ) : (
-    <InfoTip term="research-session">
-      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-research">
-        <Icon name="globe" size={13} /> Research session · web access, no database connection
+    <InfoTip term="research-session" align={align}>
+      <span className={clsx("inline-flex shrink-0 items-center gap-1.5 font-sans font-medium text-research", size)}>
+        <Icon name="globe" size={short ? 12 : 13} /> {short ? <span className={SHORT_TEXT}>Research session</span> : "Research session · web access, no database connection"}
       </span>
     </InfoTip>
   );

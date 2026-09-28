@@ -447,6 +447,16 @@ def test_tool_summaries_keep_metadata_and_never_rows():
     )
     assert table["columns"][0] == {"name": "STEPS", "type": "NUMBER", "comment": "<b>x</b>"}
     assert table["column_count"] == 1
+    checked = tool_summary(
+        "check_workflow",
+        "ihs-data",
+        result({"valid": False, "problems": [{"path": "reads", "message": "x"}] * 3, "note": "…"}),
+    )
+    assert checked == {"valid": False, "problem_count": 3}
+    assert tool_summary("check_workflow", "ihs-data", result({"valid": True, "problems": []})) == {
+        "valid": True,
+        "problem_count": 0,
+    }
     assert tool_summary("query", "someone-else", result({"row_count": 1})) is None
     assert (
         tool_summary("query", "ihs-data", {"content": [{"type": "text", "text": "not json"}]})
