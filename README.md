@@ -41,8 +41,8 @@ The installer asks for your U-M GPT key and the database password, and saves
 them in your computer's keychain. At the end it says where everything went.
 
 **Where to find it.** Real and practice each get their own app, with their
-own icon: **DataLab** (the "d." mark on ink) and **DataLab (practice)** (the
-same mark on cream, with an amber edge).
+own icon: **DataLab** (U-M's Block M, Maize on Blue, with the IHS mark) and
+**DataLab (practice)** (the same icon inverted, Blue on Maize).
 
 - **Mac:** the app is in **/Applications**, or in your own Applications
   folder (`~/Applications`) if your account can't add to /Applications
@@ -85,7 +85,7 @@ backend/     the DataLab app (Python): data service, agent tools, API
 frontend/    the web UI (React)
 images/      the agent image, and a small probe image for CI
 installer/   Mac and Windows install and uninstall scripts
-branding/    the DataLab mark, and the script that makes the favicons and app icons
+branding/    the Block M and IHS marks, and the script that makes the favicons and app icons
 synthetic/   a fake IHS database for development, tests, and practice mode
 spikes/      throwaway proofs of concept kept as design evidence
 docs/        design and safety documentation

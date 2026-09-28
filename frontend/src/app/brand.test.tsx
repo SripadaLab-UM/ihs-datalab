@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
 import { Brand, usePracticeTab } from "./brand";
+import { BLOCK_M, COLOURS, IHS_MARK } from "./brandArt";
 
 function Tab({ practice }: { practice: boolean }) {
   usePracticeTab(practice);
@@ -38,4 +39,22 @@ it("marks practice in the header, the tab's icon and its title", () => {
   expect(document.title).toBe("DataLab (practice)");
   unmount();
   expect(hrefs()).toEqual(["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"]);
+});
+
+it("draws the Block M on its tile, and the IHS mark beside it (never merged), from branding/build.py", () => {
+  const { rerender } = render(<Brand practice={false} />);
+  const [m, ihs] = [...screen.getByTestId("brand").querySelectorAll("svg")];
+  // The Block M as traced, Maize on Blue, where the "d." mark was (22 px).
+  expect(m).toHaveAttribute("width", "22");
+  expect(m.querySelector("rect")).toHaveAttribute("fill", COLOURS.blue);
+  expect(m.querySelector("path")).toHaveAttribute("d", BLOCK_M.d);
+  expect(m.querySelector("path")).toHaveAttribute("fill", COLOURS.maize);
+  // A drawing of its own, shown with the name on wide windows.
+  expect(ihs.querySelectorAll("path")).toHaveLength(IHS_MARK.paths.length);
+  expect(ihs.parentElement).toHaveClass("hidden", "lg:inline-flex");
+  // Practice: inverted, Blue on Maize.
+  rerender(<Brand practice />);
+  const practice = screen.getByTestId("brand").querySelector("svg");
+  expect(practice?.querySelector("rect")).toHaveAttribute("fill", COLOURS.maize);
+  expect(practice?.querySelector("path")).toHaveAttribute("fill", COLOURS.blue);
 });

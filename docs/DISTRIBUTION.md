@@ -678,25 +678,43 @@ Windows specifics).
 
 ## Branding
 
-The mark is "d." (the wordmark's period) on a square of ink; practice is the
-same letter on cream with an amber period and edge, so the two never look
-alike, even as a 16-pixel favicon. `branding/build.py` holds its geometry and
-writes everything made from it:
+The logo is U-M's **Block M**, used as the University's mark for this
+internal U-M tool (as the prototype did), beside an **IHS + AI mark**. The
+Block M is traced from the prototype's artwork
+(`um-gpt-local-proxy/deploy/cognito/logo.png`) to its polygon, in its own
+Maize `#FFCB05` on Blue `#00274C`. It's never altered, recoloured, given
+effects or merged with another shape, and keeps clear space of at least its
+serif height round it. The IHS mark is "IHS" with a four-point spark, the
+usual AI cue (no one else's logo). `AI_MARK` in `branding/build.py` picks
+it; two other designs (`network`, `pulse`) are a one-line change away, and
+`build.py --options <folder>` draws all three with preview sheets.
+
+- **App icon:** Blue, with the Block M in Maize and, from 64 pixels up, the
+  IHS mark under it; smaller, the Block M alone (the letters can't be read at
+  16 or 32 pixels).
+- **Favicon:** the Block M alone on its Blue tile: it reads at 16 pixels, in
+  a light or dark browser alike.
+- **Practice:** the same icons inverted, Blue on Maize: a yellow square
+  instead of a blue one, the clearest difference there is at 16 pixels.
+- **Header:** the Block M's tile where the mark always was (22 pixels), then
+  on wide windows the IHS mark (Blue on light, Maize on dark) and the
+  "DataLab" wordmark. Nothing else in the app changes colour.
+
+`branding/build.py` holds the geometry and writes everything made from it:
 
 | File | Used by |
 | --- | --- |
-| `branding/datalab-mark[-practice].svg`, `-1024.png` | the source, for docs and slides |
-| `frontend/public/favicon[-practice].svg` | the browser tab (light and dark, by `prefers-color-scheme`) |
+| `branding/block-m.svg`, `branding/ihs-mark.svg` | the two marks on their own |
+| `branding/datalab-mark[-practice].svg`, `-1024.png` | the app icon, for docs and slides |
+| `frontend/src/app/brandArt.ts` | the header's copy of both marks (`brand.tsx`) |
+| `frontend/public/favicon[-practice].svg` | the browser tab |
 | `frontend/public/favicon[-practice]-32.png`, `apple-touch-icon[-practice].png` | browsers without SVG favicons |
 | `backend/src/datalab/branding/DataLab[-practice].icns` | the Mac app (in the package, copied into the app) |
 | `backend/src/datalab/branding/DataLab[-practice].ico` | the Windows shortcuts (copied to `<app>\icons`) |
 
 Regenerate with `uv run --no-project --with pillow python branding/build.py`
-(on a Mac it uses `iconutil` for the `.icns`), and commit what it writes. The
-header draws the same mark in `frontend/src/app/brand.tsx` with the paper
-tokens; on practice it adds a quiet "practice" beside the name, and swaps the
-tab's icon and title for practice's. The prototype's Block M wasn't carried
-over: it's the University's mark, not DataLab's.
+(on a Mac it uses `iconutil` for the `.icns`), and commit what it writes. On
+practice the app also swaps the tab's icon and title for practice's.
 
 ## Connectivity
 
