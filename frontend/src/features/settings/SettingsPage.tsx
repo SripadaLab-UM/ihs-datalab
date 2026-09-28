@@ -43,7 +43,7 @@ function anchorOf(hash: string): string | null {
  */
 export function SettingsPage() {
   const { section } = useParams();
-  const { hash, state } = useLocation();
+  const { hash } = useLocation();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
   const current = isSection(section) ? section : null;
@@ -53,14 +53,14 @@ export function SettingsPage() {
     if (current) rememberSection(current);
   }, [current]);
   // A link from elsewhere in DataLab lights up the part it's about (highlight.ts).
-  const announcement = useSettingsHighlight();
-  const highlighting = Boolean((state as { highlight?: unknown } | null)?.highlight);
+  const { announcement, handledHash } = useSettingsHighlight();
   // A place inside a section (/settings/export-folders#destination-keys); an
-  // old anchor (#github) finds its part's new id.
+  // old anchor (#github) finds its part's new id. Not the place a highlight
+  // just scrolled to: that scroll (centred, smooth) stands.
   useEffect(() => {
-    if (!current || !anchor || anchor === current || highlighting) return;
+    if (!current || !anchor || anchor === current || handledHash.current === hash) return;
     document.getElementById(OLD_ANCHORS[anchor] ?? anchor)?.scrollIntoView?.({ block: "start" });
-  }, [current, anchor, health.isSuccess, highlighting]);
+  }, [current, anchor, hash, health.isSuccess, handledHash]);
 
   if (!current) {
     // An old link (/settings#updates) goes to its section; else the last one used.

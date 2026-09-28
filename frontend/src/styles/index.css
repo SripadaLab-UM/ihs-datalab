@@ -161,12 +161,13 @@ body {
   :where(.cm-content[contenteditable="false"]) {
     cursor: auto;
   }
-  /* Disabled: the arrow with a bar, faded (70% keeps ink text at 4.5:1 and
-     muted text at 3:1 in both themes), and no hover change: components use
+  /* Disabled: the arrow with a bar, faded to 75% (ink text stays above
+     5.9:1, muted and faint text above 3:1, on every surface in both themes:
+     styles/cursor.test.tsx), and no hover change: components use
      enabled:hover: for theirs. */
   :where(button, select, input, textarea, [role="button"], [role="tab"], [role="switch"]):where(:disabled, [aria-disabled="true"]) {
     cursor: not-allowed;
-    opacity: 0.7;
+    opacity: 0.75;
   }
   :where(label:has(> input:disabled), [aria-disabled="true"]) {
     cursor: not-allowed;

@@ -156,7 +156,7 @@ export function Modal({
     }
   };
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
+    <div data-scrim className="fixed inset-0 z-50 flex items-center justify-center bg-[#1a1916]/40 p-6" onClick={onClose}>
       <div
         ref={box}
         role="dialog"

@@ -79,12 +79,18 @@ export function lightUp(id: string, onFound: () => void): () => void {
   const still = reducedMotion();
   const className = still ? "dl-highlight-still" : "dl-highlight";
   let current: HTMLElement | null = null;
+  // Focus moves only if the person hasn't put it somewhere since the link was followed.
+  const before = document.activeElement;
+  const mayFocus = () => {
+    const now = document.activeElement;
+    return !now || now === document.body || now === before;
+  };
   const mark = (target: HTMLElement) => {
     const first = current === null;
     current = target;
     target.scrollIntoView?.({ block: "center", behavior: still || !first ? "auto" : "smooth" });
-    // Focus goes with the part when it's drawn again, unless the person has moved it.
-    if (first || document.activeElement === document.body) headingOf(target).focus({ preventScroll: true });
+    // Focus goes to the part's heading (again if the part is drawn again), unless the person has moved it.
+    if (mayFocus()) headingOf(target).focus({ preventScroll: true });
     // Restarted if the same part is asked for again.
     target.classList.remove("dl-highlight", "dl-highlight-still");
     void target.offsetWidth;
@@ -110,30 +116,41 @@ export function lightUp(id: string, onFound: () => void): () => void {
   return finish;
 }
 
+/** What useSettingsHighlight gives the page. */
+export interface SettingsHighlight {
+  /** For a live region: "Settings: Updates, Check now", cleared once the highlight ends so a repeat is heard. */
+  announcement: string;
+  /** The hash of the navigation it handled: the page's own scroll to a hash leaves that one alone. */
+  handledHash: { readonly current: string | null };
+}
+
 /**
  * On Settings: if the navigation asked to highlight a part, light it up
- * (lightUp), once. Returns what to announce to screen readers.
+ * (lightUp), once.
  */
-export function useSettingsHighlight(): string {
+export function useSettingsHighlight(): SettingsHighlight {
   const location = useLocation();
   const navigate = useNavigate();
   const asked = (location.state as Partial<SettingsHighlightState> | null)?.highlight;
   const id = typeof asked === "string" ? (OLD_ANCHORS[asked] ?? asked) : undefined;
   const [announcement, setAnnouncement] = useState("");
   const stop = useRef<() => void>(undefined);
+  const handledHash = useRef<string | null>(null);
   useEffect(() => () => stop.current?.(), []);
 
   useEffect(() => {
     if (!id) return;
     stop.current?.();
+    handledHash.current = location.hash;
     stop.current = lightUp(id, () => {
       const name = id in HIGHLIGHT_TARGETS ? HIGHLIGHT_TARGETS[id as HighlightId].name : "";
       setAnnouncement(name ? `Settings: ${name}` : "");
+      setTimeout(() => setAnnouncement(""), HIGHLIGHT_MS);
     });
     // Once: going back to this entry, or reloading, doesn't light it up again.
     navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state: null });
     // Each navigation that asks is its own highlight (location.key), even to the same part.
   }, [id, location.key]);
 
-  return announcement;
+  return { announcement, handledHash };
 }

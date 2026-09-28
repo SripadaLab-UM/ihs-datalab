@@ -132,8 +132,9 @@ arrow, so without them nothing shows the hand):
   menuitem, option, switch, checkbox, radio).
 - **The text cursor** in fields, text areas and the code editor while it can
   be edited. Plain text, a read-only code view, and data keep the arrow.
-- **Disabled** controls show not-allowed and fade to 70%, which keeps ink
-  text at 4.5:1 and muted text at 3:1 in both themes. Their hover doesn't
+- **Disabled** controls show not-allowed and fade to 75%, which keeps ink
+  text above 5.9:1 and muted and faint text above 3:1 on every surface in
+  both themes. Their hover doesn't
   change: write a control's hover as `enabled:hover:` (or
   `group-enabled:group-hover:` inside it), as `Button` does.
 - **Focus:** one 2px ink ring, 2px outside the control, for the keyboard
@@ -143,9 +144,13 @@ arrow, so without them nothing shows the hand):
   in `Story.tsx`), a bordered chip's border turns ink.
 - Something you can click is a `<button>` or a link. A row with nothing to
   open is plain text (`Pressable` in `Story.tsx`), not a disabled button.
-  `styles/clickables.test.ts` fails on a div or span with `onClick` and no
-  role and tabIndex; its few justified exceptions (scrims, the results grid's
-  rows) are listed there with the reason.
+  `styles/clickables.test.ts` reads the JSX with TypeScript's parser and
+  fails on any other element with `onClick`, `onPointerDown` or
+  `onMouseDown` that lacks an interactive role and a tabIndex. The justified
+  exceptions are marked in the source: `data-scrim` (the dimmed page behind a
+  drawer, chat or dialog, which Escape also closes), `data-row` (the results
+  grid, keyboard on the grid) and `data-tree-row` (keyboard on the parent
+  treeitem).
 - There are no drag handles or resizers yet. When one is added, it gets
   `cursor-col-resize` / `cursor-row-resize`, or `cursor-grab` with
   `active:cursor-grabbing`.

@@ -25,7 +25,7 @@ export function useSendingLine(active: boolean): string {
     const timer = setTimeout(() => setSlow(true), SLOW_MS);
     return () => clearTimeout(timer);
   }, [active]);
-  return slow ? "Still sending. DataLab is getting the agent's workspace ready…" : "Sending…";
+  return slow ? "DataLab is preparing the workspace before the agent starts…" : "Sending…";
 }
 
 /** The "Starting…" line under a message on its way, for screen readers too. */

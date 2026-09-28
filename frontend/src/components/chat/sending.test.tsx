@@ -122,7 +122,7 @@ it("says why it's taking a while after a few seconds, and never more", async () 
   fireEvent.click(await screen.findByText("How did steps change?"));
   expect(screen.getByRole("status")).toHaveTextContent("Sending…");
   act(() => vi.advanceTimersByTime(SLOW_MS + 10));
-  expect(screen.getByRole("status")).toHaveTextContent("getting the agent's workspace ready");
+  expect(screen.getByRole("status")).toHaveTextContent("DataLab is preparing the workspace before the agent starts…");
 });
 
 it("sends a starter once however often it's clicked", async () => {
@@ -202,4 +202,35 @@ it("puts the text back in a docked chat whose conversation couldn't be started",
   expect(screen.getByText("DataLab couldn't be reached.")).toBeTruthy();
   // The starters are back, to pick again.
   expect(screen.getByText("How did steps change?")).toBeTruthy();
+});
+
+it("holds Send after DataLab has the message, until its event arrives", async () => {
+  vi.mocked(api.send).mockResolvedValue(conversation);
+  showChat();
+  await screen.findByText("How did steps change?");
+  fireEvent.change(box(), { target: { value: "Steps by month?" } });
+  fireEvent.click(sendButton());
+  await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+  // The POST is done, but the message's event hasn't come: a second one would be refused.
+  await act(async () => undefined);
+  fireEvent.change(box(), { target: { value: "And by week?" } });
+  expect(sendButton()).toBeDisabled();
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(api.send).toHaveBeenCalledTimes(1);
+  expect(screen.getByTestId("pending-message")).toHaveTextContent("Steps by month?");
+  act(() => stream.push("user_message", { text: "Steps by month?" }));
+  expect(screen.queryByTestId("pending-message")).toBeNull();
+});
+
+it("gives a failed message back as typed, before anything typed since", async () => {
+  const sent = later<Conversation>();
+  vi.mocked(api.send).mockReturnValue(sent.promise);
+  showChat();
+  await screen.findByText("How did steps change?");
+  fireEvent.change(box(), { target: { value: "  Steps by month?  " } });
+  fireEvent.click(sendButton());
+  await waitFor(() => expect(api.send).toHaveBeenCalledWith("c1", "Steps by month?", "medium"));
+  fireEvent.change(box(), { target: { value: "and by week" } });
+  await act(async () => sent.reject(new Error("DataLab couldn't be reached.")));
+  expect(box().value).toBe("  Steps by month?  \nand by week");
 });

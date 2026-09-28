@@ -256,7 +256,8 @@ function NotStarted({
       onStarted(conversation, text);
     },
   });
-  const send = (text: string): Promise<unknown> => {
+  // `starter`: a picked question, which the box gets back if it fails (a typed one comes back by itself).
+  const send = (text: string, starter = false): Promise<unknown> => {
     if (inFlight.current) return Promise.reject(new Error("Already sending."));
     inFlight.current = true;
     setDraft(null);
@@ -266,7 +267,7 @@ function NotStarted({
       .mutateAsync({ message: prepare(text), text })
       .catch((error: unknown) => {
         setPending(null);
-        setDraft({ text, key: Date.now() });
+        if (starter) setDraft({ text, key: Date.now() });
         throw error;
       })
       .finally(() => {
@@ -296,7 +297,7 @@ function NotStarted({
             <EmptyState
               mode={mode.id}
               kind={mode.kind}
-              onPick={(text) => send(text).catch(() => undefined)}
+              onPick={(text) => send(text, true).catch(() => undefined)}
               starting={start.isPending}
             />
           )}

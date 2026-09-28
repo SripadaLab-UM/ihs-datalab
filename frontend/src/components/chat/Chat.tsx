@@ -75,6 +75,13 @@ export function Chat({
     if (arrived) setPending(null);
   }, [arrived]);
   const sending = pending !== null && !arrived;
+  // DataLab took it, but its event hasn't come (the stream dropped, say): after
+  // a while the chat stops waiting for it, so Send isn't held for good.
+  useEffect(() => {
+    if (!sending || !send.isSuccess) return;
+    const timer = setTimeout(() => setPending(null), STUCK_MS);
+    return () => clearTimeout(timer);
+  }, [sending, send.isSuccess]);
   // Set at once on a click, before any state update can render: a double click sends once.
   const inFlight = useRef(false);
 
@@ -98,9 +105,14 @@ export function Chat({
   const running = conversation.busy || (transcriptRunning && status.dataUpdatedAt <= turnEventAt);
   const known = useKnownFiles(conversation.id);
 
-  /** Send what the person typed or picked. It shows at once; if it fails, it goes back in the box. */
-  const sendMessage = (text: string): Promise<unknown> => {
-    if (inFlight.current || running) return Promise.reject(new Error("Already sending."));
+  /**
+   * Send what the person typed or picked. It shows at once, and nothing else
+   * can be sent until its event arrives (DataLab refuses a second message
+   * meanwhile). If it fails, the box gets the text back: the box does that
+   * itself for a typed one, `starter` asks for it for a picked one.
+   */
+  const sendMessage = (text: string, starter = false): Promise<unknown> => {
+    if (inFlight.current || running || sending) return Promise.reject(new Error("Already sending."));
     inFlight.current = true;
     setDraft(null);
     setPending({ text, after: events.at(-1)?.seq ?? 0 });
@@ -110,7 +122,7 @@ export function Chat({
       .mutateAsync(message)
       .catch((error: unknown) => {
         setPending(null);
-        setDraft({ text, key: Date.now() });
+        if (starter) setDraft({ text, key: Date.now() });
         throw error;
       })
       .finally(() => {
@@ -179,7 +191,7 @@ export function Chat({
             <EmptyState
               mode={conversation.mode}
               kind={conversation.kind}
-              onPick={(text) => void sendMessage(text).catch(() => undefined)}
+              onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
               starting={send.isPending || running}
             />
           )}
@@ -212,8 +224,8 @@ export function Chat({
       <Composer
         conversation={conversation}
         running={running}
-        // Held while the message is being sent; once DataLab has it, the agent is working.
-        sending={send.isPending}
+        // Held from Send until the message's event arrives (then the agent is working).
+        sending={send.isPending || sending}
         error={send.error?.message}
         onSend={sendMessage}
         draft={draft}
@@ -361,7 +373,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   });
   return (
     <span className="flex items-center gap-1">
-      <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
+      <label className="flex items-center gap-2 font-sans text-[13px] text-muted hover:text-ink has-[:disabled]:cursor-not-allowed">
         <input
           type="checkbox"
           className="peer sr-only"
@@ -956,6 +968,15 @@ function Composer({
   );
 }
 
+/** A message that couldn't be sent, back in the box before whatever was typed since. */
+export function restored(message: string, typedSince: string): string {
+  if (!typedSince.trim()) return message;
+  return /\n$/.test(message) ? message + typedSince : `${message}\n${typedSince}`;
+}
+
+/** After this long, a message DataLab took but whose event never came stops holding Send. */
+const STUCK_MS = 20_000;
+
 /** What sits over the message box; given whether a message is being sent, to hold still meanwhile. */
 export type ComposerNote = ReactNode | ((sending: boolean) => ReactNode);
 
@@ -989,9 +1010,9 @@ export function ComposerBox({
   sendLabel?: string;
 }) {
   const [text, setText] = useState("");
-  // A message that couldn't be sent comes back, unless something new was typed meanwhile.
+  // A message that couldn't be sent comes back, before anything typed meanwhile.
   useEffect(() => {
-    if (draft) setText((current) => (current.trim() ? current : draft.text));
+    if (draft) setText((current) => restored(draft.text, current));
   }, [draft]);
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
   const box = useRef<HTMLTextAreaElement>(null);
@@ -1003,12 +1024,13 @@ export function ComposerBox({
   }, [text]);
 
   const submit = () => {
-    const message = text.trim();
+    const typed = text;
+    const message = typed.trim();
     if (!message || running || sending) return;
     // Cleared at once: the message shows in the chat. If it fails, it comes back
-    // here (unless something new was typed meanwhile) and the error shows above.
+    // here as it was typed, before anything typed since, and the error shows above.
     setText("");
-    onSend(message).catch(() => setText((current) => (current.trim() ? current : message)));
+    onSend(message).catch(() => setText((current) => restored(typed, current)));
   };
 
   return (

@@ -57,9 +57,37 @@ it("keeps the text cursor in fields and the editor, and not-allowed on disabled 
   const disabled = selectorFor("not-allowed");
   expect(disabled).toContain(":disabled");
   expect(disabled).toContain('[aria-disabled="true"]');
-  // Faded, but readable: 70% keeps ink at 4.5:1 and muted at 3:1 (checked in the comment's numbers).
+});
+
+// The fade keeps a disabled control's text readable: ink at 4.5:1, muted and faint at 3:1, on every surface.
+function tokens(block: string): Record<string, string> {
+  return Object.fromEntries([...block.matchAll(/--color-([a-z-]+):\s*(#[0-9a-f]{6})/gi)].map((m) => [m[1], m[2]]));
+}
+const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+function luminance([r, g, b]: number[]): number {
+  const [R, G, B] = [r, g, b].map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * R + 0.7152 * G + 0.0722 * B;
+}
+function contrast(a: number[], b: number[]): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+it.each(["light", "dark"])("fades disabled controls and keeps their text readable in the %s theme", (name) => {
+  const light = tokens(css.split("@theme {")[1].split("}")[0]);
+  const theme = name === "light" ? light : { ...light, ...tokens(css.split(':root[data-theme="dark"] {')[1].split("}")[0]) };
   const faded = [...baseRules()].find(([sel]) => sel.includes(":disabled"))?.[1] ?? "";
-  expect(Number(/opacity:\s*([\d.]+)/.exec(faded)?.[1])).toBeGreaterThanOrEqual(0.7);
+  const alpha = Number(/opacity:\s*([\d.]+)/.exec(faded)?.[1]);
+  expect(alpha).toBeLessThan(1);
+  for (const surface of ["canvas", "surface", "rail", "field", "sunken", "accent-soft"]) {
+    const back = rgb(theme[surface]);
+    const over = (text: string) => rgb(theme[text]).map((v, i) => Math.round(alpha * v + (1 - alpha) * back[i]));
+    expect(contrast(over("ink"), back), `ink on ${surface}`).toBeGreaterThanOrEqual(4.5);
+    for (const text of ["muted", "faint"]) expect(contrast(over(text), back), `${text} on ${surface}`).toBeGreaterThanOrEqual(3);
+  }
 });
 
 it("draws one 2px focus ring with an offset", () => {

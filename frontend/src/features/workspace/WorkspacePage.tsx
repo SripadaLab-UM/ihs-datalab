@@ -87,8 +87,8 @@ export function WorkspacePage() {
         conversationId && "xl:grid-cols-[16rem_minmax(0,1fr)_20rem] 2xl:grid-cols-[17rem_minmax(0,1fr)_24rem]",
       )}
     >
-      {railOpen && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={closeDrawer} />}
-      {panelOpen && <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={closeDrawer} />}
+      {railOpen && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={closeDrawer} />}
+      {panelOpen && <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={closeDrawer} />}
       <aside
         id="conversation-list"
         ref={railBox}

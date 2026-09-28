@@ -129,7 +129,7 @@ export function PipelinesPage() {
         chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
       )}
     >
-      {drawer && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
       <aside
         ref={drawerBox}
         aria-label="Files and changes"
@@ -224,7 +224,7 @@ export function PipelinesPage() {
 
       {chatOpen === "open" && (
         <>
-          <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
+          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
             ref={chatBox}
             aria-label="Data engineering chat"

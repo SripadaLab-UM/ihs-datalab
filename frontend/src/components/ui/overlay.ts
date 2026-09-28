@@ -67,3 +67,21 @@ export function useMediaQuery(query: string): boolean {
   }, [query]);
   return matches;
 }
+
+/**
+ * Escape closes a panel while it's shown over the page (a drawer or docked
+ * chat on a narrow window), unless a dialog is open on top of it: the
+ * keyboard's way to do what a click on the dimmed page around it does.
+ */
+export function useEscapeToClose(active: boolean, onClose: () => void) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !document.querySelector("[role=dialog]")) close.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active]);
+}
