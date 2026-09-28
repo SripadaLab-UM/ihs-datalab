@@ -5,7 +5,6 @@ the same on every platform. The platform installers (installer/) call these.
 from __future__ import annotations
 
 import contextlib
-import getpass
 import os
 import re
 import shutil
@@ -39,6 +38,7 @@ from datalab.credentials import (
     save_oracle_password,
 )
 from datalab.repos import github
+from datalab.secret_prompt import ask_secret
 
 AGENT_IMAGE_REPOSITORIES = ("datalab-agent", "ghcr.io/sripadalab-um/datalab-agent")
 
@@ -62,9 +62,17 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
     settings = load_settings(profile)
     print(f"Setting up DataLab ({profile}) in {data_dir}")
 
+    try:
+        return _ask_for_secrets(profile, settings, update=update)
+    except KeyboardInterrupt:
+        print("Cancelled. Nothing more was saved.")
+        return 130
+
+
+def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> int:
     if update or not _saved(model_api_key):
-        key = getpass.getpass("U-M GPT API key (input hidden): ")
-        if key.strip():
+        key = ask_secret("U-M GPT API key")
+        if key:
             try:
                 store_model_key(key)
                 print("Saved the U-M GPT key to this computer's keychain.")
@@ -75,7 +83,9 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
     oracle = asks_for_oracle_password(settings)
     if oracle is not None:
         if update or not _saved(lambda: oracle_password(oracle)):
-            password = getpass.getpass(f"Database password for {oracle.user} (input hidden): ")
+            password = ask_secret(
+                f"Database password for {oracle.user}", keep_spaces=True, what="password"
+            )
             if password:
                 try:
                     store_oracle_password(oracle, password)

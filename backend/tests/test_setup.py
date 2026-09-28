@@ -3,7 +3,7 @@ import dataclasses
 import pytest
 
 import datalab.setup as installing
-from datalab import credentials
+from datalab import credentials, secret_prompt
 from datalab.config import PRACTICE_ORACLE, Settings, load_settings
 
 from .conftest import MemoryKeychain
@@ -138,7 +138,7 @@ def test_practice_setup_keeps_a_password_already_saved(tmp_path, monkeypatch, ke
 
     assert installing.setup("practice", None, update=False) == 0
     assert keychain.writes == 0
-    monkeypatch.setattr(installing.getpass, "getpass", lambda prompt: "")  # no new key
+    monkeypatch.setattr(secret_prompt.getpass, "getpass", lambda prompt: "")  # no new key
     assert installing.setup("practice", None, update=True) == 0
     assert keychain.saved[("datalab-practice", "DATALAB_RO")] == "datalab_ro"
 
@@ -152,7 +152,7 @@ def test_the_real_profile_never_gets_the_synthetic_password(tmp_path, monkeypatc
         'allowed_schemas = ["IHS_2025"]\n',
         encoding="utf-8",
     )
-    monkeypatch.setattr(installing.getpass, "getpass", lambda prompt: "")  # skipped
+    monkeypatch.setattr(secret_prompt.getpass, "getpass", lambda prompt: "")  # skipped
 
     assert installing.setup("real", lab, update=True) == 0
     assert "datalab_ro" not in keychain.saved.values()
