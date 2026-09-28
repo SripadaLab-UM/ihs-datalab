@@ -33,7 +33,7 @@ export function SqlOrigin({
   return (
     <section
       aria-label="How this SQL was created"
-      className="mb-3 rounded-[4px] border border-line bg-surface px-4 py-3 font-sans text-[13px] text-ink"
+      className="mb-3 max-h-[45vh] overflow-y-auto rounded-[4px] border border-line bg-surface px-4 py-3 font-sans text-[13px] text-ink"
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
@@ -87,7 +87,9 @@ export function SqlOrigin({
                 <li key={q.id} className="text-[12.5px]">
                   <span className="font-mono">{q.tables.map(shortTable).join(", ") || "no tables"}</span>{" "}
                   <span className="text-muted">
-                    · {q.status === "succeeded" && q.row_count !== null ? `${q.row_count.toLocaleString()} rows` : q.status}
+                    · {q.status === "succeeded" && q.row_count !== null
+                      ? `${q.row_count.toLocaleString()} row${q.row_count === 1 ? "" : "s"}`
+                      : q.status}
                   </span>
                 </li>
               ))}

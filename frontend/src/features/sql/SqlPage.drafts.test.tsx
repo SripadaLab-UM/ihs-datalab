@@ -1,7 +1,7 @@
 // Describe → generate → review → run: the agent's proposed query and the editor's draft.
 import { EditorView } from "@codemirror/view";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -46,6 +46,9 @@ vi.mock("@/components/chat/DockedChat", () => ({
     );
   },
 }));
+
+// The editor loads its language on demand: give it time on a busy machine (the whole suite runs at once).
+configure({ asyncUtilTimeout: 5000 });
 
 for (const proto of [Range.prototype, Element.prototype]) {
   proto.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as DOMRectList;
@@ -237,7 +240,7 @@ it("says how the SQL was created, with links to the turn and its activity", asyn
   expect(within(panel).getAllByText("VFITBITDAILYDATA (2025)")).toHaveLength(2);
   expect(within(panel).getByText(/VPARTICIPANTS \(2025\)/)).toBeInTheDocument();
   expect(within(panel).getByText("tables/fitbit-daily")).toBeInTheDocument();
-  expect(within(panel).getByText(/1 rows/)).toBeInTheDocument();
+  expect(within(panel).getByText(/1 row$/)).toBeInTheDocument();
   expect(within(panel).getByRole("link", { name: /activity and queries in the Workspace/ })).toHaveAttribute(
     "href",
     "/workspace/c1",

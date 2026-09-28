@@ -246,7 +246,7 @@ export function SqlPage() {
         {sidePanel}
       </aside>
 
-      <main className="flex min-h-0 min-w-0 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
           <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show tables and history">
             <Icon name="menu" size={16} />
@@ -257,6 +257,31 @@ export function SqlPage() {
               Your own queries, with the same checks and limits as the agent's. Results stay in DataLab, out of the
               agent's reach, until you export them.
             </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-1.5 sm:max-w-[50%]">
+            {kept && (
+              <Button variant="ghost" className="shrink-0 px-2 py-1 text-[12.5px]" onClick={backToKept}>
+                <Icon name="restore" size={13} /> Back to your earlier draft
+              </Button>
+            )}
+            {origin && (
+              <Button
+                variant="ghost"
+                className="shrink-0 px-2 py-1 text-[12.5px]"
+                aria-expanded={showOrigin}
+                onClick={() => setShowOrigin(!showOrigin)}
+              >
+                <Icon name="history" size={13} /> How this SQL was created
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              className="shrink-0 px-2.5 py-1 text-[12.5px]"
+              onClick={focusChat}
+              title="Describe the data you want in the chat: the agent prepares a query here for you to review and run"
+            >
+              <Icon name="spark" size={13} /> Generate SQL with the agent
+            </Button>
           </div>
         </header>
 
@@ -312,29 +337,6 @@ export function SqlPage() {
                 <Icon name="db" size={13} /> Run <kbd className="font-sans text-[11.5px] opacity-70">{submitKeys()}</kbd>
               </Button>
             )}
-            <Button
-              variant="secondary"
-              className="shrink-0 px-2.5 py-1 text-[12.5px]"
-              onClick={focusChat}
-              title="Describe the data you want in the chat; the agent prepares a query here for you to review and run"
-            >
-              <Icon name="spark" size={13} /> Generate SQL with the agent
-            </Button>
-            {origin && (
-              <Button
-                variant="ghost"
-                className="shrink-0 px-2 py-1 text-[12.5px]"
-                aria-expanded={showOrigin}
-                onClick={() => setShowOrigin(!showOrigin)}
-              >
-                <Icon name="history" size={13} /> How this SQL was created
-              </Button>
-            )}
-            {kept && (
-              <Button variant="ghost" className="shrink-0 px-2 py-1 text-[12.5px]" onClick={backToKept}>
-                <Icon name="restore" size={13} /> Back to your earlier draft
-              </Button>
-            )}
             <CheckSummary sql={sql} check={check} />
             <Button
               variant="secondary"
@@ -378,7 +380,7 @@ export function SqlPage() {
           )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col border-t border-line">
+        <div className="flex min-h-[16rem] flex-1 flex-col border-t border-line">
           <ResultsArea
             opened={opened}
             run={runner.run}
