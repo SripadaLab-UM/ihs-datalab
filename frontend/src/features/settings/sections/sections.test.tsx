@@ -10,6 +10,7 @@ import { formatBytes, settingsApi } from "@/api/settings";
 import { ConnectionsSection } from "./ConnectionsSection";
 import { DestinationKeysSection } from "./DestinationKeysSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
+import { untilSettled } from "./PracticeDatabase";
 import { StorageSection } from "./StorageSection";
 import { UpdatesSection } from "./UpdatesSection";
 
@@ -147,7 +148,8 @@ it("says which features need the U-M GPT key and which don't", async () => {
   wrap(<ConnectionsSection />);
   const umgpt = within(await screen.findByRole("region", { name: "U-M GPT" }));
   expect(umgpt.getByText("The key is optional on the practice DataLab.")).toBeTruthy();
-  expect(umgpt.getByText("Conversations with the agent, in the Workspace")).toBeTruthy();
+  expect(umgpt.getByText("Conversations with the agent, in the Workspace, and their automatic titles")).toBeTruthy();
+  expect(umgpt.getByText("The Safety check's model checks")).toBeTruthy();
   expect(umgpt.getByText(/Edit with agent, and the agent's suggested updates \(in the real DataLab\)/)).toBeTruthy();
   expect(umgpt.getByText("The SQL Playground")).toBeTruthy();
   expect(umgpt.getByText("Save as workflow, and running workflows")).toBeTruthy();
@@ -187,6 +189,23 @@ it("a practice database problem is said, with Try again", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   await waitFor(() => expect(mocked.startPracticeDatabase).toHaveBeenCalledTimes(1));
   expect(await screen.findByText("Starting…")).toBeTruthy();
+});
+
+it("while Docker Desktop starts, it says so and keeps asking until the database is up", async () => {
+  mocked.connections.mockResolvedValue(PRACTICE);
+  mocked.practiceDatabase.mockResolvedValue({
+    ...PRACTICE_DB,
+    phase: "waiting-for-docker",
+    message: "Docker Desktop isn't running. DataLab carries on by itself once it is.",
+  });
+  wrap(<ConnectionsSection />);
+  expect(await screen.findByText("Waiting for Docker…")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  // Not settled: asked again every 3 s, until it's running (or has a problem).
+  expect(untilSettled({ ...PRACTICE_DB, phase: "waiting-for-docker" })).toBe(3000);
+  expect(untilSettled({ ...PRACTICE_DB, phase: "loading" })).toBe(3000);
+  expect(untilSettled(PRACTICE_DB)).toBe(false);
+  expect(untilSettled({ ...PRACTICE_DB, phase: "problem" })).toBe(false);
 });
 
 it("the real profile shows no practice database", async () => {

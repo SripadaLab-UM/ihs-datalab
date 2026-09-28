@@ -10,8 +10,9 @@ export function KeyFeatures({ practice }: { practice: boolean }) {
       <div>
         <p className="font-medium">Needs the key</p>
         <ul className="mt-1 list-disc pl-5 text-muted">
-          <li>Conversations with the agent, in the Workspace</li>
+          <li>Conversations with the agent, in the Workspace, and their automatic titles</li>
           <li>Drafting a workflow with the agent</li>
+          <li>The Safety check's model checks</li>
           <li>
             Knowledge's Edit with agent, and the agent's suggested updates
             {practice && " (in the real DataLab)"}

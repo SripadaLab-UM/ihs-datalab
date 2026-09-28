@@ -9,6 +9,7 @@ export const PRACTICE_DATABASE = ["practice-database"];
 /** Words for each phase, as the chip beside the database says them. */
 export const PHASE: Record<Shown["phase"], { text: string; tone?: "good" | "attn" | "bad" }> = {
   checking: { text: "Checking…" },
+  "waiting-for-docker": { text: "Waiting for Docker…", tone: "attn" },
   downloading: { text: "Downloading…" },
   creating: { text: "Setting up…" },
   starting: { text: "Starting…" },
@@ -20,15 +21,22 @@ export const PHASE: Record<Shown["phase"], { text: string; tone?: "good" | "attn
 
 const SETTLED: Shown["phase"][] = ["ready", "problem"];
 
-/** How practice's synthetic database stands, while it's being set up too. */
+/** How practice's synthetic database stands, while it's being set up too.
+ *  Asked again every few seconds until it's ready or has a problem; while it
+ *  waits for Docker Desktop it isn't settled, so it's still asked. */
 export function usePracticeDatabase(enabled = true) {
   return useQuery({
     queryKey: PRACTICE_DATABASE,
     queryFn: settingsApi.practiceDatabase,
     enabled,
     // While it's starting or loading, ask again every few seconds.
-    refetchInterval: (query) => (query.state.data && SETTLED.includes(query.state.data.phase) ? false : 3000),
+    refetchInterval: (query) => untilSettled(query.state.data),
   });
+}
+
+/** How often to ask again: every 3 s until it's ready or has a problem. */
+export function untilSettled(shown: Shown | undefined): number | false {
+  return shown && SETTLED.includes(shown.phase) ? false : 3000;
 }
 
 /**
@@ -66,7 +74,7 @@ export function PracticeDatabaseStatus() {
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        {data.phase === "problem" && (
+        {(data.phase === "problem" || data.phase === "waiting-for-docker") && (
           <Button onClick={() => start.mutate()} disabled={start.isPending || data.busy}>
             Try again
           </Button>

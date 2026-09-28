@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import { api } from "@/api/client";
+import { api, type Health } from "@/api/client";
 import { githubApi } from "@/api/github";
 import { sessionApi } from "@/api/session";
 import { type Connections, settingsApi } from "@/api/settings";
 
-import { DatabaseShortcut, databaseStanding, KeyShortcut } from "./ConnectionShortcuts";
+import { DatabaseShortcut, databaseStanding, KeyShortcut, whilePracticeDatabaseStarts } from "./ConnectionShortcuts";
 import { AttentionMenu } from "./AttentionMenu";
 import { FoldersShortcut } from "./FoldersShortcut";
 import { MoreMenu } from "./MoreMenu";
@@ -418,6 +418,9 @@ it("practice's database standing follows how it's starting, and a problem needs 
   } as Connections; // prettier-ignore
   expect(databaseStanding(practice, undefined, "loading").state).toBe("practice database starting…");
   expect(databaseStanding(practice, undefined, "problem").attention).toBe("DB: not running");
+  expect(databaseStanding(practice, undefined, "waiting-for-docker").attention).toBe("DB: waiting for Docker");
+  expect(whilePracticeDatabaseStarts({ state: { data: { practice_database: "waiting-for-docker" } as Health } })).toBe(3000);
+  expect(whilePracticeDatabaseStarts({ state: { data: { practice_database: "problem" } as Health } })).toBe(false);
   expect(databaseStanding(practice, undefined, "ready").attention).toBeUndefined();
   expect(databaseStanding({ ...practice, oracle: { ...practice.oracle, practice: false } }, undefined, "problem").attention).toBeUndefined();
 });

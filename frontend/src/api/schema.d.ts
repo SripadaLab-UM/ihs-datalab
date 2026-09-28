@@ -4273,7 +4273,7 @@ export interface components {
              * Phase
              * @enum {string}
              */
-            phase: "checking" | "downloading" | "creating" | "starting" | "loading" | "resetting" | "ready" | "problem";
+            phase: "checking" | "waiting-for-docker" | "downloading" | "creating" | "starting" | "loading" | "resetting" | "ready" | "problem";
             /** Message */
             message: string;
             /** Container */

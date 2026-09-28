@@ -63,6 +63,9 @@ export function databaseStanding(
   if (oracle.practice && practiceDatabase === "problem") {
     return { state: "practice database not running", tone: "attn", attention: "DB: not running" };
   }
+  if (oracle.practice && practiceDatabase === "waiting-for-docker") {
+    return { state: "waiting for Docker Desktop", tone: "attn", attention: "DB: waiting for Docker" };
+  }
   if (oracle.practice && practiceDatabase && practiceDatabase !== "ready") {
     return { state: "practice database starting…", tone: undefined };
   }

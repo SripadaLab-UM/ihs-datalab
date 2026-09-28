@@ -293,7 +293,9 @@ function WelcomeNotes() {
         <p role="status">
           {database === "problem"
             ? "The practice database isn't running."
-            : "DataLab is starting the practice database on this computer; queries can run once it's up."}{" "}
+            : database === "waiting-for-docker"
+              ? "DataLab is waiting for Docker Desktop, to start the practice database."
+              : "DataLab is starting the practice database on this computer; queries can run once it's up."}{" "}
           <Link {...settingsLink("connections", "connection-database")} className="underline">
             See how it's going
           </Link>
