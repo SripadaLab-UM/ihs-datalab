@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
 import { Brand, usePracticeTab } from "./brand";
+import { BLOCK_M, COLOURS, IHS_MARK, TILE } from "./brandArt";
 
 function Tab({ practice }: { practice: boolean }) {
   usePracticeTab(practice);
@@ -38,4 +39,27 @@ it("marks practice in the header, the tab's icon and its title", () => {
   expect(document.title).toBe("DataLab (practice)");
   unmount();
   expect(hrefs()).toEqual(["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"]);
+});
+
+it("draws the Block M and the spark on its tile, and the IHS mark beside it, from branding/build.py", () => {
+  const { rerender } = render(<Brand practice={false} />);
+  const [m, ihs] = [...screen.getByTestId("brand").querySelectorAll("svg")];
+  // The Block M as traced, Maize on Blue, where the "d." mark was (22 px).
+  expect(m).toHaveAttribute("width", "22");
+  expect(m.querySelector("rect")).toHaveAttribute("fill", COLOURS.blue);
+  expect(m.querySelector("path")).toHaveAttribute("d", BLOCK_M.d);
+  expect(m.querySelector("path")).toHaveAttribute("fill", COLOURS.maize);
+  // The AI spark over its corner, Maize, edged in the tile's Blue.
+  const spark = m.querySelectorAll("path")[1];
+  expect(spark).toHaveAttribute("d", TILE.spark?.d);
+  expect(spark).toHaveAttribute("fill", COLOURS.maize);
+  expect(spark).toHaveAttribute("stroke", COLOURS.blue);
+  // A drawing of its own, beside the name on the widest windows (so the tabs fit at 1024).
+  expect(ihs.querySelectorAll("path")).toHaveLength(IHS_MARK.paths.length);
+  expect(ihs.parentElement).toHaveClass("hidden", "xl:inline-flex");
+  // Practice: inverted, Blue on Maize.
+  rerender(<Brand practice />);
+  const practice = screen.getByTestId("brand").querySelector("svg");
+  expect(practice?.querySelector("rect")).toHaveAttribute("fill", COLOURS.maize);
+  expect(practice?.querySelector("path")).toHaveAttribute("fill", COLOURS.blue);
 });
