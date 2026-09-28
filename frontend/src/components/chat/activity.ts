@@ -167,6 +167,17 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
         detail: null,
       };
     }
+    case "suggest_kb_update": {
+      // Shown as its own card under the answer; this is the step that made it.
+      const title = str(args.title);
+      return {
+        ...base,
+        icon: "book",
+        title: title ? `Suggested a Knowledge update: ${title}` : "Suggested a Knowledge update",
+        chips: failed ? [{ text: "DataLab refused it", tone: "bad" }] : [{ text: "for you to review", tone: "good" }],
+        detail: null,
+      };
+    }
     case "check_workflow": {
       // DataLab's workflow check on the agent's draft: a failing one is never folded away as done.
       const count = typeof s.problem_count === "number" ? s.problem_count : 0;

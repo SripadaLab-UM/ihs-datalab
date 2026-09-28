@@ -48,6 +48,7 @@ from datalab.knowledge.service import (
     NotActionable,
     NotAvailable,
     NotFound,
+    _json_safe,
     text_digest,
 )
 from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
@@ -313,6 +314,10 @@ class EditCheckOut(BaseModel):
     diff: str
     # What the edit does to status and the review fields, in plain words.
     notes: list[str]
+    # The text as the page viewer shows it (the preview): its front matter,
+    # parsed (null if it can't be), and the Markdown after it.
+    front_matter: dict[str, Any] | None = None
+    body: str = ""
 
 
 class ReapplyIn(BaseModel):
@@ -478,12 +483,18 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     @router.post("/edits/{edit_id}/check")
     async def check_edit(edit_id: str, body: CheckEditIn) -> EditCheckOut:
         def work() -> EditCheckOut:
-            checked = edits.check(edits.get(edit_id), body.text)
+            edit = edits.get(edit_id)
+            checked = edits.check(edit, body.text)
+            text = edit.text if body.text is None else body.text
+            fields = kb.front_matter(text)[0] if edit.path.endswith(".md") else None
+            _, rest, _ = kb.split_front_matter(text) if fields is not None else (None, text, 1)
             return EditCheckOut(
                 findings=[FindingOut(**f.to_dict()) for f in checked.report.findings],
                 shared=checked.shared,
                 diff=checked.diff,
                 notes=checked.notes,
+                front_matter=_json_safe(fields) if fields else None,
+                body=rest,
             )
 
         return await run(work)

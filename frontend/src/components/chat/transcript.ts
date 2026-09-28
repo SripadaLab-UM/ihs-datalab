@@ -32,6 +32,7 @@ export type Item =
   | Approval
   | { kind: "review"; text: string; status: "running" | "done" | "stopped" | "failed" }
   | KbProposalItem
+  | KbSuggestionItem
   | { kind: "notice"; tone: "error" | "info"; text: string };
 
 /**
@@ -50,6 +51,28 @@ export interface KbProposalItem {
   status: string;
   message: string;
   commit: string | null;
+}
+
+/**
+ * A Suggested Knowledge update (backend knowledge/suggestions.py): a durable
+ * finding the agent offered with `suggest_kb_update`, or the person's own
+ * ("Propose a Knowledge update"). A `kb_suggestion` event, then
+ * `kb_suggestion_updated` when it's accepted (an edit to review) or
+ * dismissed. It never changes the knowledge base by itself.
+ */
+export interface KbSuggestionItem {
+  kind: "kb_suggestion";
+  id: string;
+  by: "agent" | "person";
+  turn: number;
+  page: string;
+  title: string;
+  text: string;
+  reason: string;
+  evidence: { query_id: string; tables: string[] }[];
+  status: "open" | "accepted" | "dismissed";
+  /** The edit it became, once accepted. */
+  editId: string | null;
 }
 
 /** How the turn's model requests are going, from DataLab's relay (relay/recovery.py). */
@@ -93,6 +116,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
   const byId = new Map<string, Item>();
   const approvals = new Map<string, Approval>();
   const proposals = new Map<string, KbProposalItem>();
+  const suggestions = new Map<string, KbSuggestionItem>();
   // During a rigor review, Codex's messages are the review, not the answer.
   let review: Extract<Item, { kind: "review" }> | undefined;
 
@@ -333,6 +357,35 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           item.status = text(data.status) || item.status;
           item.message = text(data.message);
           item.commit = text(data.commit) || null;
+        }
+        break;
+      }
+      case "kb_suggestion": {
+        const item: KbSuggestionItem = {
+          kind: "kb_suggestion",
+          id,
+          by: data.by === "person" ? "person" : "agent",
+          turn: Number(data.turn) || 0,
+          page: text(data.page),
+          title: text(data.title),
+          text: text(data.text),
+          reason: text(data.reason),
+          evidence: list(data.evidence).map((e) => ({
+            query_id: text(e.query_id),
+            tables: Array.isArray(e.tables) ? e.tables.map(String) : [],
+          })),
+          status: "open",
+          editId: null,
+        };
+        suggestions.set(id, item);
+        add(item);
+        break;
+      }
+      case "kb_suggestion_updated": {
+        const item = suggestions.get(id);
+        if (item && (data.status === "accepted" || data.status === "dismissed")) {
+          item.status = data.status;
+          item.editId = text(data.edit_id) || item.editId;
         }
         break;
       }

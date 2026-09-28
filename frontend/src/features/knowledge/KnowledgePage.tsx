@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 
 import { commitUrl, type KbCommit, type KbEntry, type KbPage, knowledgeApi, type KnowledgeStatus } from "@/api/knowledge";
-import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
+import { type ChatContext, type ChatRequest, DockedChat } from "@/components/chat/DockedChat";
 import { InternalLinks, Markdown } from "@/components/chat/Markdown";
 import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
@@ -14,8 +14,10 @@ import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels 
 import { useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
+import { FrontMatter } from "./FrontMatter";
 import { KnowledgeTree } from "./KnowledgeTree";
-import { findPage, resolveLink, statusTone } from "./pages";
+import { type EditorView, PageEditor } from "./PageEditor";
+import { findPage, resolveLink } from "./pages";
 import { ago, repoState } from "./repoState";
 import { settingsLink } from "@/features/settings/highlight";
 
@@ -75,6 +77,12 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   );
   const [chatId, setChatId] = useTabState("datalab:kb:chat", "");
   const [chatKey, setChatKey] = useState(0);
+  // Edit with agent: the chat gets the page as context, ticked, and the cursor.
+  const [chatRequest, setChatRequest] = useState<ChatRequest | undefined>(undefined);
+  // Edit page: ?edit=1 edits the page open (?edit=<id>: that edit), and survives a reload.
+  const [search, setSearch] = useSearchParams();
+  const editing = search.get("edit");
+  const editView = (["edit", "preview", "review"] as const).find((v) => v === search.get("view")) ?? "edit";
   // Over the page, each is a dialog: focus in it and kept there, Escape closes it.
   // Below NAV_DOCK and CHAT_DOCK the list and the chat are shown over the page.
   const panels = usePanels("knowledge", { chatOpen: chatOpen === "open" });
@@ -102,6 +110,13 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     setView("page");
     setDrawer(false);
   };
+  const startEditing = (view: EditorView = "edit") => {
+    setView("page");
+    setSearch({ edit: "1", ...(view !== "edit" ? { view } : {}) });
+  };
+  const stopEditing = () => setSearch({});
+  // Drafts on this computer: a page with one says so, and "Edit page" continues it.
+  const drafts = useQuery({ queryKey: ["kb-edits"], queryFn: knowledgeApi.edits, enabled: Boolean(head) });
 
   // The file itself: a link or address may leave out ".md".
   const found = findPage(entries, path);
@@ -114,6 +129,10 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     () => (page.data ? { label: `The page open in the Knowledge tab (${page.data.path})`, name: page.data.path, text: page.data.text, language: languageOf(page.data.path) } : undefined),
     [page.data],
   );
+  const editWithAgent = (target: string) => {
+    setChatOpen("open");
+    setChatRequest({ key: Date.now(), placeholder: `Describe the change to ${target}` });
+  };
 
   const chatActions = (
     <>
@@ -188,6 +207,21 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
             <EmptyNote icon="book" title="Nothing here yet">
               {status.signed_in ? "Press Sync to download the knowledge base from GitHub." : <SignInFirst />}
             </EmptyNote>
+          ) : editing && path ? (
+            <div className={READING_COLUMN}>
+              <PageEditor
+                key={`${path}:${editing}`}
+                path={found?.path ?? path}
+                editId={editing !== "1" && editing !== "new" ? editing : undefined}
+                isNew={editing === "new"}
+                initialView={editView}
+                repo={status.name}
+                entries={entries}
+                signedIn={status.signed_in}
+                onOpen={open}
+                onClose={stopEditing}
+              />
+            </div>
           ) : !path || (!findPage(entries, path) && pages.isSuccess) ? (
             <EmptyNote icon="book" title={path ? "Not in the knowledge base" : "Pick a page"}>
               {path ? `There's no ${path} in the knowledge base as last synced.` : "Choose a page or skill on the left to read it."}
@@ -195,7 +229,15 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
           ) : page.error ? (
             <p className="font-sans text-[13px] text-danger">{page.error.message}</p>
           ) : page.data ? (
-            <PageView page={page.data} entries={entries} repo={status.name} onOpen={open} />
+            <PageView
+              page={page.data}
+              entries={entries}
+              repo={status.name}
+              onOpen={open}
+              draft={drafts.data?.some((d) => d.path === page.data.path) ?? false}
+              onEdit={() => startEditing()}
+              onEditWithAgent={() => editWithAgent(page.data.path)}
+            />
           ) : (
             <p className="font-sans text-[13px] text-muted">Opening {path}…</p>
           )}
@@ -224,6 +266,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
             headerActions={chatActions}
             assistant="knowledge"
             active={chatOpen === "open"}
+            request={chatRequest}
           />
         </aside>
       )}
@@ -277,8 +320,25 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
   );
 }
 
-/** One page or skill as last synced: its front matter as facts, its text rendered. */
-function PageView({ page, entries, repo, onOpen }: { page: KbPage; entries: KbEntry[]; repo: string | null | undefined; onOpen: (path: string) => void }) {
+/** One page or skill as last synced: its front matter as facts, its text rendered; and how to change it. */
+function PageView({
+  page,
+  entries,
+  repo,
+  onOpen,
+  draft,
+  onEdit,
+  onEditWithAgent,
+}: {
+  page: KbPage;
+  entries: KbEntry[];
+  repo: string | null | undefined;
+  onOpen: (path: string) => void;
+  /** There's a draft of it on this computer. */
+  draft: boolean;
+  onEdit: () => void;
+  onEditWithAgent: () => void;
+}) {
   const follow = (href: string) => {
     const target = resolveLink(page.path, href);
     const found = target ? findPage(entries, target) : undefined;
@@ -295,7 +355,28 @@ function PageView({ page, entries, repo, onOpen }: { page: KbPage; entries: KbEn
             On GitHub <Icon name="open" size={11} />
           </a>
         )}
+        {page.editable && (
+          <span className="ml-auto flex flex-wrap items-center gap-2">
+            <Button className="px-2.5 py-1 text-[12.5px]" onClick={onEdit}>
+              <Icon name="pen" size={12} /> {draft ? "Continue editing" : "Edit page"}
+            </Button>
+            <Button variant="ghost" className="px-2 py-1 text-[12.5px]" onClick={onEditWithAgent}>
+              <Icon name="spark" size={12} /> Edit with agent
+            </Button>
+          </span>
+        )}
       </header>
+      {page.editable && draft && (
+        <p className="-mt-3 font-sans text-[12.5px] text-you">You have a draft of this page on this computer, not shared yet.</p>
+      )}
+      {!page.editable && page.source_note && (
+        <p role="note" className="-mt-2 flex items-baseline gap-2 rounded-[3px] border border-line bg-sunken px-3 py-2 font-sans text-[13px] text-muted">
+          <Icon name="lock" size={12} className="shrink-0 translate-y-[1px]" />
+          <span>
+            <span className="text-ink">Read-only here.</span> {page.source_note}
+          </span>
+        </p>
+      )}
       {page.front_matter && <FrontMatter fields={page.front_matter} entries={entries} onOpen={onOpen} />}
       {markdown ? (
         <InternalLinks value={follow}>
@@ -305,93 +386,6 @@ function PageView({ page, entries, repo, onOpen }: { page: KbPage; entries: KbEn
         <CodeEditor label={page.path} language={languageOf(page.path)} value={page.text} readOnly className="h-[60vh]" />
       )}
     </article>
-  );
-}
-
-const shown = (value: unknown): string =>
-  typeof value === "string" ? value : typeof value === "number" || typeof value === "boolean" ? String(value) : JSON.stringify(value);
-
-/** A page's front matter, as facts: status and who reviewed it, the cohorts, typed evidence, limitations, related pages. */
-function FrontMatter({ fields, entries, onOpen }: { fields: Record<string, unknown>; entries: KbEntry[]; onOpen: (path: string) => void }) {
-  const status = typeof fields.status === "string" ? fields.status : null;
-  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : value === undefined || value === null ? [] : [value]);
-  const known = new Set(["id", "name", "kind", "status", "summary", "description", "evidence", "limitations", "related", "cohorts", "reviewed_by", "reviewed_on"]);
-  const others = Object.entries(fields).filter(([key]) => !known.has(key));
-  return (
-    <section className="flex flex-col gap-3 border-y border-line py-4">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <h2 className="font-serif text-[26px] leading-tight">{shown(fields.id ?? fields.name ?? "")}</h2>
-        {status && <Chip tone={statusTone(status)}>{status}</Chip>}
-        {typeof fields.kind === "string" && <Chip>{fields.kind}</Chip>}
-        {list(fields.cohorts).map((c) => (
-          <Chip key={shown(c)}>{shown(c)}</Chip>
-        ))}
-      </div>
-      {(fields.summary ?? fields.description) !== undefined && (
-        <p className="font-serif text-[18px] leading-relaxed">{shown(fields.summary ?? fields.description)}</p>
-      )}
-      {status === "reviewed" && fields.reviewed_by !== undefined && (
-        <p className="font-sans text-[12.5px] text-muted">
-          Reviewed by @{shown(fields.reviewed_by)}
-          {fields.reviewed_on !== undefined && ` on ${shown(fields.reviewed_on)}`}
-        </p>
-      )}
-      {status === "draft" && <p className="font-sans text-[12.5px] text-attn">Draft: no one has reviewed this page yet.</p>}
-      {status === "deprecated" && <p className="font-sans text-[12.5px] text-danger">Deprecated: kept for the record, not to rely on.</p>}
-      <Facts title="Evidence">
-        {list(fields.evidence).map((item, i) => {
-          const [kind, value] = item && typeof item === "object" && !Array.isArray(item) ? (Object.entries(item)[0] ?? ["", ""]) : ["", item];
-          return (
-            <li key={i} className="flex flex-wrap items-baseline gap-2">
-              {kind && <span className="dl-label w-16 shrink-0">{kind}</span>}
-              <span className="font-mono text-[12.5px] break-all">{shown(value)}</span>
-            </li>
-          );
-        })}
-      </Facts>
-      <Facts title="Limitations">
-        {list(fields.limitations).map((item, i) => (
-          <li key={i} className="font-sans text-[13.5px]">
-            {shown(item)}
-          </li>
-        ))}
-      </Facts>
-      <Facts title="Related">
-        {list(fields.related).map((item) => {
-          const found = findPage(entries, shown(item));
-          return (
-            <li key={shown(item)} className="inline">
-              {found ? (
-                <button type="button" onClick={() => onOpen(found.path)} className="font-mono text-[12.5px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
-                  {shown(item)}
-                </button>
-              ) : (
-                <span className="font-mono text-[12.5px] text-muted">{shown(item)}</span>
-              )}
-            </li>
-          );
-        })}
-      </Facts>
-      {others.length > 0 && (
-        <Facts title="Other fields">
-          {others.map(([key, value]) => (
-            <li key={key} className="font-mono text-[12.5px]">
-              {key}: {shown(value)}
-            </li>
-          ))}
-        </Facts>
-      )}
-    </section>
-  );
-}
-
-function Facts({ title, children }: { title: string; children: ReactNode[] }) {
-  if (children.length === 0) return null;
-  return (
-    <div>
-      <h3 className="dl-label">{title}</h3>
-      <ul className={clsx("mt-1 flex gap-1.5", title === "Related" ? "flex-wrap gap-x-3" : "flex-col")}>{children}</ul>
-    </div>
   );
 }
 

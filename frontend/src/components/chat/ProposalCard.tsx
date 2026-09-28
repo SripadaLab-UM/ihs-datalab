@@ -464,7 +464,7 @@ function FileReview({
 }
 
 /** The check, as Save & share will run it: errors, possible participant data (to confirm), warnings. */
-function CheckFindings({
+export function CheckFindings({
   findings,
   confirmed,
   onConfirm,

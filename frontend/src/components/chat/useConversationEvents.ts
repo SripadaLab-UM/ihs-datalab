@@ -45,6 +45,8 @@ export const EVENT_TYPES = [
   "title_changed",
   "kb_proposal",
   "kb_proposal_updated",
+  "kb_suggestion",
+  "kb_suggestion_updated",
 ];
 
 /**
