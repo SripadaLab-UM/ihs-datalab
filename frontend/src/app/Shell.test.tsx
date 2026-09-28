@@ -99,5 +99,5 @@ it("makes room for the shortcuts on narrower windows: tighter gaps, the badge on
   app("/workspace");
   const badge = await screen.findByTitle(/The practice profile/);
   expect(badge).toHaveClass("lg:hidden", "xl:inline");
-  expect(badge.closest(".ml-auto")).toHaveClass("gap-2", "xl:gap-3");
+  expect(badge.closest(".ml-auto")).toHaveClass("gap-2", "xl:gap-2.5");
 });

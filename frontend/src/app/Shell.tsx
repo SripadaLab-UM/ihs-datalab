@@ -82,7 +82,7 @@ export function Shell() {
         {/* The pill, the shortcuts, the practice badge, Help and More sit together
             at the right, closer to each other than to the tabs; End session is
             in its own menu at the far end, set apart. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch xl:gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch xl:gap-2.5">
           <UpdatePill />
           <Shortcuts />
           {/* From lg to xl the brand beside the tabs says "practice" itself, so the
