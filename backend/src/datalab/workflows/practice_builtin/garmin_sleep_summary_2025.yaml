@@ -1,0 +1,57 @@
+schema_version: 1
+name: garmin_sleep_summary_2025
+description: >-
+  IHS 2025-cohort Garmin daily sleep summary from IHS_2025.GARMINSLEEPSUMMARY
+  over the cohort window (CALENDARDATE); derives offset-adjusted start/end
+  datetimes and delivers the CSV to the IHS 2025 exports folder.
+parameters:
+  start_date: { type: date, default: 2025-04-01, description: Start date }
+  end_date: { type: date, default: 2026-01-01, description: End date }
+reads:
+  - IHS_2025.GARMINSLEEPSUMMARY
+
+steps:
+  - id: extract
+    sql: |
+      SELECT PARTICIPANTIDENTIFIER,SUMMARYID,STARTTIMEINSECONDS,STARTTIMEOFFSETINSECONDS,
+        DURATIONINSECONDS,CALENDARDATE,UNMEASURABLESLEEPINSECONDS,DEEPSLEEPDURATIONINSECONDS,
+        LIGHTSLEEPDURATIONINSECONDS,REMSLEEPINSECONDS,AWAKEDURATIONINSECONDS,VALIDATION,
+        OVERALLSLEEPSCOREVALUE,OVERALLSLEEPSCOREQUALIFIERKEY,INSERTEDDATE
+      FROM IHS_2025.GARMINSLEEPSUMMARY
+      WHERE CALENDARDATE >= TO_DATE(:start_date,'YYYY-MM-DD')
+        AND CALENDARDATE < TO_DATE(:end_date,'YYYY-MM-DD')
+    output: garmin_sleep_summary_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      x$endinseconds <- x$STARTTIMEINSECONDS + x$DURATIONINSECONDS
+      x$start <- as.POSIXct(x$STARTTIMEINSECONDS, origin = "1970-01-01", tz = "UTC") + x$STARTTIMEOFFSETINSECONDS
+      x$end   <- as.POSIXct(x$endinseconds,       origin = "1970-01-01", tz = "UTC") + x$STARTTIMEOFFSETINSECONDS
+      # start and end as R 4.2 wrote them (the legacy output), in any R: one
+      # shape per column (the date alone when every value is midnight), not
+      # quoted. From R 4.3 each midnight value on its own loses its time.
+      dt <- function(v) {
+        t <- as.POSIXlt(v); p <- c(t$sec, t$min, t$hour)
+        format(v, if (all(p[is.finite(p)] == 0)) "%Y-%m-%d" else "%Y-%m-%d %H:%M:%S")
+      }
+      for (col in c("start", "end")) x[[col]] <- dt(x[[col]])
+      text <- setdiff(which(vapply(x, is.character, NA)), match(c("start", "end"), names(x)))
+      write.csv(x, outputs$final, row.names = FALSE, quote = text)
+    inputs: { raw: extract }
+    output: garmin_sleep_summary_2025.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: garmin_sleep_summary_2025
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of Garmin sleep summaries for the lab's data manager, by
+      design: one row per sleep record, with no counts of people to suppress.
+      It goes only to the lab's own export folder.

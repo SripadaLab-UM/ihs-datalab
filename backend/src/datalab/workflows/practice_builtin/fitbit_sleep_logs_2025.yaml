@@ -1,0 +1,42 @@
+schema_version: 1
+name: fitbit_sleep_logs_2025
+description: >-
+  IHS 2025-cohort Fitbit daily sleep logs from IHS_2025.VFITBITSLEEPLOGS over
+  the cohort window (STARTDATE), delivered as a CSV to the IHS 2025 exports
+  folder.
+parameters:
+  start_date: { type: date, default: 2025-04-01, description: Start date }
+  end_date: { type: date, default: 2026-01-01, description: End date }
+reads:
+  - IHS_2025.VFITBITSLEEPLOGS
+
+steps:
+  # STARTDATE is ISO text (VARCHAR2) in this view, so the binds compare as
+  # text, without TO_DATE, as in the prototype routine.
+  - id: extract
+    sql: |
+      SELECT * FROM IHS_2025.VFITBITSLEEPLOGS
+      WHERE STARTDATE >= :start_date AND STARTDATE < :end_date
+    output: fitbit_sleep_logs_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: fitbit_sleep_logs_2025.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: fitbit_sleep_logs_2025
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of Fitbit sleep logs for the lab's data manager, by
+      design: one row per sleep log, with no counts of people to suppress. It
+      goes only to the lab's own export folder.

@@ -1,0 +1,50 @@
+schema_version: 1
+name: healthkit_sleep_intervals_2025
+description: >-
+  IHS 2025-cohort Apple Watch (HealthKit) sleep-analysis intervals from
+  IHS_2025.VHEALTHKITSAMPLES_SLEEPANALYSISINTERVAL, restricted to Apple Watch
+  sources and valid study participants, before the window end.
+  HEALTHKITSAMPLEKEY is hex-encoded in SQL via RAWTOHEX; delivered as a CSV to
+  the IHS 2025 exports folder.
+parameters:
+  end_date: { type: date, default: 2026-01-01, description: End date }
+reads:
+  - IHS_2025.VHEALTHKITSAMPLES_SLEEPANALYSISINTERVAL
+  - IHS_2025.STUDYPARTICIPANTS
+
+steps:
+  # STARTDATE is ISO text (VARCHAR2) in this view: the bind compares as text.
+  - id: extract
+    sql: |
+      SELECT RAWTOHEX(HEALTHKITSAMPLEKEY) AS HEALTHKITSAMPLEKEY, PARTICIPANTIDENTIFIER,
+        STARTDATE, RECORD_DATE, VALUE, UNITS, SOURCEPRODUCTTYPE, INSERTEDDATE
+      FROM IHS_2025.VHEALTHKITSAMPLES_SLEEPANALYSISINTERVAL
+      WHERE SOURCEPRODUCTTYPE LIKE '%Watch%'
+        AND STARTDATE < :end_date
+        AND PARTICIPANTIDENTIFIER IN (
+          SELECT PARTICIPANTIDENTIFIER FROM IHS_2025.STUDYPARTICIPANTS
+          WHERE SECONDARYIDENTIFIER IS NOT NULL
+        )
+    output: healthkit_sleep_intervals_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: healthkit_sleep_intervals_2025.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: healthkit_sleep_intervals_2025
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of Apple Watch sleep intervals for the lab's data
+      manager, by design: one row per interval, with no counts of people to
+      suppress. It goes only to the lab's own export folder.

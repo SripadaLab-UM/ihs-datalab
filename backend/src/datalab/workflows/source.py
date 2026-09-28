@@ -51,6 +51,10 @@ from datalab.workflows.model import (
 )
 
 PACKAGE = "ihsDataR"
+# Practice DataLab's built-in workflows (practice_builtin/README.md), listed
+# read-only as builtin/<name>.yaml beside the practice folder's own files.
+BUILTIN = "builtin"
+BUILTIN_DIR = Path(__file__).with_name("practice_builtin")
 # A pipeline's name: its folder in inst/pipelines/ (as a workflow step names it).
 PIPELINE_NAME = re.compile(r"[a-z][a-z0-9_]{0,47}")
 _GIT = [
@@ -72,15 +76,17 @@ def workflows_folder(settings: Settings) -> WorkflowFolder:
     """Where workflow files and the pipelines package are read from (see the
     module docstring). The default folder is made if it's missing; the
     pipelines clone isn't, until its first sync."""
+    practice = settings.profile == "practice"
     if settings.workflows.folder:
         return WorkflowFolder(Path(settings.workflows.folder).expanduser())
     local = settings.data_dir / "workflows-local"
     local.mkdir(parents=True, exist_ok=True)
-    if settings.repos.pipelines and settings.profile != "practice":
+    if settings.repos.pipelines and not practice:
         path = settings.data_dir / "repos" / settings.repos.pipelines.split("/")[1]
         # Only ever read here (never fetched): the Pipelines tab syncs it.
         return WorkflowFolder(path, clone=Clone(path, ""), fallback=local)
-    return WorkflowFolder(local)
+    # Practice lists its built-in workflows beside its own (practice_builtin/).
+    return WorkflowFolder(local, builtin=BUILTIN_DIR if practice else None)
 
 
 @dataclass(frozen=True)
@@ -115,8 +121,11 @@ class WorkflowFolder:
         commit: str | None = None,
         ids: dict[str, tuple[str, str]] | None = None,
         package_problem: str | None = None,
+        builtin: Path | None = None,
     ) -> None:
         self._root = root
+        # Read-only workflow files listed as builtin/<name>.yaml (practice's).
+        self._builtin = builtin
         # The pipelines clone (root is its checkout), and the folder read
         # until it's been synced.
         self._clone = clone
@@ -173,12 +182,16 @@ class WorkflowFolder:
             if workflow is not None:
                 self.read(relative)  # the checks a workflow file gets (inside, .yaml, size)
             try:
-                data = _read_limited(self._inside(relative), MAX_FILE_BYTES)
+                data = _read_limited(self._file(relative), MAX_FILE_BYTES)
             except SourceError:
                 if workflow is not None:
                     raise
                 continue  # one file too large or gone never blocks the others
-            blob, commit = self._git_ids(self.root / relative, data)
+            blob, commit = (
+                (None, None)
+                if self.is_builtin(relative)
+                else self._git_ids(self.root / relative, data)
+            )
             if blob is not None and commit is not None:
                 ids[relative] = (blob, commit)
             target = dest / relative
@@ -188,7 +201,10 @@ class WorkflowFolder:
         package = self.package_dir
         if package.is_dir() and not package.is_symlink():
             problem = _copy_package(package, dest / PACKAGE)
-        return WorkflowFolder(dest, ids=ids, package_problem=problem)
+        copied = dest / BUILTIN
+        return WorkflowFolder(
+            dest, ids=ids, package_problem=problem, builtin=copied if copied.is_dir() else None
+        )
 
     @property
     def workflows_dir(self) -> Path:
@@ -200,23 +216,39 @@ class WorkflowFolder:
         return self.root / PACKAGE
 
     def paths(self) -> list[str]:
-        """The workflow files, as paths relative to the folder."""
-        folder = self.workflows_dir
-        if not folder.is_dir():
+        """The workflow files, as paths relative to the folder, then the built-in
+        ones (`builtin/<name>.yaml`)."""
+        return [*_yaml_files(self.workflows_dir, self.root), *self.builtin_paths()]
+
+    def builtin_paths(self) -> list[str]:
+        if self._builtin is None:
             return []
-        found = []
-        for entry in sorted(folder.iterdir()):
-            if (
-                entry.suffix.lower() in (".yaml", ".yml")
-                and not entry.name.startswith(".")
-                and entry.is_file()
-            ):
-                found.append(entry.relative_to(self.root).as_posix())
-        return found
+        return [f"{BUILTIN}/{name}" for name in _yaml_files(self._builtin, self._builtin)]
+
+    def is_builtin(self, path: str) -> bool:
+        """Whether `path` is one of the built-in (read-only) workflow files."""
+        return self._builtin is not None and path in self.builtin_paths()
+
+    def _file(self, path: str) -> Path:
+        if self._builtin is not None and path.startswith(f"{BUILTIN}/"):
+            if path not in self.builtin_paths():
+                raise SourceError(f"There's no workflow file {path}.")
+            return self._builtin / path.removeprefix(f"{BUILTIN}/")
+        return self._inside(path)
 
     def read(self, path: str) -> WorkflowFile:
         """One workflow file: only one of `paths()`, the .yaml files (not
-        dotfiles) directly in the workflows folder. Refuses anything else."""
+        dotfiles) directly in the workflows folder, or a built-in one. Refuses
+        anything else."""
+        if self.is_builtin(path):
+            data = _read_limited(self._file(path), MAX_FILE_BYTES)
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise SourceError(f"{path} isn't UTF-8 text.") from None
+            return WorkflowFile(
+                path, text, "file", f"sha256:{hashlib.sha256(data).hexdigest()}", None
+            )
         full = self._inside(path)
         if full.parent.resolve() != self.workflows_dir.resolve():
             raise SourceError("Workflow files are read only from the workflows folder.")
@@ -242,6 +274,8 @@ class WorkflowFolder:
             raise SourceError("Workflow files in the pipelines repo are saved with Save & share.")
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", name):
             raise SourceError("A workflow's name is lower case letters, digits, - and _.")
+        if f"{BUILTIN}/{name}.yaml" in {p.lower() for p in self.builtin_paths()}:
+            raise FileExistsError(f"There's already a built-in workflow called {name}.")
         folder = self.workflows_dir
         folder.mkdir(parents=True, exist_ok=True)
         taken = {entry.name.lower() for entry in folder.iterdir()}
@@ -351,6 +385,21 @@ class WorkflowFolder:
         if committed not in current:
             return None, None
         return committed, commit
+
+
+def _yaml_files(folder: Path, root: Path) -> list[str]:
+    """The .yaml files (not dotfiles) directly in `folder`, relative to `root`."""
+    if not folder.is_dir():
+        return []
+    found = []
+    for entry in sorted(folder.iterdir()):
+        if (
+            entry.suffix.lower() in (".yaml", ".yml")
+            and not entry.name.startswith(".")
+            and entry.is_file()
+        ):
+            found.append(entry.relative_to(root).as_posix())
+    return found
 
 
 def git_blob_id(data: bytes) -> str:

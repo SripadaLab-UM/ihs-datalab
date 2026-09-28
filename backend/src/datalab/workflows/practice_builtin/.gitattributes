@@ -1,0 +1,2 @@
+# Byte for byte as in ihs-pipelines: never converted to CRLF on checkout.
+*.yaml -text

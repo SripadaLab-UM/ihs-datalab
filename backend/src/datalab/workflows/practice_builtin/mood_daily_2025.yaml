@@ -1,0 +1,39 @@
+schema_version: 1
+name: mood_daily_2025
+description: >-
+  IHS 2025-cohort daily mood export from IHS_2025.VW_DAILY_MOOD, filtered to
+  MOOD_ENDDATE on/after the study window start; delivered as a CSV to the IHS
+  2025 exports folder.
+parameters:
+  mood_enddate_from: { type: date, default: 2026-01-01, description: Mood end-date from }
+reads:
+  - IHS_2025.VW_DAILY_MOOD
+
+steps:
+  - id: extract
+    sql: |
+      SELECT * FROM IHS_2025.VW_DAILY_MOOD
+      WHERE MOOD_ENDDATE >= TO_DATE(:mood_enddate_from, 'YYYY-MM-DD')
+    output: mood_daily_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: mood_daily_2025.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: mood_daily_2025
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of daily mood entries for the lab's data manager, by
+      design: one row per mood entry, with no counts of people to suppress. It
+      goes only to the lab's own export folder.
