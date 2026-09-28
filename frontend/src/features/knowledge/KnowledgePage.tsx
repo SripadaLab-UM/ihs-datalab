@@ -23,6 +23,12 @@ import { settingsLink } from "@/features/settings/highlight";
 // edits to /work/kb come back as proposed-edit cards in this chat.
 export const CHAT_MODE = "knowledge";
 
+/** Space either side of the reading column, growing with the page between the panels: never under 16px. */
+export const READING_GUTTER = "px-[clamp(16px,4cqi,48px)]";
+/** The reading column: centred, as wide as a comfortable line of the page's text (running text is kept to 72ch
+ *  within it, `.dl-reading`); title, facts and body share its left edge. */
+export const READING_COLUMN = "dl-reading mx-auto w-full min-w-0 max-w-[46rem]";
+
 /** Knowledge pages, lab skills and their change history, with a chat that helps write or tidy a page or skill. */
 export function KnowledgePage() {
   const status = useQuery({ queryKey: ["knowledge-status"], queryFn: knowledgeApi.status });
@@ -137,7 +143,8 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         <KnowledgeTree entries={entries} selected={found?.path ?? path} reveal={Boolean(selected)} onOpen={open} loading={pages.isPending} />
       </aside>
 
-      <main className="flex min-h-0 min-w-0 flex-col">
+      {/* A size container: the reading column's margins follow the page's own width, as the panels beside it change. */}
+      <main className="@container flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
           <Button variant="ghost" className={clsx("-ml-2 px-2", listBeside && "hidden")} onClick={() => setDrawer(true)} aria-label="Show pages and skills">
             <Icon name="menu" size={16} />
@@ -160,7 +167,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
           value={view}
           onChange={setView}
         />
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <div data-reading-scroll className={clsx("min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-5", READING_GUTTER)}>
           {view === "history" ? (
             <History repo={status.name} entries={entries} onOpen={open} />
           ) : !head ? (
@@ -263,7 +270,7 @@ function PageView({ page, entries, repo, onOpen }: { page: KbPage; entries: KbEn
   const github = repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? `https://github.com/${repo}/blob/${page.head}/${page.path}` : null;
   const markdown = page.path.endsWith(".md");
   return (
-    <article className="mx-auto flex max-w-[46rem] flex-col gap-5">
+    <article data-reading-column className={clsx(READING_COLUMN, "flex flex-col gap-5")}>
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-mono text-[12.5px] text-muted">{page.path}</span>
         {github && (
@@ -384,7 +391,7 @@ function History({ repo, entries, onOpen }: { repo: string | null | undefined; e
     );
   }
   return (
-    <ol className="mx-auto flex max-w-[46rem] flex-col">
+    <ol className={clsx(READING_COLUMN, "flex flex-col")}>
       {history.data.map((commit) => (
         <CommitRow key={commit.commit} commit={commit} repo={repo} entries={entries} onOpen={onOpen} />
       ))}

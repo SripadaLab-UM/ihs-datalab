@@ -91,6 +91,14 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
             if (inline && QUERY_ID.test(path)) return <QueryMention id={path} known={known} />;
             return <code className={className}>{children}</code>;
           },
+          // A wide table scrolls sideways within its own block, never the page or the chat.
+          table({ children }) {
+            return (
+              <div data-scroll-x className="dl-scroll-x">
+                <table>{children}</table>
+              </div>
+            );
+          },
           img({ src, alt }) {
             return typeof src === "string" && src.startsWith("data:image/") ? (
               <img src={src} alt={alt ?? ""} className="max-w-full rounded" />
