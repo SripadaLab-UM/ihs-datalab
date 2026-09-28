@@ -15,6 +15,16 @@ docs/KNOWLEDGE_BASE.md, "How edits happen", and knowledge/service.py.
   top files of GitHub's main as last synced, `GET /pages/{path}` reads one,
   and `GET /history` gives its latest commits. Read-only, from the clone's
   objects, and only paths in the knowledge base's layout.
+- A person's own edits (the Knowledge tab's Edit page, knowledge/edits.py):
+  `POST /edits` starts one (or finds the page's open one), `PUT /edits/{id}`
+  keeps the draft on this computer, `POST …/check` runs Save & share's
+  check on some text, `POST …/reapply` moves it onto GitHub's newer version,
+  `POST …/share` is Save & share, and `POST …/discard`.
+- Suggested Knowledge updates from a conversation (knowledge/suggestions.py):
+  `POST /suggestions/{conversation}` is the person's own ("Propose a
+  Knowledge update"), and `…/{suggestion}/accept` and `…/dismiss` answer
+  one. Accepting starts an edit; nothing is written to the knowledge base
+  until that edit is shared.
 """
 
 from __future__ import annotations
@@ -30,6 +40,7 @@ from pydantic import BaseModel
 
 from datalab.config import Settings
 from datalab.knowledge import check as kb
+from datalab.knowledge.edits import Edit, EditRefused
 from datalab.knowledge.proposals import Proposal, unified_diff
 from datalab.knowledge.service import (
     MAX_HISTORY,
@@ -37,8 +48,10 @@ from datalab.knowledge.service import (
     NotActionable,
     NotAvailable,
     NotFound,
+    _json_safe,
     text_digest,
 )
+from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
 from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignInNeeded
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -58,6 +71,8 @@ class KnowledgeServices:
     auth: GitHubAuth | None = None
     # Tests only: a remote other than GitHub's.
     remote: str | None = None
+    # Suggested Knowledge updates, shared with the agent tools (app.py).
+    suggestions: KbSuggestions | None = None
 
 
 class AccountOut(BaseModel):
@@ -212,6 +227,132 @@ class KbPageOut(BaseModel):
     text: str
     front_matter: dict[str, Any] | None
     body: str
+    # Whether a person can edit it in DataLab; if not, where it comes from
+    # and how to change it (index.md, generated/).
+    editable: bool = False
+    source_note: str | None = None
+
+
+EditState = Literal[
+    "draft", "saving", "saved", "conflict", "check_failed", "failed", "discarded"
+]  # fmt: skip
+
+
+class EvidenceOut(BaseModel):
+    query_id: str
+    tables: list[str] = []
+    started_at: str | None = None
+
+
+class EditOriginOut(BaseModel):
+    # A suggested update accepted from this conversation.
+    conversation_id: str
+    suggestion_id: str
+    title: str = ""
+    reason: str = ""
+    evidence: list[EvidenceOut] = []
+
+
+class EditOut(BaseModel):
+    id: str
+    path: str
+    # GitHub's main when the edit began (as last synced).
+    base: str
+    new_page: bool
+    # The draft, as kept on this computer, and its digest (sent back with share).
+    text: str
+    text_sha256: str
+    status: EditState
+    created_at: str
+    # Sent back with each change: DataLab refuses one made over a newer draft.
+    updated_at: str
+    origin: EditOriginOut | None = None
+    result: SaveResultOut | None = None
+    commit: str | None = None
+    decided_by: str | None = None
+    # Where the edit started (null for a new page), and the page on GitHub's
+    # main as last synced if it changed since ("deleted": not there now).
+    before: str | None = None
+    head: str | None = None
+    upstream_changed: bool = False
+    theirs: str | None = None
+    theirs_state: Literal["text", "deleted", "not text"] = "text"
+
+
+class EditSummaryOut(BaseModel):
+    id: str
+    path: str
+    status: EditState
+    new_page: bool
+    updated_at: str
+    from_conversation: str | None = None
+
+
+class StartEditIn(BaseModel):
+    path: str
+    # A page that isn't in the knowledge base yet.
+    new: bool = False
+
+
+class KeepEditIn(BaseModel):
+    text: str
+    # The draft's updated_at as last read.
+    version: str
+
+
+class CheckEditIn(BaseModel):
+    # The text to check (the editor's); the kept draft if not given.
+    text: str | None = None
+
+
+class EditCheckOut(BaseModel):
+    findings: list[FindingOut]
+    # The page as Save & share would commit it: reviewed_by and reviewed_on
+    # as DataLab sets them.
+    shared: str
+    # Against where the edit started.
+    diff: str
+    # What the edit does to status and the review fields, in plain words.
+    notes: list[str]
+    # The text as the page viewer shows it (the preview): its front matter,
+    # parsed (null if it can't be), and the Markdown after it.
+    front_matter: dict[str, Any] | None = None
+    body: str = ""
+
+
+class ReapplyIn(BaseModel):
+    version: str
+    # The person's own text to keep on GitHub's version (else a merge).
+    resolution: str | None = None
+
+
+class ReapplyOut(BaseModel):
+    edit: EditOut
+    # When the merge overlaps: the text with the overlapping lines marked,
+    # to resolve (the edit itself is unchanged).
+    merged: str | None = None
+
+
+class ShareEditIn(BaseModel):
+    confirmed: list[str] = []
+    # What the person saw: the draft's text_sha256 and the check's finding ids.
+    seen: str | None
+    findings: list[str]
+
+
+class SuggestionIn(BaseModel):
+    page: str
+    title: str
+    text: str
+    evidence_query_ids: list[str]
+    reason: str
+
+
+class SuggestionOut(BaseModel):
+    id: str
+    status: str
+    page: str
+    edit_id: str | None = None
 
 
 class KbCommitOut(BaseModel):
@@ -249,6 +390,12 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
             raise HTTPException(403, str(error)) from None
         except GitHubUnavailable as error:
             raise HTTPException(502, str(error)) from None
+        except EditRefused as error:
+            raise HTTPException(409, str(error)) from None
+        except SuggestionInvalid as error:
+            raise HTTPException(422, str(error)) from None
+        except LookupError as error:
+            raise HTTPException(404, str(error)) from None
 
     @router.get("/status")
     async def status() -> KnowledgeStatus:
@@ -299,8 +446,151 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
     async def reject(proposal_id: str) -> ProposalDetail:
         return await run(lambda: _detail(knowledge, knowledge.reject(proposal_id)))
 
+    # A person's own edits ------------------------------------------------------
+
+    edits = knowledge.edits
+
+    def detail(edit: Edit) -> EditOut:
+        return _edit_out(knowledge, edit)
+
+    @router.get("/edits")
+    async def open_edits() -> list[EditSummaryOut]:
+        found = await run(lambda: (knowledge.require_available(), edits.store.list_open())[1])
+        return [
+            EditSummaryOut(
+                id=e.id,
+                path=e.path,
+                status=e.status,
+                new_page=e.new_page,
+                updated_at=e.updated_at,
+                from_conversation=e.origin.get("conversation_id"),
+            )
+            for e in found
+        ]
+
+    @router.post("/edits")
+    async def start_edit(body: StartEditIn) -> EditOut:
+        return await run(lambda: detail(edits.start(body.path, new=body.new)))
+
+    @router.get("/edits/{edit_id}")
+    async def get_edit(edit_id: str) -> EditOut:
+        return await run(lambda: detail(edits.get(edit_id)))
+
+    @router.put("/edits/{edit_id}")
+    async def keep_edit(edit_id: str, body: KeepEditIn) -> EditOut:
+        return await run(lambda: detail(edits.keep(edit_id, body.text, body.version)))
+
+    @router.post("/edits/{edit_id}/check")
+    async def check_edit(edit_id: str, body: CheckEditIn) -> EditCheckOut:
+        def work() -> EditCheckOut:
+            edit = edits.get(edit_id)
+            checked = edits.check(edit, body.text)
+            text = edit.text if body.text is None else body.text
+            fields = kb.front_matter(text)[0] if edit.path.endswith(".md") else None
+            _, rest, _ = kb.split_front_matter(text) if fields is not None else (None, text, 1)
+            return EditCheckOut(
+                findings=[FindingOut(**f.to_dict()) for f in checked.report.findings],
+                shared=checked.shared,
+                diff=checked.diff,
+                notes=checked.notes,
+                front_matter=_json_safe(fields) if fields else None,
+                body=rest,
+            )
+
+        return await run(work)
+
+    @router.post("/edits/{edit_id}/reapply")
+    async def reapply_edit(edit_id: str, body: ReapplyIn) -> ReapplyOut:
+        def work() -> ReapplyOut:
+            edit, merged = edits.reapply(edit_id, body.version, body.resolution)
+            return ReapplyOut(edit=detail(edit), merged=merged)
+
+        return await run(work)
+
+    @router.post("/edits/{edit_id}/share")
+    async def share_edit(edit_id: str, body: ShareEditIn) -> EditOut:
+        return await run(
+            lambda: detail(edits.share(edit_id, body.confirmed, body.seen, body.findings))
+        )
+
+    @router.post("/edits/{edit_id}/discard")
+    async def discard_edit(edit_id: str) -> EditOut:
+        return await run(lambda: detail(edits.discard(edit_id)))
+
+    # Suggested Knowledge updates -------------------------------------------------
+
+    suggestions = services.suggestions or KbSuggestions(services.conversations)
+
+    def accept_suggestion(conversation_id: str, suggestion_id: str) -> EditOut:
+        found = suggestions.get(conversation_id, suggestion_id)
+        if found["status"] != "open":
+            raise EditRefused(f"This suggestion was {found['status']} already.")
+        edit = edits.from_suggestion(conversation_id, found)
+        suggestions.mark(conversation_id, suggestion_id, "accepted", edit_id=edit.id)
+        return detail(edit)
+
+    @router.post("/suggestions/{conversation_id}")
+    async def propose_update(conversation_id: str, body: SuggestionIn) -> EditOut:
+        def work() -> EditOut:
+            knowledge.require_available()
+            made = suggestions.suggest(
+                conversation_id,
+                page=body.page,
+                title=body.title,
+                text=body.text,
+                evidence_query_ids=body.evidence_query_ids,
+                reason=body.reason,
+                by="person",
+            )
+            return accept_suggestion(conversation_id, made["id"])
+
+        return await run(work)
+
+    @router.post("/suggestions/{conversation_id}/{suggestion_id}/accept")
+    async def accept_update(conversation_id: str, suggestion_id: str) -> EditOut:
+        return await run(lambda: accept_suggestion(conversation_id, suggestion_id))
+
+    @router.post("/suggestions/{conversation_id}/{suggestion_id}/dismiss")
+    async def dismiss_update(conversation_id: str, suggestion_id: str) -> SuggestionOut:
+        def work() -> SuggestionOut:
+            found = suggestions.get(conversation_id, suggestion_id)
+            if found["status"] == "open":
+                suggestions.mark(conversation_id, suggestion_id, "dismissed")
+            now = suggestions.get(conversation_id, suggestion_id)
+            return SuggestionOut(
+                id=now["id"], status=now["status"], page=now["page"], edit_id=now.get("edit_id")
+            )
+
+        return await run(work)
+
     router.knowledge = knowledge  # type: ignore[attr-defined]  # for tests
+    router.suggestions = suggestions  # type: ignore[attr-defined]
     return router
+
+
+def _edit_out(knowledge: Knowledge, edit: Edit) -> EditOut:
+    upstream = knowledge.edits.upstream(edit)
+    origin = edit.origin
+    return EditOut(
+        id=edit.id,
+        path=edit.path,
+        base=edit.base,
+        new_page=edit.new_page,
+        text=edit.text,
+        text_sha256=text_digest(edit.text) or "",
+        status=edit.status,
+        created_at=edit.created_at,
+        updated_at=edit.updated_at,
+        origin=EditOriginOut(**origin) if origin.get("suggestion_id") else None,
+        result=SaveResultOut(**edit.result) if edit.result.get("message") else None,
+        commit=edit.commit,
+        decided_by=edit.decided_by,
+        before=upstream.before,
+        head=upstream.head,
+        upstream_changed=upstream.changed,
+        theirs=upstream.theirs if upstream.changed else None,
+        theirs_state=upstream.theirs_state,
+    )
 
 
 def _plain(status: dict[str, Any]) -> dict[str, Any]:

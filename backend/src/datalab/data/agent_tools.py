@@ -26,6 +26,7 @@ from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
 from datalab.data.sqlcheck import SqlRejected
+from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
 from datalab.sessions import plan_schema
 from datalab.sessions.approvals import Unshowable, clean_question
 from datalab.sessions.helper import ResearchHelper
@@ -80,6 +81,7 @@ def build_agent_tools(
     plans: PlanDesk | None = None,
     check_workflow_text: WorkflowCheck | None = None,
     drafts: SqlDrafts | None = None,
+    suggestions: KbSuggestions | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
@@ -268,6 +270,59 @@ def build_agent_tools(
                 }
             )
 
+    if suggestions is not None:
+        kb_suggestions = suggestions
+
+        @server.tool()
+        async def suggest_kb_update(
+            page: str,
+            title: str,
+            text: str,
+            evidence_query_ids: list[str],
+            reason: str,
+            ctx: Context,
+        ) -> str:
+            """Suggest adding a durable, evidence-backed finding to the lab knowledge base.
+
+            The person sees it as a "Suggested Knowledge update" card under your
+            answer and may accept it (it becomes an edit they review, check and
+            Save & share), edit it first, or dismiss it. It never changes the
+            knowledge base by itself. Use it only for what the lab should keep:
+            a data quirk a query confirmed, what a column really holds, a
+            definition, a caveat. Never for a one-off result, this analysis's
+            numbers, or a guess; at most one or two an answer.
+            page: the page it belongs on, e.g. "sources/fitbit.md", or a new page
+              in its kind's folder ("qc/fitbit-zero-step-days.md").
+            title: a short heading for the addition, one line.
+            text: the Markdown to add: general and self-contained. No participant
+              IDs, per-person dates, rows or tables of values, or counts of fewer
+              than 11 people.
+            evidence_query_ids: the query_id of each query in this conversation
+              that shows it (from the `query` tool's results).
+            reason: why it's worth keeping, in plain words for the reviewer.
+            """
+            access = _session(ctx, tokens, "suggest_kb_update")
+            try:
+                suggestion = kb_suggestions.suggest(
+                    access.session_id,
+                    page=page,
+                    title=title,
+                    text=text,
+                    evidence_query_ids=evidence_query_ids,
+                    reason=reason,
+                )
+            except SuggestionInvalid as error:
+                raise ToolError(str(error)) from error
+            return _json(
+                {
+                    "status": "suggested",
+                    "suggestion_id": suggestion["id"],
+                    "page": suggestion["page"],
+                    "note": "It's shown to the person as a card under your answer. Nothing was "
+                    "written to the knowledge base: they decide. Mention it in one line.",
+                }
+            )
+
     if plans is not None:
 
         @server.tool(description=plan_schema.tool_description())
@@ -422,6 +477,11 @@ def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
             raise ToolError(
                 "propose_sql isn't available in this mode: it's for the SQL Playground's "
                 "chat. Show the SQL in your answer instead."
+            )
+        if tool == "suggest_kb_update":
+            raise ToolError(
+                "suggest_kb_update isn't available in this mode: it's for Analysis, Data "
+                "extraction and Data engineering conversations."
             )
         raise ToolError(
             f"{tool} isn't available in this mode. Knowledge writing has the catalog tools "

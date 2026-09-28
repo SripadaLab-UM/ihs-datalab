@@ -227,6 +227,33 @@ def proposal_problem(path: str) -> str | None:
     return None
 
 
+def edit_source(path: str) -> str | None:
+    """Where a file that can't be edited in DataLab comes from, and how to
+    change it; None if a person can edit it (the same rule as the agent's
+    proposals, `proposal_problem`)."""
+    if proposal_problem(path) is None:
+        return None
+    where = place(path)
+    if path == "index.md":
+        return (
+            "Written by DataLab's check from each page's front matter whenever a change is "
+            "saved (or by `datalab kb-check --fix`). To change a line here, edit the page it "
+            "lists: its `summary` and `status`."
+        )
+    if where in ("schema", "generated"):
+        return (
+            "Generated from the database catalog (metadata only) by `datalab catalog`, and "
+            "refreshed by DataLab; edits here would be overwritten. To explain a table or a "
+            "column, edit or add its page in tables/; to change the catalog itself, rebuild it "
+            "from the database."
+        )
+    if where == "github":
+        return "The repo's automation, changed outside DataLab by a maintainer on GitHub."
+    if reserved_skill(path):
+        return "That skill name is DataLab's or Codex's own, so it can't be a lab skill."
+    return "It isn't part of the knowledge base's layout (see AGENTS.md), so DataLab won't save it."
+
+
 def size_limit(path: str) -> int:
     return MAX_SCHEMA_BYTES if place(path) == "schema" else MAX_TEXT_BYTES
 

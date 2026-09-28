@@ -148,7 +148,8 @@ pages), we can add a local search tool then. Not before.
    - pulls, pushes to `main`, and handles the rare conflict with a
      "someone else changed this page" screen.
 5. People can also edit pages directly in DataLab's knowledge base view, with
-   no agent involved, using the same save flow.
+   no agent involved, using the same save flow (see "Editing a page
+   directly" below).
 6. Any change can be reverted from the history view in DataLab or on GitHub.
 
 Other sessions only see a change after it has been saved and pushed. That is
@@ -246,6 +247,58 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   `frontend/src/features/knowledge/tree.ts`. It renders them with their front matter as facts, shows recent
   changes, and docks a chat in Knowledge writing mode: a data session with
   the catalog tools that table and query pages cite, but no queries.
+
+### Editing a page directly (`knowledge/edits.py`)
+
+- **What can be edited** is exactly what an agent's edit could propose
+  (`check.proposal_problem`): pages, lab skills and the top files. The rest
+  is read-only in the tab, with where it comes from (`check.edit_source`):
+  `index.md` is written by the check, and `generated/` by DataLab from the
+  catalog (`datalab catalog`).
+- **An edit** (table `kb_edits`, migration 0012) starts from GitHub's
+  `main` as last synced (its base) and holds the person's text. One edit of
+  a page at a time; opening the page again finds it. "Keep as a draft" writes
+  it there, on this computer, and never touches GitHub. The editor also
+  keeps what's typed but not yet kept in the browser's localStorage, per
+  edit, so a reload or closed tab doesn't lose it.
+- **The check** is Save & share's own (`share.prepare`), run on the editor's
+  text as it's typed. A person may change `status` (`keep_status` isn't
+  applied, unlike an agent's text); `reviewed_by` and `reviewed_on` are
+  always DataLab's, from the person saving.
+- **Save & share** is `share.save_and_share`, with `strict`: after the fetch,
+  if GitHub's version of the page isn't the one at the edit's base, it stops
+  with a conflict instead of rebasing, and pushes nothing. The edit shows the
+  three versions (the person's, GitHub's now, the base's). "Reapply" is a
+  three-way merge (`git merge-file`) onto GitHub's version, which becomes the
+  edit's new base; overlapping lines are marked for the person to resolve,
+  and their text is then used on GitHub's version. The commit's trailer is
+  `DataLab-Edit: ke_…` (and `DataLab-Conversation` for an accepted
+  suggestion).
+- **Edit with agent** opens the Knowledge assistant with the page as its
+  context, ticked, and the cursor in the message box; nothing is sent. Its
+  edit is a proposal card as usual.
+- The API is `/api/knowledge/edits` (start or find, get, keep, `check`,
+  `reapply`, `share`, `discard`).
+
+### Suggested Knowledge updates (`knowledge/suggestions.py`)
+
+- The agent tool `suggest_kb_update(page, title, text, evidence_query_ids,
+  reason)` is opt-in: only Analysis, Data extraction and Data engineering
+  name it (`sessions/modes.py`, `extra_tools`); every other mode's token
+  refuses it, and Codex doesn't list it there. Their instructions and the
+  `kb-propose` skill say to use it only for durable, evidence-backed
+  findings, at most one or two an answer, never for one-off results, and
+  never with participant-level data or small counts.
+- DataLab checks it: a page of the layout a person could edit; evidence
+  that's queries which ran, and succeeded, in this conversation (the Data
+  accessed log); text, title and reason that pass the participant-data
+  scans and name no count of fewer than 11 people; at most two a turn. It's
+  recorded as a `kb_suggestion` event, then `kb_suggestion_updated` when
+  accepted or dismissed. It never writes the knowledge base.
+- Accepting it starts an edit of the page (the text as a new section, or a
+  new draft page), with where it came from; it's reviewed and shared like
+  any edit. "Propose a Knowledge update" in a Workspace conversation is the
+  person's own, checked the same way (`POST /api/knowledge/suggestions/{conversation}`).
 
 ## The check
 

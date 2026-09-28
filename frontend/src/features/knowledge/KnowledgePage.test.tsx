@@ -41,9 +41,9 @@ const ENTRIES = [
   entry("skills/steps-check/check.R", "skill_file", "check.R"),
 ];
 const PAGES: Record<string, KbPage> = {
-  "index.md": { path: "index.md", place: "top", head: "abc1234def", text: "# Index\n", front_matter: null, body: "# Knowledge base index\n\n- [fitbit](sources/fitbit.md)\n" },
+  "index.md": { path: "index.md", place: "top", head: "abc1234def", editable: false, source_note: "Written by DataLab's check from each page's front matter.", text: "# Index\n", front_matter: null, body: "# Knowledge base index\n\n- [fitbit](sources/fitbit.md)\n" },
   "sources/fitbit.md": {
-    path: "sources/fitbit.md", place: "page", head: "abc1234def", text: "---\nid: fitbit\n---\n# Fitbit\n",
+    path: "sources/fitbit.md", place: "page", head: "abc1234def", editable: true, text: "---\nid: fitbit\n---\n# Fitbit\n",
     front_matter: {
       id: "fitbit", kind: "source", status: "reviewed", summary: "Fitbit trackers, daily summaries from 2021 on.",
       evidence: [{ schema: "IHS_2025.VFITBITDAILYDATA.TRACKERSTEPS" }], limitations: ["Wear time isn't recorded."],
@@ -52,10 +52,10 @@ const PAGES: Record<string, KbPage> = {
     body: "\n# Fitbit\n\nSee [the sleep rule](../qc/midnight-sleep.md).\n",
   },
   "qc/midnight-sleep.md": {
-    path: "qc/midnight-sleep.md", place: "page", head: "abc1234def", text: "…", front_matter: { id: "midnight-sleep", status: "draft" },
+    path: "qc/midnight-sleep.md", place: "page", head: "abc1234def", editable: true, text: "…", front_matter: { id: "midnight-sleep", status: "draft" },
     body: "# Midnight-spanning sleep\n",
   },
-  "skills/steps-check/check.R": { path: "skills/steps-check/check.R", place: "skill_file", head: "abc1234def", text: "keep <- wear >= 10\n", front_matter: null, body: "keep <- wear >= 10\n" },
+  "skills/steps-check/check.R": { path: "skills/steps-check/check.R", place: "skill_file", head: "abc1234def", editable: true, text: "keep <- wear >= 10\n", front_matter: null, body: "keep <- wear >= 10\n" },
 }; // prettier-ignore
 
 function show(at = "/knowledge") {
@@ -189,7 +189,7 @@ it("never runs what a page's text or front matter holds", async () => {
   const original = PAGES["qc/midnight-sleep.md"];
   const evil = "<img src=x onerror=\"window.__pwned=1\"><script>window.__pwned=2</script>";
   PAGES["qc/midnight-sleep.md"] = {
-    path: "qc/midnight-sleep.md", place: "page", head: "abc1234def", text: "…",
+    path: "qc/midnight-sleep.md", place: "page", head: "abc1234def", text: "…", editable: true,
     front_matter: { id: evil, status: "draft", summary: evil, limitations: [evil], related: ["javascript:alert(1)"] },
     body: `# Tricks\n\n${evil}\n\n[click me](javascript:window.__pwned=3) and [data](data:text/html,<script>alert(1)</script>)\n\n<a href="javascript:alert(1)">raw</a>\n`,
   }; // prettier-ignore

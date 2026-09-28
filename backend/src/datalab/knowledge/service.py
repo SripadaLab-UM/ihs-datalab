@@ -31,6 +31,7 @@ from typing import Any
 from datalab.config import Settings
 from datalab.knowledge import check as kb
 from datalab.knowledge import share
+from datalab.knowledge.edits import PageEdits, editable_problem
 from datalab.knowledge.proposals import (
     ACTIONABLE,
     Base,
@@ -47,6 +48,7 @@ from datalab.knowledge.proposals import (
 )
 from datalab.repos.git import Clone, GitError, Identity, TreeEntry
 from datalab.repos.github import (
+    Account,
     GitHubAuth,
     GitHubUnavailable,
     SignInNeeded,
@@ -168,6 +170,10 @@ class PageText:
     # the text after it.
     front_matter: dict[str, Any] | None
     body: str
+    # Whether a person can edit it in DataLab (the rule for proposals), and
+    # if not, where it comes from and how to change it.
+    editable: bool = False
+    source_note: str | None = None
 
 
 @dataclass(frozen=True)
@@ -231,6 +237,8 @@ class Knowledge:
         self._locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
         self._locks_lock = threading.Lock()
         self._sha256: dict[str, str] = {}  # blob id -> sha256 of its content
+        # A person's own page edits (the Knowledge tab's Edit page).
+        self.edits = PageEdits(self, database)
         if self.unavailable is None:
             for interrupted in self.store.end_interrupted_saves():
                 self._announce_quietly(interrupted)
@@ -241,6 +249,22 @@ class Knowledge:
     @property
     def available(self) -> bool:
         return self.unavailable is None
+
+    def require_available(self) -> None:
+        if self.unavailable is not None:
+            raise NotAvailable(self.unavailable)
+
+    def signed_in_account(self) -> Account | None:
+        """Who is signed in, as last known (never asks GitHub)."""
+        return self.auth.status().account if self.auth else None
+
+    def shared(self, commit: str | None) -> None:
+        """After a Save & share pushed `commit`: the clone and the sync state move on."""
+        self.store.record_sync(REPO, head=commit)
+        try:
+            self.clone.fast_forward()
+        except GitError as error:
+            log.warning("couldn't fast-forward the knowledge base clone: %s", error)
 
     # Status and sync --------------------------------------------------------
 
@@ -361,6 +385,8 @@ class Knowledge:
             text=text,
             front_matter=_json_safe(fields) if fields else None,
             body=body,
+            editable=editable_problem(path) is None,
+            source_note=kb.edit_source(path),
         )
 
     def history(self, limit: int = 20) -> list[CommitEntry]:

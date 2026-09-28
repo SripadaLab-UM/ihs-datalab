@@ -298,3 +298,27 @@ it("says a catalog-only mode reads the catalog, not that it queries the database
   );
   expect(await screen.findByText("Queries the IHS database, read-only")).toBeTruthy();
 });
+
+it("gets ready for a message about its context when the tab asks (Edit with agent), sending nothing", async () => {
+  const page: ChatContext = { label: "The page open in the Knowledge tab (sources/fitbit.md)", name: "sources/fitbit.md", text: "# Fitbit\n", language: "markdown" };
+  const rerender = show({ context: page, assistant: "knowledge" });
+  const box = await screen.findByLabelText("Your question or instruction");
+  const tick = () => screen.getByRole("checkbox", { name: /Send with message: The page open in the Knowledge tab/ });
+  expect(tick()).not.toBeChecked();
+  rerender({ context: page, assistant: "knowledge", request: { key: 1, placeholder: "Describe the change to sources/fitbit.md" } });
+  await waitFor(() => expect(box).toHaveFocus());
+  expect(tick()).toBeChecked();
+  expect(box).toHaveAttribute("placeholder", "Describe the change to sources/fitbit.md");
+  expect(api.createConversation).not.toHaveBeenCalled();
+  expect(api.send).not.toHaveBeenCalled();
+  // Unticked by the person, it stays so until the tab asks again.
+  fireEvent.click(tick());
+  rerender({ context: page, assistant: "knowledge", request: { key: 1, placeholder: "Describe the change to sources/fitbit.md" } });
+  expect(tick()).not.toBeChecked();
+  rerender({ context: page, assistant: "knowledge", request: { key: 2, placeholder: "Describe the change to sources/fitbit.md" } });
+  expect(tick()).toBeChecked();
+  // The message, when the person sends it, carries the page.
+  ask("Add the wear-time caveat");
+  await waitFor(() => expect(api.send).toHaveBeenCalled());
+  expect(vi.mocked(api.send).mock.calls[0][1]).toContain("The page open in the Knowledge tab (sources/fitbit.md):\n```markdown\n# Fitbit");
+});

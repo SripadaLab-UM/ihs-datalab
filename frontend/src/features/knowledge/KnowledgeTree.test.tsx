@@ -71,7 +71,7 @@ beforeEach(() => {
   vi.mocked(knowledgeApi.status).mockReset().mockResolvedValue(STATUS);
   vi.mocked(knowledgeApi.pages).mockReset().mockResolvedValue({ head: "abc1234def", pages: FIXTURE });
   vi.mocked(knowledgeApi.page).mockReset().mockImplementation(async (path) => ({
-    path, place: "page", head: "abc1234def", text: "…", front_matter: null,
+    path, place: "page", head: "abc1234def", text: "…", front_matter: null, editable: true,
     body: `# Page ${path}\n\nSee [the ring table](/tables/IHS_2031.RINGSLEEP.md).\n`,
   })); // prettier-ignore
   vi.mocked(knowledgeApi.history).mockReset().mockResolvedValue([]);

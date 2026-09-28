@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
 
@@ -30,6 +30,16 @@ export interface ChatContext {
   text: string;
   /** The code fence's language ("sql", "yaml", "r"...), if it's code. */
   language?: string;
+}
+
+/**
+ * A tab asking the chat to get ready for a message about its context (the
+ * Knowledge tab's Edit with agent): tick "Send with message", show `placeholder`
+ * in the box, and put the cursor there. Nothing is sent. A new `key` asks again.
+ */
+export interface ChatRequest {
+  key: number;
+  placeholder?: string;
 }
 
 /** The message as sent: what the person typed, then the context, fenced so the agent can tell them apart. */
@@ -70,6 +80,7 @@ export function DockedChat({
   assistant,
   draftKey: givenDraftKey,
   handoff,
+  request,
 }: {
   /** The mode a new conversation starts in: "extraction", "engineering"... */
   mode: string;
@@ -94,6 +105,8 @@ export function DockedChat({
   /** Before a conversation starts: shown in place of the intro and the message box, when
    *  the first message is typed elsewhere on the page (New workflow's description). */
   handoff?: ReactNode;
+  /** Get ready for a message about the context: tick it, hint in the box, focus it (never sends). */
+  request?: ChatRequest;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
   // The first message, shown in the new conversation until its event arrives.
@@ -106,6 +119,23 @@ export function DockedChat({
     setContextLabel(context?.label);
     setIncludeContext(false);
   }
+  // Asked by the tab (Edit with agent): the context goes with the message, and
+  // the cursor waits in the box. Nothing is sent until the person sends it.
+  const box = useRef<HTMLDivElement>(null);
+  const [asked, setAsked] = useState<number | undefined>(undefined);
+  if (request && request.key !== asked && context?.text.trim()) {
+    setAsked(request.key);
+    setContextLabel(context.label);
+    setIncludeContext(true);
+  }
+  useEffect(() => {
+    if (asked === undefined) return;
+    const frame = requestAnimationFrame(() =>
+      box.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Your question or instruction"]')?.focus(),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [asked]);
+  const hint = request && request.key === asked ? request.placeholder : undefined;
   const id = conversationId ?? started?.id;
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(id) });
   // The list may not have caught up with a conversation just started.
@@ -137,6 +167,7 @@ export function DockedChat({
       );
     }
     return (
+      <div ref={box} className="contents">
       <Chat
         key={conversation.id}
         conversation={conversation}
@@ -146,7 +177,7 @@ export function DockedChat({
         composerNote={note}
         // Just started here: the cursor stays in the message box.
         autoFocus={started?.id === conversation.id || undefined}
-        placeholder={placeholder}
+        placeholder={hint ?? placeholder}
         sendLabel={sendLabel}
         pending={started?.id === conversation.id ? firstMessage : undefined}
         active={active}
@@ -154,9 +185,11 @@ export function DockedChat({
         tabMode={mode}
         draftKey={draftKey}
       />
+      </div>
     );
   }
   return (
+    <div ref={box} className="contents">
     <NotStarted
       assistant={assistant}
       draftKey={draftKey}
@@ -167,7 +200,7 @@ export function DockedChat({
       note={note}
       headerStart={headerStart}
       headerActions={headerActions}
-      placeholder={placeholder}
+      placeholder={hint ?? placeholder}
       sendLabel={sendLabel}
       onStarted={(conversation, text) => {
         setFirstMessage({ text, after: 0 });
@@ -175,6 +208,7 @@ export function DockedChat({
         onConversation?.(conversation);
       }}
     />
+    </div>
   );
 }
 

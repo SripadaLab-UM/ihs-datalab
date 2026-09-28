@@ -68,6 +68,7 @@ async def test_tools_are_listed(server, tmp_path):
         "propose_plan",
         "check_workflow",
         "propose_sql",
+        "suggest_kb_update",
     }
 
 
@@ -150,6 +151,13 @@ async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(se
             "deliverables": "r",
         },
         "propose_sql": {"sql": "SELECT 1 FROM DUAL", "title": "t"},
+        "suggest_kb_update": {
+            "page": "sources/fitbit.md",
+            "title": "t",
+            "text": "x",
+            "evidence_query_ids": ["q_1"],
+            "reason": "r",
+        },
     }
     assert set(calls) == set(DATA_TOOLS) - CATALOG_TOOLS
     async with mcp_session(base_url, token) as session:
@@ -546,3 +554,31 @@ async def test_check_workflow_refuses_an_alias_bomb_at_once(server, tmp_path):
     assert time.monotonic() - started < 5
     assert found["valid"] is False and found["problems"][0]["line"] == 2
     assert "anchors or aliases" in found["problems"][0]["message"]
+
+
+async def test_suggest_kb_update_is_only_for_the_modes_that_name_it(server, tmp_path):
+    """Analysis, Data extraction and Data engineering reach DataLab's checks
+    (here: there's no turn running); every other mode is refused first."""
+    from datalab.sessions.modes import MODES
+
+    base_url, services, _ = server
+    args = {
+        "page": "sources/fitbit.md", "title": "Zero-step days", "text": "Treat 0 as missing.",
+        "evidence_query_ids": ["q_1"], "reason": "r",
+    }  # fmt: skip
+    for mode_id, mode in MODES.items():
+        if mode.kind != "data":
+            continue
+        token = data_token(services, tmp_path, tools=mode.allowed_tools)
+        async with mcp_session(base_url, token) as session:
+            result = await session.call_tool("suggest_kb_update", args)
+        assert result.is_error, mode_id
+        text = result.content[0].text
+        if mode_id in ("analysis", "extraction", "engineering"):
+            assert "during a turn" in text, (mode_id, text)
+        else:
+            assert "suggest_kb_update isn't available in this mode" in text, mode_id
+    # A token without a list (all but the opt-in tools) doesn't have it either.
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        result = await session.call_tool("suggest_kb_update", args)
+    assert "isn't available in this mode" in result.content[0].text

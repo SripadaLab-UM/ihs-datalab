@@ -16,6 +16,13 @@ export type KbEntry = Schemas["KbEntryOut"];
 export type KbPages = Schemas["KbPagesOut"];
 export type KbPage = Schemas["KbPageOut"];
 export type KbCommit = Schemas["KbCommitOut"];
+export type KbEdit = Schemas["EditOut"];
+export type KbEditState = KbEdit["status"];
+export type KbEditSummary = Schemas["EditSummaryOut"];
+export type KbEditCheck = Schemas["EditCheckOut"];
+export type KbReapply = Schemas["ReapplyOut"];
+export type KbSuggestionIn = Schemas["SuggestionIn"];
+export type KbSuggestionOut = Schemas["SuggestionOut"];
 
 const post = (body?: unknown): RequestInit => ({ method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 const id = encodeURIComponent;
@@ -53,6 +60,34 @@ export const knowledgeApi = {
   page: (path: string) => request<KbPage>(`/api/knowledge/pages/${path.split("/").map(id).join("/")}`),
   /** The latest commits of main as last synced, newest first. */
   history: (limit = 20) => request<KbCommit[]>(`/api/knowledge/history?limit=${limit}`),
+
+  // A person's own edits (the Edit page): drafts kept on this computer until Save & share.
+  /** The edits not yet shared or discarded. */
+  edits: () => request<KbEditSummary[]>("/api/knowledge/edits"),
+  /** Start editing a page (or a new one), or find the page's edit already open. */
+  startEdit: (path: string, isNew = false) => request<KbEdit>("/api/knowledge/edits", post({ path, new: isNew })),
+  getEdit: (editId: string) => request<KbEdit>(`/api/knowledge/edits/${id(editId)}`),
+  /** Keep as a draft on this computer. `version` is the draft's updated_at as last read. */
+  keepEdit: (editId: string, text: string, version: string) =>
+    request<KbEdit>(`/api/knowledge/edits/${id(editId)}`, { method: "PUT", body: JSON.stringify({ text, version }) }),
+  /** The check, as Save & share runs it, on this text (nothing is kept). */
+  checkEdit: (editId: string, text: string) => request<KbEditCheck>(`/api/knowledge/edits/${id(editId)}/check`, post({ text })),
+  /** Move the draft onto GitHub's newer version: merged, or with `resolution` as the text. */
+  reapplyEdit: (editId: string, version: string, resolution?: string) =>
+    request<KbReapply>(`/api/knowledge/edits/${id(editId)}/reapply`, post({ version, resolution: resolution ?? null })),
+  /** Save & share: what the person saw (the draft's text_sha256, the findings' ids). */
+  shareEdit: (editId: string, confirmed: string[], seen: string, findings: string[]) =>
+    request<KbEdit>(`/api/knowledge/edits/${id(editId)}/share`, post({ confirmed, seen, findings })),
+  discardEdit: (editId: string) => request<KbEdit>(`/api/knowledge/edits/${id(editId)}/discard`, post()),
+
+  // Suggested Knowledge updates from a conversation.
+  acceptSuggestion: (conversationId: string, suggestionId: string) =>
+    request<KbEdit>(`/api/knowledge/suggestions/${id(conversationId)}/${id(suggestionId)}/accept`, post()),
+  dismissSuggestion: (conversationId: string, suggestionId: string) =>
+    request<KbSuggestionOut>(`/api/knowledge/suggestions/${id(conversationId)}/${id(suggestionId)}/dismiss`, post()),
+  /** The person's own "Propose a Knowledge update": checked like the agent's, and opened as an edit. */
+  proposeUpdate: (conversationId: string, body: KbSuggestionIn) =>
+    request<KbEdit>(`/api/knowledge/suggestions/${id(conversationId)}`, post(body)),
 };
 
 /** A commit on GitHub, for a repo named "owner/name". */

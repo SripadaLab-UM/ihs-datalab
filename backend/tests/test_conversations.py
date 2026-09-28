@@ -372,14 +372,14 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
     assert knowledge._tools == CATALOG_TOOLS
     assert set(knowledge._tools_off) == set(DATA_TOOLS) - CATALOG_TOOLS
     assert (workflows._tools, workflows._tools_off) == (
-        frozenset(DATA_TOOLS) - {"propose_sql"},
-        ("propose_sql",),
+        frozenset(DATA_TOOLS) - {"propose_sql", "suggest_kb_update"},
+        ("propose_sql", "suggest_kb_update"),
     )
     assert "Knowledge writing mode" in knowledge._instructions
     assert "Workflow authoring mode" in workflows._instructions
     # The Pipelines tab's chat: no analysis plans, no SQL proposals.
     assert pipelines._tools == CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"}
-    assert set(pipelines._tools_off) == {"propose_plan", "propose_sql"}
+    assert set(pipelines._tools_off) == {"propose_plan", "propose_sql", "suggest_kb_update"}
     assert "Pipelines tab" in pipelines._instructions
 
 

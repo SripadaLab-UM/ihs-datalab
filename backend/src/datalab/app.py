@@ -43,6 +43,7 @@ from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.data.sql_drafts import SqlDrafts
 from datalab.exports import DestinationStore
+from datalab.knowledge.suggestions import KbSuggestions
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
 from datalab.releases import UpdateChecker
@@ -148,6 +149,10 @@ def create_app(
         access_log,
     )
     sql_drafts.turn_running = sessions.turn_running
+    # Suggested Knowledge updates (suggest_kb_update): recorded in the
+    # conversation, never written to the knowledge base.
+    kb_suggestions = KbSuggestions(conversations, access_log)
+    kb_suggestions.turn_running = sessions.turn_running
     # One GitHub sign-in for both lab repos: only one object may refresh its
     # tokens, since each refresh replaces the refresh token.
     github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
@@ -175,6 +180,7 @@ def create_app(
         plan_desk,
         check_workflow_text=workflows_router.runner.check_text,  # type: ignore[attr-defined]
         drafts=sql_drafts,
+        suggestions=kb_suggestions,
     )
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
@@ -305,7 +311,14 @@ def create_app(
     app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
         build_knowledge_router(
-            KnowledgeServices(settings, connection, conversations, sessions, auth=github)
+            KnowledgeServices(
+                settings,
+                connection,
+                conversations,
+                sessions,
+                auth=github,
+                suggestions=kb_suggestions,
+            )
         )
     )
     app.include_router(workflows_router)

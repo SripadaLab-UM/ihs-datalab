@@ -11,6 +11,7 @@ import { ApprovalCard } from "./ApprovalCard";
 import { ASSISTANTS, type AssistantId, CompactContext } from "./assistants";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
+import { KbSuggestionCard, ProposeUpdateButton } from "./KbSuggestionCard";
 import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
@@ -203,6 +204,7 @@ export function Chat({
             onEffort={setEffort}
             actions={
               <>
+                {conversation.kind === "data" && <ProposeUpdateButton conversation={conversation} />}
                 {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
                 {headerActions}
               </>
@@ -761,6 +763,9 @@ function TurnView({
       {proposals.map((proposal) => (
         <ProposalCard key={proposal.id} proposal={proposal} />
       ))}
+      {turn.items.map((item) =>
+        item.kind === "kb_suggestion" ? <KbSuggestionCard key={item.id} suggestion={item} conversationId={conversationId} /> : null,
+      )}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && (
         <HowItWasMade rows={storyRows} shown={shown}>
