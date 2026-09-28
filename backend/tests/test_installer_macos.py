@@ -602,8 +602,11 @@ def test_uninstall_leaves_someone_elses_app_in_your_applications(machine):
 # "starts" Docker by writing to a state file that the fake `docker` reads,
 # `hdiutil` "mounts" a copy of a folder that stands in for the disk image
 # (and "detaches" it by moving it aside), and `codesign`/`spctl` report the
-# signer written in the fake app. `sleep` returns at once, so waiting takes
-# no time. The real Docker Desktop is never used.
+# signer written in the fake app. `sleep` moves a fake clock (read by
+# `date +%s`) on instead of waiting. `ps` lists Docker's programs as running
+# for each Docker.app in the two Applications folders, `mdfind` finds what a
+# test says, and `ditto` can be made to fail. The real Docker Desktop is never
+# used.
 
 FAKE_DOCKER = """#!/bin/sh
 echo "docker $*" >> "$DATALAB_TEST_DOCKERLOG"
@@ -620,14 +623,38 @@ DOCKER_TOOLS = {
     "open": """#!/bin/sh
 echo "open $*" >> "$DATALAB_TEST_OPENLOG"
 case "$1" in
-  *Docker.app)
+  *.app)
     [ -z "${DATALAB_TEST_OPEN_FAILS:-}" ] || exit 1
     if [ "${DATALAB_TEST_OPEN_STARTS:-1}" = 1 ]; then echo running > "$DATALAB_TEST_STATE"; fi ;;
 esac
 exit 0
 """,
-    "pgrep": '#!/bin/sh\nexit "${DATALAB_TEST_NOT_ALIVE:-0}"\n',
-    "sleep": "#!/bin/sh\nexit 0\n",
+    "ps": """#!/bin/sh
+[ -z "${DATALAB_TEST_NOT_ALIVE:-}" ] || exit 0
+for app in "$DATALAB_SYSTEM_APPLICATIONS/Docker.app" "$HOME/Applications/Docker.app" \\
+  ${DATALAB_TEST_ALIVE:+"$DATALAB_TEST_ALIVE"}; do
+  echo "$app/Contents/MacOS/com.docker.backend"
+done
+""",
+    "sleep": """#!/bin/sh
+echo $(( $(cat "$DATALAB_TEST_CLOCK" 2>/dev/null || echo 1000) + $1 )) > "$DATALAB_TEST_CLOCK"
+""",
+    "date": """#!/bin/sh
+[ "$1" = +%s ] || exec /bin/date "$@"
+cat "$DATALAB_TEST_CLOCK" 2>/dev/null || echo 1000
+""",
+    "mdfind": '#!/bin/sh\necho "mdfind $*" >> "$DATALAB_TEST_MDFINDLOG"\n'
+    '[ -z "${DATALAB_TEST_MDFIND:-}" ] || printf \'%s\\n\' "$DATALAB_TEST_MDFIND"\n',
+    "ditto": """#!/bin/sh
+case "${DATALAB_TEST_DITTO:-}" in
+  interrupt) mkdir -p "$2/Contents"; echo half > "$2/Contents/half"; kill -INT "$PPID"; exit 1 ;;
+  not-permitted) echo "ditto: $2: Operation not permitted" >&2; exit 1 ;;
+  fails) echo "ditto: $2: No space left on device" >&2; exit 1 ;;
+  tamper) /usr/bin/ditto "$1" "$2" && echo "Other (ABCDE12345)" > "$2/Contents/fake-signer" ;;
+  race) /usr/bin/ditto "$1" "$2" && mkdir -p "$(dirname "$2")/Docker.app/Contents" ;;
+  *) exec /usr/bin/ditto "$@" ;;
+esac
+""",
     "sysctl": """#!/bin/sh
 case "$*" in *hw.optional.arm64*) echo "${DATALAB_TEST_ARM64:-1}" ;; *) exit 1 ;; esac
 """,
@@ -673,7 +700,16 @@ esac
 """,
     "codesign": """#!/bin/sh
 for app; do :; done
-signer="$(cat "$app/Contents/fake-signer" 2>/dev/null)" || exit 1
+if [ -f "$app" ]; then
+  signer="${DATALAB_TEST_DMG_SIGNER:-Docker Inc (9BNSXJN65R)}"  # the disk image
+else
+  signer="$(cat "$app/Contents/fake-signer" 2>/dev/null)" || exit 1
+fi
+case "$*" in
+  *'-R=anchor apple generic and certificate leaf[subject.OU] = "9BNSXJN65R"'*)
+    case "$signer" in *"(9BNSXJN65R)") ;; *) exit 3 ;; esac ;;
+  *-R=*) exit 3 ;;
+esac
 case "$1" in
   --verify) [ "$signer" != broken ] || exit 1 ;;
   -dv) echo "Identifier=com.docker.docker" >&2
@@ -684,6 +720,9 @@ esac
 for app; do :; done
 signer="$(cat "$app/Contents/fake-signer" 2>/dev/null)" || exit 3
 if [ -n "${DATALAB_TEST_SPCTL_REJECTS:-}" ]; then echo "$app: rejected" >&2; exit 3; fi
+if [ -n "${DATALAB_TEST_GATEKEEPER_OFF:-}" ]; then
+  printf '%s: accepted\\noverride=security disabled\\n' "$app" >&2; exit 0
+fi
 printf '%s: accepted\\nsource=Notarized Developer ID\\norigin=Developer ID Application: %s\\n' \\
   "$app" "$signer" >&2
 """,
@@ -693,6 +732,7 @@ DOCKER_PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleIdentifier</key><string>com.docker.docker</string>
+  <key>CFBundleExecutable</key><string>com.docker.backend</string>
   <key>CFBundleShortVersionString</key><string>4.93.0</string>
   <key>LSMinimumSystemVersion</key><string>{minimum}</string>
 </dict></plist>
@@ -705,6 +745,8 @@ def fake_docker_app(where: Path, *, signer: str = "Docker Inc (9BNSXJN65R)") -> 
     (app / "Contents" / "Info.plist").write_text(DOCKER_PLIST.format(minimum="14.0"))
     (app / "Contents" / "fake-signer").write_text(signer)
     executable(app / "Contents" / "Resources" / "bin" / "docker", FAKE_DOCKER)
+    (app / "Contents" / "MacOS").mkdir()
+    executable(app / "Contents" / "MacOS" / "com.docker.backend", "#!/bin/sh\n")
     return app
 
 
@@ -719,7 +761,7 @@ def mac(machine, tmp_path) -> dict[str, Path]:
     fake_docker_app(dmg)
     detached = tmp_path / "detached"
     detached.mkdir()
-    names = ("open", "curl", "hdiutil", "docker", "path")
+    names = ("open", "curl", "hdiutil", "docker", "path", "mdfind")
     logs = {name: tmp_path / f"{name}.log" for name in names}
     return {**machine, "dmg": dmg, "detached": detached, "state": tmp_path / "docker-state", **logs}
 
@@ -737,6 +779,8 @@ def docker_install(mac, *args: str, **env: str) -> subprocess.CompletedProcess[s
         DATALAB_TEST_PATHLOG=str(mac["path"]),
         DATALAB_TEST_DMG_SOURCE=str(mac["dmg"]),
         DATALAB_TEST_DETACHED=str(mac["detached"]),
+        DATALAB_TEST_MDFINDLOG=str(mac["mdfind"]),
+        DATALAB_TEST_CLOCK=str(mac["state"].with_name("clock")),
         DATALAB_DOCKER_POLL_SECONDS="5",
         **env,
     )
@@ -934,7 +978,7 @@ def test_a_download_that_cant_be_resumed_starts_afresh_next_time(mac):
 
 def test_a_damaged_download_is_deleted(mac):
     done = docker_install(mac, "--install-docker", DATALAB_TEST_DMG="corrupt")
-    refused(done, mac, "couldn't be opened", "downloads Docker Desktop again")
+    refused(done, mac, "couldn't be opened", "downloads it again")
     assert list(cache(mac).iterdir()) == []
 
 
@@ -1028,3 +1072,133 @@ def test_the_installer_never_resets_prunes_or_accepts_for_you():
     text = INSTALLER.read_text()
     for never in ("prune", "docker rm", "--accept-license", "group.com.docker", "sudo "):
         assert never not in text.replace("without sudo", "")
+
+
+def test_ctrl_c_while_copying_leaves_no_half_copy(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_DITTO="interrupt")
+    assert done.returncode == 130, done.stdout + done.stderr
+    assert "Stopped. Run this installer again" in done.stdout
+    assert not (mac["apps"] / ".Docker.app.datalab-partial").exists()
+    assert not (mac["apps"] / "Docker.app").exists()
+    assert lines(mac["hdiutil"])[-1].startswith("hdiutil detach")
+    again = docker_install(mac, "--install-docker")
+    assert again.returncode == 0, again.stdout + again.stderr
+
+
+def test_app_management_blocking_the_copy_says_how_to_allow_it(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_DITTO="not-permitted")
+    refused(done, mac, '"Operation not permitted"', "Privacy & Security > App Management")
+    assert "Self Service" not in done.stdout
+    assert not (mac["apps"] / ".Docker.app.datalab-partial").exists()
+
+
+def test_another_copy_failure_gets_the_general_message(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_DITTO="fails")
+    refused(done, mac, "couldn't be copied to", "Self Service app or ask IT")
+
+
+def test_a_copy_that_differs_from_what_was_checked_is_removed(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_DITTO="tamper")
+    refused(done, mac, "didn't pass macOS's checks again")
+    assert not (mac["apps"] / ".Docker.app.datalab-partial").exists()
+    assert list(cache(mac).iterdir()) == []
+
+
+def test_a_docker_app_that_appears_while_copying_is_left_alone(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_DITTO="race")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "appeared in" in done.stdout and "that one was" in done.stdout
+    theirs = mac["apps"] / "Docker.app"
+    assert [p.name for p in theirs.iterdir()] == ["Contents"]  # not a copy inside it
+    assert list((theirs / "Contents").iterdir()) == []
+    assert not (mac["apps"] / ".Docker.app.datalab-partial").exists()
+
+
+def test_a_disk_image_not_signed_by_docker_isnt_opened(mac):
+    done = docker_install(
+        mac, "--install-docker", DATALAB_TEST_DMG_SIGNER="Someone Else (ABCDE12345)"
+    )
+    refused(done, mac, "isn't signed by Docker Inc", "deleted without being opened")
+    assert lines(mac["hdiutil"]) == [] and list(cache(mac).iterdir()) == []
+
+
+def test_gatekeeper_turned_off_is_said_so(mac):
+    done = docker_install(mac, "--install-docker", DATALAB_TEST_GATEKEEPER_OFF="1")
+    refused(done, mac, "Gatekeeper is turned off", "Nothing from it was run")
+    assert list(cache(mac).iterdir()) == []
+
+
+def test_a_symlinked_app_in_the_disk_image_is_refused(mac, tmp_path):
+    real = tmp_path / "elsewhere"
+    real.mkdir()
+    (mac["dmg"] / "Docker.app").rename(real / "Docker.app")
+    (mac["dmg"] / "Docker.app").symlink_to(real / "Docker.app")
+    done = docker_install(mac, "--install-docker")
+    refused(done, mac, "didn't pass macOS's checks")
+
+
+def test_docker_linked_from_path_to_an_app_elsewhere_is_used(mac, tmp_path):
+    elsewhere = tmp_path / "Utilities"
+    elsewhere.mkdir()
+    renamed = fake_docker_app(elsewhere).rename(elsewhere / "Docker 4.84.app")
+    (mac["tools"] / "docker").symlink_to(renamed / "Contents" / "Resources" / "bin" / "docker")
+    done = docker_install(mac, DATALAB_TEST_ALIVE=str(renamed))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert lines(mac["open"]) == [f"open {renamed}"]
+    assert lines(mac["curl"]) == [] and not (mac["apps"] / "Docker.app").exists()
+    assert "isn't on your PATH" not in done.stdout
+
+
+def test_a_docker_app_spotlight_knows_is_used(mac, tmp_path):
+    elsewhere = tmp_path / "Other Apps"
+    elsewhere.mkdir()
+    app = fake_docker_app(elsewhere)
+    trash = mac["home"] / ".Trash"
+    trash.mkdir()
+    old = fake_docker_app(trash)
+    done = docker_install(mac, DATALAB_TEST_MDFIND=f"{old}\n{app}", DATALAB_TEST_ALIVE=str(app))
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert lines(mac["mdfind"]) == ["mdfind kMDItemCFBundleIdentifier == 'com.docker.docker'"]
+    assert lines(mac["open"]) == [f"open {app}"]  # not the one in the Trash
+    assert lines(mac["curl"]) == []
+    assert f"DataLab finds it in {app / 'Contents' / 'Resources' / 'bin'}" in done.stdout
+
+
+def test_an_empty_leftover_docker_app_is_explained(mac):
+    (mac["apps"] / "Docker.app" / "Contents").mkdir(parents=True)
+    done = docker_install(mac)
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert (
+        "isn't a complete Docker Desktop" in done.stdout and "Drag it to the Trash" in done.stdout
+    )
+    assert lines(mac["open"]) == [] and lines(mac["curl"]) == []
+
+
+def test_after_installing_its_own_docker_command_is_used(mac):
+    other = mac["tools"] / "docker"  # another Docker's command, not answering
+    executable(other, "#!/bin/sh\nexit 1\n")
+    done = docker_install(mac, "--install-docker")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "docker info" in lines(mac["docker"])  # the installed app's command answered
+    bin_dir = mac["apps"] / "Docker.app" / "Contents" / "Resources" / "bin"
+    assert all(line.split(":")[-1] == str(bin_dir) for line in lines(mac["path"]))
+
+
+def test_the_wait_is_timed_by_the_clock(mac):
+    fake_docker_app(mac["apps"])
+    # Each `docker info` "takes" 50 seconds: the 60-second wait ends after two.
+    slow = FAKE_DOCKER.replace(
+        'if [ "$1" = info ]; then',
+        'if [ "$1" = info ]; then\n  sleep 50',
+    )
+    executable(mac["apps"] / "Docker.app" / "Contents" / "Resources" / "bin" / "docker", slow)
+    done = docker_install(mac, DATALAB_TEST_OPEN_STARTS="0", DATALAB_DOCKER_WAIT_SECONDS="60")
+    assert done.returncode == 1 and "isn't ready after 60 seconds" in done.stdout
+    assert len([x for x in lines(mac["docker"]) if x == "docker info"]) <= 3
+
+
+def test_its_checks_use_dockers_code_requirement_and_notarization():
+    text = INSTALLER.read_text(encoding="utf-8")
+    assert 'certificate leaf[subject.OU] = \\"$DOCKER_TEAM_ID\\"' in text
+    assert 'grep -qxF "source=Notarized Developer ID"' in text
+    assert "--speed-limit 10240 --speed-time 120" in text and "--tlsv1.2" in text

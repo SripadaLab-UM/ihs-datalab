@@ -75,18 +75,27 @@ esac
 SYSTEM_APPS="${DATALAB_SYSTEM_APPLICATIONS:-/Applications}"
 USER_APPS="$HOME/Applications"
 # Cleans up on the way out, however it ends: Docker's disk image is detached
-# and the download folder removed (a partial download is kept, to resume).
+# a half-made copy of it removed, and the download folder removed (a partial
+# download is kept, to resume).
 STAGE=""
 DOCKER_MOUNT=""
+DOCKER_PARTIAL=""
+# The half-made copy of Docker Desktop, if there is one (only ever that name).
+remove_partial_copy() {
+  case "$DOCKER_PARTIAL" in
+    */.Docker.app.datalab-partial) rm -rf "$DOCKER_PARTIAL" 2>/dev/null || true ;;
+  esac
+}
 cleanup() {
   if [ -n "$DOCKER_MOUNT" ]; then
     hdiutil detach -quiet -force "$DOCKER_MOUNT" >/dev/null 2>&1 || true
     rmdir "$DOCKER_MOUNT" 2>/dev/null || true
   fi
+  remove_partial_copy
   if [ -n "$STAGE" ]; then rm -rf "$STAGE"; fi
 }
 trap cleanup EXIT
-trap 'echo; echo "Stopped. Run this installer again when you are ready: it carries on from where it"; echo "stopped (a partly downloaded Docker Desktop is resumed)."; exit 130' INT TERM HUP
+trap 'echo; echo "Stopped. Run this installer again when you are ready: it carries on from where it"; echo "stopped (a partly downloaded Docker Desktop is resumed; a half-made copy was removed)."; exit 130' INT TERM HUP
 
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 # Questions are read from the terminal, even when this script arrives on a pipe.
@@ -100,10 +109,11 @@ ask() {
 # ------------------------------------------------------------ Docker Desktop
 # Docker Desktop is found where it's installed (/Applications or
 # ~/Applications), and its `docker` command even when it isn't on PATH (the
-# /usr/local/bin link missing): then the command inside the app is used, by
-# its full path, and its folder goes first on PATH for the rest of this
-# install (it holds Docker's credential helpers too). DataLab does the same
-# each time it starts (datalab/docker_path.py).
+# /usr/local/bin link missing, or linking to a Docker.app elsewhere): then
+# the command inside the app is used, by its full path, and its folder goes
+# last on PATH for the rest of this install (it holds Docker's credential
+# helpers too). DataLab does the same each time it starts
+# (datalab/docker_path.py).
 #
 # If Docker Desktop is missing, it offers to download Docker's official one
 # for this Mac, checks it's signed and notarized by Docker Inc before running
@@ -116,6 +126,8 @@ ask() {
 # stops once Docker is ready, before anything is installed.
 DOCKER_TEAM_ID=9BNSXJN65R
 DOCKER_BUNDLE_ID=com.docker.docker
+# Signed by Docker Inc's Developer ID; for the app, also its bundle id.
+DOCKER_SIGNER="anchor apple generic and certificate leaf[subject.OU] = \"$DOCKER_TEAM_ID\""
 DOCKER_TERMS=https://www.docker.com/legal/docker-subscription-service-agreement/
 DOCKER_PAGE=https://docs.docker.com/desktop/setup/install/mac-install/
 # Docker Desktop supports the current and two previous major macOS releases:
@@ -128,7 +140,13 @@ DOCKER_POLL="${DATALAB_DOCKER_POLL_SECONDS:-5}"
 DOCKER_CACHE="$HOME/Library/Caches/DataLab/docker-desktop"
 DOCKER=""
 DOCKER_APP=""
+DOCKER_ADDED_TO_PATH=0
 
+# Whether $1 is a Docker Desktop app bundle (by its bundle id).
+is_docker_bundle() {
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  [ "$(plutil -extract CFBundleIdentifier raw -o - "$1/Contents/Info.plist" 2>/dev/null)" = "$DOCKER_BUNDLE_ID" ]
+}
 # The Docker Desktop app, if one is installed: /Applications, then ~/Applications.
 find_docker_app() {
   DOCKER_APP=""
@@ -137,19 +155,67 @@ find_docker_app() {
   done
   return 1
 }
-# The docker command: on PATH, or where Docker Desktop keeps it.
-find_docker_cli() {
-  DOCKER="$(command -v docker 2>/dev/null || true)"
-  if [ -n "$DOCKER" ]; then return 0; fi
-  for candidate in ${DOCKER_APP:+"$DOCKER_APP/Contents/Resources/bin/docker"} "$HOME/.docker/bin/docker"; do
-    if [ -x "$candidate" ]; then
-      DOCKER="$candidate"
-      PATH="$(dirname "$candidate"):$PATH"
-      export PATH
-      return 0
-    fi
+# $1 with every symbolic link followed: the file it really is.
+real_path() {
+  p="$1"; hops=0
+  while [ -L "$p" ] && [ "$hops" -lt 40 ]; do
+    to="$(readlink "$p")" || return 1
+    case "$to" in /*) p="$to" ;; *) p="$(dirname "$p")/$to" ;; esac
+    hops=$((hops + 1))
   done
+  dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$dir" "$(basename "$p")"
+}
+# A Docker Desktop somewhere else: the app the docker command on PATH really
+# is (a link to a renamed Docker.app, or one in a subfolder), or failing that
+# one Spotlight knows (not in the Trash or on a disk image).
+find_docker_app_elsewhere() {
+  if [ -n "$DOCKER" ]; then
+    real="$(real_path "$DOCKER" || true)"
+    case "$real" in
+      */Contents/Resources/bin/docker)
+        bundle="${real%/Contents/Resources/bin/docker}"
+        if is_docker_bundle "$bundle"; then DOCKER_APP="$bundle"; return 0; fi ;;
+    esac
+  fi
+  command -v mdfind >/dev/null 2>&1 || return 1
+  found="$(mdfind "kMDItemCFBundleIdentifier == '$DOCKER_BUNDLE_ID'" 2>/dev/null || true)"
+  while IFS= read -r bundle; do
+    case "$bundle" in
+      */.Trash/*|/Volumes/*|"$DOCKER_CACHE"/*|*/Docker.app/*) continue ;;
+      *.app) if is_docker_bundle "$bundle"; then DOCKER_APP="$bundle"; return 0; fi ;;
+    esac
+  done <<FOUND
+$found
+FOUND
   return 1
+}
+# The docker command: on PATH, or where Docker Desktop keeps it. With
+# "prefer-app", the one in DOCKER_APP comes first (just installed: not
+# another Docker's, such as Colima's or Homebrew's, that's on PATH).
+find_docker_cli() {
+  DOCKER=""
+  app_cli="${DOCKER_APP:+$DOCKER_APP/Contents/Resources/bin/docker}"
+  if [ "${1:-}" = prefer-app ] && [ -n "$app_cli" ] && [ -x "$app_cli" ]; then
+    DOCKER="$app_cli"
+    # The one on PATH, when it's a link to this same command.
+    on_path="$(command -v docker 2>/dev/null || true)"
+    if [ -n "$on_path" ] && [ "$(real_path "$on_path" || true)" = "$(real_path "$app_cli" || true)" ]; then
+      DOCKER="$on_path"
+    fi
+  else
+    DOCKER="$(command -v docker 2>/dev/null || true)"
+    if [ -n "$DOCKER" ]; then return 0; fi
+    for candidate in ${app_cli:+"$app_cli"} "$HOME/.docker/bin/docker"; do
+      if [ -x "$candidate" ]; then DOCKER="$candidate"; break; fi
+    done
+  fi
+  [ -n "$DOCKER" ] || return 1
+  # Last on PATH: it doesn't hide anything already there.
+  case ":$PATH:" in
+    *":$(dirname "$DOCKER"):"*) ;;
+    *) PATH="$PATH:$(dirname "$DOCKER")"; export PATH; DOCKER_ADDED_TO_PATH=1 ;;
+  esac
 }
 # Runs a command, giving up after $1 seconds (a starting Docker can hang).
 within() {
@@ -162,9 +228,10 @@ within() {
 }
 docker_ready() { [ -n "$DOCKER" ] && within 20 "$DOCKER" info >/dev/null 2>&1; }
 # Whether any of Docker Desktop's programs are running (to notice it quitting).
+# The path is compared as plain text, whatever characters it has.
 docker_app_alive() {
-  command -v pgrep >/dev/null 2>&1 || return 0
-  pgrep -f "$1/Contents/MacOS/" >/dev/null 2>&1
+  running="$(ps -axo command= 2>/dev/null)" || return 0
+  printf '%s\n' "$running" | grep -qF "$1/Contents/MacOS/"
 }
 # Whether $1 (a macOS version) is at least $2.
 version_at_least() {
@@ -174,6 +241,7 @@ version_at_least() {
     exit 0 }'
 }
 free_gb() { df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print int($4 / 1048576) }'; }
+now() { date +%s; }
 # Yes only for y or yes: for questions whose answer shouldn't be assumed.
 ask_yes() {
   printf '%s ' "$1"
@@ -185,15 +253,24 @@ rerun() {
   echo "Then run this installer again, the same way: it carries on from where it stopped,"
   echo "and anything already done isn't done twice."
 }
-# $1 is signed and notarized by Docker Inc, and is Docker Desktop.
+# $1 is Docker Desktop, signed by Docker Inc and notarized. Sets
+# NOT_GENUINE to why not: "gatekeeper" when Gatekeeper is off, so macOS
+# can't say whether it's notarized, otherwise "signature".
 docker_app_is_genuine() {
-  [ -d "$1" ] || return 1
-  codesign --verify --deep --strict "$1" >/dev/null 2>&1 || return 1
-  assessed="$(spctl -a -vv -t exec "$1" 2>&1)" || return 1
-  printf '%s\n' "$assessed" | grep -qF "origin=Developer ID Application: Docker Inc ($DOCKER_TEAM_ID)" || return 1
+  NOT_GENUINE=signature
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  codesign --verify --deep --strict -R="$DOCKER_SIGNER and identifier \"$DOCKER_BUNDLE_ID\"" "$1" \
+    >/dev/null 2>&1 || return 1
   signed="$(codesign -dv --verbose=2 "$1" 2>&1)" || return 1
   printf '%s\n' "$signed" | grep -qxF "TeamIdentifier=$DOCKER_TEAM_ID" || return 1
-  printf '%s\n' "$signed" | grep -qxF "Identifier=$DOCKER_BUNDLE_ID"
+  printf '%s\n' "$signed" | grep -qxF "Identifier=$DOCKER_BUNDLE_ID" || return 1
+  assessed="$(spctl -a -vv -t exec "$1" 2>&1)" || return 1
+  if ! printf '%s\n' "$assessed" | grep -q '^origin='; then
+    NOT_GENUINE=gatekeeper
+    return 1
+  fi
+  printf '%s\n' "$assessed" | grep -qxF "source=Notarized Developer ID" || return 1
+  printf '%s\n' "$assessed" | grep -qxF "origin=Developer ID Application: Docker Inc ($DOCKER_TEAM_ID)"
 }
 detach_docker_image() {
   if [ -n "$DOCKER_MOUNT" ]; then
@@ -202,6 +279,18 @@ detach_docker_image() {
     rmdir "$DOCKER_MOUNT" 2>/dev/null || true
     DOCKER_MOUNT=""
   fi
+}
+# Stops the Docker Desktop install: the image detached, the partial copy
+# and (with "delete") the download removed, then $2... printed.
+stop_install() {
+  what="$1"; shift
+  detach_docker_image
+  remove_partial_copy
+  rm -f "$DOCKER_CACHE/copy-errors"
+  if [ "$what" = delete ]; then rm -f "$DOCKER_CACHE/Docker-$arch.dmg"; fi
+  for line; do echo "$line"; done
+  rerun
+  exit 1
 }
 
 # Downloads, checks and installs Docker Desktop, and sets DOCKER_APP. Its
@@ -226,9 +315,8 @@ install_docker_desktop() {
     echo "If this Mac can't be updated that far, DataLab can't run on it: ask the lab."
     exit 1
   fi
-  mkdir -p "$DOCKER_CACHE"
   if [ -d "$SYSTEM_APPS" ] && [ -w "$SYSTEM_APPS" ]; then place="$SYSTEM_APPS"; else place="$USER_APPS"; fi
-  for where in "$DOCKER_CACHE" "$(dirname "$place")"; do
+  for where in "$HOME" "$(dirname "$place")"; do
     have="$(free_gb "$where")"
     if [ -n "$have" ] && [ "$have" -lt "$DOCKER_NEED_GB" ]; then
       echo "Docker Desktop needs about $DOCKER_NEED_GB GB of free disk space (for the download,"
@@ -250,7 +338,6 @@ install_docker_desktop() {
   if [ "$INSTALL_DOCKER" != yes ] \
     && ! ask_yes "Download and install Docker Desktop? [y/N]"; then
     echo
-    rmdir "$DOCKER_CACHE" 2>/dev/null || true
     echo "Docker Desktop wasn't installed, and nothing was changed. To install it yourself:"
     echo "  1. Download Docker Desktop for Mac ($kind) from $DOCKER_PAGE"
     echo "  2. Open Docker.dmg and drag Docker to Applications."
@@ -260,14 +347,17 @@ install_docker_desktop() {
     exit 1
   fi
 
+  mkdir -p "$DOCKER_CACHE"
   dmg="$DOCKER_CACHE/Docker-$arch.dmg"
   if [ -f "$dmg" ]; then
     echo "Using the Docker Desktop download from before."
   else
     echo "Downloading Docker Desktop…"
     got=0
-    curl -fL --proto '=https' --proto-redir '=https' --retry 3 --connect-timeout 30 \
-      --progress-bar -C - -o "$dmg.part" "https://desktop.docker.com/mac/main/$arch/Docker.dmg" || got=$?
+    # Given up on if it stalls (under 10 kB/s for 2 minutes).
+    curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 --connect-timeout 30 \
+      --speed-limit 10240 --speed-time 120 --progress-bar -C - -o "$dmg.part" \
+      "https://desktop.docker.com/mac/main/$arch/Docker.dmg" || got=$?
     if [ "$got" -ne 0 ]; then
       # 22: the server refused (a finished or stale part can't be resumed).
       # 33: it can't resume at all. Either way the next try starts afresh.
@@ -284,63 +374,97 @@ install_docker_desktop() {
   fi
 
   echo "Checking the download…"
+  # Docker signs the disk image itself too: checked before it's opened.
+  if ! codesign --verify -R="$DOCKER_SIGNER" "$dmg" >/dev/null 2>&1; then
+    stop_install delete \
+      "The Docker Desktop download isn't signed by Docker Inc (team $DOCKER_TEAM_ID), so it" \
+      "was deleted without being opened, and nothing was installed. This is unusual; a" \
+      "network filter may have changed it. If it happens again, install Docker Desktop" \
+      "yourself from $DOCKER_PAGE (or ask IT)."
+  fi
   DOCKER_MOUNT="$(mktemp -d "$DOCKER_CACHE/mount.XXXXXX")"
   if ! hdiutil attach -quiet -nobrowse -readonly -noautoopen -mountpoint "$DOCKER_MOUNT" "$dmg" >/dev/null 2>&1; then
     rmdir "$DOCKER_MOUNT" 2>/dev/null || true
     DOCKER_MOUNT=""
-    rm -f "$dmg"
-    echo "The Docker Desktop download couldn't be opened (it may be incomplete), so it was"
-    echo "deleted and nothing was installed."
-    rerun
-    echo "It downloads Docker Desktop again."
-    exit 1
+    stop_install delete \
+      "The Docker Desktop download couldn't be opened (it may be incomplete), so it was" \
+      "deleted and nothing was installed. Running this again downloads it again."
   fi
   source_app="$DOCKER_MOUNT/Docker.app"
   if ! docker_app_is_genuine "$source_app"; then
-    detach_docker_image
-    rm -f "$dmg"
-    echo "The downloaded Docker Desktop didn't pass macOS's checks: it must be signed and"
-    echo "notarized by Docker Inc (team $DOCKER_TEAM_ID). Nothing from it was run or installed,"
-    echo "and the download was deleted. This is unusual; a network filter may have changed it."
-    rerun
-    echo "If it happens again, install Docker Desktop yourself from $DOCKER_PAGE"
-    echo "(or ask IT), then run this installer again."
-    exit 1
+    if [ "$NOT_GENUINE" = gatekeeper ]; then
+      stop_install delete \
+        "macOS's Gatekeeper is turned off on this Mac, so macOS can't confirm that the" \
+        "downloaded Docker Desktop is notarized by Apple. Nothing from it was run or" \
+        "installed, and the download was deleted. Turn Gatekeeper back on (ask IT if" \
+        "your Mac is managed), or install Docker Desktop yourself from $DOCKER_PAGE."
+    fi
+    stop_install delete \
+      "The downloaded Docker Desktop didn't pass macOS's checks: it must be signed and" \
+      "notarized by Docker Inc (team $DOCKER_TEAM_ID). Nothing from it was run or installed," \
+      "and the download was deleted. This is unusual; a network filter may have changed it." \
+      "If it happens again, install Docker Desktop yourself from $DOCKER_PAGE (or ask IT)."
   fi
   needs="$(plutil -extract LSMinimumSystemVersion raw -o - "$source_app/Contents/Info.plist" 2>/dev/null || echo 0)"
   if ! version_at_least "$macos" "$needs"; then
-    detach_docker_image
-    rm -f "$dmg"
-    echo "This Docker Desktop needs macOS $needs or newer, and this Mac has macOS $macos."
-    echo "Update macOS first (Apple menu > System Settings > General > Software Update)."
-    rerun
-    exit 1
+    stop_install delete \
+      "This Docker Desktop needs macOS $needs or newer, and this Mac has macOS $macos." \
+      "Update macOS first (Apple menu > System Settings > General > Software Update)."
   fi
   echo "It's Docker Desktop $(plutil -extract CFBundleShortVersionString raw -o - "$source_app/Contents/Info.plist" 2>/dev/null || echo ''), signed and notarized by Docker Inc."
 
   # Copied as it is (ditto keeps its signature), under a temporary name
   # until it's complete and checked again. /Applications if this account can
-  # add to it without sudo, otherwise ~/Applications.
+  # add to it without sudo, otherwise ~/Applications. Removed on the way out
+  # if it doesn't get that far (Ctrl-C included).
   mkdir -p "$place" 2>/dev/null || true
-  partial="$place/.Docker.app.datalab-partial"
-  rm -rf "$partial" 2>/dev/null || true
+  DOCKER_PARTIAL="$place/.Docker.app.datalab-partial"
+  remove_partial_copy
+  copy_errors="$DOCKER_CACHE/copy-errors"
   echo "Copying Docker Desktop to $place…"
-  if ! ditto "$source_app" "$partial" 2>/dev/null || ! docker_app_is_genuine "$partial" \
-    || [ -e "$place/Docker.app" ] || ! mv "$partial" "$place/Docker.app" 2>/dev/null; then
-    rm -rf "$partial" 2>/dev/null || true
-    detach_docker_image
-    echo "Docker Desktop couldn't be copied to $place. macOS or your organisation's"
-    echo "device management may not allow adding apps there. On a Mac your organisation"
-    echo "manages, install Docker Desktop from its Self Service app or ask IT; otherwise"
-    echo "check there's space and that you can add files to $place."
-    rerun
-    exit 1
+  copied=0
+  ditto "$source_app" "$DOCKER_PARTIAL" 2>"$copy_errors" || copied=$?
+  if [ "$copied" -ne 0 ] || [ -L "$DOCKER_PARTIAL" ] || [ ! -d "$DOCKER_PARTIAL" ]; then
+    copy_failed "$place" "$copy_errors"
   fi
+  if ! docker_app_is_genuine "$DOCKER_PARTIAL"; then
+    stop_install delete \
+      "The copy of Docker Desktop in $place didn't pass macOS's checks again, so it" \
+      "was removed, with the download."
+  fi
+  # Checked again just before: if a Docker.app arrived meanwhile, mv would
+  # put the copy inside it.
+  if [ -e "$place/Docker.app" ] || [ -L "$place/Docker.app" ]; then
+    stop_install keep \
+      "A Docker.app appeared in $place while this copy was being made (did you" \
+      "install Docker Desktop at the same time?). This copy was removed; that one was" \
+      "left as it is."
+  fi
+  moved=0
+  mv "$DOCKER_PARTIAL" "$place/Docker.app" 2>"$copy_errors" || moved=$?
+  if [ "$moved" -ne 0 ]; then copy_failed "$place" "$copy_errors"; fi
+  DOCKER_PARTIAL=""
   DOCKER_APP="$place/Docker.app"
   detach_docker_image
-  rm -f "$dmg"
+  rm -f "$dmg" "$copy_errors"
   rmdir "$DOCKER_CACHE" 2>/dev/null || true
   echo "Docker Desktop is installed in $(dirname "$DOCKER_APP")."
+}
+# Why copying to $1 failed, from the errors in $2.
+copy_failed() {
+  if grep -q "Operation not permitted" "$2" 2>/dev/null; then
+    stop_install keep \
+      "macOS didn't let Terminal add Docker Desktop to $1 (\"Operation not permitted\")." \
+      "Either allow it: System Settings > Privacy & Security > App Management, turn on" \
+      "Terminal (then quit and reopen Terminal); or install into your own Applications" \
+      "folder instead: create a folder called Applications in your home folder." \
+      "Your organisation's device management may also block this: then ask IT."
+  fi
+  stop_install keep \
+    "Docker Desktop couldn't be copied to $1. macOS or your organisation's" \
+    "device management may not allow adding apps there. On a Mac your organisation" \
+    "manages, install Docker Desktop from its Self Service app or ask IT; otherwise" \
+    "check there's space and that you can add files to $1."
 }
 
 # Opens Docker Desktop and waits until it answers. $1: "new" right after
@@ -366,19 +490,33 @@ start_docker() {
     echo "This installer carries on by itself once Docker Desktop is running."
   else
     limit="${DATALAB_DOCKER_WAIT_SECONDS:-300}"
+    # An empty or damaged leftover isn't a Docker Desktop that can start.
+    program="$(plutil -extract CFBundleExecutable raw -o - "$DOCKER_APP/Contents/Info.plist" 2>/dev/null || true)"
+    if [ -z "$program" ] || [ ! -x "$DOCKER_APP/Contents/MacOS/$program" ]; then
+      echo "$DOCKER_APP is there, but it isn't a complete Docker Desktop (it may be left"
+      echo "over from an earlier install). Drag it to the Trash; your containers and images"
+      echo "aren't in it."
+      rerun
+      echo "It then offers to install Docker Desktop."
+      exit 1
+    fi
     echo "Starting Docker Desktop… If its window asks you something (its agreement, your"
     echo "password, signing in), answer it there; signing in is optional."
   fi
   if ! open "$DOCKER_APP" >/dev/null 2>&1; then
-    echo "Docker Desktop ($DOCKER_APP) couldn't be opened. Open it from Applications and"
-    echo "wait until its whale icon at the top of the screen says it's running."
+    echo "Docker Desktop ($DOCKER_APP) couldn't be opened. If it's damaged, drag it to the"
+    echo "Trash (your containers and images aren't in it); otherwise open it from"
+    echo "Applications and wait until its whale icon at the top of the screen says it's running."
     rerun
     exit 1
   fi
-  waited=0
+  # Timed by the clock: each `docker info` can take up to 20 seconds.
+  started="$(now)"
+  said=0
   gone=0
   until docker_ready; do
-    if [ -z "$DOCKER" ]; then find_docker_cli || true; fi
+    if [ -z "$DOCKER" ]; then find_docker_cli prefer-app || true; fi
+    waited=$(($(now) - started))
     if [ "$waited" -ge "$limit" ]; then
       if [ "$limit" -ge 120 ]; then took="$((limit / 60)) minutes"; else took="$limit seconds"; fi
       echo "Docker Desktop isn't ready after $took."
@@ -400,11 +538,11 @@ start_docker() {
       rerun
       exit 1
     fi
-    if [ "$waited" -gt 0 ] && [ $((waited % 30)) -lt "$DOCKER_POLL" ]; then
-      echo "Still waiting for Docker Desktop ($waited seconds)…"
+    if [ "$waited" -ge $((said + 30)) ]; then
+      said=$((waited - waited % 30))
+      echo "Still waiting for Docker Desktop ($said seconds)…"
     fi
     sleep "$DOCKER_POLL"
-    waited=$((waited + DOCKER_POLL))
   done
 }
 
@@ -413,7 +551,8 @@ find_docker_app || true
 find_docker_cli || true
 if docker_ready; then
   :
-elif [ -n "$DOCKER_APP" ]; then
+elif [ -n "$DOCKER_APP" ] || find_docker_app_elsewhere; then
+  find_docker_cli prefer-app || true
   start_docker existing
 else
   if [ -n "$DOCKER" ]; then
@@ -423,14 +562,13 @@ else
     echo
   fi
   install_docker_desktop
-  find_docker_cli || true
+  find_docker_cli prefer-app || true
   start_docker new
 fi
 echo "Docker Desktop is running."
-case "$DOCKER" in
-  */Contents/Resources/bin/docker|"$HOME"/.docker/bin/docker)
-    echo "(Its docker command isn't on your PATH, which is fine: DataLab finds it in $(dirname "$DOCKER").)" ;;
-esac
+if [ "$DOCKER_ADDED_TO_PATH" = 1 ]; then
+  echo "(Its docker command isn't on your PATH, which is fine: DataLab finds it in $(dirname "$DOCKER").)"
+fi
 if [ "${DATALAB_INSTALL_STOP_AFTER_DOCKER:-}" = 1 ]; then
   echo "Stopping here: DATALAB_INSTALL_STOP_AFTER_DOCKER is set."
   exit 0

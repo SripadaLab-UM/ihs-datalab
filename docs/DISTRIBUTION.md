@@ -528,16 +528,22 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
 - **Finding it.** Docker Desktop is looked for in `/Applications` and
   `~/Applications`, and its `docker` command on PATH, then inside the app
   (`Docker.app/Contents/Resources/bin/docker`) and in `~/.docker/bin`, so a
-  missing `/usr/local/bin/docker` link doesn't matter. The command found is
-  used by its full path, and its folder goes first on PATH for the rest of
-  the install (it also holds Docker's credential helpers, which `docker
-  pull` uses). DataLab does the same each time it starts
+  missing `/usr/local/bin/docker` link doesn't matter. A `docker` on PATH
+  that links to a Docker.app somewhere else (renamed, or in a subfolder) is
+  followed to that app, and failing that, Spotlight (`mdfind` for bundle id
+  `com.docker.docker`, not in the Trash or on a disk image) is asked before
+  offering to install one, so a second copy isn't installed beside it. The
+  command found is used by its full path, and its folder goes last on PATH
+  (so it hides nothing already there) for the rest of the install (it also holds Docker's credential helpers, which `docker
+  pull` uses). DataLab does the same (adding it last) each time it starts
   (`datalab/docker_path.py`, called from `datalab.cli.main`), so the app
   launched from Finder or the Desktop works without the link too.
 - **Running already:** nothing is done. **Installed but stopped:** it opens
   the app and waits until `docker info` answers (up to 5 minutes, saying
   every 30 seconds that it's still waiting; each `docker info` is given 20
-  seconds). An existing Docker Desktop is never reinstalled, upgraded, reset
+  seconds, and the wait is timed by the clock). A Docker.app that isn't
+  complete (no program named by its `CFBundleExecutable`) is reported, with
+  "drag it to the Trash and run this again". An existing Docker Desktop is never reinstalled, upgraded, reset
   or reconfigured; the installer never prunes or removes containers, images
   or volumes, and never touches Docker's settings or data
   (`~/Library/Group Containers/group.com.docker`).
@@ -549,13 +555,20 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   or newer (Docker supports the current and two previous major releases; 14
   is Docker Desktop 4.93's own minimum); and about 6 GB free. Then:
   1. Downloads `https://desktop.docker.com/mac/main/<arm64|amd64>/Docker.dmg`
-     (https only, resumable: a partial download in
-     `~/Library/Caches/DataLab/docker-desktop/` is continued next time).
+     (https and TLS 1.2 or later only; given up on if it stalls under
+     10 kB/s for 2 minutes; resumable: a partial download in
+     `~/Library/Caches/DataLab/docker-desktop/`, created only after the
+     person says yes, is continued next time). Docker signs the disk image
+     itself, so its signature (Docker Inc, team `9BNSXJN65R`) is checked
+     before it's opened.
   2. Attaches it read-only at a private mount point (not `/Volumes`), and
      checks the app inside before anything from it runs: `codesign --verify
-     --deep --strict`, `spctl -a -vv -t exec` accepting it as notarized
-     Developer ID from `Docker Inc (9BNSXJN65R)`, and `codesign -dv` showing
-     team `9BNSXJN65R` and identifier `com.docker.docker`. It also checks the
+     --deep --strict` against the requirement "Apple-anchored, leaf
+     certificate OU `9BNSXJN65R`, identifier `com.docker.docker`",
+     `codesign -dv` showing that team and identifier, and `spctl -a -vv -t
+     exec` saying `source=Notarized Developer ID` and origin
+     `Docker Inc (9BNSXJN65R)`. A symlinked Docker.app is refused. If
+     Gatekeeper is off (spctl gives no origin), it says so. It also checks the
      app's own `LSMinimumSystemVersion` against this Mac. Any failure: the
      image is detached, the download deleted, and nothing installed.
   3. Copies the app with `ditto` (which keeps its signature) to
@@ -563,9 +576,14 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
      `~/Applications` (Docker works from there; the first-run window then
      needs "Use advanced settings" with the command line tools set to
      "User" if there's no administrator password). The copy goes under a
-     temporary name, is checked again, then renamed, so a half-done copy is
-     never taken for Docker Desktop. Then the image is detached and the
-     download deleted.
+     temporary name (`.Docker.app.datalab-partial`, removed however the
+     installer ends, Ctrl-C included), is checked again, then renamed, so a
+     half-done copy is never taken for Docker Desktop. If a Docker.app
+     appears meanwhile, the copy is removed and that one left alone. If
+     macOS refuses the copy with "Operation not permitted" (Privacy &
+     Security → App Management, macOS 13 and later), it says to allow
+     Terminal there or use `~/Applications`. Then the image is detached and
+     the download deleted.
   4. Opens Docker Desktop and prints what its first-run window asks: the
      Docker Subscription Service Agreement, which the person reads and
      accepts themselves (the installer never accepts it for them), "Use
@@ -586,7 +604,8 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   particular organisation's license status is.
 - Tests (`backend/tests/test_installer_macos.py`) run the real script
   against stand-ins for `docker`, `open`, `curl`, `hdiutil`, `codesign`,
-  `spctl`, `sw_vers`, `sysctl`, `uname`, `df`, `pgrep` and `sleep`.
+  `spctl`, `sw_vers`, `sysctl`, `uname`, `df`, `ps`, `mdfind`, `ditto`,
+  `date` and `sleep` (a fake clock).
   `DATALAB_DOCKER_WAIT_SECONDS` and `DATALAB_DOCKER_POLL_SECONDS` change the
   wait; `DATALAB_INSTALL_STOP_AFTER_DOCKER=1` stops once Docker is ready,
   before anything is installed.

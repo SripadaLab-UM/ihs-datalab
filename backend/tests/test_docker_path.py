@@ -17,7 +17,7 @@ def docker_in(folder: Path) -> Path:
     return docker
 
 
-def test_docker_in_your_applications_goes_first_on_path(tmp_path, monkeypatch):
+def test_docker_in_your_applications_goes_last_on_path(tmp_path, monkeypatch):
     monkeypatch.setattr(
         docker_path,
         "candidates",
@@ -29,7 +29,7 @@ def test_docker_in_your_applications_goes_first_on_path(tmp_path, monkeypatch):
     found = docker_in(tmp_path / "home/Applications/Docker.app/Contents/Resources/bin")
     env = {"PATH": "/usr/bin:/bin"}
     assert docker_path.ensure_docker_on_path(env, platform="darwin") == found.parent
-    assert env["PATH"] == f"{found.parent}:/usr/bin:/bin"
+    assert env["PATH"] == f"/usr/bin:/bin:{found.parent}"
 
 
 def test_nothing_changes_when_docker_is_on_path(tmp_path):
@@ -61,4 +61,4 @@ def test_the_docker_folder_in_your_home_is_found(tmp_path, monkeypatch):
     found = docker_in(tmp_path / ".docker/bin")
     env = {"PATH": "/nowhere"}
     assert docker_path.ensure_docker_on_path(env, platform="darwin") == found.parent
-    assert env["PATH"] == f"{found.parent}:/nowhere"
+    assert env["PATH"] == f"/nowhere:{found.parent}"
