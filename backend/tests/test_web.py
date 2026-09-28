@@ -92,3 +92,26 @@ def test_web_ui_serves_files_and_falls_back_to_index(settings, catalog, tmp_path
         # Outside the built folder: never served.
         assert "not for the browser" not in client.get("/../secret.txt").text
         assert "not for the browser" not in client.get("/assets/%2e%2e/%2e%2e/secret.txt").text
+
+
+def test_end_session_signs_every_window_out_until_a_new_sign_in(settings, catalog, tmp_path):
+    app, browser = make(settings, catalog, tmp_path)
+    link = browser.sign_in_path()
+    with TestClient(app) as client:
+        # Only a signed-in window can end it.
+        assert client.post("/api/session/end").status_code == 401
+        signed_in = client.get(link, follow_redirects=False)
+        cookie = signed_in.cookies[browser.cookie_name]
+        client.cookies.set(browser.cookie_name, cookie)
+        assert client.get("/api/conversations").status_code == 200
+        ended = client.post("/api/session/end")
+        assert ended.status_code == 204
+        # The browser is told to forget the cookie...
+        forget = ended.headers["set-cookie"].lower()
+        assert forget.startswith(f"{browser.cookie_name}=") and "max-age=0" in forget
+        # ...and a copy kept anywhere (another window, another tab) no longer works.
+        client.cookies.clear()
+        client.cookies.set(browser.cookie_name, cookie)
+        assert client.get("/api/conversations").status_code == 401
+        # The used link doesn't sign in again: it takes DataLab's next one.
+        assert client.get(link, follow_redirects=False).headers["location"] == "/signed-out"

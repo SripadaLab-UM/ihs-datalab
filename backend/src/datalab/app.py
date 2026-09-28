@@ -58,7 +58,7 @@ from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
 from datalab.update_gate import UpdateGate, UpdateGateMiddleware
 from datalab.updater import Updater, busy_reason
-from datalab.web import ApiProtection, BrowserSession, mount_web_ui
+from datalab.web import ApiProtection, BrowserSession, add_session_routes, mount_web_ui
 
 VERSION = __version__
 
@@ -369,6 +369,7 @@ def create_app(
             detail=catalog_problem(settings, catalog, catalog_build),
         )
 
+    add_session_routes(app, browser)
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(app, browser, web_dist)
     return app

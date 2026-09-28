@@ -15,7 +15,7 @@ import secrets
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 CONTENT_SECURITY_POLICY = "; ".join(
@@ -69,6 +69,12 @@ class BrowserSession:
     def valid(self, cookie: str | None) -> bool:
         return bool(cookie) and hmac.compare_digest(cookie or "", self._cookie)
 
+    def end(self) -> None:
+        """End the browser session: the cookie stops working, in every window
+        that has it. The sign-in link was used up, so signing in again takes a
+        new one: DataLab prints one when it starts."""
+        self._cookie = secrets.token_urlsafe(32)
+
 
 # Set in the request's scope state once ApiProtection has let it through its
 # sign-in check (the api's routes, not /api/health): middleware inside that
@@ -115,6 +121,18 @@ def _with_headers(send: Send) -> Send:
         await send(message)
 
     return wrapped
+
+
+def add_session_routes(app: FastAPI, session: BrowserSession) -> None:
+    """`POST /api/session/end`: End session, from the toolbar's session menu.
+    Only a signed-in window can call it (ApiProtection checks the cookie)."""
+
+    @app.post("/api/session/end", status_code=204, tags=["session"])
+    def end_session() -> Response:
+        session.end()
+        response = Response(status_code=204)
+        response.delete_cookie(session.cookie_name, httponly=True, samesite="strict", path="/")
+        return response
 
 
 def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> None:

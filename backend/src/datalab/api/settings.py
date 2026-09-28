@@ -12,6 +12,8 @@
   recovery did, recent updates and the backups. **Install update** runs the
   updater (updater.py), only once the person has confirmed.
 - **Diagnostics** builds the metadata-only report (diagnostics.py).
+- **Feedback contact** says whom the toolbar's Feedback goes to: the lab's
+  `repos.access_contact`, and the email address in it, if it has one.
 
 The GitHub sign-in (knowledge base and pipelines) is its own section, with
 its own routes in knowledge.py.
@@ -20,6 +22,7 @@ its own routes in knowledge.py.
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -285,6 +288,22 @@ class UpdatesOut(BaseModel):
     backups: list[BackupInfoOut]
     migrations_applied: int
     latest_migration: str | None
+
+
+class FeedbackContactOut(BaseModel):
+    # The lab's `repos.access_contact` as written ("Ali <ali@umich.edu>"), if set.
+    contact: str | None
+    # The email address in it, for a mailto: link; None when there isn't one.
+    email: str | None
+
+
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def feedback_contact(contact: str | None) -> FeedbackContactOut:
+    text = contact.strip() if contact else None
+    found = _EMAIL.search(text) if text else None
+    return FeedbackContactOut(contact=text or None, email=found.group(0) if found else None)
 
 
 class DiagnosticsOut(BaseModel):
@@ -588,6 +607,10 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
                 docker=services.docker_version(),
             )
         )
+
+    @router.get("/feedback-contact")
+    def feedback_contact_route() -> FeedbackContactOut:
+        return feedback_contact(settings.repos.access_contact)
 
     return router
 
