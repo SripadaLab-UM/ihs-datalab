@@ -342,12 +342,15 @@ def test_modes_come_with_descriptions_and_starters(app):
     with TestClient(app) as client:
         modes = {m["id"]: m for m in client.get("/api/modes").json()}
     assert set(modes) == {
-        "analysis", "extraction", "engineering", "pipelines", "workflows", "knowledge", "sql", "research"
+        "analysis", "extraction", "engineering", "pipelines", "workflows", "knowledge", "sql",
+        "research",
     }  # fmt: skip
     assert all(m["description"] and m["starters"] for m in modes.values())
     assert modes["research"]["kind"] == "research"
-    # Docked by the Workflows, Knowledge, SQL and Pipelines tabs only; Knowledge writing can't query.
-    assert {i for i, m in modes.items() if m["tab_only"]} == {"workflows", "knowledge", "sql", "pipelines"}
+    # Docked by the Workflows, Knowledge, SQL and Pipelines tabs only; Knowledge
+    # writing can't query.
+    docked = {i for i, m in modes.items() if m["tab_only"]}
+    assert docked == {"workflows", "knowledge", "sql", "pipelines"}
     assert {i for i, m in modes.items() if not m["queries"]} == {"knowledge"}
 
 

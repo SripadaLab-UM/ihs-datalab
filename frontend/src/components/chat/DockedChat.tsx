@@ -239,7 +239,7 @@ function ContextRow({
         </label>
       </div>
       <p id={stateId} className="pl-[17px] text-[11.5px] text-faint">
-        {included ? "Goes with each message you send, as it is then." : "Not sent. Tick Send with message to include it."}
+        {included ? "Goes with each message you send, as it is then." : "Not sent. Tick the box to include it."}
       </p>
       {expanded && (
         <pre

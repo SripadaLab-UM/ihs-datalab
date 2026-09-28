@@ -30,7 +30,8 @@ def test_every_mode_has_its_label_kind_and_starters():
     }
     assert all(m.description and m.starters for m in MODES.values())
     # These are docked by their tabs, not offered for a new conversation.
-    assert {m.id for m in MODES.values() if m.tab_only} == {"workflows", "knowledge", "sql", "pipelines"}
+    docked = {m.id for m in MODES.values() if m.tab_only}
+    assert docked == {"workflows", "knowledge", "sql", "pipelines"}
     # The docked chats' starters are short: one or two, a line each.
     for mode in (m for m in MODES.values() if m.tab_only):
         assert 1 <= len(mode.starters) <= 2
@@ -160,9 +161,11 @@ def test_the_pipelines_tabs_chat_explains_edits_and_tests_code():
 
 def test_each_tabs_chat_works_on_what_the_tab_has_open():
     sql = " ".join(MODES["sql"].instructions.split())
-    assert "When they ask what a query does, describe it" in sql and "propose nothing unless they ask" in sql
+    assert "When they ask what a query does, describe it" in sql
+    assert "propose nothing unless they ask" in sql
     workflows = " ".join(MODES["workflows"].instructions.split())
-    assert '("The workflow file <path>")' in workflows and "changes that same file, keeping its `name:`" in workflows
+    assert '("The workflow file <path>")' in workflows
+    assert "changes that same file, keeping its `name:`" in workflows
     knowledge = " ".join(MODES["knowledge"].instructions.split())
-    assert "(\"The page open in the Knowledge tab (<path>)\")" in knowledge
+    assert '("The page open in the Knowledge tab (<path>)")' in knowledge
     assert "changes that same file in /work/kb" in knowledge

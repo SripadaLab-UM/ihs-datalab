@@ -114,7 +114,7 @@ use an AI agent on sensitive IHS data, safely. It replaces the
   - form and YAML editor;
   - "Save as workflow" from SQL Playground;
   - "Turn this into a workflow" from a conversation.
-- **Pipelines tab**: browse `ihsDataR`, docked Data engineering chat, review
+- **Pipelines tab**: browse `ihsDataR`, docked Pipelines assistant, review
   diffs, run tests, and save.
 - **Starting content**: the 8 default routines as workflows, and the
   `daily_metrics_2025` pipeline.

@@ -174,100 +174,100 @@ export function Chat({
 
   return (
     <CompactContext value={compact}>
-    <div className="flex h-full min-h-0 flex-col">
-      {assistant ? (
-        <CompactHeader
-          assistant={assistant}
-          kind={conversation.kind}
-          title={<Title conversation={conversation} compact />}
-          model={conversation.model}
-          effort={effort}
-          onEffort={setEffort}
-          actions={headerActions}
-        />
-      ) : (
-        <ChatHeader
-          start={headerStart}
-          title={<Title conversation={conversation} />}
-          kind={conversation.kind}
-          model={conversation.model}
-          effort={effort}
-          onEffort={setEffort}
-          actions={
-            <>
-              {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
-              {headerActions}
-            </>
-          }
-        />
-      )}
-      <div
-        className={clsx("relative min-h-0 flex-1 overflow-y-auto", compact ? "px-4 py-4" : "px-4 py-8 sm:px-8")}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-        }}
-      >
-        <div className={clsx("mx-auto flex flex-col", compact ? "gap-8" : "max-w-[48rem] gap-14 2xl:max-w-[54rem]")}>
-          {turns.length === 0 && !sending &&
-            (assistant ? (
-              <CompactIntro
-                assistant={assistant}
-                mode={conversation.mode}
-                kind={conversation.kind}
-                onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
-                starting={send.isPending || running}
-              />
-            ) : (
-              <EmptyState
-                mode={conversation.mode}
-                kind={conversation.kind}
-                onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
-                starting={send.isPending || running}
-              />
-            ))}
-          <KnownFilesContext value={known}>
-            {turns.map((turn, index) => (
-              <TurnView
-                key={index}
-                turn={turn}
-                conversationId={conversation.id}
-                running={running}
-                last={index === turns.length - 1}
-              />
-            ))}
-          </KnownFilesContext>
-          {sending && <PendingTurn text={pending.text} />}
-          <div ref={bottom} />
-        </div>
-        {!following && running && (
-          <div className="pointer-events-none sticky bottom-0 flex justify-center">
-            <Button
-              variant="primary"
-              className="dl-in pointer-events-auto"
-              onClick={() => bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" })}
-            >
-              <Icon name="chevron" size={14} className="rotate-90" /> Jump to latest
-            </Button>
-          </div>
+      <div className="flex h-full min-h-0 flex-col">
+        {assistant ? (
+          <CompactHeader
+            assistant={assistant}
+            kind={conversation.kind}
+            title={<Title conversation={conversation} compact />}
+            model={conversation.model}
+            effort={effort}
+            onEffort={setEffort}
+            actions={headerActions}
+          />
+        ) : (
+          <ChatHeader
+            start={headerStart}
+            title={<Title conversation={conversation} />}
+            kind={conversation.kind}
+            model={conversation.model}
+            effort={effort}
+            onEffort={setEffort}
+            actions={
+              <>
+                {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
+                {headerActions}
+              </>
+            }
+          />
         )}
+        <div
+          className={clsx("relative min-h-0 flex-1 overflow-y-auto", compact ? "px-4 py-4" : "px-4 py-8 sm:px-8")}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+          }}
+        >
+          <div className={clsx("mx-auto flex flex-col", compact ? "gap-8" : "max-w-[48rem] gap-14 2xl:max-w-[54rem]")}>
+            {turns.length === 0 && !sending &&
+              (assistant ? (
+                <CompactIntro
+                  assistant={assistant}
+                  mode={conversation.mode}
+                  kind={conversation.kind}
+                  onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
+                  starting={send.isPending || running}
+                />
+              ) : (
+                <EmptyState
+                  mode={conversation.mode}
+                  kind={conversation.kind}
+                  onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
+                  starting={send.isPending || running}
+                />
+              ))}
+            <KnownFilesContext value={known}>
+              {turns.map((turn, index) => (
+                <TurnView
+                  key={index}
+                  turn={turn}
+                  conversationId={conversation.id}
+                  running={running}
+                  last={index === turns.length - 1}
+                />
+              ))}
+            </KnownFilesContext>
+            {sending && <PendingTurn text={pending.text} />}
+            <div ref={bottom} />
+          </div>
+          {!following && running && (
+            <div className="pointer-events-none sticky bottom-0 flex justify-center">
+              <Button
+                variant="primary"
+                className="dl-in pointer-events-auto"
+                onClick={() => bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" })}
+              >
+                <Icon name="chevron" size={14} className="rotate-90" /> Jump to latest
+              </Button>
+            </div>
+          )}
+        </div>
+        <Composer
+          conversation={conversation}
+          running={running}
+          // Held from Send until the message's event arrives (then the agent is working).
+          sending={send.isPending || sending}
+          error={send.error?.message}
+          onSend={sendMessage}
+          draft={draft}
+          note={composerNote}
+          autoFocus={autoFocus}
+          placeholder={placeholder ?? (assistant && ASSISTANTS[assistant].placeholder)}
+          sendLabel={sendLabel}
+          compact={compact}
+          draftKey={draftKey}
+        />
       </div>
-      <Composer
-        conversation={conversation}
-        running={running}
-        // Held from Send until the message's event arrives (then the agent is working).
-        sending={send.isPending || sending}
-        error={send.error?.message}
-        onSend={sendMessage}
-        draft={draft}
-        note={composerNote}
-        autoFocus={autoFocus}
-        placeholder={placeholder ?? (assistant && ASSISTANTS[assistant].placeholder)}
-        sendLabel={sendLabel}
-        compact={compact}
-        draftKey={draftKey}
-      />
-    </div>
     </CompactContext>
   );
 }
@@ -1007,46 +1007,46 @@ function Checks({ lines, untraced, folded = false }: { lines: CheckLine[]; untra
         <InfoTip term="trace-and-provenance" />
       </h4>
       {open && (
-      <ul id={listId} className="flex flex-col gap-1.5">
-        {lines.map((line) => (
-          <li
-            key={line.key}
-            className={clsx(
-              "flex items-baseline gap-2",
-              line.key === "differ" ? "pl-[18px] text-muted italic" : "text-ink",
-            )}
-          >
-            {line.key !== "differ" &&
-              (line.tone === "plain" ? (
-                <span aria-hidden className="mx-[3.5px] inline-block h-[5px] w-[5px] shrink-0 -translate-y-[1px] rounded-full bg-muted" />
-              ) : (
-                <Icon
-                  name={line.tone === "good" ? "check" : "alert"}
-                  size={12}
-                  className={clsx(
-                    "shrink-0 translate-y-[1px]",
-                    line.tone === "good" && "text-data",
-                    line.tone === "attn" && "text-attn",
-                    line.tone === "bad" && "text-danger",
-                  )}
-                />
-              ))}
-            <span className="min-w-0">
-              {line.text}
-              {line.key === "trace" && untraced.length > 0 && (
-                <span className="mt-1 flex flex-wrap gap-1.5">
-                  {untraced.slice(0, 8).map((n) => (
-                    <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">
-                      {n}
-                    </Chip>
-                  ))}
-                  {untraced.length > 8 && <Chip tone="attn">+{untraced.length - 8}</Chip>}
-                </span>
+        <ul id={listId} className="flex flex-col gap-1.5">
+          {lines.map((line) => (
+            <li
+              key={line.key}
+              className={clsx(
+                "flex items-baseline gap-2",
+                line.key === "differ" ? "pl-[18px] text-muted italic" : "text-ink",
               )}
-            </span>
-          </li>
-        ))}
-      </ul>
+            >
+              {line.key !== "differ" &&
+                (line.tone === "plain" ? (
+                  <span aria-hidden className="mx-[3.5px] inline-block h-[5px] w-[5px] shrink-0 -translate-y-[1px] rounded-full bg-muted" />
+                ) : (
+                  <Icon
+                    name={line.tone === "good" ? "check" : "alert"}
+                    size={12}
+                    className={clsx(
+                      "shrink-0 translate-y-[1px]",
+                      line.tone === "good" && "text-data",
+                      line.tone === "attn" && "text-attn",
+                      line.tone === "bad" && "text-danger",
+                    )}
+                  />
+                ))}
+              <span className="min-w-0">
+                {line.text}
+                {line.key === "trace" && untraced.length > 0 && (
+                  <span className="mt-1 flex flex-wrap gap-1.5">
+                    {untraced.slice(0, 8).map((n) => (
+                      <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">
+                        {n}
+                      </Chip>
+                    ))}
+                    {untraced.length > 8 && <Chip tone="attn">+{untraced.length - 8}</Chip>}
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

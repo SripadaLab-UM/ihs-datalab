@@ -66,7 +66,8 @@ log = logging.getLogger(__name__)
 
 SEED = "pipelines"
 INTO = "pipelines"  # /work/pipelines
-# Data engineering, the Pipelines tab's chat, and Workflow authoring (whose files are in workflows/).
+# Data engineering, the Pipelines tab's chat, and Workflow authoring (whose
+# files are in workflows/).
 MODES = ("engineering", "pipelines", "workflows")
 REPO = "pipelines"  # its row in repo_sync
 _REFS = "refs/datalab/pipelines"  # keeps each proposal's commit, per conversation
