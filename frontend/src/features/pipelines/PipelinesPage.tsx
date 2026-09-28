@@ -379,11 +379,6 @@ function Overview({
   );
 }
 
-/**
- * A drawer over the page, below `wide`: focus goes into it as it opens and back
- * to what opened it as it closes, and Escape closes it (unless a dialog, such
- * as a number's sources, is open: that closes first).
- */
 const askButton = () => document.querySelector<HTMLElement>("[data-opens-chat]");
 
 /** A chat kept from before that isn't in DataLab any more (deleted): start afresh. */

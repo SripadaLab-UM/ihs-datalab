@@ -104,7 +104,8 @@ export function InfoTip({
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || box.current?.contains(document.activeElement)) return;
-      // Only the tip: a dialog behind it stays open.
+      // Only the tip: a dialog or drawer behind it stays open.
+      event.preventDefault();
       event.stopPropagation();
       setPinned(false);
       setHover(false);
@@ -123,6 +124,8 @@ export function InfoTip({
       onMouseLeave={() => setHover(false)}
       onKeyDown={(event) => {
         if (event.key === "Escape" && open) {
+          // Only the tip: a drawer's Escape (useOverlay) sees it was handled.
+          event.preventDefault();
           event.stopPropagation();
           setPinned(false);
           setHover(false);

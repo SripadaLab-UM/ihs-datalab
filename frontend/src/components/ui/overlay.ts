@@ -31,12 +31,18 @@ export function useOverlay(
     if (!active || !box) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (first.current?.(box) ?? focusables(box)[0] ?? box).focus();
+    // Marked, so its own role=dialog isn't taken for another dialog open over it.
+    box.setAttribute("data-overlay-self", "");
+    // Escape, once everything inside has had its turn: a glossary tip or a
+    // menu in the drawer closes first (and says so with preventDefault), and
+    // a dialog open over the drawer closes before it.
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector("[role=dialog]:not([data-overlay-self])")) return;
+      event.preventDefault();
+      close.current();
+    };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        close.current();
-        return;
-      }
       if (event.key !== "Tab") return;
       const items = focusables(box);
       if (items.length === 0) return event.preventDefault();
@@ -51,8 +57,11 @@ export function useOverlay(
       }
     };
     box.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onEscape);
     return () => {
       box.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onEscape);
+      box.removeAttribute("data-overlay-self");
       if (previous?.isConnected && previous !== document.body) previous.focus();
       else back.current?.()?.focus();
     };
