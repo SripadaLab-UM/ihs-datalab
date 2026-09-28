@@ -1198,20 +1198,34 @@ def load(
         cur.executemany(sql, chunk)
 
 
+# Wrong-password tries at most (FAILED_LOGIN_ATTEMPTS is 10 in Oracle's
+# default profile): a few, never enough to lock the account.
+MAX_REFUSED_LOGINS = 3
+
+
 def connect_when_ready(
     dsn: str, admin_pwd: str = ADMIN_PWD, timeout: float = 120
 ) -> oracledb.Connection:
-    """Connect as SYSTEM, retrying while a new container finishes setting up.
+    """Connect as SYSTEM, retrying while the database finishes opening.
 
-    Oracle Free can report healthy a little before the SYSTEM password is
-    active, so early logins may fail with ORA-01017 or ORA-12514.
+    Call it only once the container has said it's ready to use (practice_db
+    waits for that): the image sets SYSTEM's password just before, and
+    logins while it does can stop it from being set. A refused password is
+    tried again only MAX_REFUSED_LOGINS times, so the account never locks.
     """
     deadline = time.monotonic() + timeout
+    refused = 0
     while True:
         try:
             return oracledb.connect(user="SYSTEM", password=admin_pwd, dsn=dsn)
         except oracledb.DatabaseError as e:
-            if e.args[0].code not in (1017, 12514, 12520, 12528) or time.monotonic() > deadline:
+            code = e.args[0].code
+            refused += code == 1017
+            if (
+                code not in (1017, 12514, 12520, 12528)
+                or refused >= MAX_REFUSED_LOGINS
+                or time.monotonic() > deadline
+            ):
                 raise
             time.sleep(3)
 

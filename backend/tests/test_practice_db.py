@@ -105,6 +105,9 @@ class FakeDocker:
                 return 1, "", "image is being used by a container"
             self.images.discard(args[1])
             return 0, "", ""
+        if args[0] == "logs":
+            found = self.containers[args[-1]]
+            return 0, found.get("log", "DATABASE IS READY TO USE!\n"), ""
         if args[:2] == ["ps", "--filter"]:
             port = args[2].removeprefix("publish=")
             names = [
@@ -123,7 +126,11 @@ class FakeDocker:
             else ("", *found["publish"].split(":"))
         )
         return {
-            "State": {"Status": found["status"], "Health": {"Status": found["health"]}},
+            "State": {
+                "Status": found["status"],
+                "Health": {"Status": found["health"]},
+                "StartedAt": "2026-09-28T16:48:00Z",
+            },
             "Config": {"Labels": found["labels"], "Image": found["image"]},
             "HostConfig": {"PortBindings": {"1521/tcp": [{"HostIp": ip, "HostPort": port}]}},
             "Mounts": [
@@ -277,6 +284,63 @@ def test_a_container_reachable_from_other_computers_is_stopped(docker, oracle):
     with pytest.raises(PracticeDatabaseProblem, match="reachable from other computers"):
         database(docker, oracle).ensure()
     assert docker.containers[TARGET.container]["status"] == "exited"
+
+
+def test_no_login_until_the_image_says_its_ready(docker, oracle):
+    """Healthy isn't enough: the image sets SYSTEM's password just after,
+    and a login while it does can stop it from working (seen: ORA-04021,
+    then refused logins locking the account)."""
+    db = database(docker, oracle)
+    db.ensure()
+    container = docker.containers[TARGET.container]
+    container["status"] = "exited"
+    checks = []
+
+    def sleep(_):
+        checks.append(1)
+        if len(checks) == 3:
+            container["log"] = "...\nDATABASE IS READY TO USE!\n"
+
+    db.sleep = sleep
+    real_start = docker.__call__
+
+    def start_then_quiet(args, **options):
+        result = real_start(args, **options)
+        if args[0] == "start":
+            container["log"] = "Starting Oracle Database instance FREE.\n"
+        return result
+
+    db.docker = start_then_quiet
+
+    def logged_in_too_early(dsn, wait=180):
+        assert len(checks) >= 3, "logged in before the image said it's ready"
+        return True
+
+    db.has_data = logged_in_too_early
+    db.ensure()
+    logs = [c for c in docker.calls if c[0] == "logs"]
+    assert logs[-1][:2] == ["logs", "--since"]
+
+
+def test_a_refused_system_password_is_tried_only_a_few_times(monkeypatch):
+    import oracledb
+
+    from datalab.practice_db import generate
+
+    tries = []
+
+    class Refused:
+        code = 1017
+
+    def connect(**_):
+        tries.append(1)
+        raise oracledb.DatabaseError(Refused())
+
+    monkeypatch.setattr(oracledb, "connect", connect)
+    monkeypatch.setattr(generate.time, "sleep", lambda _: None)
+    with pytest.raises(oracledb.DatabaseError):
+        generate.connect_when_ready(TARGET.dsn)
+    assert len(tries) == generate.MAX_REFUSED_LOGINS < 10
 
 
 def test_a_container_of_ours_without_its_volume_isnt_used(docker, oracle):

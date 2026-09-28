@@ -73,6 +73,8 @@ _ORACLE_FREE = re.compile(r"(^|/)database/free([:@]|$)")
 # Where Oracle Free keeps its database files: the volume.
 DATA_PATH = "/opt/oracle/oradata"
 SERVICE = "FREEPDB1"
+# What Oracle's image prints once the database is set up and open.
+READY_LINE = "DATABASE IS READY TO USE!"
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -159,6 +161,8 @@ class Container:
     image: str = ""
     # The named volumes mounted at the database's files.
     data_volumes: tuple[str, ...] = ()
+    # When it last started (Docker's timestamp), for its log since then.
+    started_at: str = ""
 
     @property
     def local_only(self) -> bool:
@@ -396,6 +400,7 @@ class PracticeDatabase:
             ours=LABEL in labels,
             published=tuple((b.get("HostIp", ""), b.get("HostPort", "")) for b in bindings),
             image=config.get("Image") or "",
+            started_at=state.get("StartedAt") or "",
             data_volumes=tuple(
                 m.get("Name", "")
                 for m in mounts
@@ -680,7 +685,7 @@ class PracticeDatabase:
         deadline = self.clock() + self.ready_timeout
         while True:
             found = self.inspect(name)
-            if found is not None and found.health == "healthy":
+            if found is not None and found.health == "healthy" and self._said_ready(found, name):
                 return True
             if found is None or found.status != "running" or self.clock() > deadline:
                 raise PracticeDatabaseProblem(
@@ -766,7 +771,7 @@ class PracticeDatabase:
                     f"The practice database stopped while starting (it's {state}). Try again; "
                     "if it happens again, reset the practice database."
                 )
-            if container.health == "healthy" or (
+            if (container.health == "healthy" and self._said_ready(container)) or (
                 container.health is None and container.status == "running"
             ):
                 return
@@ -779,6 +784,16 @@ class PracticeDatabase:
                 say("Still starting the practice database…")
                 said = self.clock()
             self.sleep(3)
+
+    def _said_ready(self, container: Container, name: str | None = None) -> bool:
+        """Whether the image said "DATABASE IS READY TO USE!" since it last
+        started. Its health check passes a little earlier, while it's still
+        setting SYSTEM's password; a login then can stop that from working
+        (ORA-04021), and retries would lock the account."""
+        since = ["--since", container.started_at] if container.started_at else []
+        name = name or self.target.container
+        code, out, error = self._docker("logs", *since, name, timeout=30)
+        return code == 0 and READY_LINE in out + error
 
     def _docker(self, *args: str, timeout: float | None = 60, show: bool = False):
         return self.docker(list(args), timeout=timeout, show=show)
