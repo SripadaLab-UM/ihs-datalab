@@ -8,6 +8,7 @@ import { pipelinesApi } from "@/api/pipelines";
 import { workflowsApi } from "@/api/workflows";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { Button, Icon } from "@/components/ui";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { useEscapeToClose } from "@/components/ui/overlay";
 import { ACTIONABLE } from "@/features/pipelines/pipelines";
@@ -139,8 +140,12 @@ export function WorkflowsPage() {
                       runs on synthetic data and is saved in a practice folder on this computer.
                     </p>
                   )}
-                  {workflows.isError ? (
-                    <p className="font-sans text-[13px] text-danger">{workflows.error.message}</p>
+                  {workflows.isError && !workflows.data ? (
+                    <LoadFailed
+                      message={`The workflows couldn't be read: ${workflows.error.message}`}
+                      onRetry={() => void workflows.refetch()}
+                      retrying={workflows.isFetching}
+                    />
                   ) : workflows.data ? (
                     workflows.data.length === 0 ? (
                       <FirstWorkflow message={status.data?.message} />
@@ -148,7 +153,8 @@ export function WorkflowsPage() {
                       <WorkflowList workflows={workflows.data} />
                     )
                   ) : (
-                    <p className="font-sans text-[13px] text-muted">Reading the workflows…</p>
+                    // Never the empty "Make your first workflow" before the list is in.
+                    <LoadingRows label="Loading workflows…" />
                   )}
                   <Destinations practice={practice} />
                 </div>
@@ -292,6 +298,7 @@ function Rail({ onNavigate }: { onNavigate: () => void }) {
       <Link to="/workflows" onClick={onNavigate} className="dl-label px-4 py-1.5 hover:text-ink">
         Workflows
       </Link>
+      {workflows.isPending && <LoadingRows label="Loading…" rows={3} dense quiet className="px-4 py-1.5" />}
       {workflows.data?.map((w) => (
         <Link
           key={w.path}

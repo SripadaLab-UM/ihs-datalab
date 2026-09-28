@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { type CatalogTable, sqlApi } from "@/api/sql";
 import { EmptyNote, Icon } from "@/components/ui";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 
 /**
  * Every cohort's tables and columns, with their descriptions. Clicking a
@@ -48,7 +49,10 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
         <p className="mt-1.5 font-sans text-[11.5px] text-faint">Click a name to put it in your query.</p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-        {catalog.isError && <p className="font-sans text-[13px] text-danger">The catalog couldn't be loaded.</p>}
+        {catalog.isError && (
+          <LoadFailed message="The catalog couldn't be loaded." onRetry={() => void catalog.refetch()} retrying={catalog.isFetching} />
+        )}
+        {catalog.isPending && words.length <= 1 && <LoadingRows label="Loading the tables…" rows={5} dense />}
         {catalog.isSuccess && cohorts.length === 0 && (
           <EmptyNote icon="table" title="No tables yet">
             DataLab has no catalog of the cohorts' tables yet. Settings → About this DataLab says why, and what

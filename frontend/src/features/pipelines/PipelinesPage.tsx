@@ -7,6 +7,7 @@ import { type PipelineProposal, pipelinesApi } from "@/api/pipelines";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, Icon, Tabs } from "@/components/ui";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 import { CHAT_DOCK, chatClass, NAV_DOCK, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { formatBytes } from "@/lib/csv";
 import { useTabState } from "@/features/sql/hooks";
@@ -95,13 +96,27 @@ export function PipelinesPage() {
       {side === "files" ? (
         tree.data && tree.data.files.length > 0 ? (
           <FileTree files={tree.data.files} selected={proposalId ? null : path} onOpen={open} />
+        ) : status.isPending || (ready && tree.isPending) ? (
+          <LoadingRows label="Loading the files…" rows={5} dense className="px-4 py-4" />
+        ) : tree.isError ? (
+          <div className="px-4 py-4">
+            <LoadFailed message="The files couldn't be read." onRetry={() => void tree.refetch()} retrying={tree.isFetching} />
+          </div>
         ) : (
           <p className="px-4 py-4 font-sans text-[13px] text-muted">
-            {tree.isLoading ? "Loading the files…" : "The repo's files appear here once it's synced."}
+            The repo's files appear here once it's synced.
           </p>
         )
       ) : (
-        <ProposalList proposals={proposals.data ?? []} chatId={chatId} selected={proposalId} onOpen={review} />
+        proposals.data || !status.data?.available ? (
+          <ProposalList proposals={proposals.data ?? []} chatId={chatId} selected={proposalId} onOpen={review} />
+        ) : proposals.isError ? (
+          <div className="px-4 py-4">
+            <LoadFailed message="The changes couldn't be read." onRetry={() => void proposals.refetch()} retrying={proposals.isFetching} />
+          </div>
+        ) : (
+          <LoadingRows label="Loading the changes…" rows={3} dense className="px-4 py-4" />
+        )
       )}
     </div>
   );
@@ -207,7 +222,7 @@ export function PipelinesPage() {
               )}
             </div>
           ) : (
-            <Overview proposals={proposals.data ?? []} ready={ready} onReview={review} />
+            <Overview proposals={proposals.data ?? []} ready={ready} loading={status.isPending} onReview={review} />
           )}
         </div>
       </main>
@@ -289,10 +304,13 @@ function ProposalList({
 function Overview({
   proposals,
   ready,
+  loading,
   onReview,
 }: {
   proposals: PipelineProposal[];
   ready: boolean;
+  /** The repo's state isn't known yet: nothing said about syncing until it is. */
+  loading: boolean;
   onReview: (id: string) => void;
 }) {
   const waiting = proposals.filter((p) => ACTIONABLE.has(p.status));
@@ -318,6 +336,8 @@ function Overview({
             ))}
           </ul>
         </>
+      ) : loading ? (
+        <LoadingRows label="Loading the pipelines repo…" rows={2} dense />
       ) : ready ? (
         <p>Open a file on the left to read it, or ask the agent for a change.</p>
       ) : (

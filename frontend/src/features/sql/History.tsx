@@ -4,6 +4,7 @@ import { type HistoryItem, sqlApi } from "@/api/sql";
 import { Chip, EmptyNote } from "@/components/ui";
 
 import { formatSeconds } from "./Results";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 
 const STATUS: Record<string, { label: string; tone?: "good" | "attn" | "bad" }> = {
   succeeded: { label: "ran", tone: "good" },
@@ -17,7 +18,14 @@ const STATUS: Record<string, { label: string; tone?: "good" | "attn" | "bad" }> 
  *  editor and shows its result, if it has one. */
 export function History({ onOpen }: { onOpen: (item: HistoryItem) => void }) {
   const history = useQuery({ queryKey: ["sql-history"], queryFn: sqlApi.history });
-  if (history.isError) return <p className="px-4 py-3 font-sans text-[13px] text-danger">The history couldn't be loaded.</p>;
+  if (history.isError) {
+    return (
+      <div className="px-4 py-3">
+        <LoadFailed message="The history couldn't be loaded." onRetry={() => void history.refetch()} retrying={history.isFetching} />
+      </div>
+    );
+  }
+  if (history.isPending) return <LoadingRows label="Loading your queries…" rows={4} dense className="px-4 py-3" />;
   if (history.isSuccess && history.data.length === 0) {
     return (
       <div className="px-4 py-3">

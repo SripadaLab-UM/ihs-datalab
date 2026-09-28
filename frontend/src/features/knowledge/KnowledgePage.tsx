@@ -9,6 +9,7 @@ import { InternalLinks, Markdown } from "@/components/chat/Markdown";
 import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
+import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
@@ -170,6 +171,13 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         <div data-reading-scroll className={clsx("min-h-0 flex-1 overflow-x-hidden overflow-y-auto py-5", READING_GUTTER)}>
           {view === "history" ? (
             <History repo={status.name} entries={entries} onOpen={open} />
+          ) : pages.isPending ? (
+            // Never "Nothing here yet" before the pages are in.
+            <LoadingRows label="Loading the knowledge base…" rows={4} className={READING_COLUMN} />
+          ) : pages.isError && !pages.data ? (
+            <div className={READING_COLUMN}>
+              <LoadFailed message={`The pages couldn't be read: ${pages.error.message}`} onRetry={() => void pages.refetch()} retrying={pages.isFetching} />
+            </div>
           ) : !head ? (
             <EmptyNote icon="book" title="Nothing here yet">
               {status.signed_in ? "Press Sync to download the knowledge base from GitHub." : <SignInFirst />}
