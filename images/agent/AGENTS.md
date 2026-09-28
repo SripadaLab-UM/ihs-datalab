@@ -80,9 +80,11 @@ skill). Participant-level data never goes there.
   `/work/outputs/`. DataLab shows it with **scripts turned off** and no
   network, so make it static: inline CSS, tables, and images (PNG or SVG
   files next to it, or embedded). Interactive charts won't work in DataLab.
-- Files in `/work/outputs` appear in the Outputs panel after each turn. Link
-  to them in your answer by their full path (`/work/outputs/report.html`);
-  the person can open them from there.
+- Files in `/work/outputs` appear in the Outputs panel after each turn. In
+  your answer, call a file by what it is ("the report", "the flow table")
+  and give its full path once, in backticks (`/work/outputs/report.html`):
+  DataLab shows it as an "Open report" button. Don't paste query IDs or SQL
+  into the answer; DataLab shows the queries that ran in its Queries tab.
 - State sample sizes, filters, and exclusions, and name the tables you used.
 - Keep answers clear and concise. The user may be a clinician or researcher
   rather than a programmer.

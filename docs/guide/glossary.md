@@ -84,9 +84,9 @@ participants is shown or can be worked out, and nothing is overstated. See
 
 ## Trace and provenance
 
-The trace is DataLab's check that each number in an answer appears in that
-turn's query results, command output, or data files. A match means the number
-appears there, not that it's the right number.
+The trace is DataLab's own check that each number in an answer appears in
+that turn's query results, command output, or data files: a match, not proof
+it's right. The rigor review is the agent checking itself, so they can differ.
 
 Provenance is the chain behind a result: click a number to see where it
 appears, or open a file and choose **How was this made?** to see the turn,

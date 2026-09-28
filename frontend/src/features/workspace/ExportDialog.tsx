@@ -108,7 +108,7 @@ export function ExportDialog({
           )}
           <div>
             <div className="flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">Files from outputs/</p>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Files from outputs/</p>
               {(shown?.files.length ?? 0) > 0 && (
                 <button
                   className="text-xs text-accent underline"
@@ -167,7 +167,7 @@ export function ExportDialog({
             </div>
           )}
           <label className="block">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
+            <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-xs text-muted">
                 No export folders yet. Add one in <Link to="/settings/export-folders" className="text-accent underline">Settings</Link>.
