@@ -255,15 +255,15 @@ it("closes the files drawer and the chat with Escape, and gives focus back", asy
   const show = await screen.findByRole("button", { name: "Show files and changes" });
   show.focus();
   fireEvent.click(show);
-  const drawer = screen.getByRole("complementary", { name: "Files and changes" });
+  const drawer = screen.getByRole("dialog", { name: "Files and changes" });
   await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
-  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   await waitFor(() => expect(show).toHaveFocus());
   const ask = screen.getByRole("button", { name: /Ask the agent/ });
   ask.focus();
   fireEvent.click(ask);
   expect(await screen.findByText("The engineering chat")).toBeInTheDocument();
-  fireEvent.keyDown(window, { key: "Escape" });
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   // Hidden, not gone: reopened, it's the same chat with its draft.
   await waitFor(() => expect(screen.getByText("The engineering chat")).not.toBeVisible());
   expect(screen.getByRole("button", { name: /Ask the agent/ })).toHaveFocus();
@@ -321,4 +321,30 @@ it("says how each ending went: saved as a commit, or why nothing was shared", as
   // Still the person's to decide: save again (tests first) or discard.
   expect(screen.getByRole("button", { name: "Save & share" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Discard" })).toBeEnabled();
+});
+
+it("shows the changes loading, not 'Nothing proposed yet', while the repo's state is still loading", async () => {
+  vi.mocked(pipelinesApi.status).mockReturnValue(new Promise(() => {}));
+  render(
+    <QueryClientProvider client={client()}>
+      <PipelinesPage />
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: /Changes/ }));
+  expect(await screen.findByText("Loading the changes…")).toBeInTheDocument();
+  expect(screen.queryByText(/Nothing proposed yet/)).toBeNull();
+});
+
+it("says when the repo's state couldn't be read, with Retry, in the files and the changes", async () => {
+  vi.mocked(pipelinesApi.status).mockRejectedValueOnce(new Error("down")).mockResolvedValue(status);
+  render(
+    <QueryClientProvider client={client()}>
+      <PipelinesPage />
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByText("The pipelines repo's state couldn't be read.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("tab", { name: /Changes/ }));
+  expect(screen.getByText("The changes couldn't be read.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(screen.queryByText("The changes couldn't be read.")).toBeNull());
 });

@@ -94,7 +94,8 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
           // A wide table scrolls sideways within its own block, never the page or the chat.
           table({ children }) {
             return (
-              <div data-scroll-x className="dl-scroll-x">
+              // Focusable, so a wide table can be scrolled from the keyboard too.
+              <div data-scroll-x className="dl-scroll-x" role="region" aria-label="Table, scrolls sideways" tabIndex={0}>
                 <table>{children}</table>
               </div>
             );

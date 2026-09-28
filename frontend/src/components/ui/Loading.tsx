@@ -38,9 +38,20 @@ export function LoadingRows({
 }
 
 /** A list that couldn't be loaded: why, and Retry. */
-export function LoadFailed({ message, onRetry, retrying = false }: { message: string; onRetry: () => void; retrying?: boolean }) {
+export function LoadFailed({
+  message,
+  onRetry,
+  retrying = false,
+  quiet = false,
+}: {
+  message: string;
+  onRetry: () => void;
+  retrying?: boolean;
+  /** Not announced: another alert on the page already says it. */
+  quiet?: boolean;
+}) {
   return (
-    <div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-sans text-[13px]">
+    <div role={quiet ? undefined : "alert"} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-sans text-[13px]">
       <span className="text-danger">{message}</span>
       <Button variant="secondary" className="px-2.5 py-1 text-[12.5px]" onClick={onRetry} disabled={retrying}>
         {retrying ? "Trying again…" : "Retry"}

@@ -8,8 +8,8 @@ import { type HistoryItem, type SqlCheck, type SqlProposal, type SqlRun, sqlApi 
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Icon, InfoTip, Tabs } from "@/components/ui";
-import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
-import { useEscapeToClose } from "@/components/ui/overlay";
+import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useOverlay } from "@/components/ui/overlay";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
@@ -63,9 +63,16 @@ export function SqlPage() {
   );
   const panels = usePanels("sql", { chatOpen: chatOpen === "open" });
   const chatKept = useKeptOnceOpen(chatOpen === "open");
-  // Over the page on a narrow window, the drawer and the chat close on Escape, as on a click beside them.
-  useEscapeToClose(drawer && !panels.navDocked, () => setDrawer(false));
-  useEscapeToClose(chatOpen === "open" && !panels.chatDocked, () => setChatOpen("closed"));
+  // Docked again (the window widened), the list is no longer a drawer to close.
+  if (drawer && panels.navDocked) setDrawer(false);
+  // Over the page on a narrow window, each is a dialog: focus in it and kept there, Escape closes it
+  // (as does a click beside it), and focus goes back to what opened it.
+  const drawerBox = useRef<HTMLElement>(null);
+  const chatBox = useRef<HTMLElement>(null);
+  const drawerOver = drawer && !panels.navDocked;
+  const chatOver = chatOpen === "open" && !panels.chatDocked;
+  useOverlay(drawerBox, drawerOver, () => setDrawer(false));
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), undefined, messageBox);
   const [chatId, setChatId] = useTabState("datalab:sql:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
@@ -254,8 +261,16 @@ export function SqlPage() {
 
   return (
     <div ref={panels.ref} data-panels="sql" style={panels.style} className="relative grid h-full min-h-0">
-      {drawer && !panels.navDocked && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
-      <aside aria-label="Tables and history" className={navClass(panels.navDocked, drawer)}>
+      {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
+      <aside
+        ref={drawerBox}
+        id={panels.navId}
+        aria-label="Tables and history"
+        role={drawerOver ? "dialog" : undefined}
+        aria-modal={drawerOver || undefined}
+        tabIndex={-1}
+        className={navClass(panels.navDocked, drawer)}
+      >
         {sidePanel}
       </aside>
 
@@ -416,14 +431,17 @@ export function SqlPage() {
         />
       )}
 
-      {chatOpen === "open" && !panels.chatDocked && (
-        <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />
-      )}
+      {chatOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />}
       {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
       {chatKept && (
         <aside
+          ref={chatBox}
+          id={panels.chatId}
           aria-label={CHAT_LABEL}
           hidden={chatOpen !== "open"}
+          role={chatOver ? "dialog" : undefined}
+          aria-modal={chatOver || undefined}
+          tabIndex={-1}
           className={chatClass(panels.chatDocked)}
         >
           <DockedChat
@@ -437,6 +455,7 @@ export function SqlPage() {
             sendLabel="Generate SQL"
             // The editor as it is now: a proposal never replaces edits made while the agent works.
             onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
+            active={chatOpen === "open"}
           />
         </aside>
       )}

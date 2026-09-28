@@ -65,6 +65,10 @@ it("keeps the same chat, with its draft, through resizing, closing and reopening
   const draft = await screen.findByRole("textbox", { name: "Draft" });
   fireEvent.change(draft, { target: { value: "half a question" } });
   const divider = screen.getByRole("separator", { name: "Resize the chat" });
+  // Each divider names the panel it resizes.
+  expect(document.getElementById(divider.getAttribute("aria-controls")!)).toBe(screen.getByRole("complementary", { name: "Knowledge chat" }));
+  const list = screen.getByRole("separator", { name: "Resize the list" });
+  expect(document.getElementById(list.getAttribute("aria-controls")!)).toBe(screen.getByRole("complementary", { name: "Pages and skills" }));
   fireEvent.keyDown(divider, { key: "ArrowLeft", shiftKey: true });
   fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the list" }), { key: "ArrowRight" });
   fireEvent.click(screen.getByRole("button", { name: "Hide the chat" }));

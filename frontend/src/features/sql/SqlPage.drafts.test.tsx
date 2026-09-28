@@ -336,3 +336,36 @@ it("forgets the waiting proposal when another chat is opened", async () => {
   expect(sessionStorage.getItem("datalab:sql:proposal")).toBeNull();
   expect(await editorText()).toBe(MINE);
 });
+
+it("on a narrow window, the chat is a dialog over the page: focus in its message box, kept there, and back on Escape", async () => {
+  sessionStorage.setItem("datalab:sql:chat-open", "closed");
+  show({ draft: MINE });
+  const opener = await screen.findByRole("button", { name: /Generate SQL with the agent/ });
+  opener.focus();
+  fireEvent.click(opener);
+  const box = await screen.findByRole("dialog", { name: "SQL drafting chat" });
+  const message = within(box).getByRole("textbox", { name: "Your question or instruction" });
+  await waitFor(() => expect(message).toHaveFocus());
+  // Tab from the last control wraps to the first: never into the page under the scrim.
+  const controls = [...box.querySelectorAll<HTMLElement>("button, textarea")];
+  controls.at(-1)!.focus();
+  fireEvent.keyDown(controls.at(-1)!, { key: "Tab" });
+  expect(controls[0]).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(opener).toHaveFocus());
+  // Hidden, not gone, and told it's not shown (no stream, no polling).
+  expect(box).not.toBeVisible();
+  expect((chatProps.mock.lastCall![0] as { active: boolean }).active).toBe(false);
+});
+
+it("on a narrow window, the tables drawer takes focus, keeps it, and gives it back on Escape", async () => {
+  show({ draft: MINE });
+  const menu = await screen.findByRole("button", { name: "Show tables and history" });
+  menu.focus();
+  fireEvent.click(menu);
+  const drawer = screen.getByRole("dialog", { name: "Tables and history" });
+  await waitFor(() => expect(drawer).toContainElement(document.activeElement as HTMLElement));
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(menu).toHaveFocus());
+  expect(screen.queryByRole("dialog", { name: "Tables and history" })).toBeNull();
+});

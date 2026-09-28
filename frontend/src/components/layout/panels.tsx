@@ -5,7 +5,7 @@
 // window the list and the chat are drawers over the page instead, and the
 // dividers go.
 import clsx from "clsx";
-import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { useMediaQuery } from "@/components/ui/overlay";
 
@@ -119,6 +119,9 @@ export interface Panels {
   chatDocked: boolean;
   /** The dividers, to render inside the container (they place themselves). */
   dividers: ReactNode;
+  /** The ids to give the list and the chat, which the dividers name as what they resize. */
+  navId: string;
+  chatId: string;
 }
 
 /**
@@ -141,20 +144,24 @@ export function usePanels(tab: string, { nav = true, chatOpen, navDefault }: { n
   const docked = { nav: navDocked, chat: chatDocked && chatOpen };
   const shown = fit(total, { nav: stored.nav ?? defaults.nav, chat: stored.chat ?? defaults.chat }, docked);
 
-  const set = useCallback(
-    (side: Side, width: number | undefined) => {
-      setStored((before) => {
-        const next = { ...before, [side]: width === undefined ? undefined : Math.round(width) };
-        writeWidths(tab, next);
-        return next;
-      });
-    },
-    [tab],
-  );
+  // Saved after each change the person makes (not when read, or for another tab's widths).
+  const changed = useRef(false);
+  useEffect(() => {
+    if (!changed.current) return;
+    changed.current = false;
+    writeWidths(tab, stored);
+  }, [tab, stored]);
+  const set = useCallback((side: Side, width: number | undefined) => {
+    changed.current = true;
+    setStored((before) => ({ ...before, [side]: width === undefined ? undefined : Math.round(width) }));
+  }, []);
   const reset = useCallback(() => {
+    changed.current = true;
     setStored({});
-    writeWidths(tab, {});
-  }, [tab]);
+  }, []);
+  const ids = useId();
+  const navId = `${ids}-nav`;
+  const chatId = `${ids}-chat`;
 
   const columns = [docked.nav && `${shown.nav}px`, "minmax(0,1fr)", docked.chat && `${shown.chat}px`].filter(Boolean).join(" ");
   const dividers = (
@@ -167,6 +174,7 @@ export function usePanels(tab: string, { nav = true, chatOpen, navDefault }: { n
           min={LIMITS.nav.min}
           max={shown.navMax}
           at={{ left: shown.nav }}
+          controls={navId}
           onChange={(w) => set("nav", w)}
           onReset={() => set("nav", undefined)}
           onResetAll={reset}
@@ -180,6 +188,7 @@ export function usePanels(tab: string, { nav = true, chatOpen, navDefault }: { n
           min={LIMITS.chat.min}
           max={shown.chatMax}
           at={{ right: shown.chat }}
+          controls={chatId}
           onChange={(w) => set("chat", w)}
           onReset={() => set("chat", undefined)}
           onResetAll={reset}
@@ -187,7 +196,7 @@ export function usePanels(tab: string, { nav = true, chatOpen, navDefault }: { n
       )}
     </>
   );
-  return { ref, style: { gridTemplateColumns: columns }, navDocked, chatDocked, dividers };
+  return { ref, style: { gridTemplateColumns: columns }, navDocked, chatDocked, dividers, navId, chatId };
 }
 
 /**
@@ -203,6 +212,7 @@ export function Divider({
   min,
   max,
   at,
+  controls,
   onChange,
   onReset,
   onResetAll,
@@ -213,6 +223,8 @@ export function Divider({
   min: number;
   max: number;
   at: { left?: number; right?: number };
+  /** The id of the panel it resizes. */
+  controls: string;
   onChange: (width: number) => void;
   onReset: () => void;
   onResetAll: () => void;
@@ -278,11 +290,12 @@ export function Divider({
         role="separator"
         aria-orientation="vertical"
         aria-label={label}
+        aria-controls={controls}
         aria-valuenow={Math.round(value)}
         aria-valuemin={min}
         aria-valuemax={Math.round(max)}
         aria-valuetext={`${Math.round(value)} pixels wide`}
-        title="Drag to resize. Double-click for the default width."
+        title="Drag, or use the arrow keys, to resize. Double-click or press Enter for the default width."
         tabIndex={0}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -347,3 +360,6 @@ export function useKeptOnceOpen(open: boolean): boolean {
   if (open && !kept) setKept(true);
   return kept || open;
 }
+
+/** A chat drawer's first focus: its message box. */
+export const messageBox = (box: HTMLElement): HTMLElement | null => box.querySelector<HTMLElement>("textarea:not([disabled])");

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
 import { type PipelineProposal, pipelinesApi } from "@/api/pipelines";
@@ -8,7 +8,8 @@ import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, Icon, Tabs } from "@/components/ui";
 import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
-import { CHAT_DOCK, chatClass, NAV_DOCK, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useOverlay } from "@/components/ui/overlay";
 import { formatBytes } from "@/lib/csv";
 import { useTabState } from "@/features/sql/hooks";
 
@@ -54,9 +55,14 @@ export function PipelinesPage() {
   // Below these widths each is a drawer over the page.
   const drawerBox = useRef<HTMLElement>(null);
   const chatBox = useRef<HTMLElement>(null);
-  useOverlay(drawer, () => setDrawer(false), drawerBox, NAV_DOCK);
+  // Docked again (the window widened), the list is no longer a drawer to close.
+  if (drawer && panels.navDocked) setDrawer(false);
+  const drawerOver = drawer && !panels.navDocked;
+  const chatOver = chatOpen === "open" && !panels.chatDocked;
+  // Over the page, each is a dialog: focus in it and kept there, Escape closes it, focus goes back.
+  useOverlay(drawerBox, drawerOver, () => setDrawer(false));
   // The button that opened the chat is gone while it's open: its successor gets focus back.
-  useOverlay(chatOpen === "open", () => setChatOpen("closed"), chatBox, CHAT_DOCK, askButton);
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), askButton, messageBox);
 
   const file = useQuery({
     queryKey: ["pipelines-file", status.data?.head, path],
@@ -96,6 +102,10 @@ export function PipelinesPage() {
       {side === "files" ? (
         tree.data && tree.data.files.length > 0 ? (
           <FileTree files={tree.data.files} selected={proposalId ? null : path} onOpen={open} />
+        ) : status.isError ? (
+          <div className="px-4 py-4">
+            <LoadFailed message="The pipelines repo's state couldn't be read." onRetry={() => void status.refetch()} retrying={status.isFetching} />
+          </div>
         ) : status.isPending || (ready && tree.isPending) ? (
           <LoadingRows label="Loading the files…" rows={5} dense className="px-4 py-4" />
         ) : tree.isError ? (
@@ -108,11 +118,15 @@ export function PipelinesPage() {
           </p>
         )
       ) : (
-        proposals.data || !status.data?.available ? (
+        proposals.data || (status.data && !status.data.available) ? (
           <ProposalList proposals={proposals.data ?? []} chatId={chatId} selected={proposalId} onOpen={review} />
-        ) : proposals.isError ? (
+        ) : status.isError || proposals.isError ? (
           <div className="px-4 py-4">
-            <LoadFailed message="The changes couldn't be read." onRetry={() => void proposals.refetch()} retrying={proposals.isFetching} />
+            <LoadFailed
+              message="The changes couldn't be read."
+              onRetry={() => void (status.isError ? status.refetch() : proposals.refetch())}
+              retrying={status.isFetching || proposals.isFetching}
+            />
           </div>
         ) : (
           <LoadingRows label="Loading the changes…" rows={3} dense className="px-4 py-4" />
@@ -141,8 +155,16 @@ export function PipelinesPage() {
 
   return (
     <div ref={panels.ref} data-panels="pipelines" style={panels.style} className="relative grid h-full min-h-0">
-      {drawer && !panels.navDocked && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
-      <aside ref={drawerBox} aria-label="Files and changes" className={navClass(panels.navDocked, drawer)}>
+      {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
+      <aside
+        ref={drawerBox}
+        id={panels.navId}
+        aria-label="Files and changes"
+        role={drawerOver ? "dialog" : undefined}
+        aria-modal={drawerOver || undefined}
+        tabIndex={-1}
+        className={navClass(panels.navDocked, drawer)}
+      >
         {sidePanel}
       </aside>
 
@@ -229,12 +251,19 @@ export function PipelinesPage() {
         </div>
       </main>
 
-      {chatOpen === "open" && !panels.chatDocked && (
-        <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />
-      )}
+      {chatOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />}
       {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
       {chatKept && (
-        <aside ref={chatBox} aria-label="Data engineering chat" hidden={chatOpen !== "open"} className={chatClass(panels.chatDocked)}>
+        <aside
+          ref={chatBox}
+          id={panels.chatId}
+          aria-label="Data engineering chat"
+          hidden={chatOpen !== "open"}
+          role={chatOver ? "dialog" : undefined}
+          aria-modal={chatOver || undefined}
+          tabIndex={-1}
+          className={chatClass(panels.chatDocked)}
+        >
           <DockedChat
             key={chatKey}
             mode="engineering"
@@ -242,6 +271,7 @@ export function PipelinesPage() {
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
             headerActions={chatActions}
+            active={chatOpen === "open"}
           />
         </aside>
       )}
@@ -354,36 +384,6 @@ function Overview({
  * to what opened it as it closes, and Escape closes it (unless a dialog, such
  * as a number's sources, is open: that closes first).
  */
-function useOverlay(
-  open: boolean,
-  close: () => void,
-  box: RefObject<HTMLElement | null>,
-  wide: string,
-  // Where focus goes back to if what opened it isn't there any more.
-  returnTo?: () => HTMLElement | null,
-) {
-  const closing = useRef(close);
-  closing.current = close;
-  useEffect(() => {
-    if (!open || window.matchMedia?.(wide).matches) return;
-    // (Not the page itself, when the button that opened it is already gone.)
-    const active = document.activeElement;
-    const opener = active instanceof HTMLElement && active !== document.body ? active : null;
-    if (!box.current?.contains(document.activeElement)) {
-      box.current?.querySelector<HTMLElement>("textarea, input, button, a[href]")?.focus();
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !document.querySelector("[role=dialog]")) closing.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      if (opener?.isConnected) opener.focus();
-      else returnTo?.()?.focus();
-    };
-  }, [open, box, wide, returnTo]);
-}
-
 const askButton = () => document.querySelector<HTMLElement>("[data-opens-chat]");
 
 /** A chat kept from before that isn't in DataLab any more (deleted): start afresh. */

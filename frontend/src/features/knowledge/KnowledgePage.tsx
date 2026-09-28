@@ -10,7 +10,7 @@ import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
 import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
-import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
@@ -24,8 +24,9 @@ import { settingsLink } from "@/features/settings/highlight";
 // edits to /work/kb come back as proposed-edit cards in this chat.
 export const CHAT_MODE = "knowledge";
 
-/** Space either side of the reading column, growing with the page between the panels: never under 16px. */
-export const READING_GUTTER = "px-[clamp(16px,4cqi,48px)]";
+/** Space either side of the reading column, growing with the page between the panels: never under 16px
+ *  (16px where the browser has no container units). */
+export const READING_GUTTER = "px-4 supports-[width:1cqi]:px-[clamp(16px,4cqi,48px)]";
 /** The reading column: centred, as wide as a comfortable line of the page's text (running text is kept to 72ch
  *  within it, `.dl-reading`); title, facts and body share its left edge. */
 export const READING_COLUMN = "dl-reading mx-auto w-full min-w-0 max-w-[46rem]";
@@ -82,10 +83,12 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   const chatBeside = panels.chatDocked;
   const drawerBox = useRef<HTMLElement>(null);
   const chatBox = useRef<HTMLElement>(null);
+  // Docked again (the window widened), the list is no longer a drawer to close.
+  if (drawer && listBeside) setDrawer(false);
   const drawerOver = drawer && !listBeside;
   const chatOver = chatOpen === "open" && !chatBeside;
   useOverlay(drawerBox, drawerOver, () => setDrawer(false));
-  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-kb-ask]"));
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-kb-ask]"), messageBox);
 
   const sync = useMutation({
     mutationFn: knowledgeApi.sync,
@@ -135,6 +138,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
       {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
       <aside
         ref={drawerBox}
+        id={panels.navId}
         aria-label="Pages and skills"
         role={drawerOver ? "dialog" : undefined}
         aria-modal={drawerOver || undefined}
@@ -203,6 +207,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
       {chatKept && (
         <aside
           ref={chatBox}
+          id={panels.chatId}
           aria-label="Knowledge chat"
           hidden={chatOpen !== "open"}
           role={chatOver ? "dialog" : undefined}
@@ -217,6 +222,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
             headerActions={chatActions}
+            active={chatOpen === "open"}
           />
         </aside>
       )}

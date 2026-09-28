@@ -33,6 +33,7 @@ export function Chat({
   placeholder,
   sendLabel,
   pending: firstPending,
+  active = true,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
@@ -49,8 +50,10 @@ export function Chat({
   sendLabel?: string;
   /** A message already on its way (DockedChat's first one): shown until its event arrives. */
   pending?: PendingMessage;
+  /** False while the chat is kept but not shown (a closed docked chat): no stream and no polling until it's back. */
+  active?: boolean;
 }) {
-  const events = useConversationEvents(conversation.id);
+  const events = useConversationEvents(conversation.id, active);
   const turns = useMemo(() => buildTranscript(events), [events]);
   const last = turns.at(-1);
   const reviewing = last?.items.some((i) => i.kind === "review" && i.status === "running") ?? false;
@@ -100,7 +103,7 @@ export function Chat({
     queryFn: api.conversations,
     // While working, until DataLab answers that it isn't.
     refetchInterval: (query) =>
-      conversation.busy || (transcriptRunning && query.state.dataUpdatedAt <= turnEventAt) ? 3000 : false,
+      active && (conversation.busy || (transcriptRunning && query.state.dataUpdatedAt <= turnEventAt)) ? 3000 : false,
   });
   const running = conversation.busy || (transcriptRunning && status.dataUpdatedAt <= turnEventAt);
   const known = useKnownFiles(conversation.id);

@@ -17,16 +17,20 @@ export function useOverlay(
   onClose: () => void,
   /** Where focus goes on close when what had it is gone (a button shown only while it's closed). */
   returnTo?: () => HTMLElement | null,
+  /** What gets focus on open (a chat's message box), when not its first control. */
+  initial?: (box: HTMLElement) => HTMLElement | null,
 ) {
   const close = useRef(onClose);
   close.current = onClose;
   const back = useRef(returnTo);
   back.current = returnTo;
+  const first = useRef(initial);
+  first.current = initial;
   useEffect(() => {
     const box = ref.current;
     if (!active || !box) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    (focusables(box)[0] ?? box).focus();
+    (first.current?.(box) ?? focusables(box)[0] ?? box).focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();

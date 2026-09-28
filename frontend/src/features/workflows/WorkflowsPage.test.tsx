@@ -605,3 +605,36 @@ it("gives New workflow's page the same header, with Ask for help at its right", 
   const area = header.querySelector("[data-header-actions]")!;
   expect(within(area as HTMLElement).getByRole("button", { name: /Ask for help/ })).toBeInTheDocument();
 });
+
+it("on a narrow window, the files drawer takes focus, keeps it, closes on Escape and gives focus back", async () => {
+  show("/workflows");
+  const menu = await screen.findByRole("button", { name: "Show workflow files" });
+  menu.focus();
+  fireEvent.click(menu);
+  const drawer = screen.getByRole("dialog", { name: "Workflow files" });
+  const links = within(drawer).getAllByRole("link");
+  await waitFor(() => expect(links[0]).toHaveFocus());
+  links.at(-1)!.focus();
+  fireEvent.keyDown(links.at(-1)!, { key: "Tab" });
+  expect(links[0]).toHaveFocus();
+  fireEvent.keyDown(links[0], { key: "Tab", shiftKey: true });
+  expect(links.at(-1)).toHaveFocus();
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(menu).toHaveFocus());
+  expect(screen.queryByRole("dialog", { name: "Workflow files" })).toBeNull();
+});
+
+it("on a narrow window, the chat is a dialog; closed with Escape it's kept but inactive, and focus returns to Ask for help", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "closed");
+  show("/workflows");
+  const ask = await screen.findByRole("button", { name: /Ask for help/ });
+  ask.focus();
+  fireEvent.click(ask);
+  const box = screen.getByRole("dialog", { name: "Workflow authoring chat" });
+  await waitFor(() => expect(box).toContainElement(document.activeElement as HTMLElement));
+  expect((chatProps.mock.lastCall![0] as { active: boolean }).active).toBe(true);
+  fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+  await waitFor(() => expect(screen.getByRole("button", { name: /Ask for help/ })).toHaveFocus());
+  expect(box).not.toBeVisible();
+  expect((chatProps.mock.lastCall![0] as { active: boolean }).active).toBe(false);
+});

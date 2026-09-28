@@ -9,8 +9,8 @@ import { workflowsApi } from "@/api/workflows";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { Button, Icon } from "@/components/ui";
 import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
-import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
-import { useEscapeToClose } from "@/components/ui/overlay";
+import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useOverlay } from "@/components/ui/overlay";
 import { ACTIONABLE } from "@/features/pipelines/pipelines";
 import { useTabState } from "@/features/sql/hooks";
 
@@ -42,9 +42,16 @@ export function WorkflowsPage() {
   const panels = usePanels("workflows", { chatOpen: chatOpen === "open", navDefault: 256 });
   const chatKept = useKeptOnceOpen(chatOpen === "open");
   const [drawer, setDrawer] = useState(false);
-  // Over the page on a narrow window, the files drawer and the chat close on Escape, as on a click beside them.
-  useEscapeToClose(drawer && !panels.navDocked, () => setDrawer(false));
-  useEscapeToClose(chatOpen === "open" && !panels.chatDocked, () => setChatOpen("closed"));
+  // Docked again (the window widened), the files are no longer a drawer to close.
+  if (drawer && panels.navDocked) setDrawer(false);
+  // Over the page on a narrow window, each is a dialog: focus in it and kept there, Escape closes it
+  // (as does a click beside it), and focus goes back to what opened it.
+  const drawerBox = useRef<HTMLElement>(null);
+  const chatBox = useRef<HTMLElement>(null);
+  const drawerOver = drawer && !panels.navDocked;
+  const chatOver = chatOpen === "open" && !panels.chatDocked;
+  useOverlay(drawerBox, drawerOver, () => setDrawer(false), () => document.querySelector<HTMLElement>("[data-opens-files]"));
+  useOverlay(chatBox, chatOver, () => setChatOpen("closed"), () => document.querySelector<HTMLElement>("[data-opens-chat]"), messageBox);
   // How many page headers are on screen: each shows "Ask for help" in its action area; with none
   // (a page still loading, say), the page floats its own.
   const [headers, setHeaders] = useState(0);
@@ -92,7 +99,7 @@ export function WorkflowsPage() {
     </Button>
   );
   const menu = panels.navDocked ? null : (
-    <Button variant="ghost" className="-ml-2 shrink-0 px-2" onClick={() => setDrawer(true)} aria-label="Show workflow files">
+    <Button data-opens-files="" variant="ghost" className="-ml-2 shrink-0 px-2" onClick={() => setDrawer(true)} aria-label="Show workflow files">
       <Icon name="menu" size={16} />
     </Button>
   );
@@ -100,8 +107,16 @@ export function WorkflowsPage() {
 
   return (
     <div ref={panels.ref} data-panels="workflows" style={panels.style} className="relative grid h-full min-h-0">
-      {drawer && !panels.navDocked && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
-      <aside aria-label="Workflow files" className={clsx(navClass(panels.navDocked, drawer), "overflow-y-auto")}>
+      {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
+      <aside
+        ref={drawerBox}
+        id={panels.navId}
+        aria-label="Workflow files"
+        role={drawerOver ? "dialog" : undefined}
+        aria-modal={drawerOver || undefined}
+        tabIndex={-1}
+        className={clsx(navClass(panels.navDocked, drawer), "overflow-y-auto")}
+      >
         <Rail onNavigate={() => setDrawer(false)} />
       </aside>
 
@@ -182,12 +197,19 @@ export function WorkflowsPage() {
         </SharedHeaderContext>
       </main>
 
-      {chatOpen === "open" && !panels.chatDocked && (
-        <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />
-      )}
+      {chatOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />}
       {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
       {chatKept && (
-        <aside aria-label="Workflow authoring chat" hidden={chatOpen !== "open"} className={chatClass(panels.chatDocked)}>
+        <aside
+          ref={chatBox}
+          id={panels.chatId}
+          aria-label="Workflow authoring chat"
+          hidden={chatOpen !== "open"}
+          role={chatOver ? "dialog" : undefined}
+          aria-modal={chatOver || undefined}
+          tabIndex={-1}
+          className={chatClass(panels.chatDocked)}
+        >
           {chatId && <WaitingInPipelines conversationId={chatId} />}
           <DockedChat
             key={chatKey}
@@ -196,6 +218,7 @@ export function WorkflowsPage() {
             onConversation={(conversation) => setChatId(conversation.id)}
             context={context}
             headerActions={chatActions}
+            active={chatOpen === "open"}
           />
         </aside>
       )}
@@ -299,6 +322,11 @@ function Rail({ onNavigate }: { onNavigate: () => void }) {
         Workflows
       </Link>
       {workflows.isPending && <LoadingRows label="Loading…" rows={3} dense quiet className="px-4 py-1.5" />}
+      {workflows.isError && !workflows.data && (
+        <div className="px-4 py-1.5">
+          <LoadFailed quiet message="The files couldn't be read." onRetry={() => void workflows.refetch()} retrying={workflows.isFetching} />
+        </div>
+      )}
       {workflows.data?.map((w) => (
         <Link
           key={w.path}
