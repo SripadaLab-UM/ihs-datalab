@@ -21,6 +21,7 @@ vi.mock("@/api/sql", () => ({
     catalog: vi.fn(),
     search: vi.fn(),
     export: vi.fn(),
+    proposals: vi.fn(async () => []),
   },
 }));
 vi.mock("@/api/client", () => ({
@@ -198,12 +199,12 @@ it("opens a query from history, with its SQL and result", async () => {
   expect(await screen.findByText("SYN001")).toBeInTheDocument();
 });
 
-it("docks a Data extraction chat that is offered the SQL, not sent it", async () => {
+it("docks a SQL drafting chat that is offered the SQL, not sent it", async () => {
   sessionStorage.setItem("datalab:sql:chat-open", "open");
   show("SELECT 1 FROM DUAL");
   await waitFor(() => expect(chatProps).toHaveBeenCalled());
   const props = chatProps.mock.lastCall![0] as { mode: string; context: { text: string; language: string } };
-  expect(props.mode).toBe("extraction");
+  expect(props.mode).toBe("sql");
   expect(props.context).toMatchObject({ text: "SELECT 1 FROM DUAL", language: "sql" });
 });
 

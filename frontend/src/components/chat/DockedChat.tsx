@@ -42,6 +42,9 @@ export function DockedChat({
   model,
   headerStart,
   headerActions,
+  placeholder,
+  sendLabel,
+  onSending,
 }: {
   /** The mode a new conversation starts in: "extraction", "engineering"... */
   mode: string;
@@ -52,6 +55,11 @@ export function DockedChat({
   model?: string;
   headerStart?: ReactNode;
   headerActions?: ReactNode;
+  /** The message box's own wording ("Describe the data you want", "Generate SQL"). */
+  placeholder?: string;
+  sendLabel?: string;
+  /** Called as Send is pressed (or a starter picked), before anything is sent. */
+  onSending?: () => void;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
   const [includeContext, setIncludeContext] = useState(false);
@@ -69,7 +77,10 @@ export function DockedChat({
 
   const hasContext = Boolean(context?.text.trim());
   // Called as Send is pressed, so the message is what the person saw then.
-  const prepare = (text: string) => (hasContext && includeContext ? withContext(text, context) : text);
+  const prepare = (text: string) => {
+    onSending?.();
+    return hasContext && includeContext ? withContext(text, context) : text;
+  };
   const note = hasContext
     ? (sending: boolean) => (
         <ContextNote context={context!} included={includeContext} onInclude={setIncludeContext} disabled={sending} />
@@ -94,10 +105,12 @@ export function DockedChat({
         conversation={conversation}
         headerStart={headerStart}
         headerActions={headerActions}
-        prepareMessage={context ? prepare : undefined}
+        prepareMessage={context || onSending ? prepare : undefined}
         composerNote={note}
         // Just started here: the cursor stays in the message box.
         autoFocus={started?.id === conversation.id || undefined}
+        placeholder={placeholder}
+        sendLabel={sendLabel}
       />
     );
   }
@@ -109,6 +122,8 @@ export function DockedChat({
       note={note}
       headerStart={headerStart}
       headerActions={headerActions}
+      placeholder={placeholder}
+      sendLabel={sendLabel}
       onStarted={(conversation) => {
         setStarted(conversation);
         onConversation?.(conversation);
@@ -187,6 +202,8 @@ function NotStarted({
   note,
   headerStart,
   headerActions,
+  placeholder,
+  sendLabel,
   onStarted,
 }: {
   mode: string;
@@ -195,6 +212,8 @@ function NotStarted({
   note?: ComposerNote;
   headerStart?: ReactNode;
   headerActions?: ReactNode;
+  placeholder?: string;
+  sendLabel?: string;
   onStarted: (conversation: Conversation) => void;
 }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
@@ -265,7 +284,15 @@ function NotStarted({
           )}
         </div>
       </div>
-      <ComposerBox running={false} sending={start.isPending || !mode} error={error} onSend={send} note={note} />
+      <ComposerBox
+        running={false}
+        sending={start.isPending || !mode}
+        error={error}
+        onSend={send}
+        note={note}
+        placeholder={placeholder}
+        sendLabel={sendLabel}
+      />
     </div>
   );
 }

@@ -342,12 +342,12 @@ def test_modes_come_with_descriptions_and_starters(app):
     with TestClient(app) as client:
         modes = {m["id"]: m for m in client.get("/api/modes").json()}
     assert set(modes) == {
-        "analysis", "extraction", "engineering", "workflows", "knowledge", "research"
+        "analysis", "extraction", "engineering", "workflows", "knowledge", "sql", "research"
     }  # fmt: skip
     assert all(m["description"] and m["starters"] for m in modes.values())
     assert modes["research"]["kind"] == "research"
-    # Docked by the Workflows and Knowledge tabs only; Knowledge writing can't query.
-    assert {i for i, m in modes.items() if m["tab_only"]} == {"workflows", "knowledge"}
+    # Docked by the Workflows, Knowledge and SQL tabs only; Knowledge writing can't query.
+    assert {i for i, m in modes.items() if m["tab_only"]} == {"workflows", "knowledge", "sql"}
     assert {i for i, m in modes.items() if not m["queries"]} == {"knowledge"}
 
 
@@ -367,7 +367,10 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
         workflows = sessions._runtime(store.get(made["workflows"]["id"]))
     assert knowledge._tools == CATALOG_TOOLS
     assert set(knowledge._tools_off) == set(DATA_TOOLS) - CATALOG_TOOLS
-    assert (workflows._tools, workflows._tools_off) == (None, ())
+    assert (workflows._tools, workflows._tools_off) == (
+        frozenset(DATA_TOOLS) - {"propose_sql"},
+        ("propose_sql",),
+    )
     assert "Knowledge writing mode" in knowledge._instructions
     assert "Workflow authoring mode" in workflows._instructions
 

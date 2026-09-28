@@ -1,26 +1,44 @@
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
-import { type HistoryItem, type SqlCheck, type SqlRun, sqlApi } from "@/api/sql";
+import { type HistoryItem, type SqlCheck, type SqlProposal, type SqlRun, sqlApi } from "@/api/sql";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Icon, InfoTip, Tabs } from "@/components/ui";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
+import {
+  bindLines,
+  bindsOf,
+  type DraftBinds,
+  type EditorDraft,
+  type Handled,
+  type KeptDraft,
+  nextProposal,
+  onArrival,
+  type Origin,
+  useTabJson,
+} from "./drafts";
 import { History } from "./History";
 import { useElapsed, useRun, useSqlCheck, useTabState } from "./hooks";
 import { formatSeconds, NothingYet, ResultGrid, ResultNote, type ShownResult, submitKeys } from "./Results";
+import { SqlOrigin } from "./SqlOrigin";
 
 type Bridge = typeof import("./editorBridge");
 
 const WIDE = "(min-width: 1280px)";
+// The docked chat's mode (backend sessions/modes.py): its agent proposes queries for the editor.
+const CHAT_MODE = "sql";
+const CHAT_LABEL = "SQL drafting chat";
 
-/** The SQL Playground: your own SQL editor, results preview and catalog browser, with a Data extraction chat docked beside it. */
+/** The SQL Playground: your own SQL editor, results preview and catalog browser, with a SQL drafting
+ *  chat docked beside it. Describe the data you want, the agent proposes a query (propose_sql), it
+ *  arrives in the editor with its bind values, and you review it and click Run: nothing runs by itself. */
 export function SqlPage() {
   const status = useQuery({ queryKey: ["sql-status"], queryFn: sqlApi.status });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
@@ -30,7 +48,7 @@ export function SqlPage() {
   const [sql, setSql] = useTabState("datalab:sql:draft", "");
   const { check, diagnostics } = useSqlCheck(sql);
   const bindNames = useBindNames(sql, check);
-  const [binds, setBinds] = useState<Record<string, string>>({});
+  const [binds, setBinds] = useTabJson<DraftBinds>("datalab:sql:binds", {});
   const runner = useRun();
   const elapsed = useElapsed(runner.startedAt);
   // A query opened from history, shown instead of the latest run.
@@ -46,6 +64,109 @@ export function SqlPage() {
   const [chatId, setChatId] = useTabState("datalab:sql:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
+
+  // The agent's proposals: which one is in the editor, one waiting to be chosen,
+  // a draft kept aside, and the editor as it was when the last message was sent.
+  const [origin, setOrigin] = useTabJson<Origin | null>("datalab:sql:origin", null);
+  const [pending, setPending] = useTabJson<SqlProposal | null>("datalab:sql:proposal", null);
+  const [kept, setKept] = useTabJson<KeptDraft | null>("datalab:sql:kept", null);
+  const [snapshot, setSnapshot] = useTabJson<EditorDraft | null>("datalab:sql:snapshot", null);
+  const [handled, setHandled] = useTabJson<Handled | null>("datalab:sql:handled", null);
+  // Another chat (New chat, or one opened at its turn): the last one's waiting proposal goes.
+  const shownChat = useRef(chatId);
+  useEffect(() => {
+    if (shownChat.current === chatId) return;
+    shownChat.current = chatId;
+    setPending(null);
+  }, [chatId, setPending]);
+  const [showOrigin, setShowOrigin] = useState(false);
+  const current = useRef({ sql, binds, origin, snapshot });
+  current.current = { sql, binds, origin, snapshot };
+  const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(chatId) });
+  const chatBusy = Boolean(chatId && conversations.data?.find((c) => c.id === chatId)?.busy);
+  const proposals = useQuery({
+    queryKey: ["sql-proposals", chatId],
+    queryFn: () => sqlApi.proposals(chatId),
+    enabled: Boolean(chatId),
+    refetchInterval: chatBusy ? 2000 : false,
+  });
+  // The turn has ended: read the proposals once more, for the one it ended with.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!chatBusy && chatId) void queryClient.invalidateQueries({ queryKey: ["sql-proposals", chatId] });
+  }, [chatBusy, chatId, queryClient]);
+
+  const fill = useCallback(
+    (proposal: SqlProposal) => {
+      setSql(proposal.sql);
+      setBinds(bindsOf(proposal));
+      setOrigin({ proposal, insertedSql: proposal.sql, insertedBinds: bindsOf(proposal) });
+      setPending(null);
+    },
+    [setSql, setBinds, setOrigin, setPending],
+  );
+  // A new proposal fills the editor, or waits in a banner when the editor holds the person's work.
+  useEffect(() => {
+    if (!chatId || !proposals.data) return;
+    if (handled?.chat !== chatId) {
+      // A chat seen here for the first time: what it proposed before isn't new.
+      setHandled({ chat: chatId, seq: nextProposal(proposals.data, 0).seq });
+      return;
+    }
+    const next = nextProposal(proposals.data, handled.seq);
+    if (next.seq === handled.seq) return;
+    setHandled({ chat: chatId, seq: next.seq });
+    const { sql: now, binds: typed, origin: shown, snapshot: sent } = current.current;
+    setSnapshot(null);
+    // A stopped or failed turn: nothing touches the editor.
+    if (!next.proposal) return;
+    // A snapshot from before bind values were kept with it (plain text): the SQL alone.
+    const before = typeof sent === "string" ? { sql: sent, binds: typed } : sent;
+    if (onArrival({ sql: now, binds: typed }, shown, before) === "fill") fill(next.proposal);
+    else setPending(next.proposal);
+  }, [chatId, proposals.data, handled, setHandled, setSnapshot, setPending, fill]);
+
+  const takeProposal = (proposal: SqlProposal) => {
+    // The current draft is kept aside, to go back to.
+    setKept({ sql, binds, origin });
+    fill(proposal);
+  };
+  const backToKept = () => {
+    if (!kept) return;
+    setKept({ sql, binds, origin });
+    setSql(kept.sql);
+    setBinds(kept.binds);
+    setOrigin(kept.origin);
+  };
+
+  const openChat = (then?: () => void) => {
+    setChatOpen("open");
+    // Once the chat is on screen (it may have been closed).
+    let tries = 0;
+    const attempt = () => {
+      const box = document.querySelector<HTMLElement>(`aside[aria-label="${CHAT_LABEL}"]`);
+      if (box || tries++ > 30) then?.();
+      else window.requestAnimationFrame(attempt);
+    };
+    window.requestAnimationFrame(attempt);
+  };
+  const focusChat = () =>
+    openChat(() => document.querySelector<HTMLTextAreaElement>(`aside[aria-label="${CHAT_LABEL}"] textarea`)?.focus());
+  const showTurn = (proposal: SqlProposal) => {
+    if (proposal.conversation_id !== chatId) {
+      setChatId(proposal.conversation_id);
+      setChatKey((k) => k + 1);
+    }
+    let tries = 0;
+    const find = () => {
+      const turn = document.querySelector<HTMLElement>(
+        `aside[aria-label="${CHAT_LABEL}"] [data-question-seq="${proposal.request_seq}"]`,
+      );
+      if (turn) turn.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      else if (tries++ < 120) window.setTimeout(find, 50);
+    };
+    openChat(find);
+  };
 
   // Inserting names from the catalog at the cursor, through the editor's own view.
   const holder = useRef<{ view: EditorView | null }>({ view: null });
@@ -77,13 +198,22 @@ export function SqlPage() {
 
   const openHistory = (item: HistoryItem) => {
     runner.clear();
+    setOrigin(null);
     setSql(item.sql);
     setBinds(Object.fromEntries(Object.entries(item.binds).map(([k, v]) => [k, v === null ? "" : String(v)])));
     setOpened(item);
     setDrawer(false);
   };
 
-  const context = useMemo<ChatContext>(() => ({ label: "The query in the SQL editor", text: sql, language: "sql" }), [sql]);
+  // The editor's SQL and, under it, the bind values typed for it, so a follow-up builds on both.
+  const context = useMemo<ChatContext>(
+    () => ({
+      label: "The query in the SQL editor",
+      text: sql.trim() ? sql.replace(/\n+$/, "") + bindLines(bindNames, binds) : sql,
+      language: "sql",
+    }),
+    [sql, bindNames, binds],
+  );
 
   const sidePanel = (
     <div className="flex h-full min-h-0 flex-col">
@@ -135,7 +265,7 @@ export function SqlPage() {
         {sidePanel}
       </aside>
 
-      <main className="flex min-h-0 min-w-0 flex-col">
+      <main className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
           <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show tables and history">
             <Icon name="menu" size={16} />
@@ -147,14 +277,65 @@ export function SqlPage() {
               agent's reach, until you export them.
             </p>
           </div>
-          {chatOpen === "closed" && (
-            <Button variant="secondary" className="shrink-0 px-2.5 py-1 text-[12.5px]" onClick={() => setChatOpen("open")}>
-              <Icon name="spark" size={13} /> Ask for help
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-1 gap-y-1.5 sm:max-w-[50%]">
+            {kept && (
+              <Button variant="ghost" className="shrink-0 px-2 py-1 text-[12.5px]" onClick={backToKept}>
+                <Icon name="restore" size={13} /> Back to your earlier draft
+              </Button>
+            )}
+            {origin && (
+              <Button
+                variant="ghost"
+                className="shrink-0 px-2 py-1 text-[12.5px]"
+                aria-expanded={showOrigin}
+                onClick={() => setShowOrigin(!showOrigin)}
+              >
+                <Icon name="history" size={13} /> How this SQL was created
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              className="shrink-0 px-2.5 py-1 text-[12.5px]"
+              onClick={focusChat}
+              title="Describe the data you want in the chat: the agent prepares a query here for you to review and run"
+            >
+              <Icon name="spark" size={13} /> Generate SQL with the agent
             </Button>
-          )}
+          </div>
         </header>
 
         <div className="px-5">
+          {pending && (
+            <div
+              role="status"
+              aria-label="The agent proposed a query"
+              className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[4px] border border-line bg-sunken px-3 py-2 font-sans text-[13px]"
+            >
+              <Icon name="spark" size={13} className="text-muted" />
+              <span className="min-w-0 flex-1">
+                The agent proposed a query{pending.title ? <>: <span className="font-medium">{pending.title}</span></> : "."}
+              </span>
+              <Button
+                variant="primary"
+                className="px-2.5 py-1 text-[12.5px]"
+                title="Open it in the editor. Your current draft is kept, and “Back to your earlier draft” brings it back."
+                onClick={() => takeProposal(pending)}
+              >
+                Use this query
+              </Button>
+              <Button
+                variant="secondary"
+                className="px-2.5 py-1 text-[12.5px]"
+                title="Put it in the editor in place of your current draft, which isn't kept."
+                onClick={() => fill(pending)}
+              >
+                Replace current draft
+              </Button>
+              <Button variant="ghost" className="px-2 py-1 text-[12.5px]" onClick={() => setPending(null)}>
+                Dismiss
+              </Button>
+            </div>
+          )}
           <CodeEditor
             label="SQL query"
             language="sql"
@@ -187,12 +368,23 @@ export function SqlPage() {
             </Button>
             <InfoTip term="workflow" align="end" />
           </div>
+          {chatBusy && (
+            <p role="status" className="-mt-1 pb-2 font-sans text-[12.5px] text-muted">
+              The agent is preparing SQL. Your draft stays as it is until you choose.
+            </p>
+          )}
+          {origin && showOrigin && (
+            <SqlOrigin origin={origin} editorSql={sql} onShowTurn={showTurn} onClose={() => setShowOrigin(false)} />
+          )}
           {bindNames.length > 0 && (
             <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-2 pb-3">
               <legend className="dl-label mb-1.5">Values for the bind variables</legend>
               {bindNames.map((name) => (
                 <label key={name} className="flex items-center gap-2">
                   <span className="font-mono text-[12.5px] text-ink">:{name}</span>
+                  {bindType(origin, sql, name) && (
+                    <span className="font-sans text-[11px] text-faint">{bindType(origin, sql, name)}</span>
+                  )}
                   <input
                     value={binds[name] ?? ""}
                     onChange={(e) => setBinds({ ...binds, [name]: e.target.value })}
@@ -207,7 +399,7 @@ export function SqlPage() {
           )}
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col border-t border-line">
+        <div className="flex min-h-[16rem] flex-1 flex-col border-t border-line">
           <ResultsArea
             opened={opened}
             run={runner.run}
@@ -232,16 +424,20 @@ export function SqlPage() {
         <>
           <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
-            aria-label="Data extraction chat"
+            aria-label={CHAT_LABEL}
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
           >
             <DockedChat
               key={chatKey}
-              mode="extraction"
+              mode={CHAT_MODE}
               conversationId={chatId || undefined}
               onConversation={(conversation) => setChatId(conversation.id)}
               context={context}
               headerActions={chatActions}
+              placeholder="Describe the data you want"
+              sendLabel="Generate SQL"
+              // The editor as it is now: a proposal never replaces edits made while the agent works.
+              onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
             />
           </aside>
         </>
@@ -385,13 +581,21 @@ function useBindNames(sql: string, check: SqlCheck | null): string[] {
   return next;
 }
 
-/** Forget the docked chat's conversation if it's gone from DataLab (deleted in the Workspace)
- *  by the time this page opens. A chat started here is never forgotten this way. */
+/** A bind's type as the agent proposed it, while the editor still holds its query. */
+function bindType(origin: Origin | null, sql: string, name: string): string | undefined {
+  if (!origin || sql !== origin.insertedSql) return undefined;
+  return origin.proposal.binds.find((b) => b.name === name)?.type;
+}
+
+/** Forget the docked chat's conversation if it's gone from DataLab (deleted in the Workspace),
+ *  or isn't a SQL drafting chat (one from before this tab drafted SQL), by the time this page
+ *  opens. A chat started here is never forgotten this way. */
 function useForgetMissingChat(chatId: string, forget: () => void) {
   const initial = useRef(chatId).current;
   const checking = Boolean(initial) && chatId === initial;
   const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: checking });
-  const missing = checking && conversations.isSuccess && !conversations.data.some((c) => c.id === chatId);
+  const missing =
+    checking && conversations.isSuccess && !conversations.data.some((c) => c.id === chatId && c.mode === CHAT_MODE);
   useEffect(() => {
     if (missing) forget();
   }, [missing, forget]);

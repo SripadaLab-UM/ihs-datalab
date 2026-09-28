@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datalab.sessions.tokens import TAB_TOOLS as _TAB_TOOLS
 from datalab.sessions.tokens import SessionKind
 
 
@@ -24,9 +25,10 @@ class Mode:
     instructions: str
     # Suggested first messages, shown in an empty conversation.
     starters: tuple[str, ...] = ()
-    # The ihs-data tools it may use (data sessions), or None for all of them.
-    # The session's token carries the list, and DataLab's data tools refuse
-    # any other (agent_tools.py); Codex doesn't list the others either.
+    # The ihs-data tools it may use (data sessions), or None for all of them
+    # but the tab-only ones (TAB_TOOLS). The session's token carries the
+    # list, and DataLab's data tools refuse any other (agent_tools.py);
+    # Codex doesn't list the others either.
     tools: frozenset[str] | None = None
     # Whether files and folders can be attached to it.
     attachments: bool = True
@@ -35,16 +37,19 @@ class Mode:
     tab_only: bool = False
 
     @property
+    def allowed_tools(self) -> frozenset[str]:
+        """The ihs-data tools it may use: its own list, or every tool but the tab-only ones."""
+        return self.tools if self.tools is not None else frozenset(DATA_TOOLS) - TAB_TOOLS
+
+    @property
     def queries(self) -> bool:
         """Whether its `query` tool runs SQL (without it: metadata only)."""
-        return self.tools is None or "query" in self.tools
+        return "query" in self.allowed_tools
 
     @property
     def tools_off(self) -> tuple[str, ...]:
         """The ihs-data tools Codex doesn't list in this mode."""
-        if self.tools is None:
-            return ()
-        return tuple(t for t in DATA_TOOLS if t not in self.tools)
+        return tuple(t for t in DATA_TOOLS if t not in self.allowed_tools)
 
 
 # Every ihs-data tool (data/agent_tools.py; a test keeps the two the same).
@@ -57,9 +62,13 @@ DATA_TOOLS = (
     "check_workflow",
     "propose_plan",
     "ask_research_helper",
+    "propose_sql",
 )
 # The catalog tools: metadata only, never rows.
 CATALOG_TOOLS = frozenset({"search_catalog", "describe_table", "join_paths", "find_concept"})
+# Tools only the mode that names them gets (sessions/tokens.py): propose_sql
+# fills the SQL Playground's editor, so only its chat has it.
+TAB_TOOLS = _TAB_TOOLS
 
 
 ANALYSIS = """\
@@ -181,6 +190,44 @@ Final answers include: the request as you understood it, the catalog
 evidence, assumptions and caveats, every SQL statement you actually ran with
 its purpose, the row count, columns, and file paths, and anything the person
 should double-check.
+"""
+
+SQL_DRAFTING = """\
+You are working in the SQL Playground's chat in IHS DataLab. The person
+describes the data they want, and you prepare one SQL query for the editor
+beside this chat. They review it, change it if they like, and run it
+themselves: you never run the final extraction.
+
+- Before writing SQL, find tables with search_catalog and check every column
+  you rely on with describe_table. Use the knowledge base for what the lab's
+  terms mean (enrolled, a cohort, a device), and say which pages you used.
+  A catalog match is metadata, not proof that a column is populated: check
+  with a small count first.
+- You may run small discovery and profiling queries with `query` (a count,
+  a date range, which values a column takes) to check an assumption. Keep
+  them small, and never run the whole extraction or paste rows into the chat.
+- Confirm date and time column types before filtering. Use a bind variable
+  for every value the person may want to change (dates, cohorts, thresholds),
+  never a literal in the SQL. Dates are "date" binds with "YYYY-MM-DD"
+  values, written TO_DATE(:start_date, 'YYYY-MM-DD') in the SQL.
+- When the query is ready, call `propose_sql` exactly once, as your last
+  step: the whole query, every bind variable with its value and type, a
+  one-line title, your assumptions, and the tables and knowledge-base pages
+  you relied on. Only that query reaches the editor: SQL in your message and
+  the queries you ran while exploring never do. Never present a count or
+  profiling query as the proposal.
+- If propose_sql refuses the query, fix it and call it again. If you can't
+  write a query that answers the request, say why and propose nothing.
+- The person's message may come with the query in their editor ("The query
+  in the SQL editor"). A follow-up such as "limit this to April" or "include
+  Garmin" revises the current query: call propose_sql again with the whole
+  revised query, not a fragment.
+- If the database is unavailable, retry at most twice, then stop and say so
+  plainly.
+
+Final answers are short: what the query returns (one row per what), the
+assumptions to double-check, and that it's in the editor to review and run.
+Don't repeat the whole SQL in the answer.
 """
 
 ENGINEERING = """\
@@ -416,6 +463,21 @@ MODES = {
                 "Extract daily Fitbit sleep for the 2025 cohort, one row per participant-night.",
                 "Which tables hold PHQ-9 scores, and how do they differ between years?",
             ),
+        ),
+        Mode(
+            "sql",
+            "SQL drafting",
+            "data",
+            "Describe the data you want, and get a checked SQL query to review and run.",
+            SQL_DRAFTING,
+            (
+                "Daily Fitbit steps for enrolled 2025 participants in March.",
+                "Nightly Fitbit sleep minutes for the 2024 cohort, one row per participant-night.",
+            ),
+            tools=CATALOG_TOOLS | {"query", "propose_sql", "ask_research_helper"},
+            # The Playground's chat has no files to attach.
+            attachments=False,
+            tab_only=True,
         ),
         Mode(
             "engineering",

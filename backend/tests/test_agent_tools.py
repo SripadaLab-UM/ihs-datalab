@@ -67,6 +67,7 @@ async def test_tools_are_listed(server, tmp_path):
         "ask_research_helper",
         "propose_plan",
         "check_workflow",
+        "propose_sql",
     }
 
 
@@ -148,6 +149,7 @@ async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(se
             "checks_and_limitations": "c",
             "deliverables": "r",
         },
+        "propose_sql": {"sql": "SELECT 1 FROM DUAL", "title": "t"},
     }
     assert set(calls) == set(DATA_TOOLS) - CATALOG_TOOLS
     async with mcp_session(base_url, token) as session:

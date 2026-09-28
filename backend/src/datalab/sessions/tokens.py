@@ -15,6 +15,9 @@ from pathlib import Path
 from typing import Literal
 
 SessionKind = Literal["data", "research"]
+# Tools a session has only when its mode names them (sessions/modes.py): a
+# token without a tool list doesn't allow them.
+TAB_TOOLS = frozenset({"propose_sql"})
 
 
 @dataclass(frozen=True)
@@ -25,11 +28,13 @@ class SessionAccess:
     results_dir: Path
     results_path_in_container: str = "/data/oracle"
     # The ihs-data tools it may use (its mode's, sessions/modes.py), or None
-    # for all of them. DataLab's data tools refuse the others.
+    # for all of them but TAB_TOOLS. DataLab's data tools refuse the others.
     tools: frozenset[str] | None = None
 
     def allows(self, tool: str) -> bool:
-        return self.tools is None or tool in self.tools
+        if self.tools is None:
+            return tool not in TAB_TOOLS
+        return tool in self.tools
 
 
 class SessionTokens:

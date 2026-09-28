@@ -685,7 +685,7 @@ class SessionManager:
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
-                tools=mode.tools,
+                tools=mode.allowed_tools if mode.kind == "data" else mode.tools,
                 tools_off=mode.tools_off,
             )
             self._runtimes[conversation.id] = runtime

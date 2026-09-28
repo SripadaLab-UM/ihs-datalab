@@ -12,6 +12,9 @@ same SQL check, limits and logging as the agent's, and list with
 - `GET /history`: this Playground's queries, newest first.
 - `GET /catalog` and `GET /catalog/search`: the table browser.
 - `POST /results/{query_id}/export`: export a result, with a manifest.
+- `GET /proposals/{conversation_id}`: the queries the Playground's chat
+  proposed for the editor (propose_sql, `datalab/data/sql_drafts.py`), each
+  turn's latest, with where it came from. Never run by DataLab.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ from datalab.config import Settings
 from datalab.data.access_log import AccessLog, QueryRecord
 from datalab.data.catalog import Catalog, TableInfo
 from datalab.data.service import DataService
+from datalab.data.sql_drafts import SqlDrafts, TurnProposal
 from datalab.data.sqlcheck import MAX_SQL_BYTES
 from datalab.exports import DestinationStore, ExportError, ExportSource
 from datalab.playground import Diagnostic, Playground, PlaygroundBusy, Run
@@ -44,6 +48,7 @@ class SqlServices:
     catalog: Catalog  # the table browser
     access_log: AccessLog  # the Playground's query history
     destinations: DestinationStore  # where results can be exported to
+    drafts: SqlDrafts | None = None  # the chat's proposed queries
 
 
 class SqlStatus(BaseModel):
@@ -167,6 +172,52 @@ class CatalogHit(BaseModel):
     type: str
     comment: str
     matching_columns: list[str]
+
+
+class ProposedBindOut(BaseModel):
+    name: str
+    value: str | int | float | None
+    type: Literal["text", "number", "date"]
+
+
+class TurnQueryOut(BaseModel):
+    """A query the agent ran in the proposal's turn, as its Queries list has it."""
+
+    id: str
+    status: str
+    tables: list[str]
+    row_count: int | None
+    started_at: str
+
+
+class SqlProposalOut(BaseModel):
+    proposal_id: str
+    conversation_id: str
+    # The turn (its question's number, 1 for the first) and its event.
+    turn: int
+    seq: int
+    created_at: str
+    # The turn as it ended: running, completed, interrupted or failed.
+    turn_status: str
+    turn_done: bool
+    # The person's question, without the editor's SQL sent with it, and its event.
+    request: str
+    request_seq: int
+    title: str
+    sql: str
+    binds: list[ProposedBindOut]
+    assumptions: list[str]
+    # What the SQL check found it reads.
+    tables: list[str]
+    warnings: list[str]
+    # What the agent said it relied on.
+    tables_named: list[str]
+    knowledge: list[str]
+    # From the turn's own record: tables it described, knowledge-base files
+    # its commands read, and the queries it ran.
+    tables_described: list[str]
+    kb_read: list[str]
+    queries: list[TurnQueryOut]
 
 
 class ExportIn(BaseModel):
@@ -367,7 +418,41 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         )
         return export_out(target, done)
 
+    @router.get("/proposals/{conversation_id}")
+    def proposals(conversation_id: str) -> list[SqlProposalOut]:
+        """Each turn's latest proposed query, oldest first. Nothing is run."""
+        drafts = services.drafts
+        if drafts is None or not drafts.is_sql_conversation(conversation_id):
+            raise HTTPException(404, "No such SQL Playground chat.")
+        return [_proposal(conversation_id, p) for p in drafts.proposals(conversation_id)]
+
     return router
+
+
+def _proposal(conversation_id: str, found: TurnProposal) -> SqlProposalOut:
+    data = found.proposal
+    return SqlProposalOut(
+        proposal_id=str(data.get("proposal_id", "")),
+        conversation_id=conversation_id,
+        turn=found.turn,
+        seq=found.seq,
+        created_at=found.created_at,
+        turn_status=found.status,
+        turn_done=found.done,
+        request=found.request,
+        request_seq=found.request_seq,
+        title=str(data.get("title", "")),
+        sql=str(data.get("sql", "")),
+        binds=[ProposedBindOut(**b) for b in data.get("binds") or []],
+        assumptions=list(data.get("assumptions") or []),
+        tables=list(data.get("tables") or []),
+        warnings=list(data.get("warnings") or []),
+        tables_named=list(data.get("tables_named") or []),
+        knowledge=list(data.get("knowledge") or []),
+        tables_described=found.tables_described,
+        kb_read=found.kb_read,
+        queries=[TurnQueryOut(**q) for q in found.queries],
+    )
 
 
 def _columns(names: list[str], types: list[str] | list[str | None]) -> list[ColumnOut]:

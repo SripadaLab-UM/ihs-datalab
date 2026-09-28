@@ -733,6 +733,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/sql/proposals/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Proposals
+         * @description Each turn's latest proposed query, oldest first. Nothing is run.
+         */
+        get: operations["proposals_api_sql_proposals__conversation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/github/status": {
         parameters: {
             query?: never;
@@ -3315,6 +3335,18 @@ export interface components {
             /** Decided By */
             decided_by?: string | null;
         };
+        /** ProposedBindOut */
+        ProposedBindOut: {
+            /** Name */
+            name: string;
+            /** Value */
+            value: string | number | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "text" | "number" | "date";
+        };
         /** QueryRecordOut */
         QueryRecordOut: {
             /** Id */
@@ -3658,6 +3690,49 @@ export interface components {
             /** Sql */
             sql: string;
         };
+        /** SqlProposalOut */
+        SqlProposalOut: {
+            /** Proposal Id */
+            proposal_id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Turn */
+            turn: number;
+            /** Seq */
+            seq: number;
+            /** Created At */
+            created_at: string;
+            /** Turn Status */
+            turn_status: string;
+            /** Turn Done */
+            turn_done: boolean;
+            /** Request */
+            request: string;
+            /** Request Seq */
+            request_seq: number;
+            /** Title */
+            title: string;
+            /** Sql */
+            sql: string;
+            /** Binds */
+            binds: components["schemas"]["ProposedBindOut"][];
+            /** Assumptions */
+            assumptions: string[];
+            /** Tables */
+            tables: string[];
+            /** Warnings */
+            warnings: string[];
+            /** Tables Named */
+            tables_named: string[];
+            /** Knowledge */
+            knowledge: string[];
+            /** Tables Described */
+            tables_described: string[];
+            /** Kb Read */
+            kb_read: string[];
+            /** Queries */
+            queries: components["schemas"]["TurnQueryOut"][];
+        };
         /** SqlStatus */
         SqlStatus: {
             /** Available */
@@ -3831,6 +3906,22 @@ export interface components {
             id: string;
             /** Freed Bytes */
             freed_bytes: number;
+        };
+        /**
+         * TurnQueryOut
+         * @description A query the agent ran in the proposal's turn, as its Queries list has it.
+         */
+        TurnQueryOut: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Tables */
+            tables: string[];
+            /** Row Count */
+            row_count: number | null;
+            /** Started At */
+            started_at: string;
         };
         /** UpdateCheckOut */
         UpdateCheckOut: {
@@ -5372,6 +5463,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    proposals_api_sql_proposals__conversation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SqlProposalOut"][];
                 };
             };
             /** @description Validation Error */
