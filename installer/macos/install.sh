@@ -12,7 +12,9 @@
 # What it does:
 #   1. Checks that Docker Desktop is installed and running, and starts it if it
 #      isn't. If it's missing, offers to download Docker's official Docker Desktop
-#      for this Mac, checks it's signed by Docker Inc, copies it to Applications,
+#      for this Mac and checks it's signed by Docker Inc. On an administrator
+#      account, Docker's own installer puts it in /Applications (you type your
+#      password once, for sudo); otherwise it's copied to Applications. Then it
 #      opens it (its first-run window asks you to accept Docker's agreement) and
 #      waits until it's running. --install-docker answers yes to that offer.
 #   2. Installs uv (a Python installer) for you, if it isn't there already.
@@ -393,7 +395,16 @@ install_docker_desktop() {
     echo "If this Mac can't be updated that far, DataLab can't run on it: ask the lab."
     exit 1
   fi
-  if [ -d "$SYSTEM_APPS" ] && [ -w "$SYSTEM_APPS" ]; then place="$SYSTEM_APPS"; else place="$USER_APPS"; fi
+  # An administrator account installs it with Docker's own installer (its
+  # supported command-line install: into /Applications, with its helper and
+  # /usr/local/bin links set up, after the person types their password for
+  # sudo). Other accounts get a copy of the app: in /Applications if they can
+  # add to it without sudo, otherwise ~/Applications.
+  case " $(id -Gn 2>/dev/null) " in
+    *" admin "*) method=docker-installer; place="$SYSTEM_APPS" ;;
+    *) method=copy
+       if [ -d "$SYSTEM_APPS" ] && [ -w "$SYSTEM_APPS" ]; then place="$SYSTEM_APPS"; else place="$USER_APPS"; fi ;;
+  esac
   for where in "$HOME" "$(dirname "$place")"; do
     have="$(free_gb "$where")"
     if [ -n "$have" ] && [ "$have" -lt "$DOCKER_NEED_GB" ]; then
@@ -406,8 +417,14 @@ install_docker_desktop() {
   done
 
   echo "This installer can download Docker Desktop for this Mac ($kind) from Docker"
-  echo "(desktop.docker.com), check that it's signed by Docker Inc, and copy it to"
-  echo "$place. The download is about 0.6 GB."
+  if [ "$method" = docker-installer ]; then
+    echo "(desktop.docker.com), check that it's signed by Docker Inc, and install it in"
+    echo "$place with Docker's own installer: macOS asks for your password once, in"
+    echo "this window. The download is about 0.6 GB."
+  else
+    echo "(desktop.docker.com), check that it's signed by Docker Inc, and copy it to"
+    echo "$place. The download is about 0.6 GB."
+  fi
   echo "When Docker Desktop first opens, it shows the Docker Subscription Service"
   echo "Agreement ($DOCKER_TERMS)"
   echo "for you to read and accept yourself: this installer doesn't accept it for you."
@@ -491,6 +508,12 @@ install_docker_desktop() {
   fi
   echo "It's Docker Desktop $(plutil -extract CFBundleShortVersionString raw -o - "$source_app/Contents/Info.plist" 2>/dev/null || echo ''), signed and notarized by Docker Inc."
 
+  installer_command="$source_app/Contents/MacOS/install"
+  if [ "$method" = docker-installer ] && [ -x "$installer_command" ] && [ ! -L "$installer_command" ]; then
+    install_with_dockers_installer
+    return
+  fi
+
   # Copied as it is (ditto keeps its signature), under a temporary name
   # until it's complete and checked again. /Applications if this account can
   # add to it without sudo, otherwise ~/Applications. Removed on the way out
@@ -527,6 +550,40 @@ install_docker_desktop() {
   rm -f "$dmg" "$copy_errors"
   rmdir "$DOCKER_CACHE" 2>/dev/null || true
   echo "Docker Desktop is installed in $(dirname "$DOCKER_APP")."
+}
+# Docker's own installer, from the checked disk image, run with sudo: the
+# person types their password (sudo reads it from the terminal; nothing is
+# passed to it). Docker's agreement isn't accepted here: Docker shows it
+# when it first opens, for the person to accept.
+install_with_dockers_installer() {
+  echo
+  echo "Installing Docker Desktop in $place with Docker's installer. macOS asks for your"
+  echo "password (the one you log in to this Mac with) to install Docker Desktop: type it"
+  echo "and press Return. Nothing shows as you type."
+  status=0
+  sudo "$installer_command" --user "$(id -un)" || status=$?
+  if [ "$status" -ne 0 ]; then
+    left=""
+    if [ -e "$place/Docker.app" ]; then
+      left="Docker's installer may have left $place/Docker.app partly installed: drag it to the Trash first."
+    fi
+    stop_install keep \
+      "Docker Desktop wasn't installed: the password wasn't given or accepted, or Docker's" \
+      "installer stopped (code $status). ${left:-Nothing was changed.}" \
+      "If your account can't use sudo, ask IT, or install Docker Desktop yourself from" \
+      "$DOCKER_PAGE."
+  fi
+  if ! docker_app_is_genuine "$place/Docker.app"; then
+    stop_install keep \
+      "Docker's installer finished, but $place/Docker.app didn't pass macOS's checks" \
+      "(signed and notarized by Docker Inc, team $DOCKER_TEAM_ID). Drag it to the Trash, or" \
+      "ask IT."
+  fi
+  DOCKER_APP="$place/Docker.app"
+  detach_docker_image
+  rm -f "$dmg"
+  rmdir "$DOCKER_CACHE" 2>/dev/null || true
+  echo "Docker Desktop is installed in $place."
 }
 # Why copying to $1 failed, from the errors in $2.
 copy_failed() {

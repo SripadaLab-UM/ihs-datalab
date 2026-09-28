@@ -27,9 +27,13 @@ def test_docker_in_your_applications_goes_last_on_path(tmp_path, monkeypatch):
         ],
     )
     found = docker_in(tmp_path / "home/Applications/Docker.app/Contents/Resources/bin")
-    env = {"PATH": "/usr/bin:/bin"}
+    # Only a folder of this test's own: a real docker elsewhere on the machine
+    # (a CI runner's /usr/bin/docker) must not be found.
+    nothing = tmp_path / "empty-bin"
+    nothing.mkdir()
+    env = {"PATH": str(nothing)}
     assert docker_path.ensure_docker_on_path(env, platform="darwin") == found.parent
-    assert env["PATH"] == f"/usr/bin:/bin:{found.parent}"
+    assert env["PATH"] == f"{nothing}:{found.parent}"
 
 
 def test_nothing_changes_when_docker_is_on_path(tmp_path):
@@ -59,6 +63,6 @@ def test_the_docker_folder_in_your_home_is_found(tmp_path, monkeypatch):
         lambda home=None: [tmp_path / "none/docker", tmp_path / ".docker/bin/docker"],
     )
     found = docker_in(tmp_path / ".docker/bin")
-    env = {"PATH": "/nowhere"}
+    env = {"PATH": str(tmp_path / "nowhere")}
     assert docker_path.ensure_docker_on_path(env, platform="darwin") == found.parent
-    assert env["PATH"] == f"/nowhere:{found.parent}"
+    assert env["PATH"] == f"{tmp_path / 'nowhere'}:{found.parent}"

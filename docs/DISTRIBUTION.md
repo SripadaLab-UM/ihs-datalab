@@ -585,7 +585,17 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
      Gatekeeper is off (spctl gives no origin), it says so. It also checks the
      app's own `LSMinimumSystemVersion` against this Mac. Any failure: the
      image is detached, the download deleted, and nothing installed.
-  3. Copies the app with `ditto` (which keeps its signature) to
+  3. On an administrator account (`admin` in `id -Gn`), runs Docker's own
+     supported command-line installer from the checked image:
+     `sudo <image>/Docker.app/Contents/MacOS/install --user <user>`, never
+     with `--accept-license`. It says first that macOS will ask for the
+     password; sudo reads it from the terminal (nothing is passed to it).
+     Docker's installer puts the app in `/Applications` and sets up its
+     privileged helper and `/usr/local/bin` links; the installed app is then
+     checked again. If sudo is cancelled or the installer fails, it stops
+     with what to do (the download is kept and checked again next time).
+     Otherwise (not an administrator, or no install command in the image):
+     copies the app with `ditto` (which keeps its signature) to
      `/Applications` if the account can add to it without `sudo`, otherwise
      `~/Applications` (Docker works from there; the first-run window then
      needs "Use advanced settings" with the command line tools set to
@@ -616,9 +626,11 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
 - The prompt says Docker Desktop's license terms apply to its use and that
   an organisation may have its own guidance; it doesn't say what a
   particular organisation's license status is.
+- Readiness is `docker info` only: DataLab doesn't use Docker Compose.
 - Tests (`backend/tests/test_installer_macos.py`) run the real script
   against stand-ins for `docker`, `open`, `curl`, `hdiutil`, `codesign`,
   `spctl`, `sw_vers`, `sysctl`, `uname`, `df`, `ps`, `mdfind`, `ditto`,
+  `id`, `sudo`, Docker's `install`,
   `date` and `sleep` (a fake clock).
   `DATALAB_DOCKER_WAIT_SECONDS` and `DATALAB_DOCKER_POLL_SECONDS` change the
   wait; `DATALAB_INSTALL_STOP_AFTER_DOCKER=1` stops once Docker is ready,
