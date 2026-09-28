@@ -91,7 +91,7 @@ def read_marker(data_dir: Path) -> Marker | None:
     if not path.exists():
         return None
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
         marker = Marker(**{k: raw[k] for k in Marker.__dataclass_fields__ if k in raw})
     except (OSError, ValueError, TypeError) as error:
         raise UnreadableMarker(str(error)) from error
@@ -386,7 +386,7 @@ def _clear(data_dir: Path, marker: Marker, outcome: str) -> None:
 def _log(data_dir: Path, entry: dict) -> None:
     path = data_dir / _HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as file:
+    with path.open("a", encoding="utf-8") as file:
         file.write(json.dumps({"at": _now(), **entry}) + "\n")
 
 
@@ -394,7 +394,7 @@ def _write(data_dir: Path, marker: Marker) -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
     path = marker_path(data_dir)
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(4)}")
-    temporary.write_text(json.dumps(asdict(marker), indent=2) + "\n")
+    temporary.write_text(json.dumps(asdict(marker), indent=2) + "\n", encoding="utf-8")
     with temporary.open("rb+") as file:
         os.fsync(file.fileno())
     os.replace(temporary, path)

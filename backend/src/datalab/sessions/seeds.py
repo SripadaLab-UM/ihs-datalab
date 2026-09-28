@@ -61,7 +61,7 @@ class Seed:
 def records(paths: SessionPaths) -> dict[str, dict[str, Any]]:
     """What happened to each seed in this conversation, by name."""
     try:
-        value = json.loads(paths.seeds.read_text())
+        value = json.loads(paths.seeds.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     return value if isinstance(value, dict) else {}
@@ -158,5 +158,5 @@ def _save(done: dict[str, dict[str, Any]], paths: SessionPaths, name: str, **ent
     done[name] = {**entry, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
     paths.root.mkdir(parents=True, exist_ok=True)
     fresh = paths.seeds.with_suffix(".tmp")
-    fresh.write_text(json.dumps(done, indent=1))
+    fresh.write_text(json.dumps(done, indent=1), encoding="utf-8")
     fresh.replace(paths.seeds)

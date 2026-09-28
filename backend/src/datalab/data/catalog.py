@@ -102,7 +102,7 @@ class Catalog:
     def load(cls, directory: Path) -> Catalog:
         tables = []
         for path in sorted(directory.glob("*/*.yml")):
-            raw = yaml.safe_load(path.read_text())
+            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
             raw["columns"] = [Column(**c) for c in raw.get("columns", [])]
             tables.append(TableInfo(**raw))
         return cls(tables)
@@ -113,7 +113,8 @@ class Catalog:
             folder.mkdir(parents=True, exist_ok=True)
             data = asdict(table)
             (folder / f"{table.name}.yml").write_text(
-                yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100)
+                yaml.safe_dump(data, sort_keys=False, allow_unicode=True, width=100),
+                encoding="utf-8",
             )
 
     # Building --------------------------------------------------------------

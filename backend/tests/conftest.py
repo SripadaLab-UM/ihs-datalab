@@ -115,7 +115,7 @@ class FakeDatabase:
         if self.block:
             cancel.wait(timeout=10)
             raise QueryCancelled("The query was stopped.")
-        with out_path.open("w", newline="") as handle:
+        with out_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
             writer.writerow(["STUDY_PARTICIPANT_ID", "TRACKERSTEPS"])
             writer.writerows(self.rows)

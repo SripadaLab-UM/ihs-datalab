@@ -59,6 +59,12 @@ target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "G"]
+# Every text file is opened as UTF-8: Windows' default is cp1252, which can't
+# write "→" (tests/test_text_encoding.py also checks what ruff can't see).
+# PLW1514 is a preview rule; only the rules named here use preview.
+extend-select = ["PLW1514"]
+preview = true
+explicit-preview-rules = true
 
 [tool.pyright]
 include = ["src"]

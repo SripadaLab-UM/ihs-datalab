@@ -33,7 +33,7 @@ def notify(method, **params):
 for line in sys.stdin:
     message = json.loads(line)
     if LOG and "method" in message:
-        with open(LOG, "a") as log:
+        with open(LOG, "a", encoding="utf-8") as log:
             log.write(
                 json.dumps({"method": message["method"], "params": message.get("params")}) + "\n"
             )

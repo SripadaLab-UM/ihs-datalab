@@ -448,7 +448,8 @@ def _git(root: Path, *args: str) -> str:
         done = subprocess.run(
             [*_GIT, "-C", str(root), *args],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             # Only the repo's own config (the synced clone's is DataLab's).
             env=git_env({"GIT_OPTIONAL_LOCKS": "0"}),

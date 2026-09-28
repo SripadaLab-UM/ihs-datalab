@@ -229,7 +229,7 @@ def _release_agent_image() -> str | None:
     if release.exists():
         import json
 
-        return json.loads(release.read_text()).get("agent_image")
+        return json.loads(release.read_text(encoding="utf-8")).get("agent_image")
     return None
 
 
@@ -283,7 +283,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
     profile = resolve_profile(profile)
     data_dir = data_dir_for(profile)
     file = data_dir / "settings.toml"
-    raw = tomllib.loads(file.read_text()) if file.exists() else {}
+    raw = tomllib.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
 
     if profile == "practice":
         oracle: OracleSettings | None = PRACTICE_ORACLE

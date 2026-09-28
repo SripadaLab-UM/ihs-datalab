@@ -54,7 +54,9 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
     data_dir = data_dir_for(profile)
     data_dir.mkdir(parents=True, exist_ok=True)
     if lab_settings is not None:
-        tomllib.loads(lab_settings.read_text())  # refuse a broken file before copying it
+        tomllib.loads(
+            lab_settings.read_text(encoding="utf-8")
+        )  # refuse a broken file before copying it
         shutil.copyfile(lab_settings, data_dir / "settings.toml")
         print(f"Saved the lab's DataLab settings to {data_dir / 'settings.toml'}")
     settings = load_settings(profile)
@@ -288,7 +290,9 @@ def _docker_quiet(*query: str, then: str) -> None:
     """Run a docker listing, then apply `then` to whatever it returned."""
     if shutil.which("docker") is None:
         return
-    listing = subprocess.run(["docker", *query], capture_output=True, text=True)
+    listing = subprocess.run(
+        ["docker", *query], capture_output=True, encoding="utf-8", errors="replace"
+    )
     ids = listing.stdout.split()
     if ids:
         subprocess.run(["docker", *then.split(), *ids], capture_output=True)

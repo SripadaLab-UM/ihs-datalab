@@ -151,7 +151,7 @@ class SafetyCheck:
         )
         token = self._tokens.issue(SessionAccess(session_id, kind, paths.oracle_results))
         paths.create()
-        paths.codex_config.write_text("# safety probe\n")
+        paths.codex_config.write_text("# safety probe\n", encoding="utf-8", newline="\n")
         try:
             await containers.start(token)
             yield _Probe(containers, paths)
@@ -381,7 +381,7 @@ class SafetyCheck:
         found = any(s in environment for s in known)
         for path in _files(probe.paths.root):
             with contextlib.suppress(OSError):
-                content = path.read_text(errors="ignore")
+                content = path.read_text(encoding="utf-8", errors="ignore")
                 found = found or any(s in content for s in known)
         return _result(
             "no_keys_in_container",
@@ -612,7 +612,8 @@ class SafetyCheck:
             work = root / "work"
             (work / "outputs").mkdir(parents=True)
             (work / "outputs" / "page.html").write_text(
-                _HOSTILE_PAGE.replace("CANARY", f"http://127.0.0.1:{self._port}{canary}")
+                _HOSTILE_PAGE.replace("CANARY", f"http://127.0.0.1:{self._port}{canary}"),
+                encoding="utf-8",
             )
             checkpoints = Checkpoints(root / "store", work)
             latest = await asyncio.to_thread(checkpoints.take, "Safety check")

@@ -41,13 +41,13 @@ def build_safety_router(check: SafetyCheck, last_report_file: Path) -> APIRouter
         async with running:
             report = SafetyReportOut(**(await check.run()).to_dict())
         last_report_file.parent.mkdir(parents=True, exist_ok=True)
-        last_report_file.write_text(report.model_dump_json(indent=1))
+        last_report_file.write_text(report.model_dump_json(indent=1), encoding="utf-8")
         return report
 
     @router.get("/last")
     def last_check() -> SafetyReportOut | None:
         if not last_report_file.exists():
             return None
-        return SafetyReportOut(**json.loads(last_report_file.read_text()))
+        return SafetyReportOut(**json.loads(last_report_file.read_text(encoding="utf-8")))
 
     return router

@@ -215,7 +215,8 @@ def docker_version() -> str:
         done = subprocess.run(
             ["docker", "version", "--format", _DOCKER_FORMAT],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=8,
             check=False,
         )
@@ -248,7 +249,7 @@ def _source(get) -> str:
 
 def _safety(file: Path) -> list[str]:
     try:
-        report = json.loads(file.read_text())
+        report = json.loads(file.read_text(encoding="utf-8"))
         results = report["results"]
     except (OSError, ValueError, KeyError, TypeError):
         return ["not run yet"]

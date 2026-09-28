@@ -586,7 +586,7 @@ def test_the_github_token_never_reaches_a_container(lab, monkeypatch):
     async def docker(*args: str, check: bool = True) -> str:
         seen.append(" ".join(args))
         if args[0] == "run" and "--env-file" in args:
-            seen.append(Path(args[args.index("--env-file") + 1]).read_text())
+            seen.append(Path(args[args.index("--env-file") + 1]).read_text(encoding="utf-8"))
         return "Accepting HTTP Socket connections" if args[0] == "logs" else ""
 
     monkeypatch.setattr(module, "docker", docker)

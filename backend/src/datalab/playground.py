@@ -147,13 +147,13 @@ class Playground:
     def _load_or_make_id(self) -> str:
         file = self._root / "playground.json"
         with contextlib.suppress(OSError, ValueError, AttributeError):
-            stored = json.loads(file.read_text()).get("id")
+            stored = json.loads(file.read_text(encoding="utf-8")).get("id")
             if isinstance(stored, str) and _ID.fullmatch(stored):
                 return stored
         new = f"pg_{secrets.token_hex(6)}"
         self._root.mkdir(parents=True, exist_ok=True)
         partial = file.with_name(file.name + ".partial")
-        partial.write_text(json.dumps({"id": new}) + "\n")
+        partial.write_text(json.dumps({"id": new}) + "\n", encoding="utf-8")
         partial.replace(file)
         return new
 
@@ -408,14 +408,15 @@ def _write_columns(outcome: QueryOutcome) -> None:
     file = _columns_file(outcome.result_path)
     with contextlib.suppress(OSError):
         file.write_text(
-            json.dumps({"columns": outcome.columns, "types": outcome.column_types}) + "\n"
+            json.dumps({"columns": outcome.columns, "types": outcome.column_types}) + "\n",
+            encoding="utf-8",
         )
 
 
 def _read_types(result: Path, count: int) -> list[str | None]:
     types: list[Any] = []
     with contextlib.suppress(OSError, ValueError, AttributeError):
-        types = json.loads(_columns_file(result).read_text()).get("types") or []
+        types = json.loads(_columns_file(result).read_text(encoding="utf-8")).get("types") or []
     return [t if isinstance(t, str) else None for t in types[:count]] + [None] * (
         count - len(types[:count])
     )

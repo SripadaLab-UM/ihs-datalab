@@ -50,8 +50,8 @@ MOOD_COMMENTS = ["Long call shift", "Good day off", "Tired", "Night float", "Bus
 # ---------------------------------------------------------------- spec ----
 
 def load_spec() -> tuple[dict, dict]:
-    objects = yaml.safe_load((HERE / "spec" / "objects.yaml").read_text())["objects"]
-    config = yaml.safe_load((HERE / "spec" / "cohorts.yaml").read_text())
+    objects = yaml.safe_load((HERE / "spec" / "objects.yaml").read_text(encoding="utf-8"))["objects"]
+    config = yaml.safe_load((HERE / "spec" / "cohorts.yaml").read_text(encoding="utf-8"))
     return objects, config
 
 

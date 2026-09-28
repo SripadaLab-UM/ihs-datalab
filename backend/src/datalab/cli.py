@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from datalab.config import load_settings
 
 def main(argv: list[str] | None = None) -> int:
     from datalab import __version__
+
+    _console_never_fails()
 
     parser = argparse.ArgumentParser(prog="datalab")
     parser.add_argument("--version", action="version", version=f"datalab {__version__}")
@@ -144,6 +147,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "catalog":
         return _build_catalog(settings, args)
     return 2
+
+
+def _console_never_fails() -> None:
+    """On Windows, output to a pipe or a file uses the locale's encoding
+    (cp1252), which has no "→" or "✓": print those as "?" rather than fail."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if encoding != "utf8" and isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
 
 
 def _serve(settings, *, open_browser: bool) -> int:

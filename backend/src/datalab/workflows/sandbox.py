@@ -209,7 +209,7 @@ class DockerSandbox:
         """R's version and a fingerprint of installed.packages(), cached per image."""
         cache = self.cache_dir / f"image-{digest.split(':')[-1][:32]}.json"
         with contextlib.suppress(OSError, ValueError, KeyError):
-            facts = json.loads(cache.read_text())
+            facts = json.loads(cache.read_text(encoding="utf-8"))
             return facts["r_version"], facts["r_packages_sha256"]
         name = f"probe-{os.urandom(3).hex()}"
         step = ContainerStep(
@@ -241,7 +241,7 @@ class DockerSandbox:
             "r_packages": len(lines) - 1,
         }
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps(facts, indent=2))
+        cache.write_text(json.dumps(facts, indent=2), encoding="utf-8")
         return facts["r_version"], facts["r_packages_sha256"]
 
     async def run(self, step: ContainerStep) -> ContainerOutcome:

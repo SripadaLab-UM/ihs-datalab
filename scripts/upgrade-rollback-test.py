@@ -81,7 +81,7 @@ def run(ref: str, scratch: Path) -> None:
     old_src = old_src / "backend" / "src"
     data = scratch / "data"
     data.mkdir()
-    (data / "settings.toml").write_text(f"port = {PORT}\n")
+    (data / "settings.toml").write_text(f"port = {PORT}\n", encoding="utf-8")
     database = data / "datalab.sqlite"
 
     step("The previous release makes a database with synthetic content")
@@ -231,7 +231,9 @@ def schema(database: Path) -> list[str]:
 def manifests(data: Path) -> list[dict]:
     found = []
     for manifest in sorted((data / "backups").glob("*/manifest.json")):
-        found.append({**json.loads(manifest.read_text()), "folder": manifest.parent.name})
+        found.append(
+            {**json.loads(manifest.read_text(encoding="utf-8")), "folder": manifest.parent.name}
+        )
     return found
 
 
@@ -246,7 +248,7 @@ def previous_release_with_rollback(ref: str, old_names: list[str], folder: Path)
     found = re.search(r'^__version__ = "(.*)"', old_init, re.MULTILINE)
     version = found.group(1) if found else "0.0.0"
     (folder / "datalab" / "__init__.py").write_text(
-        f'"""IHS DataLab."""\n\n__version__ = "{version}"\n'
+        f'"""IHS DataLab."""\n\n__version__ = "{version}"\n', encoding="utf-8"
     )
     return folder
 
@@ -255,7 +257,11 @@ def datalab(src: Path, data: Path, *args: str) -> subprocess.CompletedProcess[st
     env = {**os.environ, "PYTHONPATH": str(src), "DATALAB_PROFILE": "practice"}
     env["DATALAB_DATA_DIR"] = str(data)
     result = subprocess.run(
-        [sys.executable, "-m", "datalab.cli", *args], env=env, capture_output=True, text=True
+        [sys.executable, "-m", "datalab.cli", *args],
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
     )
     print(indent(result.stdout + result.stderr))
     return result
@@ -273,7 +279,13 @@ def python(src: Path | None, code: str) -> None:
             f"import datalab; assert datalab.__file__.startswith({str(src)!r}), datalab.__file__"
         )
         script = f"{check}\n{script}"
-    result = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if result.returncode != 0:
         sys.exit(f"This failed:\n{code}\n{result.stdout}{result.stderr}")
 
@@ -292,7 +304,9 @@ def migration_names(ref: str) -> list[str]:
 
 
 def git(*args: str, check: bool = True) -> str:
-    result = subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True)
+    result = subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace"
+    )
     if check and result.returncode != 0:
         sys.exit(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result.stdout
