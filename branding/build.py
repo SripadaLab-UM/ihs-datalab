@@ -47,8 +47,9 @@ BRAND_TS = REPO / "frontend" / "src" / "app" / "brandArt.ts"
 MAIZE = "#FFCB05"
 BLUE = "#00274C"
 
-# Which IHS + AI mark the app uses: "spark", "network" or "pulse".
-AI_MARK = "spark"
+# Which design the app uses (a one-line change): "1b", or one of the earlier
+# options "1", "2", "3" (see DESIGNS below).
+DESIGN = "1b"
 
 # ------------------------------------------------------------------ geometry
 
@@ -127,19 +128,54 @@ MARKS: dict[str, Callable[[], tuple[list[Shape], tuple[float, float]]]] = {
     "pulse": _pulse,
 }
 
+# A design: the IHS mark beside the header's name, and how the icon is laid
+# out. "lockup": the M, and the IHS mark under it from 64 px up. "stack": the
+# M with "IHS" centred under it, and a big spark over the M's top-right
+# corner, knocked out of the tile colour so it reads over both.
+DESIGNS = {
+    "1": ("spark", "lockup"),
+    "2": ("network", "lockup"),
+    "3": ("pulse", "lockup"),
+    "1b": ("spark", "stack"),
+}
+AI_MARK, LAYOUT = DESIGNS[DESIGN]
+
 # The icon, on a 64-unit square.
 TILE_RADIUS = 12.0
 M_ALONE = 44.0  # the M's width when it's alone (small sizes, the favicon)
-M_WITH = 34.0  # ... and above the IHS mark
-MARK_WIDTH = 30.0  # the IHS mark's width under it
-GAP = 6.5  # between them: more than the M's serif height at this size
-LOCKUP_FROM = 64  # pixels: below this the icon is the Block M alone
+M_WITH = 34.0  # "lockup": the M above the IHS mark
+MARK_WIDTH = 30.0  # ... the IHS mark's width under it
+GAP = 6.5  # ... between them
+LOCKUP_FROM = 64  # pixels: the full design from here up
+SMALL_FROM = 32  # pixels: from here to 64, the M and a smaller spark ("stack")
+
+# "stack", on the 64-unit tile. The M, and "IHS" a little narrower than it
+# (the letters are lighter, so a touch narrower looks the same width), on the
+# tile's axis; the pair sits a unit above the geometric middle (the optical
+# centre). The spark's centre is near the M's top-right corner.
+STACK = {
+    "full": {"m": 32.0, "ihs": 27.0, "gap": 4.5, "top": 12.5, "spark": (47.0, 14.0, 12.5)},
+    "small": {"m": 40.0, "top": 19.5, "spark": (49.5, 20.0, 10.5)},
+    "tiny": {"m": 40.0, "top": 19.5, "spark": (50.0, 18.5, 12.0)},
+}
+HALO = 2.2  # the spark's knock-out edge, in the tile's colour
 
 COLOURS = {
-    # tile, Block M, IHS mark
-    "real": (BLUE, MAIZE, MAIZE),
-    "practice": (MAIZE, BLUE, BLUE),
+    # tile, the marks
+    "real": (BLUE, MAIZE),
+    "practice": (MAIZE, BLUE),
 }
+
+# One mark placed on the tile: its shapes, scale, x, y, and the width of the
+# tile-coloured edge knocked out round it (None: none).
+Placed = tuple[list[Shape], float, float, float, "float | None"]
+
+
+def tier(size: int) -> str:
+    """Which version of the icon a size in pixels gets."""
+    if size >= LOCKUP_FROM:
+        return "full"
+    return "small" if size >= SMALL_FROM else "m"
 
 
 def _spark_points(cx: float, cy: float, r: float, steps: int = 12) -> list[tuple[float, float]]:
@@ -213,10 +249,17 @@ def svg_paths(shapes: Sequence[Shape]) -> list[dict[str, Any]]:
     return out
 
 
-def _svg_elements(shapes: Sequence[Shape], colour: str) -> str:
+def _svg_elements(
+    shapes: Sequence[Shape], colour: str, *, halo: tuple[str, float] | None = None
+) -> str:
     parts = []
     for p in svg_paths(shapes):
-        if p["stroke"] is None:
+        if p["stroke"] is None and halo:
+            parts.append(
+                f'<path d="{p["d"]}" fill="{colour}" stroke="{halo[0]}" '
+                f'stroke-width="{_n(2 * halo[1])}" stroke-linejoin="round" paint-order="stroke"/>'
+            )
+        elif p["stroke"] is None:
             parts.append(f'<path d="{p["d"]}" fill="{colour}"/>')
         else:
             join = ' stroke-linejoin="round"' if p["cap"] == "round" else ""
@@ -231,32 +274,44 @@ def _block_m_shapes() -> list[Shape]:
     return [("poly", BLOCK_M)]
 
 
-def _placements(mark: str, lockup: bool) -> list[tuple[list[Shape], float, float, float]]:
-    """What goes on the 64-unit tile: (shapes, scale, x, y) for each mark."""
+def _placements(tier: str, *, mark: str = AI_MARK, layout: str = LAYOUT) -> list[Placed]:
+    """What goes on the 64-unit tile, for a tier: "full", "small" (the M and a
+    smaller spark), "tiny" (the same with a bigger spark, for 16 px) or "m"."""
     mw, mh = BLOCK_M_SIZE
-    if not lockup:
-        scale = M_ALONE / mw
-        return [(_block_m_shapes(), scale, (64 - M_ALONE) / 2, (64 - mh * scale) / 2)]
-    shapes, (aw, ah) = MARKS[mark]()
-    m_scale, a_scale = M_WITH / mw, MARK_WIDTH / aw
-    total = mh * m_scale + GAP + ah * a_scale
-    top = (64 - total) / 2
-    return [
-        (_block_m_shapes(), m_scale, (64 - M_WITH) / 2, top),
-        (shapes, a_scale, (64 - MARK_WIDTH) / 2, top + mh * m_scale + GAP),
-    ]
+    alone = M_ALONE / mw
+    m_alone: Placed = (_block_m_shapes(), alone, (64 - M_ALONE) / 2, (64 - mh * alone) / 2, None)
+    if tier == "m" or (layout == "lockup" and tier != "full"):
+        return [m_alone]
+    if layout == "lockup":
+        shapes, (aw, ah) = MARKS[mark]()
+        m_scale, a_scale = M_WITH / mw, MARK_WIDTH / aw
+        total = mh * m_scale + GAP + ah * a_scale
+        top = (64 - total) / 2
+        return [
+            (_block_m_shapes(), m_scale, (64 - M_WITH) / 2, top, None),
+            (shapes, a_scale, (64 - MARK_WIDTH) / 2, top + mh * m_scale + GAP, None),
+        ]
+    spec = STACK[tier]
+    m_scale = spec["m"] / mw
+    placed: list[Placed] = [(_block_m_shapes(), m_scale, (64 - spec["m"]) / 2, spec["top"], None)]
+    if tier == "full":
+        letters, width = _ihs_block()
+        i_scale = spec["ihs"] / width
+        y = spec["top"] + mh * m_scale + spec["gap"]
+        placed.append((letters, i_scale, (64 - spec["ihs"]) / 2, y, None))
+    cx, cy, r = spec["spark"]
+    placed.append(([("spark", cx, cy, r)], 1.0, 0.0, 0.0, HALO))
+    return placed
 
 
-def icon_svg(profile: str, *, mark: str = AI_MARK, lockup: bool = True) -> str:
-    tile, m_colour, a_colour = COLOURS[profile]
+def icon_svg(profile: str, *, tier: str = "full", design: str = DESIGN) -> str:
+    tile, colour = COLOURS[profile]
+    mark, layout = DESIGNS[design]
     title = "DataLab (practice)" if profile == "practice" else "DataLab"
     body = [f'<rect width="64" height="64" rx="{_n(TILE_RADIUS)}" fill="{tile}"/>']
-    for i, (shapes, scale, x, y) in enumerate(_placements(mark, lockup)):
-        colour = m_colour if i == 0 else a_colour
-        body.append(
-            f'<g transform="translate({_n(x)} {_n(y)}) scale({_n(scale)})">'
-            f"{_svg_elements(shapes, colour)}</g>"
-        )
+    for shapes, scale, x, y, halo in _placements(tier, mark=mark, layout=layout):
+        inner = _svg_elements(shapes, colour, halo=(tile, halo) if halo else None)
+        body.append(f'<g transform="translate({_n(x)} {_n(y)}) scale({_n(scale)})">{inner}</g>')
     return (
         '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">\n'
         f"  <title>{title}</title>\n  " + "\n  ".join(body) + "\n</svg>\n"
@@ -283,15 +338,24 @@ def brand_ts(mark: str) -> str:
         else:
             paths.append(f'    {{ d: "{p["d"]}", stroke: {_n(p["stroke"])}, cap: "{p["cap"]}" }},')
     mw, mh = BLOCK_M_SIZE
-    [(_, ts, tx, ty)] = _placements(mark, lockup=False)
+    # The header's tile is 22 px: the 32 px version (the M, and the spark if
+    # the design has one).
+    placed = _placements("small", mark=mark, layout=LAYOUT)
+    _, ts, tx, ty, _ = placed[0]
+    spark = "null"
+    if len(placed) > 1:
+        spark = f'{{ d: "{svg_paths(placed[1][0])[0]["d"]}", halo: {_n(placed[1][4] or 0)} }}'
     return (
         "// Written by branding/build.py: change the geometry there and run it again.\n\n"
         'export type ArtPath = { d: string; stroke?: number; cap?: "butt" | "round" };\n\n'
         "/** The Block M, the University's mark (never altered or merged with another shape). */\n"
         f'export const BLOCK_M = {{ width: {_n(mw)}, height: {_n(mh)}, d: "{m}" }};\n\n'
-        "/** The icon's tile, 64 units square: the Block M alone on it, as in the favicon.\n"
-        " * Real: Maize on Blue; practice: Blue on Maize. */\n"
-        f"export const TILE = {{ radius: {_n(TILE_RADIUS)}, x: {_n(tx)}, y: {_n(ty)}, scale: {_n(ts)} }};\n"
+        "/** The icon's tile as the header draws it, 64 units square (the 32 px icon): the\n"
+        " * Block M and, over its top-right corner, the spark, with an edge knocked out of the\n"
+        " * tile's colour (`halo`). Real: Maize on Blue; practice: Blue on Maize. */\n"
+        "export const TILE: { radius: number; x: number; y: number; scale: number; "
+        "spark: { d: string; halo: number } | null } = "
+        f"{{ radius: {_n(TILE_RADIUS)}, x: {_n(tx)}, y: {_n(ty)}, scale: {_n(ts)}, spark: {spark} }};\n"
         f'export const COLOURS = {{ maize: "{MAIZE}", blue: "{BLUE}" }};\n\n'
         f"/** The IHS + AI mark ({mark!r} in branding/build.py). */\n"
         f"export const IHS_MARK: {{ name: string; width: number; height: number; paths: ArtPath[] }} = {{\n"
@@ -310,6 +374,7 @@ def _paint(
     colour: str,
     at: Callable[[float, float], tuple[float, float]],
     unit: float,
+    halo: tuple[str, float] | None = None,
 ) -> None:
     for shape in shapes:
         kind = shape[0]
@@ -344,22 +409,34 @@ def _paint(
             pen.ellipse((x - r * unit, y - r * unit, x + r * unit, y + r * unit), fill=colour)
         elif kind == "spark":
             _, cx, cy, r = shape
-            pen.polygon([at(x, y) for x, y in _spark_points(cx, cy, r)], fill=colour)
+            points = [at(x, y) for x, y in _spark_points(cx, cy, r)]
+            if halo:  # the knock-out edge: a tile-coloured stroke round it
+                pen.line(
+                    [*points, points[0], points[1]],
+                    fill=halo[0],
+                    joint="curve",
+                    width=max(1, round(2 * halo[1] * unit)),
+                )
+            pen.polygon(points, fill=colour)
 
 
 def draw(
-    profile: str, size: int, *, mac: bool = False, mark: str = AI_MARK, lockup: bool | None = None
+    profile: str,
+    size: int,
+    *,
+    mac: bool = False,
+    design: str = DESIGN,
+    tier_: str | None = None,
 ) -> Image.Image:
     """The icon as a square RGBA bitmap. `mac`: on Apple's icon grid (an
-    824/1024 rounded body, the rest transparent). `lockup`: the IHS mark under
-    the M (by default from LOCKUP_FROM pixels up)."""
-    if lockup is None:
-        lockup = size >= LOCKUP_FROM
+    824/1024 rounded body, the rest transparent). `tier_`: which version (by
+    default the one for `size`)."""
+    mark, layout = DESIGNS[design]
     scale = 4
     big = size * scale
     image = Image.new("RGBA", (big, big), (0, 0, 0, 0))
     pen = ImageDraw.Draw(image)
-    tile, m_colour, a_colour = COLOURS[profile]
+    tile, colour = COLOURS[profile]
     if mac:
         offset, unit, radius = big * 100 / 1024, big * 824 / 1024 / 64, big * 185 / 1024
     else:
@@ -367,12 +444,12 @@ def draw(
     pen.rounded_rectangle(
         (offset, offset, offset + 64 * unit - 1, offset + 64 * unit - 1), radius=radius, fill=tile
     )
-    for i, (shapes, s, x, y) in enumerate(_placements(mark, lockup)):
+    for shapes, s, x, y, halo in _placements(tier_ or tier(size), mark=mark, layout=layout):
 
         def at(u: float, v: float, s: float = s, x: float = x, y: float = y) -> tuple[float, float]:
             return offset + (x + u * s) * unit, offset + (y + v * s) * unit
 
-        _paint(pen, shapes, m_colour if i == 0 else a_colour, at, s * unit)
+        _paint(pen, shapes, colour, at, s * unit, (tile, halo) if halo else None)
     return image.resize((size, size), Image.Resampling.LANCZOS)
 
 
@@ -399,7 +476,7 @@ def icns(profile: str) -> bytes:
                 for factor, name in ((1, ""), (2, "@2x")):
                     # By the size it's seen at (points), so a 16-point icon
                     # on a Retina screen is still the M alone.
-                    image = draw(profile, points * factor, mac=True, lockup=points >= LOCKUP_FROM)
+                    image = draw(profile, points * factor, mac=True, tier_=tier(points))
                     image.save(iconset / f"icon_{points}x{points}{name}.png")
             out = Path(folder) / "DataLab.icns"
             subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(out)], check=True)
@@ -446,17 +523,24 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def preview(mark: str) -> Image.Image:
+def preview(design: str) -> Image.Image:
     """A sheet for choosing the IHS mark: the icons, the mark alone and the
     header, at 16, 32, 64 and 256 pixels, on light and on dark."""
+    mark, layout = DESIGNS[design]
     shapes, size = MARKS[mark]()
-    sizes = (16, 32, 64, 256)
+    # For "stack", both 16 px versions: the M alone, and the M with a spark.
+    sizes: list[tuple[int, str | None]] = [(16, None), (32, None), (64, None), (256, None)]
+    if layout == "stack":
+        sizes[:1] = [(16, "m"), (16, "tiny")]
     row_h, pad = 300, 30
-    sheet = Image.new("RGB", (2060, 2 * row_h + 70), "#ffffff")
+    sheet = Image.new("RGB", (2140, 2 * row_h + 70), "#ffffff")
     pen = ImageDraw.Draw(sheet)
     small, label = _font(15), _font(22)
     pen.text(
-        (pad, 18), f"IHS + AI mark: {mark!r}  (branding/build.py AI_MARK)", fill=BLUE, font=label
+        (pad, 18),
+        f"Design {design!r}: {mark} mark, {layout} icon  (branding/build.py DESIGN)",
+        fill=BLUE,
+        font=label,
     )
     for band, (bg, fg, name) in enumerate(
         ((("#ffffff", BLUE, "light")), ("#161614", MAIZE, "dark"))
@@ -466,14 +550,17 @@ def preview(mark: str) -> Image.Image:
         text = "#5c6b7a" if name == "light" else "#aab4c0"
         x = pad
         for title, make in (
-            ("app icon", lambda s: draw("real", s, mark=mark)),
-            ("practice", lambda s: draw("practice", s, mark=mark)),
-            ("mark alone", lambda s, fg=fg: draw_art(shapes, size, fg, max(8, round(s * 0.5)))),
+            ("app icon", lambda s, t: draw("real", s, design=design, tier_=t)),
+            ("practice", lambda s, t: draw("practice", s, design=design, tier_=t)),
+            (
+                "mark alone",
+                lambda s, t, fg=fg: draw_art(shapes, size, fg, max(8, round(s * 0.5))),
+            ),
         ):
             pen.text((x, top + 12), title, fill=text, font=small)
             cx = x
-            for s in sizes:
-                image = make(s)
+            for s, t in sizes if title != "mark alone" else sizes[-4:]:
+                image = make(s, t)
                 y = top + 40 + (256 - image.height) // 2 if s == 256 else top + 40
                 sheet.paste(image, (cx, y), image)
                 if s == 16:  # and the 16 enlarged, to see its pixels
@@ -489,7 +576,7 @@ def preview(mark: str) -> Image.Image:
         hx, hy = x, top + 40
         pen.text((hx, top + 12), "header (2x)", fill=text, font=small)
         pen.rectangle((hx, hy, hx + 360, hy + 84), fill=bg, outline=text)
-        tile = draw("real", 44, lockup=False)
+        tile = draw("real", 44, design=design, tier_="small")
         sheet.paste(tile, (hx + 20, hy + 20), tile)
         a = draw_art(shapes, size, fg, 22)
         sheet.paste(a, (hx + 20 + 44 + 14, hy + 31), a)
@@ -509,14 +596,15 @@ def main() -> None:
     args = parser.parse_args()
     if args.options:
         args.options.mkdir(parents=True, exist_ok=True)
-        for n, name in enumerate(MARKS, start=1):
+        for design, (name, _) in DESIGNS.items():
+            stem = f"option{design}-{name}" if design != "1b" else "option1b"
             shapes, size = MARKS[name]()
-            (args.options / f"option{n}-{name}.svg").write_text(
+            (args.options / f"{stem}.svg").write_text(
                 mark_svg(shapes, size, BLUE, f"IHS mark: {name}")
             )
-            (args.options / f"option{n}-{name}-icon.svg").write_text(icon_svg("real", mark=name))
-            preview(name).save(args.options / f"option{n}-{name}-preview.png")
-            print(f"wrote {args.options}/option{n}-{name}*")
+            (args.options / f"{stem}-icon.svg").write_text(icon_svg("real", design=design))
+            preview(design).save(args.options / f"{stem}-preview.png")
+            print(f"wrote {args.options}/{stem}*")
         return
     PUBLIC.mkdir(parents=True, exist_ok=True)
     PACKAGE.mkdir(parents=True, exist_ok=True)
@@ -531,9 +619,10 @@ def main() -> None:
     for profile in ("real", "practice"):
         suffix = "-practice" if profile == "practice" else ""
         written[REPO / "branding" / f"datalab-mark{suffix}.svg"] = icon_svg(profile).encode()
-        # The favicon is the Block M alone: it reads at 16 pixels, and the
-        # same in a light or dark browser (it brings its own Blue).
-        written[PUBLIC / f"favicon{suffix}.svg"] = icon_svg(profile, lockup=False).encode()
+        # The favicon SVG is the Block M alone: a tab draws it at 16 px, where
+        # the spark doesn't read. The same in a light or dark browser (it
+        # brings its own tile). The 32 px PNG has the spark.
+        written[PUBLIC / f"favicon{suffix}.svg"] = icon_svg(profile, tier="m").encode()
         written[PUBLIC / f"favicon{suffix}-32.png"] = png(draw(profile, 32))
         written[PUBLIC / f"apple-touch-icon{suffix}.png"] = png(draw(profile, 180))
         written[REPO / "branding" / f"datalab-mark{suffix}-1024.png"] = png(

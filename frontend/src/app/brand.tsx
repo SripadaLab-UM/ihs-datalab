@@ -2,16 +2,27 @@ import { useEffect } from "react";
 
 import { type ArtPath, BLOCK_M, COLOURS, IHS_MARK, TILE } from "./brandArt";
 
-/** The Block M, U-M's mark, on the icon's tile: Maize on Blue, and on
- * practice Blue on Maize, as its icons are. Never altered or merged with
- * another shape (the IHS mark sits beside it). The geometry is
- * branding/build.py's, which makes the favicons and app icons. */
+/** The icon's tile, as the 32 px icon: U-M's Block M with the AI spark over
+ * its top-right corner, Maize on Blue, and on practice Blue on Maize, as its
+ * icons are. The geometry is branding/build.py's, which makes the favicons
+ * and app icons. */
 export function BrandMark({ practice = false, size = 22 }: { practice?: boolean; size?: number }) {
   const [tile, m] = practice ? [COLOURS.maize, COLOURS.blue] : [COLOURS.blue, COLOURS.maize];
   return (
     <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" className="shrink-0">
       <rect width="64" height="64" rx={TILE.radius} fill={tile} />
       <path d={BLOCK_M.d} fill={m} transform={`translate(${TILE.x} ${TILE.y}) scale(${TILE.scale})`} />
+      {TILE.spark && (
+        // The AI spark over the M's top-right corner, edged in the tile's colour.
+        <path
+          d={TILE.spark.d}
+          fill={m}
+          stroke={tile}
+          strokeWidth={2 * TILE.spark.halo}
+          strokeLinejoin="round"
+          paintOrder="stroke"
+        />
+      )}
     </svg>
   );
 }

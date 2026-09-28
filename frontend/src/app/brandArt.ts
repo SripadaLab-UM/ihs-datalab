@@ -5,9 +5,10 @@ export type ArtPath = { d: string; stroke?: number; cap?: "butt" | "round" };
 /** The Block M, the University's mark (never altered or merged with another shape). */
 export const BLOCK_M = { width: 132, height: 104, d: "M0 0 46 0 66 52 86 0 132 0 132 24 119 24 119 82 132 82 132 104 81 104 81 82 92 82 92 30.5 72.5 82 59.5 82 40 30.5 40 82 51 82 51 104 0 104 0 82 13 82 13 24 0 24Z" };
 
-/** The icon's tile, 64 units square: the Block M alone on it, as in the favicon.
- * Real: Maize on Blue; practice: Blue on Maize. */
-export const TILE = { radius: 12, x: 10, y: 14.667, scale: 0.333 };
+/** The icon's tile as the header draws it, 64 units square (the 32 px icon): the
+ * Block M and, over its top-right corner, the spark, with an edge knocked out of the
+ * tile's colour (`halo`). Real: Maize on Blue; practice: Blue on Maize. */
+export const TILE: { radius: number; x: number; y: number; scale: number; spark: { d: string; halo: number } | null } = { radius: 12, x: 12, y: 19.5, scale: 0.303, spark: { d: "M49.5 9.5Q50.76 18.74 60 20Q50.76 21.26 49.5 30.5Q48.24 21.26 39 20Q48.24 18.74 49.5 9.5Z", halo: 2.2 } };
 export const COLOURS = { maize: "#FFCB05", blue: "#00274C" };
 
 /** The IHS + AI mark ('spark' in branding/build.py). */
