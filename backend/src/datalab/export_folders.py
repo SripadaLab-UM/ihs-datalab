@@ -134,6 +134,9 @@ class Target:
     path: Path
     sync_provider: Provider | None
     identity: exports.Identity | None = None
+    # What it was checked against, to check again once open (None: practice's
+    # own folder, which is inside DataLab's data folder).
+    protected: tuple[Path, ...] | None = None
 
 
 # Finding sync folders ------------------------------------------------------
@@ -360,9 +363,13 @@ def usable(settings: Settings, destination: Destination) -> bool:
 
 
 def open_target(target: Target) -> exports.Folder:
-    """Open a checked folder for writing: the very folder that was checked, or
-    ExportError. Write through it (exports.export takes it), never by path."""
-    return exports.Folder.at(target.path, expected=target.identity)
+    """Open a checked folder for writing: the very folder that was checked, and
+    still passing its checks once open, or ExportError. Write through it
+    (exports.export takes it), never by path."""
+    folder = exports.Folder.at(target.path, expected=target.identity)
+    if target.protected is not None:
+        _still_checked(folder, list(target.protected))
+    return folder
 
 
 def check_new_folder(chosen: Path, *, protected: list[Path]) -> Path:
@@ -468,6 +475,8 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
     body = TEST_TEXT.encode()
     try:
         folder = exports.Folder.at(path, expected=expected)
+        if not skip_checks:
+            _still_checked(folder, protected)
     except ExportError as error:
         return WriteTest(False, "refused", str(error), None, True)
     with folder:
@@ -483,36 +492,55 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
                 name,
                 True,
             )
+        # The test file stays open until it's removed: while it's open its
+        # inode can't be reused, so a file put in its place can't pass for it.
         try:
-            os.write(fd, body)
-            os.fsync(fd)
-            os.lseek(fd, 0, os.SEEK_SET)
-            back = b""
-            while chunk := os.read(fd, 65536):
-                back += chunk
-            same = back == body
-            failure = "The file DataLab saved didn't read back the same."
-            mine = exports.identity(os.fstat(fd))
-        except OSError as error:
-            same = False
-            failure = f"DataLab couldn't finish saving a file here: {error.strerror}."
-            mine = exports.identity(os.fstat(fd))
+            try:
+                os.write(fd, body)
+                os.fsync(fd)
+                os.lseek(fd, 0, os.SEEK_SET)
+                back = b""
+                while chunk := os.read(fd, 65536):
+                    back += chunk
+                same = back == body
+                failure = "The file DataLab saved didn't read back the same."
+            except OSError as error:
+                same = False
+                failure = f"DataLab couldn't finish saving a file here: {error.strerror}."
+            mine = _fingerprint(os.fstat(fd))
+            removed = True
+            try:
+                there = folder.lstat(name)
+                if stat.S_ISREG(there.st_mode) and _fingerprint(there) == mine:
+                    folder.unlink(name)
+                else:
+                    removed = False  # something else is there now: leave it alone
+            except FileNotFoundError:
+                pass
+            except (OSError, ExportError):
+                removed = False
         finally:
             os.close(fd)
-        removed = True
-        try:
-            there = folder.lstat(name)
-            if stat.S_ISREG(there.st_mode) and exports.identity(there) == mine:
-                folder.unlink(name)
-            else:
-                removed = False  # something else is there now: leave it alone
-        except FileNotFoundError:
-            pass
-        except (OSError, ExportError):
-            removed = False
     if not same:
         return WriteTest(False, "not_writable", failure, name, removed)
     return WriteTest(True, "ready", None, name, removed)
+
+
+def _fingerprint(info: os.stat_result) -> tuple[int, ...]:
+    """A file as it is now: which file, and its size and last change."""
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _still_checked(folder: exports.Folder, protected: list[Path]) -> None:
+    """Check the folder's path again now that it's open: it must still pass,
+    and still be the folder that's open. (A folder deleted and made again can
+    get the same inode number, so matching the first check isn't enough.)
+    Anything that changes after this can't redirect writes made through
+    `folder`. Closes it and raises ExportError if not."""
+    again = check_folder(folder.path, protected=protected)
+    if not again.ready or again.identity != folder.identity:
+        folder.close()
+        raise ExportError(exports.FOLDER_CHANGED)
 
 
 _CANT_WRITE = (

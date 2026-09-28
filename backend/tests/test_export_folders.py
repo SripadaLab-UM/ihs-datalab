@@ -372,7 +372,13 @@ def no_sync_words(response) -> None:
 def test_adding_naming_testing_and_removing_a_dropbox_folder(
     real_settings, catalog, home, monkeypatch
 ):
-    dropbox = cloud(home, "Dropbox-UniversityofMichigan")
+    # Where the Dropbox app keeps its folder: ~/Library/CloudStorage on a Mac,
+    # the home folder elsewhere.
+    if sys.platform == "darwin":
+        dropbox, where = cloud(home, "Dropbox-UniversityofMichigan"), "~/Library/CloudStorage/"
+    else:
+        dropbox, where = home / "Dropbox (UniversityofMichigan)", "~/"
+        dropbox.mkdir()
     folder = dropbox / "IHS exports"
     folder.mkdir()
     (folder / "earlier.csv").write_text("an earlier export")
@@ -389,7 +395,7 @@ def test_adding_naming_testing_and_removing_a_dropbox_folder(
         assert places["can_add"] is True
         [place] = places["places"]
         assert place["provider"] == "dropbox" and place["label"] == "Dropbox (UniversityofMichigan)"
-        assert place["where"] == "~/Library/CloudStorage/Dropbox-UniversityofMichigan"
+        assert place["where"] == where + dropbox.name
 
         added = client.post(
             "/api/export-destinations", json={"name": "Lab Dropbox", "start_in": place["id"]}
@@ -762,3 +768,25 @@ def test_junction_like_folders_are_links_everywhere(home, monkeypatch):
         root.child("weekly")
     with pytest.raises(exports.ExportError):
         exports.Folder.at(folder / "weekly")
+
+
+def test_a_folder_swapped_as_it_is_opened_is_refused(by_fd, home, tmp_path, monkeypatch):
+    """Checked again once open: a swap between the check and the open (even
+    one that reuses the inode number, as Linux does) doesn't get through."""
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    fake_data = tmp_path / "fake-datalab-data"
+    fake_data.mkdir()
+    checked = check_folder(folder, protected=[fake_data])
+    target = Target("d", "Lab", folder, "dropbox", checked.identity, (fake_data,))
+    real_at = exports.Folder.at.__func__  # type: ignore[attr-defined]
+
+    def open_then_swap(cls, path, expected=None):
+        opened = real_at(cls, path, expected)
+        swap_for_link(folder, fake_data)
+        return opened
+
+    monkeypatch.setattr(exports.Folder, "at", classmethod(open_then_swap))
+    with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
+        export_folders.open_target(target)
+    assert list(fake_data.iterdir()) == []
