@@ -125,6 +125,14 @@ describe("the review's verdict on traced claims", () => {
     }
   });
 
+  it("reads the whole point, not only its first line (from the re-review)", () => {
+    expect(reviewTraceVerdict("1. Traced claims: Holds.\n   - Except the 12.4% mean, which I computed by hand.\n2. Plan: Holds.")).toBe("flags");
+    expect(reviewTraceVerdict("1. **Traced claims:** Yes.\n   However, 3.1 was typed from memory.\n\n2. **Plan:** Holds.")).toBe("flags");
+    // The next point's own words don't count.
+    expect(reviewTraceVerdict("1. Traced claims: Holds.\n2. Plan: not followed.")).toBe("clean");
+    expect(reviewTraceVerdict("1. Traced claims: Holds.\n\nThe plan was not followed.")).toBe("clean");
+  });
+
   it("is unknown when it can't be read either way", () => {
     expect(reviewTraceVerdict(point("Holds? No — 12.4 has no source.").replace("Traced claims", "Plan"))).toBe("unknown");
     expect(reviewTraceVerdict(point("See point 6."))).toBe("unknown");

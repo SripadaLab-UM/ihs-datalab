@@ -86,11 +86,22 @@ export function failures(rows: Row[]): Failure[] {
 
 /** The review's point on traced claims as it wrote it, without the label or markup; "" if it has none. */
 export function reviewTraceLine(text: string): string {
-  const line = text.split("\n").find((l) => /traced claims/i.test(l));
-  if (!line) return "";
-  return line
+  // The whole point, not only its first line: an exception is often on the
+  // next line ("Holds.\n  - Except the 12.4% mean…"). A point ends where the
+  // next one starts (a number, a heading or a bold label) or at a blank line.
+  const lines = text.split("\n");
+  const start = lines.findIndex((l) => /traced claims/i.test(l));
+  if (start < 0) return "";
+  const point = [lines[start]];
+  for (const l of lines.slice(start + 1)) {
+    if (!l.trim() || /^\s*(\d+[.)]|#{1,6}\s|\*\*[A-Z])/.test(l)) break;
+    point.push(l.replace(/^\s*[-*•]\s*/, ""));
+  }
+  return point
+    .join(" ")
     .replace(/\*\*|__|`/g, "")
     .replace(/^.*?traced claims\s*[:\-–—]?\s*/i, "")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -104,7 +115,7 @@ export function reviewTraceVerdict(text: string): "clean" | "flags" | "unknown" 
   const line = reviewTraceLine(text).toLowerCase();
   if (!line) return "unknown";
   if (/^(holds|yes)\.?$|^no untraced numbers\.?$|^(holds|yes)\s*[.;:,—–-]\s*no untraced numbers\.?$/.test(line)) return "clean";
-  if (/untraced|not|n['’]t|cannot|unclear|apart|other than|otherwise|except|but|\b(no|mostly|partly|partially)\b/.test(line)) return "flags";
+  if (/untraced|not|n['’]t|cannot|unclear|apart|other than|otherwise|except|but|however|although|though|\b(no|mostly|partly|partially)\b/.test(line)) return "flags";
   return "unknown";
 }
 
