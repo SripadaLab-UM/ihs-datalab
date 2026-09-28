@@ -494,6 +494,9 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
             )
         # The test file stays open until it's removed: while it's open its
         # inode can't be reused, so a file put in its place can't pass for it.
+        # (Windows can't remove an open file; NTFS doesn't reuse a file's id at
+        # once, so there it's closed first.)
+        open_fd: int | None = fd
         try:
             try:
                 os.write(fd, body)
@@ -508,6 +511,9 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
                 same = False
                 failure = f"DataLab couldn't finish saving a file here: {error.strerror}."
             mine = _fingerprint(os.fstat(fd))
+            if sys.platform == "win32":
+                os.close(fd)
+                open_fd = None
             removed = True
             try:
                 there = folder.lstat(name)
@@ -520,7 +526,8 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
             except (OSError, ExportError):
                 removed = False
         finally:
-            os.close(fd)
+            if open_fd is not None:
+                os.close(open_fd)
     if not same:
         return WriteTest(False, "not_writable", failure, name, removed)
     return WriteTest(True, "ready", None, name, removed)
