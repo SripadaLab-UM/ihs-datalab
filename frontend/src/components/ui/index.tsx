@@ -203,7 +203,10 @@ export function Tabs<T extends string>({
   onChange: (id: T) => void;
 }) {
   return (
-    <div role="tablist" className="flex gap-4 overflow-x-auto border-b border-line px-4">
+    // The divider is an inset shadow the selected tab's underline covers, not a
+    // border it overlaps by 1px: that 1px made the row scroll vertically, and
+    // Windows shows a scrollbar for it.
+    <div role="tablist" className="flex gap-4 overflow-x-auto overflow-y-hidden px-4 shadow-[inset_0_-1px_0_var(--color-line)]">
       {tabs.map((tab) => (
         <button
           key={tab.id}
@@ -211,7 +214,7 @@ export function Tabs<T extends string>({
           aria-selected={tab.id === value}
           onClick={() => onChange(tab.id)}
           className={clsx(
-            "-mb-px border-b-2 py-2.5 font-sans text-[13px]",
+            "shrink-0 border-b-2 py-2.5 font-sans text-[13px]",
             tab.id === value ? "border-ink font-medium text-ink" : "border-transparent text-muted hover:text-ink",
           )}
         >
