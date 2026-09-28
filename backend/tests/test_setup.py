@@ -227,7 +227,7 @@ def test_no_key_entered_says_conversations_need_one_and_how_to_add_it(
     workflows don't need it), but it mustn't look like everything is set up."""
     monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "practice"))
     monkeypatch.setattr(installing, "model_api_key", credentials.model_api_key)  # none saved
-    monkeypatch.setattr(installing.getpass, "getpass", lambda prompt: "")
+    monkeypatch.setattr(secret_prompt.getpass, "getpass", lambda prompt: "")
 
     assert installing.setup("practice", None, update=False) == 0
     said = capsys.readouterr().out
