@@ -25,6 +25,8 @@ const hrefs = () => [...document.querySelectorAll("link[data-brand]")].map((link
 it("shows the name, and leaves the real DataLab's tab as it is", () => {
   render(<Tab practice={false} />);
   expect(screen.getByTestId("brand")).toHaveTextContent(/^DataLab$/);
+  // Only the mark on narrow windows, so the tabs fit.
+  expect(screen.getByText("DataLab")).toHaveClass("hidden", "lg:inline");
   expect(hrefs()).toEqual(["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"]);
   expect(document.title).toBe("DataLab");
 });

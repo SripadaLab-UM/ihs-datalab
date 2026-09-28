@@ -1311,13 +1311,25 @@ if (Test-Path -LiteralPath $PackagedIcon -PathType Leaf) {
 }
 # The same entry in the Start menu and on the Desktop. Both run bin\datalab.cmd,
 # never a version's own folder, so they keep working after an update.
+$QuotedShim = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab)
 $Desktop = [Environment]::GetFolderPath("Desktop")
 $Links = @(Join-Path $StartMenu "$LinkName.lnk")
-if ($Desktop) { $Links += Join-Path $Desktop "$LinkName.lnk" }
+if ($Desktop) {
+    # A Desktop shortcut of that name is replaced only if it's DataLab's (it
+    # runs this bin\datalab.cmd); anything else there is the person's own.
+    $DesktopLink = Join-Path $Desktop "$LinkName.lnk"
+    $Existing = if (Test-Path -LiteralPath $DesktopLink) { (New-Object -ComObject WScript.Shell).CreateShortcut($DesktopLink) } else { $null }
+    if ($Existing -and "$($Existing.Arguments)".IndexOf("'$QuotedShim'", [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        Note "Your Desktop already has a shortcut called $LinkName that isn't DataLab's; it was left alone."
+        $Desktop = ""
+    } else {
+        $Links += $DesktopLink
+    }
+}
 foreach ($path in $Links) {
     $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
     $Shortcut.TargetPath = $WindowsPowerShell
-    $Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$([System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab))' --profile $DataLabProfile serve`""
+    $Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$QuotedShim' --profile $DataLabProfile serve`""
     $Shortcut.Description = if ($Practice) { "IHS DataLab (practice: synthetic data only)" } else { "IHS DataLab" }
     if (Test-Path -LiteralPath $Icon -PathType Leaf) { $Shortcut.IconLocation = "$Icon,0" }
     $Shortcut.Save()

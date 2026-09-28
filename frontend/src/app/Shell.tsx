@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
 import { Brand, usePracticeTab } from "@/app/brand";
@@ -17,7 +17,8 @@ const TABS = [
   { to: "/workflows", label: "Workflows" },
   { to: "/pipelines", label: "Pipelines" },
   { to: "/knowledge", label: "Knowledge" },
-  { to: "/settings", label: "Settings & Safety" },
+  // "Settings" on narrower windows, so every tab fits.
+  { to: "/settings", label: "Settings & Safety", short: "Settings" },
 ];
 
 export function Shell() {
@@ -25,6 +26,15 @@ export function Shell() {
   const practice = health.data?.profile === "practice";
   usePracticeTab(practice);
   const [signedOut, setSignedOut] = useState(false);
+  // On a narrow window the tabs scroll: keep the one you're on in view.
+  const nav = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    nav.current?.querySelector<HTMLElement>('[aria-current="page"]')?.scrollIntoView?.({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [pathname]);
   useEffect(() => {
     const onSignedOut = () => {
       setSignedOut(true);
@@ -42,9 +52,9 @@ export function Shell() {
         </div>
       )}
       <UpdatingBanner />
-      <header className="flex items-center gap-8 border-b border-line px-5">
+      <header className="flex items-center gap-4 border-b border-line px-5 lg:gap-8">
         <Brand practice={practice} />
-        <nav className="flex gap-1 self-stretch overflow-x-auto">
+        <nav ref={nav} className="flex min-w-0 gap-1 self-stretch overflow-x-auto">
           {TABS.map((tab) => (
             <NavLink
               key={tab.to}
@@ -56,11 +66,18 @@ export function Shell() {
                 )
               }
             >
-              {tab.label}
+              {tab.short ? (
+                <>
+                  <span className="xl:hidden">{tab.short}</span>
+                  <span className="hidden xl:inline">{tab.label}</span>
+                </>
+              ) : (
+                tab.label
+              )}
             </NavLink>
           ))}
         </nav>
-        {/* The pill, the practice badge and Help sit together at the right,
+        {/* The pill, GitHub, the practice badge and Help sit together at the right,
             closer to each other than to the tabs. */}
         <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
           <UpdatePill />
@@ -70,7 +87,7 @@ export function Shell() {
               className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
               title="The practice profile: synthetic data only, never the real study database"
             >
-              practice · synthetic data
+              practice<span className="hidden lg:inline"> · synthetic data</span>
             </span>
           )}
           <HelpLink />

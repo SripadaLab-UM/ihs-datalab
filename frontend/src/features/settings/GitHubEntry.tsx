@@ -36,7 +36,7 @@ export function GitHubEntry() {
       aria-label={signedIn ? `GitHub: signed in as ${login}` : "Sign in to GitHub"}
       title={
         signedIn
-          ? `Signed in to GitHub as ${github.account?.name || login}. See the lab repos' access in Settings → Connections.`
+          ? `Signed in to GitHub as ${login}${github.account?.name ? ` (${github.account.name})` : ""}. See the lab repos' access in Settings → Connections.`
           : "Not signed in to GitHub: the lab's knowledge base and pipelines can't sync. Sign in in Settings → Connections."
       }
       className={clsx(
@@ -45,7 +45,12 @@ export function GitHubEntry() {
       )}
     >
       <GitHubMark />
-      {signedIn ? <span className="max-w-[10rem] truncate font-mono text-[12.5px]">{login}</span> : "Sign in"}
+      {/* Below xl only the mark, so the tabs fit; the tooltip names the login. */}
+      {signedIn ? (
+        <span className="hidden max-w-[10rem] truncate font-mono text-[12.5px] xl:inline">{login}</span>
+      ) : (
+        <span className="hidden xl:inline">Sign in</span>
+      )}
     </Link>
   );
 }

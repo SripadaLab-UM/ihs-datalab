@@ -175,14 +175,20 @@ foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
     $Link = Join-Path $StartMenu $name
     if (Test-Path -LiteralPath $Link) { Remove-Item -LiteralPath $Link }
 }
-# The Desktop shortcuts, only if they're DataLab's (they run bin\datalab.cmd).
+# The Desktop shortcuts, only if they're DataLab's: they run this DataLab's
+# bin\datalab.cmd, written as install.ps1 writes it.
+$QuotedShim = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($Shim)
 $Desktop = [Environment]::GetFolderPath("Desktop")
 if ($Desktop) {
     foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
         $Link = Join-Path $Desktop $name
         if (-not (Test-Path -LiteralPath $Link -PathType Leaf)) { continue }
         $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($Link)
-        if ("$($Shortcut.Arguments)" -like "*\bin\datalab.cmd*") { Remove-Item -LiteralPath $Link }
+        if ("$($Shortcut.Arguments)".IndexOf("'$QuotedShim'", [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            Remove-Item -LiteralPath $Link
+        } else {
+            Write-Host "   (Left $Link on your Desktop: it isn't DataLab's.)"
+        }
     }
 }
 Write-Host "DataLab has been removed."
