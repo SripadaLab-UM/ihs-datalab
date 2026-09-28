@@ -123,6 +123,8 @@ it("opens what holds a page followed from a link in another page", async () => {
   expect(expanded("Data sources, 8 pages")).toBe("true");
   expect(item("IHS_2031.RINGSLEEP").getAttribute("aria-selected")).toBe("true");
   expect(item("nap_window").getAttribute("aria-selected")).toBe("false");
+  // A summary that names the page first says only the rest.
+  expect(rowOf("IHS_2031.RINGSLEEP").textContent).toBe("IHS_2031.RINGSLEEPRing sleep table.");
 });
 
 it("keeps the person's own choices while moving between pages, and across reloads", async () => {

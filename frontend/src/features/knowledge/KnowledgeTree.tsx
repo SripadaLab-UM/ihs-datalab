@@ -164,6 +164,8 @@ export function KnowledgeTree({
       const isSelected = n.entry ? n.entry.path === selected : undefined;
       const context = found && n.entry && !found.hits.has(n.id); // shown only to place a match
       const status = n.entry?.status && n.entry.status !== "reviewed" ? n.entry.status : null;
+      // A summary that starts by naming the page ("IHS_2025.X: Fitbit table…") without the name again.
+      const summary = n.entry?.summary.startsWith(`${n.label}: `) ? n.entry.summary.slice(n.label.length + 2) : n.entry?.summary;
       const name = n.entry ? [n.label, status].filter(Boolean).join(", ") : `${n.label}, ${n.count} ${n.count === 1 ? "page" : "pages"}`;
       return (
         <li
@@ -233,7 +235,7 @@ export function KnowledgeTree({
                 {hasChildren && <span className="shrink-0 font-sans text-[11.5px] text-faint tabular">· {n.count}</span>}
                 {status && <Chip tone={statusTone(status)}>{status}</Chip>}
               </span>
-              {n.entry?.summary && !context && <span className="truncate font-sans text-[11.5px] leading-snug text-muted">{n.entry.summary}</span>}
+              {summary && !context && <span className="truncate font-sans text-[11.5px] leading-snug text-muted">{summary}</span>}
             </span>
           </div>
           {open && (

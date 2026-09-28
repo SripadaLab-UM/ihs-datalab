@@ -23,6 +23,7 @@ export const FIXTURE: KbEntry[] = [
   entry("tables/IHS_2031.RINGSLEEP.md", "page", "IHS_2031.RINGSLEEP", {
     related: ["sources/ring.md"],
     cohorts: ["2031"],
+    summary: "IHS_2031.RINGSLEEP: Ring sleep table.",
   }),
   entry("tables/IHS_2031.LOOKUP.md", "page", "IHS_2031.LOOKUP"),
   entry("features/nap_minutes.md", "page", "nap_minutes", {
