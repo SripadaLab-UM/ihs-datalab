@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from datalab import __version__, credentials, db, setup, updates
+from datalab import __version__, credentials, db, release_keys, setup, updates
 from datalab.api.settings import SettingsServices, build_settings_router
 from datalab.config import OracleSettings, Settings
 from datalab.data.access_log import AccessLog
@@ -637,8 +637,9 @@ def test_updates_show_the_version_marker_recovery_and_backups(settings, keychain
     updates.begin(h.root, settings.database_file, from_version=__version__, to_version="0.3.0")
     shown = h.client.get("/api/settings/updates").json()
     assert shown["version"] == __version__
-    # This package pins no release key yet (release_keys.py): updates aren't set up.
-    assert shown["check"]["state"] == "not-configured"
+    # Nothing has been checked yet; with no pinned release key, updates aren't set up.
+    expected = "not-checked" if release_keys.trusted_keys() else "not-configured"
+    assert shown["check"]["state"] == expected
     assert shown["check"]["current_version"] == __version__
     assert shown["check"]["available"] is None and shown["check"]["can_install"] is False
     assert shown["check"]["install"]["state"] == "idle"
