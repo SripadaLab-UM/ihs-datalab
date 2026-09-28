@@ -56,6 +56,7 @@ from datalab.sessions.checkpoints import Entry
 from datalab.sessions.hooks import TurnInfo
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import Conversation, ConversationStore
+from datalab.textcheck import lone_surrogate, size_text
 
 log = logging.getLogger(__name__)
 
@@ -427,7 +428,7 @@ class Knowledge:
                     log.warning("couldn't sync the knowledge base before copying it: %s", error)
             head = self.clone.remote_head()
             if head is None:
-                (staging / "README.md").write_text(UNAVAILABLE_NOTE)
+                (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
                 return None
             self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
         return head
@@ -626,6 +627,8 @@ class Knowledge:
         with self._lock(proposal.conversation_id):
             proposal = self._actionable(proposal_id)
             paths = {c.path for c in proposal.files}
+            if any(lone_surrogate(p) is not None for p in {*files, *reset}):
+                raise NotActionable("A file name in the edits has a character that isn't text.")
             unknown = sorted(p for p in {*files, *reset} if p not in paths)
             if unknown:
                 raise NotActionable(f"Not in this proposal: {', '.join(unknown)}.")
@@ -639,9 +642,11 @@ class Knowledge:
                 edits["files"].pop(path, None)
                 edits["resolutions"].pop(path, None)
             for path, text in files.items():
+                if text is not None and (not_text := lone_surrogate(text)) is not None:
+                    raise NotActionable(f"{path}, line {not_text.line}: {not_text.message}")
                 if text is not None and ("\0" in text or len(text.encode()) > kb.size_limit(path)):
                     raise NotActionable(
-                        f"{path} must be text under {kb.size_limit(path) // 1024} KB."
+                        f"{path} must be text under {size_text(kb.size_limit(path))}."
                     )
                 if proposal.status == "conflict" and path in conflicts and text is not None:
                     edits["resolutions"][path] = text

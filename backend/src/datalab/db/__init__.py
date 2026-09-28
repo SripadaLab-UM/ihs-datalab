@@ -74,7 +74,7 @@ def migrate(connection: sqlite3.Connection, *, app_version: str | None = None) -
         # has to be part of the script for a migration to apply all-or-nothing.
         name = migration.name.replace("'", "''")
         script = (
-            f"BEGIN;\n{migration.read_text()}\n"
+            f"BEGIN;\n{migration.read_text(encoding='utf-8')}\n"
             f"INSERT INTO schema_migrations VALUES ('{name}', datetime('now'));\nCOMMIT;"
         )
         try:

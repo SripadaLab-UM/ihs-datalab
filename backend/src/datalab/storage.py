@@ -75,6 +75,7 @@ _KNOWN = {
 }
 _OTHER_LABELS = {
     "repos": "The lab's repos (knowledge base and pipelines)",
+    "catalog": "The database catalog: tables and columns, metadata only",
     "workflow-cache": "Built R packages for workflows",
     "workflows-local": "Workflow files on this computer",
     "settings.toml": "Settings",

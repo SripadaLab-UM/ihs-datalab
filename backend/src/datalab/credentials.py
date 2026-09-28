@@ -11,7 +11,7 @@ import os
 import keyring
 from keyring.errors import KeyringError
 
-from datalab.config import OracleSettings
+from datalab.config import PRACTICE_ORACLE, OracleSettings
 
 MODEL_KEY_SERVICE = "datalab-umgpt"
 MODEL_KEY_ACCOUNT = "api-key"
@@ -48,9 +48,12 @@ def oracle_password(oracle: OracleSettings) -> str:
         oracle.keychain_service, oracle.user
     )
     if not password:
-        raise MissingCredential(
-            f"No database password saved for {oracle.user}. Add it in Settings → Connections."
+        where = (
+            "Run: datalab --profile practice setup"
+            if oracle is PRACTICE_ORACLE
+            else "Add it in Settings → Connections."
         )
+        raise MissingCredential(f"No database password saved for {oracle.user}. {where}")
     return password
 
 

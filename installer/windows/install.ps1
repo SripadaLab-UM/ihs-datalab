@@ -349,23 +349,27 @@ function Save-Download($url, $sha256, $publisher, $file) {
     Say "Checked: SHA-256 and signature ($signedBy)"
 }
 
-# The organisation (O=) a certificate was issued to, exactly as written in it.
-# A value with a comma in it ("OpenAI OpCo, LLC") may come back quoted, as
-# O="OpenAI OpCo, LLC" (with any quote inside doubled): that's unquoted, so
-# the comparison stays exact.
+# The organisation (O=) a certificate was issued to, exactly as written in it,
+# or "" (which never matches a publisher). A value with a comma in it
+# ("OpenAI OpCo, LLC") may come back quoted, as O="OpenAI OpCo, LLC" (with any
+# quote inside doubled): that's unquoted, so the comparison stays exact.
+# Refused ("") unless every line is "KEY=value" and exactly one is O=: a value
+# with a line break in it (say, a CN of "x<newline>O=Docker Inc") would
+# otherwise read as a line of its own.
 function Get-Organisation($certificate) {
     if (-not $certificate) { return "" }
-    $name = $certificate.SubjectName.Format($true)  # one "KEY=value" per line
+    $name = $certificate.SubjectName.Format($true).TrimEnd("`r", "`n")  # one "KEY=value" per line
+    $found = @()
     foreach ($line in $name -split "\r?\n") {
-        if ($line -match '^\s*O=(.*)$') {
-            $value = $Matches[1].Trim()
-            if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
-                $value = $value.Substring(1, $value.Length - 2).Replace('""', '"')
-            }
-            return $value
-        }
+        if ($line -notmatch '^\s*[A-Za-z][A-Za-z0-9.]*=') { return "" }
+        if ($line -match '^\s*O=(.*)$') { $found += $Matches[1].Trim() }
     }
-    return ""
+    if ($found.Count -ne 1) { return "" }
+    $value = $found[0]
+    if ($value.Length -ge 2 -and $value.StartsWith('"') -and $value.EndsWith('"')) {
+        $value = $value.Substring(1, $value.Length - 2).Replace('""', '"')
+    }
+    return $value
 }
 
 # The SHA-256 of some bytes, written the same way as in the command that starts
@@ -699,10 +703,12 @@ function Unregister-Resume {
 # its SHA-256 and uv.exe for its publisher's signature before it's used. A
 # uv already there is used only if it's that version and still signed.
 function Install-PinnedUv {
+    # The version, the zip's SHA-256, and uv.exe's own SHA-256 when it was
+    # unpacked: a copy is reused only if it's still exactly that file.
     $marker = Join-Path $UvDir "datalab-pinned.txt"
     $want = "$UvVersion $UvZipSha256"
-    if ((Test-Path -LiteralPath $Uv) -and (Test-Path -LiteralPath $marker) -and
-        ((Get-Content -LiteralPath $marker -TotalCount 1) -eq $want)) {
+    $recorded = if (Test-Path -LiteralPath $marker) { "$(Get-Content -LiteralPath $marker -TotalCount 1)".Trim() } else { "" }
+    if ((Test-Path -LiteralPath $Uv) -and $recorded -eq "$want $((Get-FileHash -LiteralPath $Uv -Algorithm SHA256).Hash.ToLower())") {
         $signature = Get-AuthenticodeSignature -LiteralPath $Uv
         if ($signature.Status -eq "Valid" -and (Get-Organisation $signature.SignerCertificate) -ceq $UvPublisher) {
             Good "uv $UvVersion is installed already."
@@ -730,8 +736,9 @@ function Install-PinnedUv {
             Stop-Install "uv.exe isn't signed by its publisher ($UvPublisher), so it wasn't used."
         }
         Say "Checked: SHA-256 and signature ($signedBy)"
+        $uvHash = (Get-FileHash -LiteralPath (Join-Path $unpacked "uv.exe") -Algorithm SHA256).Hash.ToLower()
         Move-Item -LiteralPath $unpacked -Destination $UvDir
-        Set-Content -LiteralPath $marker -Value $want -Encoding ASCII
+        Set-Content -LiteralPath $marker -Value "$want $uvHash" -Encoding ASCII
     } finally {
         Remove-Tree $download
     }

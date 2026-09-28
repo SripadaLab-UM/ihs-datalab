@@ -24,6 +24,8 @@ from sqlglot.optimizer.scope import Scope, find_all_in_scope, traverse_scope
 from sqlglot.schema import MappingSchema
 from sqlglot.tokenizer_core import Token, TokenType
 
+from datalab.textcheck import lone_surrogate, size_text
+
 MAX_SQL_BYTES = 64 * 1024
 
 # Oracle's built-in SQL functions (SQL Language Reference, "Functions"), less
@@ -200,8 +202,10 @@ def check_sql(
     sql = sql.strip().rstrip(";").strip()
     if not sql:
         raise SqlRejected("The query is empty.")
+    if (not_text := lone_surrogate(sql)) is not None:
+        raise SqlRejected(not_text.message)
     if len(sql.encode()) > MAX_SQL_BYTES:
-        raise SqlRejected(f"The query is longer than {MAX_SQL_BYTES // 1024} KB.")
+        raise SqlRejected(f"The query is longer than {size_text(MAX_SQL_BYTES)}.")
 
     statement = _parse_single_statement(sql)
     if not isinstance(statement, _SELECT_ROOTS):

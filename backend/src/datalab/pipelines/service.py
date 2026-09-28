@@ -255,7 +255,7 @@ class Pipelines:
         with repo.clone.lock:
             head = repo.fresh_head()
             if head is None:
-                (staging / "README.md").write_text(UNAVAILABLE_NOTE)
+                (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
                 return None
             repo.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
         return head

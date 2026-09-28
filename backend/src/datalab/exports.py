@@ -314,7 +314,10 @@ def mark_downloaded(path: Path) -> None:
     with Gatekeeper (the quarantine flag). Best effort elsewhere.
     """
     if sys.platform == "win32":
-        with contextlib.suppress(OSError), open(f"{path}:Zone.Identifier", "w") as stream:
+        with (
+            contextlib.suppress(OSError),
+            open(f"{path}:Zone.Identifier", "w", encoding="utf-8") as stream,
+        ):
             stream.write("[ZoneTransfer]\r\nZoneId=3\r\n")
     elif sys.platform == "darwin":
         flag = f"0083;{int(datetime.now().timestamp()):x};DataLab;"

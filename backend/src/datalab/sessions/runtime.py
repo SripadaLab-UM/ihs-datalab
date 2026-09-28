@@ -295,7 +295,9 @@ class SessionRuntime:
                 model=self._model,
                 tool_timeout_seconds=self._tool_timeout,
                 tools_off=self._tools_off,
-            )
+            ),
+            encoding="utf-8",
+            newline="\n",
         )
         await self.containers.start(token)
         process = await self.containers.open_app_server()
@@ -337,12 +339,14 @@ class SessionRuntime:
         self._thread_id = (response.get("thread") or {}).get("id")
         if not self._thread_id:
             raise RuntimeError("Codex didn't return a thread id.")
-        (self.paths.root / "thread.json").write_text(json.dumps({"thread_id": self._thread_id}))
+        (self.paths.root / "thread.json").write_text(
+            json.dumps({"thread_id": self._thread_id}), encoding="utf-8"
+        )
 
     def _saved_thread_id(self) -> str | None:
         path = self.paths.root / "thread.json"
         if path.exists():
-            return json.loads(path.read_text()).get("thread_id")
+            return json.loads(path.read_text(encoding="utf-8")).get("thread_id")
         return None
 
     # Codex -> DataLab events ------------------------------------------------

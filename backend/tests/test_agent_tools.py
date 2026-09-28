@@ -459,6 +459,79 @@ async def test_a_pipeline_name_never_reads_or_names_anything_outside_the_package
         assert "Pipeline names are lower case letters" in text
 
 
+def test_a_tool_call_with_a_lone_surrogate_is_a_parse_error_not_a_crash(server, tmp_path):
+    # The MCP SDK reads the JSON-RPC body strictly, so no tool sees one: the
+    # call is refused as JSON-RPC's parse error, and the session goes on.
+    base_url, services, _ = server
+    headers = {
+        "Authorization": f"Bearer {data_token(services, tmp_path)}",
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    url = f"{base_url}/mcp"
+
+    def rpc(client: httpx.Client, method: str, params: dict | None, n: int | None):
+        body: dict = {"jsonrpc": "2.0", "method": method}
+        if n is not None:
+            body["id"] = n
+        if params is not None:
+            body["params"] = params
+        return client.post(url, content=json.dumps(body), headers=headers)
+
+    def call(client: httpx.Client, name: str, arguments: dict, n: int) -> httpx.Response:
+        return rpc(client, "tools/call", {"name": name, "arguments": arguments}, n)
+
+    with httpx.Client(timeout=30) as client:
+        hello = {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        }
+        init = rpc(client, "initialize", hello, 1)
+        assert init.status_code == 200
+        headers["mcp-session-id"] = init.headers["mcp-session-id"]
+        rpc(client, "notifications/initialized", None, None)
+        free_text = {
+            "search_catalog": {"query": "mood\ud800"},
+            "describe_table": {"table": "IHS_2025.X\ud800"},
+            "join_paths": {"first_table": "IHS_2025.\ud800", "second_table": "IHS_2025.X"},
+            "find_concept": {"concept": "sleep\udfff"},
+            "query": {"sql": "SELECT 1 FROM IHS_2025.VW_DAILY_MOOD", "binds": {"a": "\ud800"}},
+            "check_workflow": {"text": "name: x\n# \ud800\n"},
+            "propose_plan": {
+                "analysis_type": "describe",
+                "question_and_purpose": "q\ud800",
+                "data_and_scope": "d",
+                "checks_and_limitations": "c",
+                "deliverables": "d",
+            },
+            "ask_research_helper": {"question": "what is \ud800"},
+        }
+        for n, (name, arguments) in enumerate(free_text.items(), start=2):
+            refused = call(client, name, arguments, n)
+            assert refused.status_code == 400, (name, refused.text)
+            assert refused.json()["error"]["code"] == -32700, name
+        # Written raw (bytes UTF-8 can't have), it's refused the same way.
+        body = b'{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"find_concept",'
+        body += b'"arguments":{"concept":"\xed\xa0\x80"}}}'
+        assert client.post(url, headers=headers, content=body).status_code == 400
+        assert call(client, "find_concept", {"concept": "mood"}, 21).status_code == 200
+
+
+def test_check_workflow_says_text_that_isnt_utf8_is_a_problem():
+    # The agent's JSON can carry a lone surrogate (the MCP client here can't
+    # send one, so this is the tool's own function). Encoding it would raise.
+    from datalab.data.agent_tools import _check_problems
+
+    def check(text: str) -> None:
+        raise AssertionError("not reached")
+
+    [problem] = _check_problems(check, "name: x\n# \ud800\n")
+    assert problem["line"] == 2 and "isn't text (U+D800" in problem["message"]
+    [big] = _check_problems(check, "#" * 300_000)
+    assert big["message"] == "The file is larger than 256 KB."
+
+
 async def test_check_workflow_refuses_an_alias_bomb_at_once(server, tmp_path):
     import time
 

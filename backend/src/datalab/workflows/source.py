@@ -41,6 +41,7 @@ from pathlib import Path
 
 from datalab.config import Settings
 from datalab.repos.git import Clone, git_env
+from datalab.textcheck import size_text
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
     Pipeline,
@@ -248,7 +249,7 @@ class WorkflowFolder:
             raise FileExistsError(f"There's already a workflow file called {name}.yaml.")
         data = text.encode("utf-8")
         if len(data) > MAX_FILE_BYTES:
-            raise SourceError(f"The file is larger than {MAX_FILE_BYTES // 1024} KB.")
+            raise SourceError(f"The file is larger than {size_text(MAX_FILE_BYTES)}.")
         target = folder / f"{name}.yaml"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
         fd = os.open(target, flags, 0o644)
@@ -296,7 +297,7 @@ class WorkflowFolder:
         except UnicodeDecodeError:
             return [f"{shown} isn't UTF-8 text."]
         except SourceError:
-            return [f"{shown} is larger than {MAX_FILE_BYTES // 1024} KB."]
+            return [f"{shown} is larger than {size_text(MAX_FILE_BYTES)}."]
         except (OSError, RuntimeError, ValueError):
             return [f"{shown} can't be read."]
         return []
@@ -438,7 +439,7 @@ def _read_limited(path: Path, limit: int) -> bytes:
     with os.fdopen(fd, "rb") as handle:
         data = handle.read(limit + 1)
     if len(data) > limit:
-        raise SourceError(f"{path.name} is larger than {limit // 1024} KB.")
+        raise SourceError(f"{path.name} is larger than {size_text(limit)}.")
     return data
 
 
@@ -447,7 +448,8 @@ def _git(root: Path, *args: str) -> str:
         done = subprocess.run(
             [*_GIT, "-C", str(root), *args],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             # Only the repo's own config (the synced clone's is DataLab's).
             env=git_env({"GIT_OPTIONAL_LOCKS": "0"}),

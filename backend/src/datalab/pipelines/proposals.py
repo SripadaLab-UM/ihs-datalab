@@ -27,6 +27,7 @@ from typing import Any, Literal
 from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Base, Change, Refusal, Workspace
 from datalab.repos.git import name_problem, safe_path
+from datalab.textcheck import size_text
 
 # Where proposals may change the repo.
 EDITABLE = ("ihsDataR/", "workflows/")
@@ -78,7 +79,7 @@ def compare(workspace: Workspace, base: Base) -> tuple[list[Change], list[Refusa
             refused.append(Refusal(path, problem))
             continue
         if size > MAX_FILE_BYTES:
-            refused.append(Refusal(path, f"it's over the {MAX_FILE_BYTES // 1024} KB limit"))
+            refused.append(Refusal(path, f"it's over the {size_text(MAX_FILE_BYTES)} limit"))
             continue
         if kb.as_text(workspace.read(digest)) is None:
             refused.append(Refusal(path, "it isn't a text file"))

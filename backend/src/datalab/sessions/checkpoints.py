@@ -283,7 +283,7 @@ class Checkpoints:
         return self._manifests / f"{number:05d}.contents.json"
 
     def _contents(self, number: int) -> dict[str, Any]:
-        return json.loads(self._contents_path(number).read_text())
+        return json.loads(self._contents_path(number).read_text(encoding="utf-8"))
 
     def _object_path(self, digest: str) -> Path:
         return self._objects / digest[:2] / digest[2:]
@@ -512,14 +512,14 @@ def _parents(rel: str) -> list[str]:
 
 
 def _summary(path: Path) -> Checkpoint:
-    raw = json.loads(path.read_text())
+    raw = json.loads(path.read_text(encoding="utf-8"))
     raw["skipped"] = [Skipped(**s) for s in raw["skipped"]]
     return Checkpoint(**raw)
 
 
 def _write_json(path: Path, value: Any) -> None:
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(value))
+    tmp.write_text(json.dumps(value), encoding="utf-8")
     os.replace(tmp, path)
 
 

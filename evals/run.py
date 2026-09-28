@@ -67,7 +67,7 @@ def main() -> int:
     name = f"{started:%Y-%m-%d-%H%M%S}-{commit[:7]}{'-dirty' if dirty else ''}"
     out = ROOT / "evals" / "results" / name
     out.mkdir(parents=True)
-    (out / "expected.json").write_text(json.dumps(expected, indent=2))
+    (out / "expected.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
 
     home = Path.home() / (
         "Library/Application Support/DataLab"
@@ -85,7 +85,7 @@ def main() -> int:
     catalog = data_dir / "catalog"
     built = subprocess.run(
         ["uv", "run", "datalab", "--profile", "practice", "catalog", "--from-database", "--out", str(catalog)],
-        cwd=ROOT / "backend", env=env, capture_output=True, text=True,
+        cwd=ROOT / "backend", env=env, capture_output=True, encoding="utf-8", errors="replace",
     )  # fmt: skip
     if built.returncode != 0 or not any(catalog.rglob("*.yml")):
         shutil.rmtree(data_dir, ignore_errors=True)
@@ -93,9 +93,10 @@ def main() -> int:
         sys.exit(f"Couldn't build the catalog from the synthetic database:\n{built.stderr[-2000:]}")
     (data_dir / "settings.toml").write_text(
         f"port = {PORT}\ncatalog_dir = {json.dumps(str(catalog))}\n"
-        + (f"default_model = {json.dumps(args.model)}\n" if args.model else "")
+        + (f"default_model = {json.dumps(args.model)}\n" if args.model else ""),
+        encoding="utf-8",
     )
-    log = (out / "server.log").open("w")
+    log = (out / "server.log").open("w", encoding="utf-8")
     server = subprocess.Popen(
         ["uv", "run", "datalab", "--profile", "practice", "serve", "--no-browser"],
         cwd=ROOT / "backend", env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
@@ -128,7 +129,9 @@ def main() -> int:
                 results.append(result)
                 verdict = "PASS" if result["passed"] else "FAIL"
                 print(f"  {verdict} in {result['seconds']:.0f}s", flush=True)
-                (out / f"{task.id}-{attempt}.json").write_text(json.dumps(result, indent=2))
+                (out / f"{task.id}-{attempt}.json").write_text(
+                    json.dumps(result, indent=2), encoding="utf-8"
+                )
                 _write_summary(out, info, results)
                 if server.poll() is not None:
                     # Without its server every task after this would fail too,
@@ -150,7 +153,7 @@ def _sign_in(log_path: Path) -> httpx.Client:
     deadline = time.time() + 120
     link = None
     while time.time() < deadline and link is None:
-        text = log_path.read_text()
+        text = log_path.read_text(encoding="utf-8")
         match = re.search(rf"http://127\.0\.0\.1:{PORT}/sign-in\?token=[\w-]+", text)
         link = match.group(0) if match else None
         time.sleep(0.5)
@@ -341,8 +344,8 @@ def _failed(task, attempt: int, error: str) -> dict:
 
 
 def _write_summary(out: Path, info: dict, results: list[dict]) -> None:
-    (out / "run.json").write_text(json.dumps(info, indent=2))
-    (out / "SUMMARY.md").write_text(_summary(info, results))
+    (out / "run.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+    (out / "SUMMARY.md").write_text(_summary(info, results), encoding="utf-8")
 
 
 def _summary(info: dict, results: list[dict]) -> str:
@@ -398,14 +401,14 @@ def _instance(data_dir: Path) -> str:
 def _containers(instance: str) -> list[str]:
     return subprocess.run(
         ["docker", "ps", "-aq", "--filter", f"label=datalab.instance={instance}"],
-        capture_output=True, text=True,
+        capture_output=True, encoding="utf-8", errors="replace",
     ).stdout.split()  # fmt: skip
 
 
 def _networks(instance: str) -> list[str]:
     return subprocess.run(
         ["docker", "network", "ls", "-q", "--filter", f"label=datalab.instance={instance}"],
-        capture_output=True, text=True,
+        capture_output=True, encoding="utf-8", errors="replace",
     ).stdout.split()  # fmt: skip
 
 
@@ -439,7 +442,9 @@ def _tree_hash(folder: Path) -> str:
 
 
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    return subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, encoding="utf-8", errors="replace"
+    ).stdout.strip()
 
 
 if __name__ == "__main__":

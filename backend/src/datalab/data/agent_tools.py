@@ -31,6 +31,7 @@ from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
 from datalab.sessions.plans import Outcome, PlanDesk
 from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
+from datalab.textcheck import lone_surrogate, size_text
 from datalab.workflows.model import MAX_FILE_BYTES as MAX_WORKFLOW_BYTES
 from datalab.workflows.model import WorkflowInvalid, problem_positions
 
@@ -73,7 +74,7 @@ def build_agent_tools(
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
     @server.tool(annotations=_READ_ONLY)
-    def search_catalog(
+    async def search_catalog(
         query: str, ctx: Context, cohorts: list[str] | None = None, limit: int = 15
     ) -> str:
         """Find tables and views by name, comment, or column. Metadata only.
@@ -82,6 +83,7 @@ def build_agent_tools(
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
         _session(ctx, tokens, "search_catalog")
+        await service.ensure_catalog()
         hits = catalog.search(query, limit=max(1, min(limit, 50)), schemas=cohorts)
         return _json(
             [
@@ -99,19 +101,20 @@ def build_agent_tools(
         )
 
     @server.tool(annotations=_READ_ONLY)
-    def describe_table(table: str, ctx: Context) -> str:
+    async def describe_table(table: str, ctx: Context) -> str:
         """Columns, types, comments, and primary key of one table.
 
         table: schema-qualified name, e.g. "IHS_2025.VFITBITDAILYDATA".
         """
         _session(ctx, tokens, "describe_table")
+        await service.ensure_catalog()
         info = catalog.get(table)
         if info is None:
             raise ToolError(f"{table} isn't in the catalog. Use search_catalog to find tables.")
         return _json(_describe(info, catalog))
 
     @server.tool(annotations=_READ_ONLY)
-    def join_paths(first_table: str, second_table: str, ctx: Context) -> str:
+    async def join_paths(first_table: str, second_table: str, ctx: Context) -> str:
         """How two tables can be joined: shared columns, most useful first, and caveats.
 
         Metadata only. Flags cross-cohort joins, type mismatches, a missing
@@ -119,13 +122,14 @@ def build_agent_tools(
         first_table, second_table: schema-qualified names, e.g. "IHS_2025.VFITBITSLEEP".
         """
         _session(ctx, tokens, "join_paths")
+        await service.ensure_catalog()
         result = join_keys(catalog, first_table, second_table)
         if "error" in result:
             raise ToolError(result["error"])
         return _json(result)
 
     @server.tool(annotations=_READ_ONLY)
-    def find_concept(concept: str, ctx: Context, cohorts: list[str] | None = None) -> str:
+    async def find_concept(concept: str, ctx: Context, cohorts: list[str] | None = None) -> str:
         """Candidate tables for a research concept, such as "sleep" or "depression".
 
         Metadata only: searches names and comments with the words the catalog
@@ -133,6 +137,7 @@ def build_agent_tools(
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
         _session(ctx, tokens, "find_concept")
+        await service.ensure_catalog()
         return _json(concept_candidates(catalog, concept[:200], cohorts))
 
     @server.tool(annotations=_READ_ONLY)
@@ -412,8 +417,11 @@ def _draft_problems(text: str) -> list[dict[str, Any]] | None:
     """A problem found before the full check reads the text, or None to go
     on to it. The check's own YAML reading refuses anchors, aliases,
     repeated keys and deep nesting (workflows/model.py: parse_yaml)."""
+    if (not_text := lone_surrogate(text)) is not None:
+        line = not_text.line
+        return [{"where": f"line {line}", "line": line, "message": not_text.message}]
     if len(text.encode()) > MAX_WORKFLOW_BYTES:
-        return [_whole(f"The file is larger than {MAX_WORKFLOW_BYTES // 1024} KB.")]
+        return [_whole(f"The file is larger than {size_text(MAX_WORKFLOW_BYTES)}.")]
     return None
 
 

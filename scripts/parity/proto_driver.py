@@ -36,7 +36,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-CONFIG = json.loads(Path(sys.argv[1]).read_text())
+CONFIG = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 CLONE = Path(CONFIG["clone"])
 STATE = Path(CONFIG["state"])
 OUT = Path(CONFIG["out"])
@@ -157,13 +157,13 @@ def run_routines(store: RoutineStore, client: CopyingDropboxClient) -> None:
         routine = by_name.get(name)
         if routine is None:
             status.update(status="missing", error="No such default routine.")
-            (target / "status.json").write_text(json.dumps(status, indent=2))
+            (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
             continue
         if MODE != "live":
             extract = CONFIG["extracts"].get(name)
             if extract is None:
                 status.update(status="skipped", error="v1 has no extract for this routine.")
-                (target / "status.json").write_text(json.dumps(status, indent=2))
+                (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
                 continue
             store._broker_request = stand_in_broker({"*": extract})
         client.target = target / "delivered"
@@ -177,7 +177,7 @@ def run_routines(store: RoutineStore, client: CopyingDropboxClient) -> None:
         status["seconds"] = round(time.monotonic() - started, 1)
         if run is not None:
             collect_routine(run, routine, target, status)
-        (target / "status.json").write_text(json.dumps(status, indent=2))
+        (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
         print(f"prototype {name}: {status['status']}", flush=True)
 
 
@@ -198,7 +198,7 @@ def collect_routine(
         elif step["type"] == "qc":
             report = run_dir / spec.get("output_filename", "")
             if report.is_file():
-                data = json.loads(report.read_text())
+                data = json.loads(report.read_text(encoding="utf-8"))
                 qc.append(
                     {"step": step["id"], "passed": data["passed"], "row_count": data["row_count"]}
                 )
@@ -210,7 +210,7 @@ def collect_routine(
             source = run_dir / name
             if source.is_file():
                 shutil.copyfile(source, folder / name)
-    (target / "qc.json").write_text(json.dumps(qc, indent=2))
+    (target / "qc.json").write_text(json.dumps(qc, indent=2), encoding="utf-8")
 
 
 def run_pipelines() -> None:
@@ -225,7 +225,7 @@ def run_pipelines() -> None:
             files = CONFIG.get("pipeline_extracts", {}).get(name)
             if not files:
                 status.update(status="skipped", error="v1 has no extracts for this pipeline.")
-                (target / "status.json").write_text(json.dumps(status, indent=2))
+                (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
                 continue
             broker = stand_in_broker(files)
         executor = IhsDataRPackageExecutor(SETTINGS, broker_request=broker)
@@ -245,7 +245,7 @@ def run_pipelines() -> None:
             status.update(status="failed", error=f"{type(error).__name__}: {str(error)[:300]}")
             print(f"prototype {name}: {type(error).__name__}", file=sys.stderr, flush=True)
         status["seconds"] = round(time.monotonic() - started, 1)
-        (target / "status.json").write_text(json.dumps(status, indent=2))
+        (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
         print(f"prototype {name}: {status['status']}", flush=True)
 
 

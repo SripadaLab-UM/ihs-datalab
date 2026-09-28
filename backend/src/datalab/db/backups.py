@@ -186,7 +186,7 @@ def list_backups(folder: Path) -> list[Backup]:
 def read_backup(entry: Path) -> Backup | None:
     """The backup in a folder, or None if it has no readable manifest."""
     try:
-        raw = json.loads((entry / MANIFEST).read_text())
+        raw = json.loads((entry / MANIFEST).read_text(encoding="utf-8"))
         return Backup(
             folder=entry,
             app_version=str(raw["app_version"]),
@@ -285,7 +285,7 @@ def _sha256(path: Path) -> str:
 
 def _write_json(path: Path, value: dict) -> None:
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(4)}")
-    temporary.write_text(json.dumps(value, indent=2) + "\n")
+    temporary.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
     _fsync(temporary)
     os.replace(temporary, path)
 

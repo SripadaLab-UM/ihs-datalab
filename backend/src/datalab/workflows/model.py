@@ -37,6 +37,7 @@ from datalab import safeyaml
 from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.exports import effective_name, safe_name
 from datalab.sessions.titles import normalize_title, scrub_title
+from datalab.textcheck import lone_surrogate, size_text
 
 SCHEMA_VERSION = 1
 # The smallest `small_cells: min` DataLab accepts: counts of 1 to 10 are small.
@@ -300,10 +301,12 @@ def parse_yaml(text: str) -> Any:
     (the runner, validate, Save as workflow, Save & share, check_workflow),
     and the text may be an agent's: anchors, aliases, repeated keys, deep
     nesting and large files are refused before anything is built
-    (safeyaml.py)."""
+    (safeyaml.py), as is text that isn't UTF-8 (a lone surrogate)."""
+    if (not_text := lone_surrogate(text)) is not None:
+        raise WorkflowInvalid([Problem(f"line {not_text.line}", not_text.message)])
     if len(text.encode()) > MAX_FILE_BYTES:
         raise WorkflowInvalid(
-            [Problem("", f"The file is larger than {MAX_FILE_BYTES // 1024} KB.")]
+            [Problem("", f"The file is larger than {size_text(MAX_FILE_BYTES)}.")]
         )
     try:
         return _dates_as_text(safeyaml.load(text, max_bytes=MAX_FILE_BYTES))
@@ -348,7 +351,7 @@ def problem_positions(text: str, paths: list[str]) -> dict[str, tuple[int, int] 
             continue
         if not composed:
             composed = True
-            if len(text.encode()) <= MAX_FILE_BYTES:
+            if lone_surrogate(text) is None and len(text.encode()) <= MAX_FILE_BYTES:
                 try:
                     root = yaml.compose(text, Loader=yaml.SafeLoader)
                 except yaml.YAMLError:
@@ -927,13 +930,14 @@ def coerce_param(param: Parameter, value: Any) -> Scalar:
     if kind == "integer":
         if isinstance(value, bool):
             raise ValueError("Give a whole number.")
-        if isinstance(value, int):
+        # At most 18 digits, however it's given (as text, 0x.. in the YAML, 1e30).
+        if isinstance(value, int) and abs(value) < 10**18:
             return value
         if isinstance(value, str) and re.fullmatch(r"-?\d{1,18}", value.strip()):
             return int(value)
-        if isinstance(value, float) and value.is_integer():
+        if isinstance(value, float) and value.is_integer() and abs(value) < 1e18:
             return int(value)
-        raise ValueError("Give a whole number.")
+        raise ValueError("Give a whole number (at most 18 digits).")
     if kind == "number":
         if isinstance(value, bool):
             raise ValueError("Give a number.")

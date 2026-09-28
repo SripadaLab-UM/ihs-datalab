@@ -424,3 +424,7 @@ class TestSecondReview:
             recursive.format(n="n") + " SELECT n FROM r"
         )
         ok_with_catalog(recursive.format(n="r.n") + " SELECT n FROM r")
+
+
+def test_sql_that_isnt_text_is_refused_not_an_error():
+    assert "isn't text (U+D800" in rejected("SELECT 1 FROM IHS_2025.PARTICIPANTS -- \ud800")

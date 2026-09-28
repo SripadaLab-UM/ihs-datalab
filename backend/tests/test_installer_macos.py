@@ -50,7 +50,7 @@ esac
 
 
 def executable(path: Path, text: str) -> None:
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 

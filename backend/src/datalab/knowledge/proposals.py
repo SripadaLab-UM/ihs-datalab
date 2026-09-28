@@ -33,6 +33,7 @@ from typing import Any, Literal
 
 from datalab.knowledge import check as kb
 from datalab.repos.git import TreeEntry, safe_path
+from datalab.textcheck import size_text
 
 ProposalStatus = Literal[
     "open", "superseded", "withdrawn", "rejected", "saving", "saved",
@@ -123,7 +124,7 @@ def compare(workspace: Workspace, base: Base) -> tuple[list[Change], list[Refusa
             refused.append(Refusal(path, problem or "its name can't be used on every computer"))
             continue
         if size > kb.size_limit(path):
-            refused.append(Refusal(path, f"it's over the {kb.size_limit(path) // 1024} KB limit"))
+            refused.append(Refusal(path, f"it's over the {size_text(kb.size_limit(path))} limit"))
             continue
         text = kb.as_text(workspace.read(digest))
         if text is None:

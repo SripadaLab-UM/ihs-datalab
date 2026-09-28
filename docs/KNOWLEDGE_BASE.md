@@ -252,7 +252,8 @@ someone else's change landed in between, and in GitHub Actions after every
 push. There it uses the same published check.
 
 - Front matter is valid, and ids are unique and match file names. It's
-  read strictly (`safeyaml.py`): a key given twice, a key that isn't a
+  read strictly (`safeyaml.py`): a key given twice (or as another spelling
+  of the same value, `yes` and `true`), a key that isn't a
   plain name (`<<`, a list or map), anchors and aliases, and deep nesting
   are errors, so a second `status:` line can't win over the one DataLab
   keeps. DataLab keeps an agent's `status` and review fields on the parsed
