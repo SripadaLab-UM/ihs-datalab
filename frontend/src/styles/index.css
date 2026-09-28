@@ -23,10 +23,15 @@
   --color-rail: #f7f6f2;
   --color-field: #fbfaf7;
   --color-sunken: #f6f5f2;
+  /* Contrast (WCAG AA, checked in styles/tokens.test.ts): muted and faint text
+     are at least 4.5:1 on every surface, soft tints included; edge, the
+     boundary of a field you type in, at least 3:1. Line is a hairline rule,
+     decoration only, so it stays quiet. */
   --color-line: #e7e5df;
+  --color-edge: #858279;
   --color-ink: #2b2a26;
-  --color-muted: #6c6a62;
-  --color-faint: #6f6c63;
+  --color-muted: #625f57;
+  --color-faint: #67645b;
   --color-accent: #2b2a26;
   --color-accent-soft: #f1efea;
   --color-accent-ink: #ffffff;
@@ -50,10 +55,11 @@
     --color-rail: #1b1a17;
     --color-field: #1d1c19;
     --color-sunken: #1f1e1b;
-    --color-line: #2e2d29;
+    --color-line: #3a3934;
+    --color-edge: #7b786f;
     --color-ink: #e9e6de;
-    --color-muted: #a39f94;
-    --color-faint: #8f8b81;
+    --color-muted: #b3afa4;
+    --color-faint: #9d998e;
     --color-accent: #e9e6de;
     --color-accent-soft: #26251f;
     --color-accent-ink: #161614;
@@ -94,7 +100,7 @@ body {
 /* The small uppercase labels that organise a page (READ NEXT, THE ANSWER). */
 .dl-label {
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -236,6 +242,13 @@ body {
 input[type="checkbox"],
 input[type="radio"] {
   accent-color: var(--color-accent);
+}
+
+/* A field you type in keeps a boundary you can see (3:1), where the page's
+   other rules stay hairlines. Unlayered, so it wins over border-line; focus
+   and hover keep their own colour. */
+:is(input:not([type="checkbox"], [type="radio"]), textarea, select).border-line:not(:focus, :hover) {
+  border-color: var(--color-edge);
 }
 
 /* What the first-run tour's current step is about (features/help/Tour.tsx). */

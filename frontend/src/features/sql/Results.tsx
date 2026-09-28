@@ -112,7 +112,7 @@ export function ResultGrid({ result, practice }: { result: ShownResult; practice
                 {data.columns.map((column, i) => (
                   <th key={i} scope="col" className="border-b border-line px-3 py-1.5 text-left align-bottom font-medium whitespace-nowrap">
                     <span className="block text-ink">{column.name}</span>
-                    {column.type && <span className="block text-[10.5px] font-normal text-faint">{column.type}</span>}
+                    {column.type && <span className="block text-[11.5px] font-normal text-faint">{column.type}</span>}
                   </th>
                 ))}
               </tr>
