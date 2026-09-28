@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from datalab import db, updater, updates
+from datalab import db, launcher_icons, updater, updates
 from datalab.config import Settings
 from datalab.db import backups
 from datalab.releases import ChecksumMismatch, ReleaseSource, UpdateChecker
@@ -68,6 +68,9 @@ class FakeRunner:
         elif step == "pip":
             python = Path(command[command.index("--python") + 1])
             (python.parent / "datalab").write_text("#!/bin/sh\n")
+            branding = python.parent.parent / "lib/python3.13/site-packages/datalab/branding"
+            branding.mkdir(parents=True)
+            (branding / "DataLab.icns").write_bytes(b"the new version's icon")
         elif step == "version":
             return subprocess.CompletedProcess(command, 0, f"datalab {self.says}\n", "")
         return subprocess.CompletedProcess(command, 0, "", "")
@@ -239,6 +242,58 @@ async def test_the_new_version_finishes_the_update_when_it_starts(world):
     assert recovery is not None and recovery.outcome == "finishing"
     updates.finish(world.data_dir, NEW)
     assert world.marker() is None and world.history() == ["finished"]
+
+
+async def test_after_the_switch_the_launcher_gets_the_new_versions_icon(world, tmp_path):
+    # The app bundle an earlier installer made, with the old icon.
+    apps = tmp_path / "Applications"
+    bundle = apps / "DataLab.app"
+    (bundle / "Contents" / "MacOS").mkdir(parents=True)
+    (bundle / "Contents" / "Resources").mkdir()
+    (bundle / "Contents" / "Resources" / "DataLab.icns").write_bytes(b"the old icon")
+    (bundle / "Contents" / "Info.plist").write_text(
+        "<plist><dict><key>CFBundleIdentifier</key><string>edu.umich.ihs.datalab</string>"
+        "</dict></plist>"
+    )
+    (bundle / "Contents" / "MacOS" / "DataLab").write_text(f"exec '{world.root}/bin/datalab'\n")
+    seen: list[tuple[str | None, Path | None]] = []
+
+    def refresh(branding: Path | None) -> object:
+        seen.append((world.layout.pointer()[0], branding))
+        return launcher_icons.refresh(
+            branding,
+            root=world.root,
+            platform="darwin",
+            app_folders=[apps],
+            run=lambda *a, **k: None,
+        )
+
+    update = await install(world, refresh_icons=refresh)
+
+    assert update.progress.state == "restarting"
+    # Once, after the switch, from the new version's own package.
+    assert seen == [(NEW, world.layout.branding(NEW))]
+    assert (bundle / "Contents" / "Resources" / "DataLab.icns").read_bytes() == (
+        b"the new version's icon"
+    )
+
+
+async def test_an_icon_that_cant_be_refreshed_never_fails_the_update(world):
+    def broken(branding: Path | None) -> object:
+        raise RuntimeError("no icons today")
+
+    update = await install(world, refresh_icons=broken)
+    assert update.progress.state == "restarting", update.progress.message
+    assert world.layout.pointer() == (NEW, OLD)
+
+
+async def test_an_update_that_fails_before_the_switch_leaves_the_icon_alone(world):
+    seen: list[Path | None] = []
+    world.run.fail = "pull-images"
+    update = await install(world, refresh_icons=seen.append)
+    assert update.progress.state == "failed"
+    assert seen == []
+    assert world.layout.branding(NEW) is None  # its folder is gone
 
 
 # ------------------------------------------------------------------ refusals
