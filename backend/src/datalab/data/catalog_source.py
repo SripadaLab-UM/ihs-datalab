@@ -148,7 +148,14 @@ class CatalogSource:
                 f"tables DataLab can read{self._left_out()}. Build it with: datalab catalog "
                 "--from-database --out <folder>",
             )
-        from_knowledge = self._read_knowledge() if self._clone is not None else None
+        try:
+            from_knowledge = self._read_knowledge() if self._clone is not None else None
+        except GitError as error:
+            return self._missing(
+                "DataLab couldn't read the lab knowledge base's clone. Sync it again in "
+                f"Settings → Connections; {_ASK}",
+                f"Reading the knowledge base's clone failed: {error}",
+            )
         if from_knowledge is not None and len(from_knowledge[0]):
             return from_knowledge[0], "knowledge", from_knowledge[1]
         knowledge_skipped = self.skipped
