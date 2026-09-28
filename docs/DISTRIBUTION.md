@@ -697,7 +697,7 @@ it; two other designs (`network`, `pulse`) are a one-line change away, and
 - **Practice:** the same icons inverted, Blue on Maize: a yellow square
   instead of a blue one, the clearest difference there is at 16 pixels.
 - **Header:** the Block M's tile where the mark always was (22 pixels), then
-  on wide windows the IHS mark (Blue on light, Maize on dark) and the
+  from 1280 pixels wide the IHS mark (Blue on light, Maize on dark), and the
   "DataLab" wordmark. Nothing else in the app changes colour.
 
 `branding/build.py` holds the geometry and writes everything made from it:

@@ -49,9 +49,9 @@ it("draws the Block M on its tile, and the IHS mark beside it (never merged), fr
   expect(m.querySelector("rect")).toHaveAttribute("fill", COLOURS.blue);
   expect(m.querySelector("path")).toHaveAttribute("d", BLOCK_M.d);
   expect(m.querySelector("path")).toHaveAttribute("fill", COLOURS.maize);
-  // A drawing of its own, shown with the name on wide windows.
+  // A drawing of its own, beside the name on the widest windows (so the tabs fit at 1024).
   expect(ihs.querySelectorAll("path")).toHaveLength(IHS_MARK.paths.length);
-  expect(ihs.parentElement).toHaveClass("hidden", "lg:inline-flex");
+  expect(ihs.parentElement).toHaveClass("hidden", "xl:inline-flex");
   // Practice: inverted, Blue on Maize.
   rerender(<Brand practice />);
   const practice = screen.getByTestId("brand").querySelector("svg");

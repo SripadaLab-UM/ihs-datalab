@@ -54,7 +54,8 @@ export function IhsMark({ size = 11 }: { size?: number }) {
 }
 
 /** The logo and the name, with a quiet "practice" beside them on practice.
- * Below `lg` only the Block M, so the tabs fit (the badge still says practice). */
+ * Below `xl` no IHS mark, and below `lg` only the Block M, so the tabs fit
+ * (the badge still says practice). */
 export function Brand({ practice }: { practice: boolean }) {
   return (
     <span
@@ -63,7 +64,7 @@ export function Brand({ practice }: { practice: boolean }) {
       title={practice ? "DataLab (practice)" : "DataLab"}
     >
       <BrandMark practice={practice} />
-      <span className="hidden lg:inline-flex">
+      <span className="hidden xl:inline-flex">
         <IhsMark />
       </span>
       <span className="hidden font-serif text-[20px] leading-none lg:inline">DataLab</span>
