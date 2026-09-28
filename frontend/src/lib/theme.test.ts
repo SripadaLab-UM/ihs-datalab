@@ -49,6 +49,39 @@ describe("the theme", () => {
     expect(document.documentElement.dataset.theme).toBeUndefined();
   });
 
+  describe("public/theme-boot.js", () => {
+    const FRONTEND = resolve(__dirname, "../..");
+    const boot = () => new Function(readFileSync(resolve(FRONTEND, "public/theme-boot.js"), "utf8"))();
+
+    it("is an ordinary script in <head>, before the app's module and its stylesheet", () => {
+      const html = readFileSync(resolve(FRONTEND, "index.html"), "utf8");
+      const head = html.slice(0, html.indexOf("</head>"));
+      const tag = /<script src="\/theme-boot\.js"><\/script>/.exec(head);
+      expect(tag).not.toBeNull();
+      expect(tag![0]).not.toContain("module");
+      expect(html.indexOf("/theme-boot.js")).toBeLessThan(html.indexOf("/src/main.tsx"));
+      expect(html.indexOf("/theme-boot.js")).toBeLessThan(Math.max(html.indexOf("stylesheet"), html.length));
+    });
+
+    it("sets the same data-theme as the app, from the same key", () => {
+      localStorage.setItem(THEME_KEY, "dark");
+      boot();
+      expect(document.documentElement.dataset.theme).toBe("dark");
+      delete document.documentElement.dataset.theme;
+      localStorage.setItem(THEME_KEY, "purple");
+      boot();
+      expect(document.documentElement.dataset.theme).toBeUndefined();
+    });
+
+    it("leaves System alone when the browser refuses storage", () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("SecurityError");
+      });
+      expect(boot).not.toThrow();
+      expect(document.documentElement.dataset.theme).toBeUndefined();
+    });
+  });
+
   it("has the same dark colours whether chosen or the computer's", () => {
     const css = readFileSync(resolve(__dirname, "../styles/index.css"), "utf8");
     const block = (selector: string) => {
