@@ -41,8 +41,8 @@ The installer asks for your U-M GPT key and the database password, and saves
 them in your computer's keychain. At the end it says where everything went.
 
 **Where to find it.** Real and practice each get their own app, with their
-own icon: **DataLab** (U-M's Block M, Maize on Blue, with the IHS mark) and
-**DataLab (practice)** (the same icon inverted, Blue on Maize).
+own icon: **DataLab** (U-M's Block M over "IHS", Maize on Blue, with an AI
+spark) and **DataLab (practice)** (the same icon inverted, Blue on Maize).
 
 - **Mac:** the app is in **/Applications**, or in your own Applications
   folder (`~/Applications`) if your account can't add to /Applications

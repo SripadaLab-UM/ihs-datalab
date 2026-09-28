@@ -678,26 +678,24 @@ Windows specifics).
 
 ## Branding
 
-The logo is U-M's **Block M**, used as the University's mark for this
-internal U-M tool (as the prototype did), beside an **IHS + AI mark**. The
-Block M is traced from the prototype's artwork
-(`um-gpt-local-proxy/deploy/cognito/logo.png`) to its polygon, in its own
-Maize `#FFCB05` on Blue `#00274C`. It's never altered, recoloured, given
-effects or merged with another shape, and keeps clear space of at least its
-serif height round it. The IHS mark is "IHS" with a four-point spark, the
-usual AI cue (no one else's logo). `AI_MARK` in `branding/build.py` picks
-it; two other designs (`network`, `pulse`) are a one-line change away, and
-`build.py --options <folder>` draws all three with preview sheets.
+DataLab is an internal tool of the University of Michigan's Intern Health
+Study, and its logo is the team's own: U-M's **Block M** (traced from the
+prototype's artwork, `um-gpt-local-proxy/deploy/cognito/logo.png`, in Maize
+`#FFCB05` on Blue `#00274C`) with **"IHS"** centred under it and a big
+four-point **spark**, the usual AI cue, over the M's top-right corner. The
+spark is edged in the tile's colour, so it reads where it crosses the M.
+`DESIGN = "1b"` in `branding/build.py` picks this; the earlier options
+(`"1"`, `"2"`, `"3"`) are a one-line change away, and
+`build.py --options <folder>` draws every design with preview sheets.
 
-- **App icon:** Blue, with the Block M in Maize and, from 64 pixels up, the
-  IHS mark under it; smaller, the Block M alone (the letters can't be read at
-  16 or 32 pixels).
-- **Favicon:** the Block M alone on its Blue tile: it reads at 16 pixels, in
-  a light or dark browser alike.
+- **App icon:** the whole design from 64 pixels up; at 32 pixels the M and a
+  smaller spark; at 16 pixels the M alone.
+- **Favicon:** the SVG is the M alone (a tab draws it at 16 pixels); the
+  32-pixel PNG has the spark.
 - **Practice:** the same icons inverted, Blue on Maize: a yellow square
   instead of a blue one, the clearest difference there is at 16 pixels.
-- **Header:** the Block M's tile where the mark always was (22 pixels), then
-  from 1280 pixels wide the IHS mark (Blue on light, Maize on dark), and the
+- **Header:** the 32-pixel tile where the mark always was (22 pixels), then
+  from 1280 pixels wide the IHS mark (Blue on light, Maize on dark) and the
   "DataLab" wordmark. Nothing else in the app changes colour.
 
 `branding/build.py` holds the geometry and writes everything made from it:
