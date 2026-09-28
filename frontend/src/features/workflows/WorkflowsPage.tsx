@@ -49,7 +49,8 @@ export function WorkflowsPage() {
   // New workflow, before drafting starts: its description is typed in the page's own form,
   // and the chat takes over from there. One place asks the question.
   const location = useLocation();
-  const describing = /\/workflows\/new\/?$/.test(location.pathname) && !chatId;
+  const onNew = /\/workflows\/new\/?$/.test(location.pathname);
+  const describing = onNew && !chatId;
 
   /** New workflow: a Workflow authoring chat, started with the person's description, shown beside the draft. */
   const startDrafting = async (description: string) => {
@@ -183,6 +184,8 @@ export function WorkflowsPage() {
               headerActions={chatActions}
               assistant="workflows"
               handoff={describing ? <DescribeFirst /> : undefined}
+              // Drafting a new one, the box is for answering its questions.
+              placeholder={onNew ? "Answer, or add a detail" : undefined}
             />
           </aside>
         </>

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError } from "@/api/http";
@@ -11,6 +11,7 @@ import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 import { settingsLink } from "@/features/settings/highlight";
 
 import { checkChips, proposalState, proposalTitle, saveBlocker } from "./activity";
+import { CompactContext } from "./assistants";
 import type { KbProposalItem } from "./transcript";
 
 /** The editor's language for a knowledge-base file. */
@@ -34,7 +35,9 @@ const short = (commit: string) => commit.slice(0, 7);
 export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
   const queryClient = useQueryClient();
   const key = ["kb-proposal", proposal.id];
-  const [open, setOpen] = useState(() => proposalState(proposal.status).actionable);
+  // Docked beside a tab, it starts folded to its files and checks: "Review the changes" opens it.
+  const compact = use(CompactContext);
+  const [open, setOpen] = useState(() => !compact && proposalState(proposal.status).actionable);
   const saving = proposal.status === "saving";
   const detail = useQuery({
     queryKey: key,
@@ -74,14 +77,14 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
       ref={card}
       tabIndex={-1}
       aria-label={proposalTitle(proposal)}
-      className={clsx("border-l py-1 pl-5 text-[14px] outline-none", state.actionable ? "border-you" : "border-line")}
+      className={clsx("min-w-0 border-l py-1 text-[14px] outline-none", compact ? "pl-3" : "pl-5", state.actionable ? "border-you" : "border-line")}
     >
       <div className="flex flex-wrap items-baseline gap-2.5">
         <Icon name="book" size={15} className="translate-y-[2px] text-muted" />
-        <h3 className="font-serif text-[21px] font-normal">{proposalTitle(proposal)}</h3>
+        <h3 className={clsx("font-serif font-normal", compact ? "text-[17px]" : "text-[21px]")}>{proposalTitle(proposal)}</h3>
         <Chip tone={state.tone}>{state.label}</Chip>
       </div>
-      <p className="mt-1 max-w-[62ch] font-serif text-[16px] leading-relaxed text-muted italic" role="status">
+      <p className={clsx("mt-1 max-w-[62ch] font-serif leading-relaxed text-muted italic", compact ? "text-[14.5px]" : "text-[16px]")} role="status">
         {state.text}
       </p>
       {status === "saved" && commit && (
@@ -96,7 +99,7 @@ export function ProposalCard({ proposal }: { proposal: KbProposalItem }) {
         <ul className="mt-3 flex flex-col gap-1 font-sans text-[13px]">
           {proposal.files.map((file) => (
             <li key={file.path} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span className="font-mono text-[12.5px] text-ink">{file.path}</span>
+              <span className={clsx("font-mono text-[12.5px] text-ink", compact && "min-w-0 break-all")}>{file.path}</span>
               <span className="text-muted">{file.change}</span>
               <span className="font-mono text-[11.5px] text-muted tabular">
                 +{file.added} −{file.removed}

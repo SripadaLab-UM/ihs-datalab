@@ -260,3 +260,31 @@ it("shows a docked conversation in the panel's own sizes: the question as a mess
   expect(question).toHaveClass("text-[17px]");
   expect(screen.getByText("SELECT 1 FROM dual")).toBeInTheDocument();
 });
+
+it("folds a proposed knowledge edit in a docked chat, and opens it on request", async () => {
+  const { ProposalCard } = await import("./ProposalCard");
+  const { CompactContext } = await import("./assistants");
+  const { MemoryRouter } = await import("react-router");
+  const proposal = {
+    kind: "kb_proposal" as const, id: "kp_1", status: "open", message: "", commit: null, truncated: false,
+    files: [{ path: "sources/fitbit.md", change: "modified", added: 2, removed: 1, flags: [] }],
+    refused: [], check: { errors: 0, data: 0, warnings: 0 },
+  }; // prettier-ignore
+  const card = (compact: boolean) => (
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>
+        <CompactContext value={compact}>
+          <ProposalCard proposal={proposal as never} />
+        </CompactContext>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  const view = render(card(true));
+  // Its files and checks, and one button to open the review.
+  expect(screen.getByText("sources/fitbit.md")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Review the changes" })).toBeInTheDocument();
+  view.unmount();
+  // The Workspace opens it at once, as before.
+  render(card(false));
+  expect(screen.queryByRole("button", { name: "Review the changes" })).toBeNull();
+});

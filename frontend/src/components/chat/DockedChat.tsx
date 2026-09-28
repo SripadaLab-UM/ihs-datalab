@@ -233,7 +233,9 @@ function ContextRow({
             aria-label={`Send with message: ${context.label}`}
             aria-describedby={stateId}
           />
-          Send with message
+          {/* A narrow panel keeps room for the name: the box's own label says the rest. */}
+          <span className="hidden @[24rem]:inline">Send with message</span>
+          <span aria-hidden className="@[24rem]:hidden">Send</span>
         </label>
       </div>
       <p id={stateId} className="pl-[17px] text-[11.5px] text-faint">

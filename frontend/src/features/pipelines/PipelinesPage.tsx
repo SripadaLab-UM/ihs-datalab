@@ -152,8 +152,8 @@ export function PipelinesPage() {
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">Pipelines</h1>
             <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">
-              The lab's ihsDataR package and workflow files. Ask the Data engineering agent for a change: it works on
-              its own copy, and what it changes comes here to review, test, and save.
+              The lab's ihsDataR package and workflow files. Ask the Pipelines assistant to explain or change them:
+              it works on its own copy, and what it changes comes here to review, test, and save.
             </p>
             <p
               role="status"
