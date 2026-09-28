@@ -31,6 +31,10 @@ synthetic/db.sh verify     # check privileges, row counts and quirks as DATALAB_
 synthetic/db.sh stop       # stop (data is kept); `reset` deletes the container and its volume
 ```
 
+`db.sh` looks after a container without DataLab's label only if it's
+called `datalab-synthetic-oracle`; for another name
+(`DATALAB_PRACTICE_DB_CONTAINER`) pass `--force`.
+
 The first `start` takes about a minute. The image is Oracle's
 `container-registry.oracle.com/database/free:latest-lite`, pinned by digest in
 `backend/src/datalab/practice_db/__init__.py` (`IMAGE`). Or run it yourself:
@@ -53,7 +57,21 @@ The first `start` takes about a minute. The image is Oracle's
 - **Left alone:** a container or volume of that name without DataLab's
   label, and a synthetic database already answering on port 1522 that
   DataLab didn't set up (this development container, say): practice DataLab
-  uses that one as it is, and never loads data into it or resets it.
+  uses that one as it is, and never loads data into it or resets it. It
+  does so only if Docker says an Oracle Database Free container publishes
+  the port, and then only `DATALAB_RO` checks the marker, once: DataLab
+  never logs in as SYSTEM to a database it didn't make, and doesn't log in
+  at all to anything else on the port (an SSH tunnel, say).
+- **Upgrading from this development container:** if it's stopped when
+  practice DataLab is set up or opens, practice DataLab starts it and uses
+  it (a terminal asks first), rather than making a second database on its
+  port.
+- **One at a time.** Loading and resetting hold a lock in the practice data
+  folder (`practice-db/.lock`), and `practice-db setup` leaves the database
+  to a practice DataLab that's running.
+- **Oracle's image** is downloaded for a first setup only; an update or a
+  reinstall with a practice database already there downloads nothing. A
+  busy registry never stops an install or an update.
 - **Uninstalling** asks whether to delete the practice database too.
 - `datalab --profile practice practice-db status | setup | start | stop | reset`.
   The real profile refuses these.

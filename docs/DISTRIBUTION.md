@@ -46,7 +46,9 @@ It comes from the install page in the app repo. The installer then:
 3. **Pulls the pinned images**, then asks for the keys (`datalab setup`).
    For the practice profile it also pulls Oracle Database Free (from
    Oracle's registry, pinned by digest in `datalab/practice_db`, tried again
-   a few times when the registry is busy), asks for no database password,
+   a few times when the registry is busy), for a first setup only, and
+   never as a reason to stop (an in-app update runs the same `pull-images`),
+   asks for no database password,
    and says the U-M GPT key is optional there and what it unlocks.
 4. **Offers the GitHub sign-in** and clones the two lab repos, never as an
    administrator. The sign-in uses the "enter this code at
