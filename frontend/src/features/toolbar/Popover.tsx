@@ -13,7 +13,7 @@ import type { AnyIcon } from "@/components/ui/Icon";
 
 /** The toolbar button's look: the GitHub entry's, so every shortcut matches it. */
 export const TRIGGER =
-  "flex shrink-0 cursor-pointer items-center gap-1.5 self-center rounded-[3px] px-1.5 py-1 font-sans text-[13px] leading-none whitespace-nowrap transition-colors";
+  "flex shrink-0 cursor-pointer items-center gap-1.5 self-center rounded-[3px] px-1 py-1 font-sans xl:px-1.5 text-[13px] leading-none whitespace-nowrap transition-colors";
 
 export const PANEL =
   "absolute top-full right-0 z-40 mt-1 rounded-[4px] border border-line bg-surface text-left text-ink shadow-[0_18px_40px_-18px_rgba(0,0,0,0.35)]";
@@ -171,21 +171,21 @@ export function Shortcut({
   );
 }
 
-/** A panel's heading line: what it is, and how it stands, in words. */
+/** A panel's heading: what it is, and how it stands, in words. */
 export function PanelHead({ title, state, tone }: { title: string; state: string; tone?: "good" | "attn" }) {
   return (
-    <div className="flex items-baseline justify-between gap-3">
+    <div>
       <p className="dl-label">{title}</p>
       <p
         className={clsx(
-          "flex items-center gap-1 text-right font-sans text-[12.5px]",
+          "mt-1 flex items-center gap-1 font-sans text-[13px] font-medium",
           tone === "good" && "text-data",
           tone === "attn" && "text-attn",
-          !tone && "text-muted",
+          !tone && "text-ink",
         )}
       >
-        {tone && <Icon name={tone === "good" ? "check" : "alert"} size={12} className="shrink-0" />}
-        {state}
+        {tone && <Icon name={tone === "good" ? "check" : "alert"} size={13} className="shrink-0" />}
+        <span className="first-letter:uppercase">{state}</span>
       </p>
     </div>
   );

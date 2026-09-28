@@ -45,9 +45,10 @@ export function GitHubEntry() {
       )}
     >
       <GitHubMark />
-      {/* Below xl only the mark, so the tabs fit; the tooltip names the login. */}
+      {/* Signed in, only the mark (as the other shortcuts, which add words only
+          when something needs attention); the tooltip names the login. */}
       {signedIn ? (
-        <span className="hidden max-w-[10rem] truncate font-mono text-[12.5px] xl:inline">{login}</span>
+        <span className="sr-only">{login}</span>
       ) : (
         <span className="hidden xl:inline">Sign in</span>
       )}

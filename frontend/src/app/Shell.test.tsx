@@ -60,5 +60,5 @@ it("says practice in the badge at every width, and synthetic data when there's r
   app("/workspace");
   const badge = await screen.findByTitle(/The practice profile/);
   expect(badge).toHaveTextContent("practice · synthetic data");
-  expect(badge.querySelector("span")).toHaveClass("hidden", "lg:inline");
+  expect(badge.querySelector("span")).toHaveClass("hidden", "xl:inline");
 });

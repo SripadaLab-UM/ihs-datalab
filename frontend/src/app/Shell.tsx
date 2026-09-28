@@ -82,20 +82,22 @@ export function Shell() {
         {/* The pill, the shortcuts, the practice badge, Help and More sit together
             at the right, closer to each other than to the tabs; End session is
             in its own menu at the far end, set apart. */}
-        <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
+        <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch xl:gap-3">
           <UpdatePill />
           <Shortcuts />
+          {/* From lg to xl the brand beside the tabs says "practice" itself, so the
+              badge makes room there for the shortcuts. */}
           {practice && (
             <span
-              className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
+              className="shrink-0 self-center lg:hidden xl:inline rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
               title="The practice profile: synthetic data only, never the real study database"
             >
-              practice<span className="hidden lg:inline"> · synthetic data</span>
+              practice<span className="hidden xl:inline"> · synthetic data</span>
             </span>
           )}
           <HelpLink />
           <MoreMenu />
-          <div className="flex shrink-0 self-stretch border-l border-line pl-1.5">
+          <div className="flex shrink-0 self-stretch border-l border-line pl-1">
             <SessionMenu />
           </div>
         </div>

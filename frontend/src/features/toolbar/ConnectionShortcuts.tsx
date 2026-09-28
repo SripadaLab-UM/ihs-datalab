@@ -50,12 +50,12 @@ export function databaseStanding(connections: Connections | undefined, result?: 
   const oracle = connections.oracle;
   if (result && !result.ok) return { state: "test failed", tone: "attn", attention: "DB: not connected" };
   if (oracle.practice) {
-    return { state: result?.ok ? "connected (synthetic)" : "practice: synthetic database", tone: result?.ok ? "good" : undefined };
+    return { state: result?.ok ? "connected (synthetic)" : "synthetic, not tested yet", tone: result?.ok ? "good" : undefined };
   }
   if (!oracle.configured) return { state: "not set up", tone: "attn", attention: "DB: not set up" };
   if (oracle.password === "missing") return { state: "password missing", tone: "attn", attention: "DB: no password" };
   if (result?.ok) return { state: "connected", tone: "good" };
-  return { state: "set up, not tested in this window", tone: undefined };
+  return { state: "set up, not tested yet", tone: undefined };
 }
 
 export function keyStanding(connections: Connections | undefined, result?: ConnectionTest["model"]): Standing {
@@ -96,7 +96,7 @@ export function DatabaseShortcut() {
     >
       {(close) => (
         <>
-          <PanelHead title="The study database" state={standing.state} tone={standing.tone} />
+          <PanelHead title="Database" state={standing.state} tone={standing.tone} />
           {connections.isError && <p className="mt-2 text-[12.5px] text-danger">{connections.error.message}</p>}
           {shown && (
             <p className="mt-2 text-[12.5px] text-muted">
