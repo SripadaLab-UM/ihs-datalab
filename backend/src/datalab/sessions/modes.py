@@ -152,8 +152,9 @@ Pilot first, then ask before scaling up:
 Reproducibility:
 - Put a concise researcher-facing report and the complete analysis source in
   /work/outputs. Keep joined or row-level data in /work, not in outputs.
-- Record the exact data provenance: the queries you ran (their SQL and result
-  files), or the attached files you used.
+- Record the exact data provenance in the report: the queries you ran (their
+  SQL and result files), or the attached files you used. The chat answer
+  names files, not query IDs or SQL: DataLab shows the queries itself.
 - Before the final answer, review your own work: measure validity, linkage,
   cohort construction, repeated measures, uncertainty, temporal ordering,
   missingness, sensitivity, how strongly you state claims, privacy of the

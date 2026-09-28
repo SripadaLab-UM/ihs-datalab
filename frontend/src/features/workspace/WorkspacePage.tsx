@@ -137,7 +137,7 @@ export function WorkspacePage() {
                     <span className="sr-only">{c.kind === "data" ? "Data session:" : "Research session:"}</span>
                     <span className="line-clamp-2 min-w-0 flex-1 break-words">{c.title}</span>
                     {c.busy && (
-                      <span className="flex shrink-0 items-center gap-1 text-[11px] text-muted" title="The agent is working">
+                      <span className="flex shrink-0 items-center gap-1 text-[11.5px] text-muted" title="The agent is working">
                         <span className="dl-breathe size-[6px] rounded-full bg-ink" /> working
                       </span>
                     )}
@@ -290,7 +290,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
 
   const chosen = modes.data?.find((m) => m.id === mode);
   const field = "mt-1.5 w-full rounded-xl border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-accent";
-  const label = "text-[11px] font-semibold uppercase tracking-[0.08em] text-faint";
+  const label = "text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint";
   return (
     <Modal title="New conversation" onClose={onClose}>
       <form

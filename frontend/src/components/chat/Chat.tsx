@@ -4,7 +4,7 @@ import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useSt
 
 import { api, type Conversation, type Effort } from "@/api/client";
 import { Button, Chip, FileGlyph, Icon, InfoTip, SessionBadge } from "@/components/ui";
-import { OpenFileContext, workspaceFile } from "@/lib/files";
+import { KnownFilesContext, OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
 import { Markdown } from "./Markdown";
@@ -12,6 +12,7 @@ import { planStatus } from "./plan";
 import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
+import { type CheckLine, checkLines, failureChip, failures } from "./checks";
 import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
@@ -80,6 +81,7 @@ export function Chat({
       conversation.busy || (transcriptRunning && query.state.dataUpdatedAt <= turnEventAt) ? 3000 : false,
   });
   const running = conversation.busy || (transcriptRunning && status.dataUpdatedAt <= turnEventAt);
+  const known = useKnownFiles(conversation.id);
 
   // When a turn finishes, refresh what depends on it (busy dots, data accessed).
   useEffect(() => {
@@ -147,15 +149,17 @@ export function Chat({
               error={start.error?.message}
             />
           )}
-          {turns.map((turn, index) => (
-            <TurnView
-              key={index}
-              turn={turn}
-              conversationId={conversation.id}
-              running={running}
-              last={index === turns.length - 1}
-            />
-          ))}
+          <KnownFilesContext value={known}>
+            {turns.map((turn, index) => (
+              <TurnView
+                key={index}
+                turn={turn}
+                conversationId={conversation.id}
+                running={running}
+                last={index === turns.length - 1}
+              />
+            ))}
+          </KnownFilesContext>
           <div ref={bottom} />
         </div>
         {!following && running && (
@@ -182,6 +186,30 @@ export function Chat({
       />
     </div>
   );
+}
+
+/**
+ * The files this conversation has, by container path, so its answers link
+ * only to those. Only where files can be opened (the Workspace); null elsewhere.
+ */
+function useKnownFiles(conversationId: string): ReadonlySet<string> | null {
+  const openFile = use(OpenFileContext);
+  const enabled = Boolean(openFile);
+  const outputs = useQuery({ queryKey: ["files", conversationId], queryFn: () => api.files(conversationId), enabled });
+  const work = useQuery({ queryKey: ["files", conversationId, "work"], queryFn: () => api.files(conversationId, "work"), enabled });
+  const results = useQuery({
+    queryKey: ["files", conversationId, "results"],
+    queryFn: () => api.files(conversationId, "results"),
+    enabled,
+  });
+  return useMemo(() => {
+    if (!enabled) return null;
+    return new Set([
+      ...(outputs.data ?? []).map((f) => `/work/outputs/${f.path}`),
+      ...(work.data ?? []).map((f) => `/work/${f.path}`),
+      ...(results.data ?? []).map((f) => `/data/oracle/${f.path}`),
+    ]);
+  }, [enabled, outputs.data, work.data, results.data]);
 }
 
 /** The line over a chat: its title, which session it is, the model and how hard it thinks. */
@@ -457,7 +485,20 @@ function TurnView({
           stopping={stop.isPending}
         />
       )}
-      {answer && <AnswerCard answer={answer} trace={turn.trace} streaming={live} turn={turn} />}
+      {answer && (
+        <AnswerCard
+          answer={answer}
+          trace={turn.trace}
+          streaming={live}
+          turn={turn}
+          checks={checkLines({
+            trace: turn.trace,
+            review: reviews.at(-1),
+            reviewing: reviews.at(-1)?.status === "running" && running,
+            failed: live ? [] : failures(storyRows),
+          })}
+        />
+      )}
       {/* Only the latest review: one run again replaces one that didn't finish. */}
       {reviews.slice(-1).map((review) => (
         <ReviewBox key={`review-${reviews.length}`} review={review} conversationId={conversationId} running={running} last={last} />
@@ -466,7 +507,11 @@ function TurnView({
         <ProposalCard key={proposal.id} proposal={proposal} />
       ))}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
-      {finished && <HowItWasMade rows={storyRows}>{story}</HowItWasMade>}
+      {finished && (
+        <HowItWasMade rows={storyRows}>
+          {story}
+        </HowItWasMade>
+      )}
       {last && !running && canContinue(turn) && <ContinueButton conversationId={conversationId} />}
       {turn.status === "interrupted" && (
         <p className="font-serif text-[16px] text-muted italic">Stopped. Anything it saved is in History.</p>
@@ -528,10 +573,9 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
   const files = new Set(
     steps.flatMap((step) => (step.detail?.kind === "files" ? step.detail.paths : [])),
   ).size;
-  // Failed steps and error notices are named on the row, so folding never hides them.
-  const errors =
-    steps.filter((step) => step.tone === "error").length +
-    rows.filter((row) => row.type === "notice" && row.tone === "error").length;
+  // Failed steps and error notices are named on the row, so folding never hides them,
+  // with whether a later step of the same kind worked.
+  const failedChip = failureChip(failures(rows));
   const facts = [
     steps.length > 0 && `${steps.length} step${steps.length === 1 ? "" : "s"}`,
     count("db") && `${count("db")} quer${count("db") === 1 ? "y" : "ies"}`,
@@ -550,11 +594,7 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
               <Chip key={fact}>{fact}</Chip>
             ))}
             {planChip && <Chip tone={planChip.tone}>{planChip.text}</Chip>}
-            {errors > 0 && (
-              <Chip tone="bad">
-                {errors} error{errors === 1 ? "" : "s"} along the way
-              </Chip>
-            )}
+            {failedChip && <Chip tone={failedChip.tone}>{failedChip.text}</Chip>}
           </span>
         </span>
       </button>
@@ -618,7 +658,19 @@ function waitingFor(rows: ReturnType<typeof activityRows>): string | undefined {
 }
 
 /** The answer, set apart from the work behind it. */
-function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace: Turn["trace"]; streaming: boolean; turn: Turn }) {
+function AnswerCard({
+  answer,
+  trace,
+  streaming,
+  turn,
+  checks,
+}: {
+  answer: string;
+  trace: Turn["trace"];
+  streaming: boolean;
+  turn: Turn;
+  checks: CheckLine[];
+}) {
   const openFile = use(OpenFileContext);
   const openQuery = use(ShowQueryContext);
   // Where each number appears, once the turn's provenance has arrived.
@@ -645,45 +697,70 @@ function AnswerCard({ answer, trace, streaming, turn }: { answer: string; trace:
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
-      <Markdown text={answer} numbers={numbers} />
+      <Markdown text={answer} numbers={numbers} answer />
       {numbers && turn.provenance && turn.provenance.more_numbers > 0 && (
         <p className="mt-3 font-sans text-[12.5px] text-muted">
           {turn.provenance.more_numbers} more number{turn.provenance.more_numbers === 1 ? "" : "s"} in this answer
           weren't checked for where {turn.provenance.more_numbers === 1 ? "it appears" : "they appear"}.
         </p>
       )}
-      {trace && !streaming && (
-        <div className="mt-6 flex flex-wrap items-center gap-1.5 border-t border-line pt-3">
-          <TraceChip trace={trace} />
-        </div>
-      )}
+      {!streaming && checks.length > 0 && <Checks lines={checks} untraced={trace?.untraced ?? []} />}
     </section>
   );
 }
 
-/** Which numbers in the answer came from something the turn produced. */
-function TraceChip({ trace }: { trace: NonNullable<Turn["trace"]> }) {
-  if (trace.untraced.length === 0) {
-    return (
-      <>
-        <Chip>{trace.numbers === 1 ? "the 1 number" : `all ${trace.numbers} numbers`} matched to this turn's outputs</Chip>
-        <InfoTip term="trace-and-provenance" />
-      </>
-    );
-  }
+/**
+ * The checks on the answer, each saying whose check it is and whether a
+ * problem remains: DataLab's own number check first, then the agent's rigor
+ * review, why they differ when they seem to, and the steps that failed.
+ */
+function Checks({ lines, untraced }: { lines: CheckLine[]; untraced: string[] }) {
   return (
-    <>
-      <InfoTip term="trace-and-provenance" />
-      <Chip tone="attn">
-        {trace.untraced.length} of {trace.numbers} number{trace.numbers === 1 ? "" : "s"} not matched to this turn's outputs
-      </Chip>
-      {trace.untraced.slice(0, 8).map((n) => (
-        <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">
-          {n}
-        </Chip>
-      ))}
-      {trace.untraced.length > 8 && <Chip tone="attn">+{trace.untraced.length - 8}</Chip>}
-    </>
+    <div data-testid="answer-checks" className="mt-6 flex flex-col gap-1.5 border-t border-line pt-3 font-sans text-[13px] leading-snug">
+      <h4 className="dl-label flex items-center gap-1.5">
+        Checks on this answer <InfoTip term="trace-and-provenance" />
+      </h4>
+      <ul className="flex flex-col gap-1.5">
+        {lines.map((line) => (
+          <li
+            key={line.key}
+            className={clsx(
+              "flex items-baseline gap-2",
+              line.key === "differ" ? "pl-[18px] text-muted italic" : "text-ink",
+            )}
+          >
+            {line.key !== "differ" &&
+              (line.tone === "plain" ? (
+                <span aria-hidden className="mx-[3.5px] inline-block h-[5px] w-[5px] shrink-0 -translate-y-[1px] rounded-full bg-muted" />
+              ) : (
+                <Icon
+                  name={line.tone === "good" ? "check" : "alert"}
+                  size={12}
+                  className={clsx(
+                    "shrink-0 translate-y-[1px]",
+                    line.tone === "good" && "text-data",
+                    line.tone === "attn" && "text-attn",
+                    line.tone === "bad" && "text-danger",
+                  )}
+                />
+              ))}
+            <span className="min-w-0">
+              {line.text}
+              {line.key === "trace" && untraced.length > 0 && (
+                <span className="mt-1 flex flex-wrap gap-1.5">
+                  {untraced.slice(0, 8).map((n) => (
+                    <Chip key={n} tone="attn" title="Not in this turn's query results, command output, or data files: check it">
+                      {n}
+                    </Chip>
+                  ))}
+                  {untraced.length > 8 && <Chip tone="attn">+{untraced.length - 8}</Chip>}
+                </span>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -743,7 +820,7 @@ function ReviewBox({
             type="button"
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger disabled:opacity-45"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger disabled:opacity-55"
           >
             Stop the review
           </button>
@@ -753,7 +830,7 @@ function ReviewBox({
             type="button"
             onClick={() => again.mutate()}
             disabled={running || again.isPending || again.isSuccess}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink disabled:opacity-45"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink disabled:opacity-55"
           >
             Run the review again
           </button>
@@ -872,7 +949,7 @@ export function ComposerBox({
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
         {typeof note === "function" ? note(sending) : note}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
-        <div className="flex items-end gap-2 rounded-[4px] border border-line bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
+        <div className="flex items-end gap-2 rounded-[4px] border border-edge bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
           <textarea
             ref={box}
             autoFocus={autoFocus}

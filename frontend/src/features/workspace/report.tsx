@@ -177,13 +177,14 @@ function Report({
           {finalAnswer(turn) && <Answer text={finalAnswer(turn)} charts={charts} />}
           {finalAnswer(turn) && turn.trace && turn.trace.untraced.length > 0 && (
             <p className="muted">
-              Numbers not traced to a query result, command output, or output file: {turn.trace.untraced.join(", ")}
+              DataLab's number check: not found in this turn's query results, command output, or output files:{" "}
+              {turn.trace.untraced.join(", ")}
             </p>
           )}
           {turn.items.map((item, i) =>
             item.kind === "review" && item.text ? (
               <details key={`r${i}`} className="work">
-                <summary>Rigor review</summary>
+                <summary>Rigor review (the agent's check of its own work)</summary>
                 <Answer text={item.text} charts={charts} />
               </details>
             ) : null,

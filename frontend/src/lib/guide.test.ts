@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { TOOLTIP_TERMS } from "@/components/ui/InfoTip";
 import { TOUR_ANCHORS, tourSteps } from "@/features/help/Tour";
+import { SETTINGS_SECTIONS, settingsPath } from "@/features/settings/sectionIds";
 
 import { GLOSSARY, glossaryTerm, headings, PAGES, pageBySlug, parseGlossary, parsePage, plain, resolveGuideLink, searchGuide, slug, topicFor } from "./guide";
 
@@ -76,9 +77,20 @@ describe("the guide, bundled", () => {
     expect(topicFor("/pipelines").file).toBe("pipelines.md");
     expect(topicFor("/knowledge/tables/x").file).toBe("knowledge-proposals.md");
     expect(topicFor("/settings").file).toBe("settings.md");
+    expect(topicFor("/settings/connections").file).toBe("settings.md");
+    expect(topicFor("/settings/updates").file).toBe("settings.md");
+    expect(topicFor("/settings/safety").file).toBe("safety.md");
     expect(topicFor("/nowhere").file).toBe("README.md");
     // Every screen named in the guide is one of the app's.
-    const routes = ["/workspace", "/sql", "/workflows", "/pipelines", "/knowledge", "/settings"];
+    const routes = [
+      "/workspace",
+      "/sql",
+      "/workflows",
+      "/pipelines",
+      "/knowledge",
+      "/settings",
+      ...SETTINGS_SECTIONS.map((s) => settingsPath(s.id)),
+    ];
     for (const page of PAGES) for (const screen of page.screens) expect(routes).toContain(screen.replace(/\/\*$/, ""));
   });
 });

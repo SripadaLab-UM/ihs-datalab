@@ -8,7 +8,9 @@ import { SHOW_QUERY } from "@/components/chat/provenance";
 import { Button, Chip, EmptyNote, FileGlyph, Icon, InfoTip, Modal, Tabs } from "@/components/ui";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 import { formatBytes } from "@/lib/csv";
-import type { OpenFile } from "@/lib/files";
+import { type OpenFile, sharedPrefix } from "@/lib/files";
+
+export { sharedPrefix };
 
 import { ExportDialog } from "./ExportDialog";
 import { Inputs } from "./Inputs";
@@ -152,24 +154,6 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
   );
 }
 
-/**
- * The start several file names share, cut at a separator, when it's long
- * enough to crowd out the part that tells them apart (sleep_mood_2025_pilot_).
- */
-export function sharedPrefix(names: string[]): string {
-  if (names.length < 2) return "";
-  let prefix = names[0];
-  for (const name of names.slice(1)) {
-    let i = 0;
-    while (i < prefix.length && i < name.length && prefix[i] === name[i]) i++;
-    prefix = prefix.slice(0, i);
-  }
-  const cut = Math.max(prefix.lastIndexOf("_"), prefix.lastIndexOf("-"), prefix.lastIndexOf(" "));
-  prefix = cut >= 0 ? prefix.slice(0, cut + 1) : "";
-  // Never swallow a whole name: every file keeps something to show.
-  return prefix.length >= 8 && names.every((name) => name.length > prefix.length + 2) ? prefix : "";
-}
-
 function shown(path: string, prefix: string): string {
   const { name } = splitPath(path);
   return prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name;
@@ -226,7 +210,7 @@ function History({ conversation }: { conversation: Conversation }) {
                   <Icon name="restore" size={13} /> Restore
                 </Button>
               </div>
-              <div className="font-mono text-[11px] text-faint">
+              <div className="font-mono text-[11.5px] text-faint">
                 {new Date(checkpoint.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ·{" "}
                 {checkpoint.files} file{checkpoint.files === 1 ? "" : "s"} · {formatBytes(checkpoint.bytes)}
               </div>

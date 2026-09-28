@@ -14,7 +14,8 @@ covers both.
 
 ## Sign in
 
-1. Open **Settings & Safety → GitHub** and press **Sign in with GitHub**.
+1. Open **Settings & Safety → Connections → GitHub** (or press **Sign in**
+   beside the GitHub mark at the top right) and press **Sign in with GitHub**.
 2. DataLab shows a short code. Open GitHub's device page from the link, enter
    the code, and approve **IHS DataLab**.
 3. DataLab notices within a few seconds and downloads the repositories.

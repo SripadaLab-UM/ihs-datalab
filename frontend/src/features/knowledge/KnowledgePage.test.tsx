@@ -65,7 +65,7 @@ function show(at = "/knowledge") {
       <QueryClientProvider client={client}>
         <Routes>
           <Route path="knowledge/*" element={<KnowledgePage />} />
-          <Route path="settings" element={<p>the settings page</p>} />
+          <Route path="settings/*" element={<p>the settings page</p>} />
         </Routes>
       </QueryClientProvider>
     </MemoryRouter>,

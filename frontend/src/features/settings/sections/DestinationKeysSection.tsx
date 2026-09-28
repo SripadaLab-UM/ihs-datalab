@@ -4,9 +4,9 @@ import { api } from "@/api/client";
 import { type DestinationKey, settingsApi } from "@/api/settings";
 import { Chip } from "@/components/ui";
 
-import { Section } from "./Section";
+import { FixedOnPractice, Section } from "./Section";
 
-/** Where other screens link to this section: `/settings#destination-keys`. */
+/** Where other screens link to this section: `/settings/export-folders#destination-keys`. */
 export const DESTINATION_KEYS_ANCHOR = "destination-keys";
 
 /**
@@ -27,7 +27,7 @@ export function DestinationKeysSection({ practice }: { practice: boolean }) {
 
   return (
     <div id={DESTINATION_KEYS_ANCHOR} className="scroll-mt-6">
-      <Section title="Workflow destinations">
+      <Section title="Workflow destinations" actions={practice ? <FixedOnPractice /> : undefined}>
         {practice ? (
           <p className="mt-1 text-sm text-muted">
             Practice DataLab delivers workflow results only to its own practice folder, so there's nothing to set

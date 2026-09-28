@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 
+import { settingsPath } from "./sectionIds";
 import { installing, useUpdateCheck } from "./updateCheck";
 
 const PILL =
@@ -16,7 +17,7 @@ export function UpdatePill() {
   if (!check) return null;
   if (installing(check)) {
     return (
-      <Link to="/settings#updates" className={`${PILL} border-attn/50 text-attn`} role="status">
+      <Link to={settingsPath("updates")} className={`${PILL} border-attn/50 text-attn`} role="status">
         Updating to {check.install.version}…
       </Link>
     );
@@ -24,7 +25,7 @@ export function UpdatePill() {
   if (check.state !== "available" || !check.available) return null;
   return (
     <Link
-      to="/settings#updates"
+      to={settingsPath("updates")}
       className={`${PILL} border-you/50 bg-you-soft text-you hover:border-you`}
       title={`DataLab ${check.available.version} is available (this is ${check.current_version}). See what's new in Settings.`}
     >

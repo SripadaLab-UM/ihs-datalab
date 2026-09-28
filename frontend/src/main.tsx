@@ -7,6 +7,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import { App } from "./app/App";
+import { applyTheme, readTheme } from "./lib/theme";
+
+// Light, Dark or System (Settings → Appearance), before the first paint.
+applyTheme(readTheme());
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

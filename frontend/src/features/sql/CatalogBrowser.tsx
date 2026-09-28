@@ -130,7 +130,7 @@ function TableRow({
         </button>
       </div>
       {!open && highlight.length > 0 && (
-        <p className="mb-1 ml-[18px] flex flex-wrap gap-x-2 pl-2 font-sans text-[11px] text-faint">
+        <p className="mb-1 ml-[18px] flex flex-wrap gap-x-2 pl-2 font-sans text-[11.5px] text-faint">
           Columns:
           {highlight.map((name) => (
             <button
@@ -159,9 +159,9 @@ function TableRow({
                 )}
               >
                 <span className="min-w-0 truncate font-mono text-[11.5px] text-ink">{column.name}</span>
-                <span className="ml-auto shrink-0 font-mono text-[10.5px] text-faint">{column.type}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11.5px] text-faint">{column.type}</span>
               </button>
-              {column.comment && <p className="-mt-0.5 mb-0.5 truncate font-sans text-[11px] text-muted">{column.comment}</p>}
+              {column.comment && <p className="-mt-0.5 mb-0.5 truncate font-sans text-[11.5px] text-muted">{column.comment}</p>}
             </li>
           ))}
         </ul>
