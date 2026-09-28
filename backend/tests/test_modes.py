@@ -45,17 +45,13 @@ def test_every_mode_gets_the_knowledge_base_note():
 
 def test_workflow_authoring_queries_like_data_extraction():
     workflows, extraction = MODES["workflows"], MODES["extraction"]
-    assert (
-        (workflows.kind, workflows.queries, workflows.tools_off)
-        == (
-            extraction.kind,
-            extraction.queries,
-            extraction.tools_off,
-        )
-        == ("data", True, ("propose_sql",))
-    )
+    assert (workflows.kind, workflows.queries) == (extraction.kind, extraction.queries)
+    assert (workflows.kind, workflows.queries) == ("data", True)
+    # Only Data extraction suggests Knowledge updates.
+    assert workflows.tools_off == ("propose_sql", "suggest_kb_update")
+    assert extraction.tools_off == ("propose_sql",)
     server = config("workflows")["mcp_servers"]["ihs-data"]
-    assert server["disabled_tools"] == ["propose_sql"]
+    assert server["disabled_tools"] == ["propose_sql", "suggest_kb_update"]
     assert config("workflows")["web_search"] == "disabled"
 
 
@@ -86,12 +82,14 @@ def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     assert mode.tools == CATALOG_TOOLS
     server = config("knowledge")["mcp_servers"]["ihs-data"]
     assert server["disabled_tools"] == [
-        "query", "check_workflow", "propose_plan", "ask_research_helper", "propose_sql"
+        "query", "check_workflow", "propose_plan", "ask_research_helper", "propose_sql",
+        "suggest_kb_update",
     ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
     # Every other mode keeps its tools and attachments, all but the SQL tab's own.
     for other in set(MODES) - {"knowledge", "sql", "pipelines"}:
-        assert MODES[other].tools is None and MODES[other].tools_off == ("propose_sql",)
+        assert MODES[other].tools is None and "propose_sql" in MODES[other].tools_off
+        assert set(MODES[other].tools_off) <= {"propose_sql", "suggest_kb_update"}
         assert MODES[other].queries and MODES[other].attachments
 
 
@@ -103,7 +101,7 @@ def test_only_the_sql_playgrounds_chat_proposes_sql():
     assert "propose_sql" in mode.allowed_tools
     assert [m.id for m in MODES.values() if "propose_sql" in m.allowed_tools] == ["sql"]
     assert config("sql")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
-        "check_workflow", "propose_plan"
+        "check_workflow", "propose_plan", "suggest_kb_update"
     ]  # fmt: skip
     text = mode.instructions
     assert "call `propose_sql` exactly once" in text
@@ -146,12 +144,12 @@ def test_the_pipelines_tabs_chat_explains_edits_and_tests_code():
     assert (mode.kind, mode.queries, mode.attachments, mode.tab_only) == ("data", True, False, True)
     assert mode.allowed_tools == CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"}
     assert config("pipelines")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
-        "propose_plan", "propose_sql"
+        "propose_plan", "propose_sql", "suggest_kb_update"
     ]  # fmt: skip
     assert config("pipelines")["web_search"] == "disabled"
     text = mode.instructions
     assert text.endswith(modes.ENGINEERING_RULES)
-    assert MODES["engineering"].instructions.endswith(modes.ENGINEERING_RULES)
+    assert modes.ENGINEERING_RULES in MODES["engineering"].instructions
     assert "explain what it does" in text and "change nothing" in text
     assert "comes back as a proposal" in text and "Only a person saves a change" in text
     # Engineering's safety rules come along.
@@ -169,3 +167,20 @@ def test_each_tabs_chat_works_on_what_the_tab_has_open():
     knowledge = " ".join(MODES["knowledge"].instructions.split())
     assert '("The page open in the Knowledge tab (<path>)")' in knowledge
     assert "changes that same file in /work/kb" in knowledge
+
+
+def test_only_workspace_modes_with_durable_findings_suggest_knowledge_updates():
+    """suggest_kb_update: Analysis, Data extraction and Data engineering. Not
+    the tabs' own chats (SQL, Pipelines, Workflows, Knowledge writing), nor
+    Research, which has no data tools."""
+    having = [m.id for m in MODES.values() if "suggest_kb_update" in m.allowed_tools]
+    assert having == ["analysis", "extraction", "engineering"]
+    for mode_id in having:
+        text = " ".join(MODES[mode_id].instructions.split())
+        assert "call `suggest_kb_update`" in text
+        assert "at most one or two an answer" in text
+        assert "none for a one-off result" in text
+        assert "counts of fewer than 11 people" in text
+        assert config(mode_id)["mcp_servers"]["ihs-data"]["disabled_tools"] == ["propose_sql"]
+    for mode_id in set(MODES) - set(having):
+        assert "suggest_kb_update" not in MODES[mode_id].instructions

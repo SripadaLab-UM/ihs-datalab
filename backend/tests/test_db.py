@@ -70,7 +70,10 @@ def test_0011_keeps_existing_folders_and_deliveries(tmp_path):
         "('dl_1', 'run_1', 'lab-dropbox', 'dest_1', '/synthetic/dropbox', '/synthetic/dropbox/x', "
         "'[]', 'sha256:3', 'then')"
     )
-    assert db.migrate(connection, app_version="0.0.0") == ["0011_export_folders.sql"]
+    assert db.migrate(connection, app_version="0.0.0") == [
+        "0011_export_folders.sql",
+        "0012_kb_edits.sql",
+    ]
     [folder] = connection.execute("SELECT * FROM export_destinations").fetchall()
     assert (folder["name"], folder["key"], folder["offered"]) == (
         "Synthetic Dropbox",

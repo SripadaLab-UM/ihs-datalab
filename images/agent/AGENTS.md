@@ -22,7 +22,11 @@ export files out of DataLab.
 
 Edits you make in `/work/kb` become proposed changes to the lab knowledge
 base, which a person reviews before anything is shared (the `kb-propose`
-skill). Participant-level data never goes there.
+skill). Participant-level data never goes there. In Analysis, Data
+extraction and Data engineering, a durable finding that a query here
+confirmed is better offered with `suggest_kb_update` (at most one or two an
+answer, with the query ids as evidence): the person sees it as a card and
+decides. It never changes the knowledge base by itself.
 
 ## Data
 

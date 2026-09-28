@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datalab.sessions.tokens import OPT_IN_TOOLS as _OPT_IN_TOOLS
 from datalab.sessions.tokens import TAB_TOOLS as _TAB_TOOLS
 from datalab.sessions.tokens import SessionKind
 
@@ -26,10 +27,12 @@ class Mode:
     # Suggested first messages, shown in an empty conversation.
     starters: tuple[str, ...] = ()
     # The ihs-data tools it may use (data sessions), or None for all of them
-    # but the tab-only ones (TAB_TOOLS). The session's token carries the
+    # but the opt-in ones (OPT_IN_TOOLS). The session's token carries the
     # list, and DataLab's data tools refuse any other (agent_tools.py);
     # Codex doesn't list the others either.
     tools: frozenset[str] | None = None
+    # Opt-in tools it has as well (with tools=None): suggest_kb_update.
+    extra_tools: frozenset[str] = frozenset()
     # Whether files and folders can be attached to it.
     attachments: bool = True
     # Only for the tab that docks it; not offered in the Workspace's New
@@ -40,8 +43,11 @@ class Mode:
 
     @property
     def allowed_tools(self) -> frozenset[str]:
-        """The ihs-data tools it may use: its own list, or every tool but the tab-only ones."""
-        return self.tools if self.tools is not None else frozenset(DATA_TOOLS) - TAB_TOOLS
+        """The ihs-data tools it may use: its own list, or every tool but the opt-in ones
+        (and those it names)."""
+        if self.tools is not None:
+            return self.tools | self.extra_tools
+        return (frozenset(DATA_TOOLS) - OPT_IN_TOOLS) | self.extra_tools
 
     @property
     def queries(self) -> bool:
@@ -65,15 +71,38 @@ DATA_TOOLS = (
     "propose_plan",
     "ask_research_helper",
     "propose_sql",
+    "suggest_kb_update",
 )
 # The catalog tools: metadata only, never rows.
 CATALOG_TOOLS = frozenset({"search_catalog", "describe_table", "join_paths", "find_concept"})
 # Tools only the mode that names them gets (sessions/tokens.py): propose_sql
 # fills the SQL Playground's editor, so only its chat has it.
 TAB_TOOLS = _TAB_TOOLS
+OPT_IN_TOOLS = _OPT_IN_TOOLS
+# Suggesting a Knowledge update (suggest_kb_update): the Workspace modes
+# whose findings about the data can be durable. Not the tabs' own chats.
+KB_SUGGESTIONS = frozenset({"suggest_kb_update"})
 
 
-ANALYSIS = """\
+SUGGEST_KB = """\
+Suggesting a Knowledge update:
+- When this conversation confirms something durable about the data that the
+  lab should keep (a quirk a query showed, what a column really holds, a
+  definition, a caveat about a table or cohort), call `suggest_kb_update`
+  with the page it belongs on (existing, or a new one in its kind's folder),
+  a short title, the text to add, the query_ids of the queries here that
+  show it, and why it's worth keeping. The person sees it as a card under
+  your answer and decides; it never changes the knowledge base by itself.
+- Only durable, general, evidence-backed findings: at most one or two an
+  answer, and none for a one-off result, this analysis's numbers, or a
+  guess. Never participant-level data: no IDs, per-person dates, rows or
+  tables of values, or counts of fewer than 11 people.
+- Mention it in one line of your answer. Edit /work/kb yourself only when
+  the person asks you to write or change a page.
+"""
+
+ANALYSIS = (
+    """\
 You are working in Analysis mode in IHS DataLab. The people you work with are
 principal investigators and researchers, who may not be technical. Translate
 their scientific intent into a defensible, reproducible analysis without
@@ -166,9 +195,13 @@ Final answers lead with a plain-language bottom line, label the work
 exploratory or confirmatory, separate evidence from interpretation, state the
 key sample sizes and uncertainty, point to the report and source, and list the
 most important limitations and next steps.
-"""
 
-EXTRACTION = """\
+"""
+    + SUGGEST_KB
+)
+
+EXTRACTION = (
+    """\
 You are working in Data extraction mode in IHS DataLab: getting a clean,
 documented dataset out of the IHS database for the person you're helping.
 
@@ -192,7 +225,10 @@ Final answers include: the request as you understood it, the catalog
 evidence, assumptions and caveats, every SQL statement you actually ran with
 its purpose, the row count, columns, and file paths, and anything the person
 should double-check.
+
 """
+    + SUGGEST_KB
+)
 
 SQL_DRAFTING = """\
 You are working in the SQL Playground's chat in IHS DataLab. The person
@@ -277,6 +313,8 @@ lab's data pipelines and R code (such as the ihsDataR package).
 
 """
     + ENGINEERING_RULES
+    + "\n"
+    + SUGGEST_KB
 )
 
 PIPELINES = (
@@ -538,6 +576,7 @@ MODES = {
                 "How did daily step counts change over the intern year?",
                 "Describe the 2025 cohort: size, demographics, and data coverage.",
             ),
+            extra_tools=KB_SUGGESTIONS,
         ),
         Mode(
             "extraction",
@@ -549,6 +588,7 @@ MODES = {
                 "Extract daily Fitbit sleep for the 2025 cohort, one row per participant-night.",
                 "Which tables hold PHQ-9 scores, and how do they differ between years?",
             ),
+            extra_tools=KB_SUGGESTIONS,
         ),
         Mode(
             "sql",
@@ -575,6 +615,7 @@ MODES = {
                 "Review the attached R script and suggest how to turn it into package functions.",
                 "Write tests for the attached cleaning function.",
             ),
+            extra_tools=KB_SUGGESTIONS,
         ),
         Mode(
             "pipelines",

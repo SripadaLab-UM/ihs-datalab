@@ -66,12 +66,18 @@ class Share:
     files: Mapping[str, bytes | None]
     author: Identity
     reviewer: str  # the GitHub login recorded in reviewed_by
+    # Where it came from: a conversation (empty for a person's own edit in
+    # the Knowledge tab), and the proposal's or the edit's id.
     conversation_id: str
     proposal_id: str
     confirmed: Collection[str] = ()
     # The person's text for files that conflicted, written against `resolved_against`.
     resolutions: Mapping[str, bytes] = field(default_factory=dict)
     resolved_against: str | None = None
+    # A person's own edit of a page (the Knowledge tab's Edit page): if
+    # anyone else changed one of its files on GitHub since `base`, stop with a
+    # conflict instead of merging, so the person sees both versions first.
+    strict: bool = False
     today: datetime.date = field(default_factory=datetime.date.today)
 
 
@@ -145,6 +151,15 @@ def _save(clone: Clone, share: Share) -> SaveResult:
         upstream = clone.remote_head()
         if upstream is None:
             return SaveResult("failed", "GitHub's knowledge base has no main branch.")
+        moved = _changed_since(clone, share, upstream) if share.strict else []
+        if moved:
+            return SaveResult(
+                "conflict",
+                f"Someone else changed {', '.join(moved)} on GitHub since you started editing. "
+                "Nothing was shared. Compare the versions, then save again.",
+                upstream=upstream,
+                conflicts=moved,
+            )
         rebased = clone.rebase(
             ours,
             onto=upstream,
@@ -204,6 +219,18 @@ def _finish(clone: Clone, commit: str, upstream: str, share: Share, message: str
     return clone.commit_files(upstream, dict(overlay), message, share.author, tree_of=commit)
 
 
+def _changed_since(clone: Clone, share: Share, upstream: str) -> list[str]:
+    """The files of `share` whose version on `upstream` isn't the one at `base`."""
+    if upstream == share.base:
+        return []
+    now, then = clone.ls_tree(upstream), clone.ls_tree(share.base)
+    return sorted(
+        path
+        for path in share.files
+        if (now.get(path) and now[path].blob) != (then.get(path) and then[path].blob)
+    )
+
+
 def _still_valid(clone: Clone, share: Share, upstream: str) -> dict[str, bytes]:
     """Resolutions still fit only where `main`'s version of the file is the
     one the person resolved against."""
@@ -248,12 +275,15 @@ def _message(share: Share) -> str:
     if len(subject) > 72:
         subject = f"Knowledge: {len(changed)} files"
     body = "\n".join(f"- {'deleted' if final[p] is None else 'updated'} {p}" for p in changed)
+    how = "Reviewed and saved" if share.conversation_id else "Edited and saved"
+    trailers = f"DataLab-Conversation: {share.conversation_id}\n" if share.conversation_id else ""
+    label = "DataLab-Edit" if share.proposal_id.startswith("ke_") else "DataLab-Proposal"
     return (
         f"{subject}\n\n"
-        f"Reviewed and saved in DataLab by {share.author.name} (@{share.reviewer}).\n\n"
+        f"{how} in DataLab by {share.author.name} (@{share.reviewer}).\n\n"
         f"{body}\n\n"
-        f"DataLab-Conversation: {share.conversation_id}\n"
-        f"DataLab-Proposal: {share.proposal_id}\n"
+        f"{trailers}"
+        f"{label}: {share.proposal_id}\n"
     )
 
 
