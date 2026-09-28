@@ -13,6 +13,7 @@ import {
   type WorkflowsStatus,
   workflowsApi,
 } from "@/api/workflows";
+import { SendingLine } from "@/components/chat/Pending";
 import { CodeEditor, type EditorDiagnostic } from "@/components/editor/CodeEditor";
 import { Button, Icon } from "@/components/ui";
 import { ACTIONABLE } from "@/features/pipelines/pipelines";
@@ -160,13 +161,22 @@ function Describe({
   onPaste: () => void;
 }) {
   const [description, setDescription] = useState("");
-  const start = useMutation({ mutationFn: () => onStart(description.trim()) });
+  // Set at once on submit, before any state update can render: a double click starts one draft.
+  const inFlight = useRef(false);
+  const start = useMutation({
+    mutationFn: () => onStart(description.trim()),
+    onSettled: () => {
+      inFlight.current = false;
+    },
+  });
   return (
     <form
       className="flex max-w-[52rem] flex-col gap-5"
       onSubmit={(e) => {
         e.preventDefault();
-        if (description.trim() && !start.isPending) start.mutate();
+        if (!description.trim() || inFlight.current) return;
+        inFlight.current = true;
+        start.mutate();
       }}
     >
       <label className="flex flex-col gap-3">
@@ -184,6 +194,8 @@ function Describe({
           value={description}
           maxLength={4000}
           onChange={(e) => setDescription(e.target.value)}
+          // Held still while it's sent; a failed start leaves it here to try again.
+          readOnly={start.isPending}
           placeholder={EXAMPLE}
           className="w-full resize-y rounded-[4px] border border-line bg-field px-3 py-2.5 font-serif text-[17px] leading-relaxed outline-none focus:border-ink"
         />
@@ -201,6 +213,7 @@ function Describe({
           Or write the YAML yourself
         </Button>
       </div>
+      {start.isPending && <SendingLine />}
       <StagesExplainer />
       {practice && (
         <p className="font-sans text-[12.5px] text-muted">

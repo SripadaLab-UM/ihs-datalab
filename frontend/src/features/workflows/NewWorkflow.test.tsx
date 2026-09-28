@@ -156,6 +156,36 @@ it("asks what the workflow should do, and starts the authoring chat with the des
   expect(await screen.findByText(/working out the details/)).toBeInTheDocument();
 });
 
+it("says at once that the draft is starting, and starts it once however often it's clicked", async () => {
+  let started!: () => void;
+  vi.mocked(api.send).mockReturnValue(new Promise((resolve) => (started = () => resolve({ id: "conv_1" } as never))));
+  show("/workflows/new");
+  const box = await screen.findByRole("textbox", { name: /What should this workflow do\?/ });
+  fireEvent.change(box, { target: { value: EXAMPLE } });
+  const button = screen.getByRole("button", { name: /Start drafting/ });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(await screen.findByRole("status")).toHaveTextContent("Sending…");
+  expect(screen.getByRole("button", { name: /Starting…/ })).toBeDisabled();
+  expect(box).toHaveAttribute("readonly");
+  await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+  expect(api.createConversation).toHaveBeenCalledTimes(1);
+  started();
+  expect(await screen.findByText(/working out the details/)).toBeInTheDocument();
+});
+
+it("keeps the description and shows why when the draft couldn't start", async () => {
+  vi.mocked(api.send).mockRejectedValue(new Error("DataLab couldn't be reached."));
+  show("/workflows/new");
+  const box = await screen.findByRole("textbox", { name: /What should this workflow do\?/ });
+  fireEvent.change(box, { target: { value: EXAMPLE } });
+  fireEvent.click(screen.getByRole("button", { name: /Start drafting/ }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("DataLab couldn't be reached.");
+  expect(box).toHaveValue(EXAMPLE);
+  expect(box).not.toHaveAttribute("readonly");
+  expect(screen.queryByText("Sending…")).toBeNull();
+});
+
 it("shows the assistant's draft as three editable stages, and edits go to the backend", async () => {
   sessionStorage.setItem("datalab:workflows:chat", "conv_1");
   vi.mocked(api.conversations).mockResolvedValue([{ id: "conv_1" }] as never);
