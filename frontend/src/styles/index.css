@@ -338,3 +338,39 @@ input[type="radio"] {
   outline: 2px solid var(--color-ink);
   outline-offset: 3px;
 }
+
+/* The part of Settings a link from elsewhere pointed at (features/settings/
+   highlight.ts): an amber ring and tint around it that fade, so the eye lands
+   there. Shadows and a background only, so nothing moves. Under reduced
+   motion it holds still for the same time and then goes. */
+@keyframes dl-highlight {
+  0%,
+  35% {
+    background-color: var(--color-attn-soft);
+    box-shadow:
+      0 0 0 8px var(--color-attn-soft),
+      0 0 0 10px var(--color-attn);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow:
+      0 0 0 8px transparent,
+      0 0 0 10px transparent;
+  }
+}
+.dl-highlight {
+  border-radius: var(--radius-md);
+  animation: dl-highlight 1.8s ease-out both;
+}
+.dl-highlight-still {
+  border-radius: var(--radius-md);
+  background-color: var(--color-attn-soft);
+  box-shadow:
+    0 0 0 8px var(--color-attn-soft),
+    0 0 0 10px var(--color-attn);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dl-highlight {
+    animation: none;
+  }
+}

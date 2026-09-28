@@ -73,7 +73,7 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
   const failed = check.install.state === "failed";
   return (
     <div className="mt-4">
-      <div className="flex flex-wrap items-center gap-3 rounded-[3px] border border-line px-4 py-3">
+      <div id="updates-check" className="flex scroll-mt-6 flex-wrap items-center gap-3 rounded-[3px] border border-line px-4 py-3">
         <p className="min-w-0 flex-1 text-[15px]" role="status">
           {check.message}
           {check.checked_at && <span className="block text-xs text-muted">Last checked {when(check.checked_at)}</span>}

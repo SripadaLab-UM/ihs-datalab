@@ -42,14 +42,14 @@ it("shows who is signed in, linking to Settings → Connections", async () => {
   show();
   const link = await screen.findByRole("link", { name: "GitHub: signed in as yfang" });
   expect(link.textContent).toBe("yfang");
-  expect(link.getAttribute("href")).toBe("/settings/connections#github");
+  expect(link.getAttribute("href")).toBe("/settings/connections#connection-github");
 });
 
 it("offers Sign in when nobody is", async () => {
   show();
   const link = await screen.findByRole("link", { name: "Sign in to GitHub" });
   expect(link.textContent).toBe("Sign in");
-  expect(link.getAttribute("href")).toBe("/settings/connections#github");
+  expect(link.getAttribute("href")).toBe("/settings/connections#connection-github");
 });
 
 it("isn't there on practice, which never signs in to GitHub", async () => {

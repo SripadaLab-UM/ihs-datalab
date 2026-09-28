@@ -3,6 +3,7 @@ import { Link } from "react-router";
 
 import { type Delivery, type Workflow, type WorkflowRun, workflowsApi } from "@/api/workflows";
 import { Chip, Icon, InfoTip } from "@/components/ui";
+import { settingsLink } from "@/features/settings/highlight";
 
 import { deliveryProblems, isLive, plural, problemWhere, short, when } from "./words";
 
@@ -116,7 +117,7 @@ export function Destinations({ practice }: { practice: boolean }) {
         ) : (
           <>
             A workflow names a destination by a key. Each computer chooses which of its export folders a key means, in{" "}
-            <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+            <Link {...settingsLink("export-folders", "destination-keys")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
               Settings &amp; Safety
             </Link>
             .

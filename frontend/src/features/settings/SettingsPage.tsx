@@ -24,6 +24,7 @@ import { ExportDestinations } from "./sections/ExportDestinations";
 import { SafetySection, safetySummary } from "./sections/SafetySection";
 import { StorageSection } from "./sections/StorageSection";
 import { UpdatesSection } from "./sections/UpdatesSection";
+import { OLD_ANCHORS, useSettingsHighlight } from "./highlight";
 import { useUpdateCheck } from "./updateCheck";
 
 function anchorOf(hash: string): string | null {
@@ -42,7 +43,7 @@ function anchorOf(hash: string): string | null {
  */
 export function SettingsPage() {
   const { section } = useParams();
-  const { hash } = useLocation();
+  const { hash, state } = useLocation();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
   const current = isSection(section) ? section : null;
@@ -51,11 +52,15 @@ export function SettingsPage() {
   useEffect(() => {
     if (current) rememberSection(current);
   }, [current]);
-  // A place inside a section (/settings/export-folders#destination-keys).
+  // A link from elsewhere in DataLab lights up the part it's about (highlight.ts).
+  const announcement = useSettingsHighlight();
+  const highlighting = Boolean((state as { highlight?: unknown } | null)?.highlight);
+  // A place inside a section (/settings/export-folders#destination-keys); an
+  // old anchor (#github) finds its part's new id.
   useEffect(() => {
-    if (!current || !anchor || anchor === current) return;
-    document.getElementById(anchor)?.scrollIntoView?.({ block: "start" });
-  }, [current, anchor, health.isSuccess]);
+    if (!current || !anchor || anchor === current || highlighting) return;
+    document.getElementById(OLD_ANCHORS[anchor] ?? anchor)?.scrollIntoView?.({ block: "start" });
+  }, [current, anchor, health.isSuccess, highlighting]);
 
   if (!current) {
     // An old link (/settings#updates) goes to its section; else the last one used.
@@ -103,6 +108,9 @@ export function SettingsPage() {
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex max-w-5xl flex-col gap-6 px-4 py-6 sm:px-8 md:flex-row md:gap-12 md:py-12">
         <h1 className="sr-only">Settings &amp; Safety</h1>
+        <p aria-live="polite" className="sr-only" data-testid="settings-announcement">
+          {announcement}
+        </p>
         <SectionNav current={current} />
         <div className="flex min-w-0 max-w-3xl flex-1 flex-col gap-14">{panel}</div>
       </div>

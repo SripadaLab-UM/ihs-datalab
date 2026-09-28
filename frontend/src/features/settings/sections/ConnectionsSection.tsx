@@ -69,7 +69,7 @@ function Model({
   const practice = connections.profile === "practice";
   return (
     <SecretPart
-      id="um-gpt"
+      id="connection-umgpt"
       title="U-M GPT"
       source={model.key}
       what="key"
@@ -152,7 +152,7 @@ function Database({
     // Nothing to save: not set up yet, or practice's own synthetic database.
     return (
       <Part
-        id="database"
+        id="connection-database"
         title="The study database"
         state={
           oracle.practice ? (
@@ -170,7 +170,7 @@ function Database({
   }
   return (
     <SecretPart
-      id="database"
+      id="connection-database"
       title="The study database"
       source={oracle.password}
       what="password"

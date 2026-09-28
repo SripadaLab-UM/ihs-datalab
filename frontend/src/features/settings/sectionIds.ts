@@ -16,7 +16,7 @@ export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 export const DEFAULT_SECTION: SettingsSectionId = "connections";
 
 /** GitHub's place in Connections, where the toolbar's GitHub entry links. */
-export const GITHUB_ANCHOR = "github";
+export const GITHUB_ANCHOR = "connection-github";
 
 /** Where the last section opened is remembered, in this browser only. */
 export const LAST_SECTION_KEY = "datalab.settings.section";
@@ -37,6 +37,10 @@ const ANCHORS: Record<string, SettingsSectionId> = {
   github: "connections",
   "um-gpt": "connections",
   database: "connections",
+  "connection-github": "connections",
+  "connection-umgpt": "connections",
+  "connection-database": "connections",
+  "updates-check": "updates",
   diagnostics: "about",
 };
 

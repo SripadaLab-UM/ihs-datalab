@@ -14,7 +14,7 @@ const CHOICES: { value: Theme; label: string; about: string }[] = [
 export function AppearanceSection() {
   const { theme, setTheme, kept } = useTheme();
   return (
-    <Section title="Appearance">
+    <Section id="appearance" title="Appearance">
       <p className="mt-1 text-sm text-muted">How DataLab looks in this browser. Other computers keep their own choice.</p>
       <fieldset className="mt-5">
         <legend className="dl-label">Theme</legend>

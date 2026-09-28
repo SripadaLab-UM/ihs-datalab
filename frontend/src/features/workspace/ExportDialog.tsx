@@ -7,6 +7,7 @@ import { api, type Conversation, type FileRoot, type WorkspaceFile } from "@/api
 import { Button, FileGlyph, Icon, Modal } from "@/components/ui";
 import { kindOf } from "@/lib/files";
 import { formatBytes } from "@/lib/csv";
+import { settingsLink } from "@/features/settings/highlight";
 
 import { buildReport, REPORT_CSS } from "./report";
 
@@ -172,7 +173,7 @@ export function ExportDialog({
             <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-xs text-muted">
-                No export folders yet. Add one in <Link to="/settings/export-folders" className="text-accent underline decoration-faint underline-offset-4 hover:decoration-ink">Settings</Link>.
+                No export folders yet. Add one in <Link {...settingsLink("export-folders", "export-folders")} className="text-accent underline decoration-faint underline-offset-4 hover:decoration-ink">Settings</Link>.
               </p>
             ) : (
               <select

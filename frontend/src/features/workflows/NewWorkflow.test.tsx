@@ -256,7 +256,7 @@ it("says there are no export folders yet, and where to add one", async () => {
   vi.mocked(workflowsApi.stages).mockResolvedValue(result({ destinations: [] }));
   show("/workflows/new");
   const status = await screen.findByText(/No export folders are set up yet/);
-  expect(within(status).getByRole("link", { name: "Settings → Export folders" })).toHaveAttribute("href", "/settings");
+  expect(within(status).getByRole("link", { name: "Settings → Export folders" })).toHaveAttribute("href", "/settings/export-folders#export-folders");
   // Not practice: no test run on this computer.
   expect(screen.queryByRole("button", { name: /Test run/ })).not.toBeInTheDocument();
   expect(screen.getByText(/Test runs of a draft happen on synthetic data, in Practice DataLab/)).toBeInTheDocument();
@@ -297,7 +297,7 @@ it("offers to add a folder, without failing, when a draft delivers nowhere and t
   vi.mocked(workflowsApi.stages).mockResolvedValue(result({ stages: stages({ deliver: null }), destinations: [] }));
   show("/workflows/new");
   const note = await screen.findByText(/Add an export folder in/);
-  expect(within(note).getByRole("link", { name: "Settings → Export folders" })).toHaveAttribute("href", "/settings");
+  expect(within(note).getByRole("link", { name: "Settings → Export folders" })).toHaveAttribute("href", "/settings/export-folders#export-folders");
   expect(screen.getByText(/Nothing is delivered/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^Deliver / })).not.toBeInTheDocument();
 });

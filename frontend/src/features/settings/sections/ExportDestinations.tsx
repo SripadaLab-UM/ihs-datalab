@@ -34,7 +34,7 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
   };
 
   return (
-    <Section title="Export folders" actions={practice ? <FixedOnPractice /> : undefined}>
+    <Section id="export-folders" title="Export folders" actions={practice ? <FixedOnPractice /> : undefined}>
       <p className="mt-1 text-sm text-muted">
         {practice
           ? "Practice DataLab exports only to its own practice folder, so nothing from it ends up somewhere real."

@@ -14,6 +14,7 @@ import { useTabState } from "@/features/sql/hooks";
 
 import { findPage, groupPages, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
+import { settingsLink } from "@/features/settings/highlight";
 
 const WIDE = "(min-width: 1280px)";
 // Below these widths the list and the chat are shown over the page.
@@ -216,7 +217,7 @@ function SignInFirst() {
   return (
     <>
       Sign in to GitHub first:{" "}
-      <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+      <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
         Settings → Connections → GitHub
       </Link>
       .
@@ -245,7 +246,7 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
       {status.repo === "signed out" ? (
         <p className="text-muted">
           {repo.text}{" "}
-          <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+          <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
             Sign in
           </Link>
         </p>
