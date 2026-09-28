@@ -28,7 +28,7 @@ def test_destinations_can_be_added_after_0008_adds_a_column(tmp_path):
     failing once 0008 added `key` ("5 columns but 4 values")."""
     connection = db.connect(tmp_path / "datalab.sqlite")
     columns = [r[1] for r in connection.execute("PRAGMA table_info(export_destinations)")]
-    assert columns == ["id", "name", "path", "added_at", "key"]
+    assert columns == ["id", "name", "path", "added_at", "key", "offered"]  # 0011: offered
     store = DestinationStore(connection)
     first = store.add("Dropbox", tmp_path / "dropbox")
     second = store.add("Box", tmp_path / "box")

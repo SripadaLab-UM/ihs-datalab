@@ -16,6 +16,7 @@ vi.mock("@/api/client", () => ({
     lastSafetyReport: vi.fn(),
     runSafetyCheck: vi.fn(),
     destinations: vi.fn(async () => []),
+    destinationPlaces: vi.fn(async () => ({ can_add: true, why_not: null, places: [] })),
     catalogStatus: vi.fn(async () => ({ detail: null })),
   },
 }));
@@ -253,7 +254,7 @@ it("the real profile offers every setting practice fixes", async () => {
   view.unmount();
 
   show("/settings/export-folders");
-  expect(await screen.findByRole("button", { name: "Add a folder…" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Choose folder…" })).toBeTruthy();
   expect(screen.queryByText(/Fixed on the practice/)).toBeNull();
 });
 

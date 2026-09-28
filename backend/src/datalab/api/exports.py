@@ -3,6 +3,11 @@
 Only the person exports, to a folder they chose. The practice profile has a
 single disposable folder instead, so nothing from it can end up somewhere
 real.
+
+Settings → Export folders uses these routes (see export_folders.py for the
+checks and the words). A folder inside a sync app's folder is still a folder
+on this computer: every response says "Saved to <name> (on this computer)",
+and for a Dropbox folder adds who will upload it. Nothing says it synced.
 """
 
 from __future__ import annotations
@@ -16,25 +21,89 @@ from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from datalab import exports
-from datalab.config import Settings, default_data_dir
+from datalab import export_folders, exports
+from datalab.config import Settings
 from datalab.data.access_log import AccessLog
-from datalab.exports import DestinationStore, ExportError, ExportSource
+from datalab.export_folders import Location, Provider, Status
+from datalab.exports import Destination, DestinationStore, ExportError, ExportSource
 from datalab.sessions import picker
 from datalab.sessions.checkpoints import UnsafePath, check_relative, open_workspace_file
-from datalab.sessions.inputs import AttachmentStore, NotAttachable, check_attachable
+from datalab.sessions.inputs import AttachmentStore, NotAttachable, _same
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import scrub_title
 
-PRACTICE_DESTINATION = "practice"
+PRACTICE_DESTINATION = export_folders.PRACTICE_ID
+PRACTICE_WHY = (
+    "Available on the real DataLab. Practice DataLab saves only to its own practice folder, "
+    "so nothing from it can end up in a real Dropbox or shared folder."
+)
 
 
 class DestinationOut(BaseModel):
+    """An export folder, and how it stands right now.
+
+    The Workflows Deliver stage and every export chooser offer the folders
+    with `available` true, by `name`.
+    """
+
     id: str
-    name: str
+    name: str  # the person's friendly name for it
     path: str
+    where: str  # the path with the home folder as ~
+    # Offered and ready now: what export and delivery choosers may pick.
     available: bool
+    status: Status  # ready, missing, not_a_folder, not_writable, refused
+    status_message: str | None  # why it isn't ready, in plain words
+    # Ready, but worth knowing: it may be online-only in the sync app. Test settles it.
+    warning: str | None
+    location: Location  # this_computer, sync_folder, external_drive
+    sync_provider: Provider | None  # dropbox, onedrive, box, google_drive, icloud
+    sync_provider_name: str | None  # "Dropbox"
+    location_note: str  # "Inside your Dropbox folder: Dropbox will upload it when …"
+    offered: bool  # the person's switch: offered for exports and workflows
+    workflow_keys: list[str]  # the workflow destination key mapped to it, if any
+    practice: bool = False  # practice DataLab's own folder (can't be changed)
+
+
+class PlaceOut(BaseModel):
+    """A sync app's folder found on this computer, by name: where the picker can open."""
+
+    id: str
+    provider: Provider
+    provider_name: str
+    label: str  # "Dropbox (UniversityofMichigan)"
+    where: str
+
+
+class PlacesOut(BaseModel):
+    can_add: bool
+    why_not: str | None  # practice: "Available on the real DataLab…"
+    places: list[PlaceOut]
+
+
+class AddDestination(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    # A place from /export-destinations/places: the picker opens there.
+    start_in: str | None = Field(default=None, max_length=300)
+
+
+class ChangeDestination(BaseModel):
+    name: str | None = Field(default=None, max_length=200)
+    offered: bool | None = None
+
+
+class FolderTestOut(BaseModel):
+    ok: bool
+    status: Status
+    message: str | None  # why it failed
+    # Said as well, e.g. that the folder is switched off as a destination.
+    note: str | None
+    test_file: str | None  # the synthetic file's name
+    removed: bool  # the test file is gone again
+    saved_to: str | None  # "Saved to Lab Dropbox (on this computer)", when ok
+    sync_note: str | None  # "Dropbox will upload it when …", when ok and in a sync folder
+    destination: DestinationOut
 
 
 class FileRef(BaseModel):
@@ -61,8 +130,75 @@ class NewExport(BaseModel):
 
 
 class ExportOut(BaseModel):
-    folder: str
+    """A finished export. Show `saved_to`, then `sync_note` when there is one."""
+
+    folder: str  # the dated folder made for it
     files: list[str]
+    destination_id: str
+    destination_name: str
+    saved_to: str  # "Saved to Lab Dropbox (on this computer)"
+    sync_provider: Provider | None
+    sync_note: str | None  # "Dropbox will upload them when its app is running and signed in. …"
+
+
+def destination_out(settings: Settings, destination: Destination) -> DestinationOut:
+    path = Path(destination.path)
+    checked = export_folders.check_folder(
+        path, protected=export_folders.protected_folders(settings)
+    )
+    info = export_folders.describe(path)
+    # The same as export_folders.usable(), from the check made here.
+    return DestinationOut(
+        id=destination.id,
+        name=destination.name,
+        path=destination.path,
+        where=export_folders.display_path(path),
+        available=destination.offered and checked.ready,
+        status=checked.status,
+        status_message=checked.message,
+        warning=checked.warning,
+        location=info.location,
+        sync_provider=info.sync_provider,
+        sync_provider_name=export_folders.PROVIDER_NAMES.get(info.sync_provider or ""),
+        location_note=info.note,
+        offered=destination.offered,
+        workflow_keys=[destination.key] if destination.key else [],
+    )
+
+
+def practice_destination_out(settings: Settings) -> DestinationOut:
+    folder = settings.data_dir / "practice-exports"
+    return DestinationOut(
+        id=PRACTICE_DESTINATION,
+        name=export_folders.PRACTICE_NAME,
+        path=str(folder),
+        where=export_folders.display_path(folder),
+        available=True,
+        status="ready",
+        status_message=None,
+        warning=None,
+        location="this_computer",
+        sync_provider=None,
+        sync_provider_name=None,
+        location_note=(
+            "Practice DataLab's own folder, inside its data folder. Nothing here is real."
+        ),
+        offered=True,
+        workflow_keys=[],
+        practice=True,
+    )
+
+
+def export_out(target: export_folders.Target, result: exports.ExportResult) -> ExportOut:
+    return ExportOut(
+        folder=str(result.folder),
+        files=result.files,
+        destination_id=target.id or PRACTICE_DESTINATION,
+        destination_name=target.name,
+        saved_to=export_folders.saved_to(target.name),
+        sync_provider=target.sync_provider,
+        sync_note=export_folders.sync_note(target.sync_provider, files=len(result.files)),
+    )
 
 
 def build_exports_router(
@@ -75,35 +211,70 @@ def build_exports_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["exports"])
     practice = settings.profile == "practice"
-    practice_folder = settings.data_dir / "practice-exports"
-    protected = [settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
+    protected = export_folders.protected_folders(settings)
 
-    def destination_folder(destination_id: str) -> Path:
-        return export_folder(settings, destinations, destination_id)
+    def find(destination_id: str) -> Destination:
+        destination = None if practice else destinations.get(destination_id)
+        if destination is None:
+            raise HTTPException(404, "No such export folder.")
+        return destination
+
+    def name_or_422(name: str, *, other_than: str | None = None) -> str:
+        try:
+            name = export_folders.check_name(name)
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from error
+        if any(
+            d.name.casefold() == name.casefold() and d.id != other_than for d in destinations.list()
+        ):
+            raise HTTPException(409, f"Another export folder is already called {name}.")
+        return name
 
     @router.get("/export-destinations")
     def list_destinations() -> list[DestinationOut]:
         if practice:
-            return [
-                DestinationOut(
-                    id=PRACTICE_DESTINATION,
-                    name="Practice exports",
-                    path=str(practice_folder),
-                    available=True,
+            return [practice_destination_out(settings)]
+        return [destination_out(settings, d) for d in destinations.list()]
+
+    @router.get("/export-destinations/places")
+    def places() -> PlacesOut:
+        """Sync apps' folders found on this computer, by name, for the picker to open in."""
+        if practice:
+            return PlacesOut(can_add=False, why_not=PRACTICE_WHY, places=[])
+        return PlacesOut(
+            can_add=True,
+            why_not=None,
+            places=[
+                PlaceOut(
+                    id=root.id,
+                    provider=root.provider,
+                    provider_name=export_folders.PROVIDER_NAMES[root.provider],
+                    label=root.label,
+                    where=root.where,
                 )
-            ]
-        return [
-            DestinationOut(id=d.id, name=d.name, path=d.path, available=d.available)
-            for d in destinations.list()
-        ]
+                for root in export_folders.sync_roots()
+            ],
+        )
 
     @router.post("/export-destinations", status_code=201)
-    async def add_destination() -> DestinationOut:
-        """Choose a folder in the computer's picker and add it as a destination."""
+    async def add_destination(body: AddDestination | None = None) -> DestinationOut:
+        """Choose a folder in the computer's picker and add it as a destination.
+
+        The browser never names the path: it can only say which found sync
+        folder the picker opens in, and give the folder a name.
+        """
         if practice:
-            raise HTTPException(403, "Practice DataLab exports only to its own practice folder.")
+            raise HTTPException(403, PRACTICE_WHY)
+        body = body or AddDestination()
+        name = name_or_422(body.name) if body.name and body.name.strip() else None
+        start_in = None
+        if body.start_in:
+            root = next((r for r in export_folders.sync_roots() if r.id == body.start_in), None)
+            if root is None:
+                raise HTTPException(404, "That folder isn't on this computer any more.")
+            start_in = root.path
         try:
-            chosen = await picker.pick("folder")
+            chosen = await picker.pick("folder", start_in=start_in)
         except picker.PickerBusy as error:
             raise HTTPException(409, str(error)) from error
         except picker.PickerUnavailable as error:
@@ -113,19 +284,69 @@ def build_exports_router(
         try:
             # The same places are off limits as for attaching: nothing is
             # exported into system folders, app data, or DataLab's own data.
-            real, _ = check_attachable(chosen[0], protected=protected)
+            real = export_folders.check_new_folder(chosen[0], protected=protected)
         except NotAttachable as error:
             raise HTTPException(422, str(error)) from error
-        if not real.is_dir():
-            raise HTTPException(422, "Choose a folder.")
-        if any(Path(d.path) == real for d in destinations.list()):
-            raise HTTPException(409, "That folder is already an export destination.")
-        added = destinations.add(real.name or str(real), real)
-        return DestinationOut(id=added.id, name=added.name, path=added.path, available=True)
+        if any(_same(Path(d.path), real) for d in destinations.list()):
+            raise HTTPException(409, "That folder is already an export folder.")
+        if name is None:
+            name = _free_name(real.name or str(real), destinations)
+        added = destinations.add(name, real)
+        return destination_out(settings, added)
+
+    @router.patch("/export-destinations/{destination_id}")
+    def change_destination(destination_id: str, body: ChangeDestination) -> DestinationOut:
+        """Rename a folder, or turn it on or off as a destination."""
+        destination = find(destination_id)
+        if body.name is not None:
+            destinations.rename(destination.id, name_or_422(body.name, other_than=destination.id))
+        if body.offered is not None:
+            destinations.set_offered(destination.id, body.offered)
+        return destination_out(settings, find(destination_id))
+
+    @router.post("/export-destinations/{destination_id}/test")
+    async def test_destination(destination_id: str) -> FolderTestOut:
+        """Save a small synthetic file there, read it back, and remove it.
+
+        That shows DataLab can save there on this computer. It says nothing
+        about whether a sync app has uploaded anything.
+        """
+        if practice:
+            if destination_id != PRACTICE_DESTINATION:
+                raise HTTPException(404, "No such export folder.")
+            target = export_folders.practice_target(settings)
+            result = await asyncio.to_thread(
+                export_folders.write_test_file, target.path, protected=protected, skip_checks=True
+            )
+            shown = practice_destination_out(settings)
+            note = None
+        else:
+            destination = find(destination_id)
+            result = await asyncio.to_thread(
+                export_folders.write_test_file, Path(destination.path), protected=protected
+            )
+            shown = destination_out(settings, destination)
+            note = (
+                None
+                if destination.offered
+                else "This folder is switched off as a destination, so exports and workflows "
+                "won't use it until you turn it on."
+            )
+        return FolderTestOut(
+            ok=result.ok,
+            status=result.status,
+            message=result.message,
+            note=note,
+            test_file=result.test_file,
+            removed=result.removed,
+            saved_to=export_folders.saved_to(shown.name) if result.ok else None,
+            sync_note=export_folders.sync_note(shown.sync_provider) if result.ok else None,
+            destination=shown,
+        )
 
     @router.delete("/export-destinations/{destination_id}", status_code=204)
     def remove_destination(destination_id: str) -> None:
-        """Forget a destination. Files already exported there are untouched."""
+        """Forget a destination. The folder, and files already exported there, are untouched."""
         if practice or not destinations.remove(destination_id):
             raise HTTPException(404, "No such export folder.")
 
@@ -136,7 +357,8 @@ def build_exports_router(
             raise HTTPException(404, "No such conversation.")
         if not body.files and body.report is None:
             raise HTTPException(422, "Choose something to export.")
-        folder = destination_folder(body.destination_id)
+        target = export_target(settings, destinations, body.destination_id)
+        folder = target.path
         sources = _sources(sessions, conversation_id, body.files, body.checkpoint, body.raw_html)
         study_data = not practice and (
             conversation.kind == "data" or bool(attachments.list(conversation_id))
@@ -166,14 +388,16 @@ def build_exports_router(
             extra = {}
             if report is not None:
                 extra["conversation.html"] = exports.report_document(title, report.html, report.css)
-            return exports.export(
-                folder,
-                title=title,
-                tag=conversation.id,
-                sources=sources,
-                extra_files=extra,
-                about=about,
-            )
+            # Written inside the very folder that was checked.
+            with export_folders.open_target(target) as opened:
+                return exports.export(
+                    opened,
+                    title=title,
+                    tag=conversation.id,
+                    sources=sources,
+                    extra_files=extra,
+                    about=about,
+                )
 
         try:
             result = await asyncio.to_thread(run)
@@ -190,36 +414,35 @@ def build_exports_router(
             "exported",
             {"folder": str(result.folder), "files": len(result.files)},
         )
-        return ExportOut(folder=str(result.folder), files=result.files)
+        return export_out(target, result)
 
     return router
 
 
-def export_folder(settings: Settings, destinations: DestinationStore, destination_id: str) -> Path:
+def _free_name(name: str, destinations: DestinationStore) -> str:
+    """A default name no other folder has: "IHS", then "IHS (2)"."""
+    name = export_folders.check_name(name[: export_folders.NAME_MAX - 5] or "Export folder")
+    taken = {d.name.casefold() for d in destinations.list()}
+    candidate, number = name, 2
+    while candidate.casefold() in taken:
+        candidate, number = f"{name} ({number})", number + 1
+    return candidate
+
+
+def export_target(
+    settings: Settings, destinations: DestinationStore, destination_id: str
+) -> export_folders.Target:
     """The folder an export goes to, checked again now. Raises HTTPException.
 
     Also used by the SQL Playground's exports, so every export goes through
     the same checks.
     """
-    if settings.profile == "practice":
-        if destination_id != PRACTICE_DESTINATION:
-            raise HTTPException(404, "No such export folder.")
-        folder = settings.data_dir / "practice-exports"
-        folder.mkdir(parents=True, exist_ok=True)
-        return folder
-    destination = destinations.get(destination_id)
-    if destination is None:
-        raise HTTPException(404, "No such export folder.")
-    folder = Path(destination.path)
-    # Checked again now: the folder may have been replaced by a link since.
-    if os.path.realpath(folder) != str(folder):
-        raise HTTPException(422, "That export folder now points somewhere else. Add it again.")
-    protected = [settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
     try:
-        check_attachable(folder, protected=protected)
-    except NotAttachable as error:
-        raise HTTPException(422, f"DataLab can't export there any more: {error}") from error
-    return folder
+        return export_folders.target(settings, destinations, destination_id)
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except ExportError as error:
+        raise HTTPException(422, str(error)) from error
 
 
 def _sources(

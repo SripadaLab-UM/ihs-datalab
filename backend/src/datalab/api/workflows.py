@@ -30,6 +30,7 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import yaml
@@ -37,7 +38,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from datalab import safeyaml
+from datalab import export_folders, safeyaml
 from datalab.api.pipelines import PipelineFindingOut
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, check_owner
@@ -246,6 +247,10 @@ class StepOut(BaseModel):
 
 
 class DeliveryOut(BaseModel):
+    """One delivery. Show `saved_to`, then `sync_note` when there is one:
+    DataLab saved the files on this computer; it can't know whether a sync
+    app has uploaded them."""
+
     id: str
     destination_key: str
     destination_path: str
@@ -253,6 +258,13 @@ class DeliveryOut(BaseModel):
     files: list[dict[str, Any]]
     manifest_sha256: str
     delivered_at: str
+    # The export folder's friendly name then (the key, for deliveries made
+    # before names were recorded).
+    destination_name: str
+    # dropbox, onedrive, box, google_drive, icloud, or None: a plain folder.
+    sync_provider: str | None
+    saved_to: str  # "Saved to Lab Dropbox (on this computer)"
+    sync_note: str | None  # "Dropbox will upload them when its app is running and signed in. …"
 
 
 class RunDetailOut(WorkflowRunOut):
@@ -373,6 +385,10 @@ class DestinationChoice(BaseModel):
     mapped: bool
     # The workflow files that already name this key.
     used_by: list[str] = []
+    # dropbox, onedrive, box, google_drive, icloud, or None: a plain folder.
+    sync_provider: str | None = None
+    # "Inside your Dropbox folder: Dropbox will upload it when …" (Settings' words).
+    location_note: str = ""
 
 
 class StagesIn(BaseModel):
@@ -673,7 +689,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     destination_id=destination.id if destination else None,
                     name=name,
                     path=where,
-                    available=practice or bool(destination and destination.available),
+                    available=practice
+                    or bool(destination and export_folders.usable(settings, destination)),
                 )
             )
         return out
@@ -889,9 +906,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         return used
 
     def destination_choices(current: str | None) -> list[DestinationChoice]:
-        """The export folders New workflow's Deliver card offers. The one place
-        that decides which folders can be offered (to swap for Settings' own
-        rule when it has one)."""
+        """The export folders New workflow's Deliver card offers: those Settings
+        offers too (export_folders.usable: switched on, and ready now)."""
         if practice:
             where = settings.data_dir / "practice-exports"
             return [
@@ -902,6 +918,9 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     available=True,
                     destination_id=None,
                     mapped=True,
+                    location_note=(
+                        "Practice DataLab's own folder, on this computer. Nothing here is real."
+                    ),
                 )
             ]
         listed = destinations.list()
@@ -910,8 +929,9 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         taken = {d.key for d in listed if d.key} | set(used)
         out = []
         for d in listed:
-            if not d.available:
-                continue  # a folder that's gone isn't offered
+            if not export_folders.usable(settings, d):
+                continue  # switched off, gone, or not writable: not offered
+            info = export_folders.describe(Path(d.path))
             key = d.key
             if key is None:
                 base = _slug(d.name) or "export-folder"
@@ -928,6 +948,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     destination_id=d.id,
                     mapped=d.key is not None,
                     used_by=used.get(key, []),
+                    sync_provider=info.sync_provider,
+                    location_note=info.note,
                 )
             )
         return out
@@ -939,8 +961,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             return None
         key = workflow.deliver.destination
         picked = destinations.get(body.map_destination)
-        if picked is None or not picked.available:
-            raise HTTPException(409, "That export folder isn't on this computer any more.")
+        if picked is None or not export_folders.usable(settings, picked):
+            raise HTTPException(409, "That export folder is switched off or can't be saved to now.")
         if picked.key == key:
             return None
         if picked.key is not None:
@@ -979,8 +1001,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
     def apply_mapping(mapping: _Mapping, saved_path: str) -> str | None:
         """Map the key now the file is saved: None if it was, else why not."""
         picked = destinations.get(mapping.destination_id)
-        if picked is None or not picked.available:
-            return f"{mapping.folder_name} isn't on this computer any more"
+        if picked is None or not export_folders.usable(settings, picked):
+            return f"{mapping.folder_name} is switched off or can't be saved to now"
         # Checked again now: other files may have started naming the key meanwhile.
         others = sorted(p for p in keys_in_use().get(mapping.key, []) if p != saved_path)
         grown = [p for p in others if p not in mapping.confirmed]
@@ -1194,12 +1216,26 @@ def _workflow_out(path: str, workflow: Workflow, runner: WorkflowRunner, file: A
     )
 
 
+def _delivery_fields(delivery: dict[str, Any]) -> dict[str, Any]:
+    name = delivery.get("destination_name") or delivery["destination_key"]
+    provider = delivery.get("sync_provider")
+    return {
+        **delivery,
+        "destination_name": name,
+        "sync_provider": provider,
+        "saved_to": export_folders.saved_to(name),
+        "sync_note": export_folders.sync_note(provider, files=len(delivery.get("files") or [])),
+    }
+
+
 def _run_fields(run: dict[str, Any]) -> dict[str, Any]:
     out = dict(run)
     for key in ("replay_exact", "reproduced", "inputs_kept"):
         if out.get(key) is not None:
             out[key] = bool(out[key])
     out["replay_notes"] = out.get("replay_notes") or []
+    if "deliveries" in out:
+        out["deliveries"] = [_delivery_fields(d) for d in out["deliveries"]]
     if "steps" in out:
         out["steps"] = [
             {

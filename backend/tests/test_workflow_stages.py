@@ -356,7 +356,7 @@ def test_practice_saves_locally_beside_its_builtin_workflows(practice):
     ).json()["id"]
     run = finished(client, run_id)
     assert run["status"] == "succeeded" and run["delivery_status"] == "delivered"
-    assert run["delivery_message"] == "1 file saved locally."
+    assert run["delivery_message"] == "Saved to Practice exports (on this computer): 1 file."
     assert run["params"]["end_date"] == "2025-04-08"
     again = finished(client, client.post(f"/api/workflows/runs/{run_id}/again").json()["id"])
     assert again["status"] == "succeeded"
@@ -414,7 +414,11 @@ REAL_DAILY = DAILY + (
 
 
 @pytest.fixture
-def real(tmp_path):
+def real(tmp_path, monkeypatch):
+    # Folders are offered only if Settings would (export_folders.usable), and
+    # tmp_path is under /private/var, which is never an export folder.
+    monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())
+    monkeypatch.setattr("datalab.sessions.inputs._CONTAINERS_POSIX", ())
     client, h, settings = _client(tmp_path, profile="real")
     store = DestinationStore(h.connection)
     with client:
@@ -546,6 +550,8 @@ def test_a_key_more_workflows_start_using_meanwhile_isnt_mapped(real, tmp_path, 
     assert store.by_key("lab-exports") is None
     # With nothing meanwhile, the confirmed list is enough (the saved file doesn't count).
     monkeypatch.undo()
+    monkeypatch.setattr("datalab.sessions.inputs._SYSTEM_FOLDERS_POSIX", ())  # undone too
+    monkeypatch.setattr("datalab.sessions.inputs._CONTAINERS_POSIX", ())
     fine = client.post(
         "/api/workflows/saves",
         json={
@@ -601,3 +607,22 @@ def test_a_discarded_drafts_test_runs_are_removed(practice):
     # Only that draft's.
     assert client.get(f"/api/workflows/runs/{other.json()['id']}").status_code == 200
     assert client.delete("/api/workflows/test-runs", params={"name": "../x"}).status_code == 422
+
+
+def test_the_deliver_card_offers_only_folders_settings_offers(real, tmp_path):
+    """Switched off, gone, or not a folder DataLab may write to: not offered."""
+    client, _, settings, store = real
+    on = _folder(tmp_path, store, "Lab Dropbox")
+    off = _folder(tmp_path, store, "Switched off")
+    store.set_offered(off.id, False)
+    _folder(tmp_path, store, "Gone", exists=False)
+    inside = settings.data_dir / "exports"
+    inside.mkdir(parents=True, exist_ok=True)
+    store.add("Inside DataLab", inside)
+    edits = {"deliver": {"destination": "whatever"}}
+    shown = client.post("/api/workflows/stages", json={"text": REAL_DAILY, "edits": edits}).json()
+    assert [c["destination_id"] for c in shown["destinations"]] == [on.id]
+    [choice] = shown["destinations"]
+    assert (
+        choice["location_note"] == "A folder on this computer." and choice["sync_provider"] is None
+    )

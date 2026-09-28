@@ -72,10 +72,11 @@ export function ExportDialog({
     <Modal title="Export" onClose={onClose}>
       {run.data ? (
         <div className="flex flex-col gap-3 text-sm">
-          <p>
-            Exported {run.data.files.length} file{run.data.files.length === 1 ? "" : "s"} to:
+          <p role="status">
+            {run.data.saved_to}: {run.data.files.length} file{run.data.files.length === 1 ? "" : "s"}, in
           </p>
           <p className="break-all rounded-lg bg-sunken px-3 py-2 font-mono text-xs">{run.data.folder}</p>
+          {run.data.sync_note && <p className="text-muted">{run.data.sync_note}</p>}
           {conversation.kind === "data" && !practice && (
             <p className="text-research">These files may contain study data. Keep them on approved storage.</p>
           )}

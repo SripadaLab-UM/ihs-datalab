@@ -31,7 +31,7 @@ _STEP_COLUMNS = frozenset(
 _DELIVERY_COLUMNS = frozenset(
     """
     id run_id destination_key destination_id destination_path folder files_json
-    manifest_sha256 delivered_at
+    manifest_sha256 delivered_at destination_name sync_provider
     """.split()  # noqa: SIM905
 )
 # What a delivery a previous DataLab left under way says: it can't be known.

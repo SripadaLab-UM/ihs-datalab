@@ -435,6 +435,9 @@ function DeliverStage({
             : "Files are written to this folder on this computer (saved locally). The file names it by a key, so it works on everyone's computer."}{" "}
           {current && <span className={clsx(MONO, "break-all text-ink")}>{current.path}</span>}
         </span>
+        {current?.location_note && (
+          <span className="font-sans text-[12px] text-muted">{current.location_note}</span>
+        )}
       </label>
       <TextField
         label="Subfolder"

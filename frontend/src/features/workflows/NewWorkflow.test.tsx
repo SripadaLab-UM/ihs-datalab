@@ -81,7 +81,7 @@ const result = (extra: Partial<StagesResult> = {}): StagesResult => ({
   problems: [],
   findings: [],
   target: LOCAL,
-  destinations: [{ key: "practice-exports", name: "Practice exports", path: "/p/practice-exports", available: true, destination_id: null, mapped: true, used_by: [] }],
+  destinations: [{ key: "practice-exports", name: "Practice exports", path: "/p/practice-exports", available: true, destination_id: null, mapped: true, used_by: [], location_note: "Practice DataLab's own folder." }],
   ...extra,
 });
 
@@ -276,12 +276,14 @@ it("maps a new folder's key only at Save, asking first when other workflows use 
   sessionStorage.setItem("datalab:workflows:draft", DRAFT);
   vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/r", profile: "real", target: LOCAL });
   const folders = [
-    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [] },
-    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: ["workflows/other.yaml"] },
+    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [], location_note: "A folder on this computer." },
+    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: ["workflows/other.yaml"], location_note: "A folder on this computer." },
   ]; // prettier-ignore
   vi.mocked(workflowsApi.stages).mockResolvedValue(result({ destinations: folders }));
   show("/workflows/new");
   const select = await screen.findByRole("combobox", { name: "Export folder" });
+  // The chosen folder says what kind of place it is, as Settings does.
+  expect(screen.getByText("A folder on this computer.")).toBeInTheDocument();
   vi.mocked(workflowsApi.stages).mockResolvedValue(
     result({ destinations: folders, stages: stages({ deliver: { destination: "lab-exports", folder: "x", files: ["drop_body"], without_small_cells: {} } }) }),
   );
@@ -310,8 +312,8 @@ async function chooseNewFolder(usedBy: string[] = []) {
   sessionStorage.setItem("datalab:workflows:draft", DRAFT);
   vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/r", profile: "real", target: LOCAL });
   const folders = [
-    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [] },
-    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: usedBy },
+    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [], location_note: "A folder on this computer." },
+    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: usedBy, location_note: "A folder on this computer." },
   ]; // prettier-ignore
   vi.mocked(workflowsApi.stages).mockResolvedValue(result({ destinations: folders }));
   show("/workflows/new");

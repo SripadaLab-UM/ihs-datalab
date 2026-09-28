@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import sys
 import threading
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
@@ -150,9 +151,17 @@ def check_attachable(
             raise NotAttachable(f"~/{top} can't be attached: it's private settings or credentials.")
     if kind == "file" and real.name.lower() in _CREDENTIAL_FILES:
         raise NotAttachable(f"{real.name} looks like a credentials file, so it can't be attached.")
+    real_id = _file_id(real)
     for folder in protected:
         mine = Path(os.path.realpath(folder))
         if _same(real, mine) or _inside(real, mine) or _inside(mine, real):
+            raise NotAttachable("DataLab's own data folder can't be attached.")
+        # By what's on disk too, not only by name: one folder can be spelt
+        # several ways (case, Unicode composed or decomposed).
+        mine_id = _file_id(mine)
+        if (mine_id is not None and any(_file_id(p) == mine_id for p in (real, *real.parents))) or (
+            real_id is not None and any(_file_id(p) == real_id for p in mine.parents)
+        ):
             raise NotAttachable("DataLab's own data folder can't be attached.")
     return real, kind
 
@@ -267,12 +276,23 @@ def _top_in(path: Path, folder: Path) -> str | None:
     """The first part of `path` below `folder`, if `path` is inside it."""
     if not _inside(path, folder):
         return None
-    return str(path)[len(str(folder).rstrip("/\\")) + 1 :].replace("\\", "/").split("/")[0]
+    text, base = (unicodedata.normalize("NFC", str(p)) for p in (path, folder))
+    return text[len(base.rstrip("/\\")) + 1 :].replace("\\", "/").split("/")[0]
+
+
+def _file_id(path: Path) -> tuple[int, int] | None:
+    """Which file or folder `path` is on disk (device, inode), if it's there."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
 
 
 def _key(path: Path) -> str:
-    """Paths compared the way the disk does: Mac and Windows ignore case."""
-    text = str(path).replace("\\", "/")
+    """Paths compared the way the disk does: Mac and Windows ignore case, and
+    a Mac doesn't tell composed from decomposed accents (é and e + ́)."""
+    text = unicodedata.normalize("NFC", str(path).replace("\\", "/"))
     return text.casefold() if sys.platform in ("darwin", "win32") else text
 
 

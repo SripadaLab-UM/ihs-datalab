@@ -99,7 +99,7 @@ const step = (step_id: string, kind: RunStep["kind"], status: RunStep["status"],
 const summary = (extra: Partial<WorkflowRun> = {}): WorkflowRun => ({
   id: "run_1", workflow_name: "weekly_steps", workflow_path: "weekly_steps.yaml", mode: "run", of_run: null,
   status: "succeeded", started_at: "2026-09-27T12:00:00Z", finished_at: "2026-09-27T12:01:00Z", started_by: "yu",
-  message: null, delivery_status: "delivered", delivery_message: "1 file delivered.", replay_exact: null,
+  message: null, delivery_status: "delivered", delivery_message: "Saved to Lab Dropbox (on this computer): 1 file. Dropbox will upload it when its app is running and signed in. DataLab can't confirm the upload.", replay_exact: null,
   replay_notes: [], reproduced: null,
   ...extra,
 }); // prettier-ignore
@@ -122,7 +122,9 @@ const detail = (extra: Partial<RunDetail> = {}): RunDetail => ({
   ],
   deliveries: [
     { id: "dl_1", destination_key: "practice-folder", destination_path: "/x", folder: "/x/weekly_steps/2026-09-27",
-      files: [{ path: "weekly.csv", bytes: 300, sha256: "eeeeffff00001111" }], manifest_sha256: "99998888", delivered_at: "2026-09-27T12:01:00Z" },
+      files: [{ path: "weekly.csv", bytes: 300, sha256: "eeeeffff00001111" }], manifest_sha256: "99998888", delivered_at: "2026-09-27T12:01:00Z",
+      destination_name: "Lab Dropbox", sync_provider: "dropbox", saved_to: "Saved to Lab Dropbox (on this computer)",
+      sync_note: "Dropbox will upload it when its app is running and signed in. DataLab can't confirm the upload." },
   ],
   ...extra,
 }); // prettier-ignore
@@ -375,7 +377,13 @@ it("shows what a run pinned and where it delivered, and runs it again", async ()
   expect(within(section).getByText(/sha256:1234567890abcdef · linux\/arm64/)).toBeInTheDocument();
   expect(within(section).getByText("sha256 aaaabbbbcccc")).toBeInTheDocument();
   expect(within(section).getByText(/not committed · sha256:abc/)).toBeInTheDocument();
-  expect(screen.getByText("1 file delivered.")).toBeInTheDocument();
+  expect(screen.getByText(/^Saved to Lab Dropbox \(on this computer\): 1 file\./)).toBeInTheDocument();
+  // Each delivery: saved on this computer, and who uploads it. Never "synced".
+  expect(screen.getByText("Saved to Lab Dropbox (on this computer)")).toBeInTheDocument();
+  expect(
+    screen.getByText("Dropbox will upload it when its app is running and signed in. DataLab can't confirm the upload."),
+  ).toBeInTheDocument();
+  expect(document.body.textContent?.toLowerCase()).not.toMatch(/synced|uploaded/);
   expect(screen.getByText("weekly.csv")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: /Run again/ }));
   await waitFor(() => expect(workflowsApi.again).toHaveBeenCalledWith("run_1"));

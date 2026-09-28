@@ -209,7 +209,15 @@ it("docks a SQL drafting chat that is offered the SQL, not sent it", async () =>
 });
 
 it("exports a result to the chosen folder", async () => {
-  vi.mocked(sqlApi.export).mockResolvedValue({ folder: "/x/2026-09-27 SQL Playground", files: [] });
+  vi.mocked(sqlApi.export).mockResolvedValue({
+    folder: "/x/2026-09-27 SQL Playground",
+    files: [],
+    destination_id: "practice",
+    destination_name: "Practice exports",
+    saved_to: "Saved to Practice exports (on this computer)",
+    sync_provider: null,
+    sync_note: null,
+  });
   show("SELECT 1 FROM DUAL");
   fireEvent.click(await screen.findByRole("button", { name: /^Run/ }));
   fireEvent.click(await screen.findByRole("button", { name: /Export/ }));

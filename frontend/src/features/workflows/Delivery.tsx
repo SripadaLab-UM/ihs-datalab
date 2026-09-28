@@ -57,9 +57,12 @@ function DeliveryFiles({ delivery }: { delivery: Delivery }) {
   return (
     <div className="border-l border-line pl-3 font-sans text-[12.5px] text-muted">
       <p>
-        To <span className="font-mono text-ink">{delivery.destination_key}</span>, in{" "}
+        <span className="text-ink">{delivery.saved_to}</span>{" "}
+        (<span className="font-mono">{delivery.destination_key}</span>), in{" "}
         <span className="font-mono text-ink break-all">{delivery.folder}</span>, {when(delivery.delivered_at)}
       </p>
+      {/* Saved on this computer; a sync app uploads it later, if it's running. Never "synced". */}
+      {delivery.sync_note && <p className="mt-0.5">{delivery.sync_note}</p>}
       <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[12px]">
         {delivery.files.map((file) => (
           <li key={String(file.path)} className="flex flex-wrap gap-x-3">

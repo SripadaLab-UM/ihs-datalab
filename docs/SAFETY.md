@@ -397,6 +397,32 @@ access. It never gains it.
     attaching). Files are copied from the checkpoint the person was shown,
     never the live workspace, and nothing already in the folder is
     overwritten.
+  - **Export folders inside a sync app's folder** (Dropbox, OneDrive, Box,
+    Google Drive, iCloud Drive) are ordinary folders on this computer:
+    DataLab has no Dropbox API access or key, and uses the folder the app
+    keeps in sync. DataLab finds those folders by name in the home folder
+    and `~/Library/CloudStorage`, without listing what's in them, only to
+    open the picker there; the browser can't name a path. A chosen link
+    that leads out of the sync folder it seems to be in is refused, as is a
+    saved folder later replaced by a link. **Test folder** writes a
+    synthetic `datalab-test-<time>.txt` (no study data), reads it back and
+    removes it. Nothing says a file was synced or uploaded: exports and
+    deliveries say "Saved to *name* (on this computer)", and for a sync
+    folder, that the app will upload it when it's running and signed in,
+    which DataLab can't confirm. Removing a folder only forgets it.
+    Writes can't be redirected after the check: the checked folder is
+    opened (`O_DIRECTORY | O_NOFOLLOW`), must be the same folder (device and
+    inode) the check saw, and every folder, file and removal is made
+    relative to that open folder (`dir_fd`), never by path; a subfolder that
+    is a link is refused. (Windows, which lacks `dir_fd`, re-checks the
+    folder's identity before each step.) DataLab's own data folder is
+    recognised by what's on disk as well as by name, so another spelling
+    (case, composed or decomposed accents, a link) doesn't get past. If a
+    checked folder is moved away (with its parent, say) while an export is
+    being written, the rest of the export still goes into that same folder,
+    the one the person chose, wherever it now is. On Windows, a junction or
+    other reparse point counts as a link and is refused, though `lstat`
+    reports it as a plain folder.
   - **Exported files can't act on the computer by themselves.** The agent's
     files go under `files/`, apart from DataLab's report and manifest. Types
     that run code or open something when double-clicked (`.bat`, `.lnk`,

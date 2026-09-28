@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Literal
@@ -25,7 +26,9 @@ const app = Application.currentApplication();
 app.includeStandardAdditions = true;
 app.activate();
 const chosen = KIND === "folder"
-  ? [app.chooseFolder({withPrompt: "Choose a folder for DataLab"})]
+  ? [app.chooseFolder(START
+      ? {withPrompt: "Choose a folder for DataLab", defaultLocation: Path(START)}
+      : {withPrompt: "Choose a folder for DataLab"})]
   : [].concat(app.chooseFile({withPrompt: "Attach files to DataLab",
                               multipleSelectionsAllowed: true}));
 JSON.stringify(chosen.map(String));
@@ -39,6 +42,7 @@ $paths = @()
 if ('{kind}' -eq 'folder') {
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = 'Choose a folder for DataLab'
+    if ($env:DATALAB_PICK_START) { $dialog.SelectedPath = $env:DATALAB_PICK_START }
     if ($dialog.ShowDialog($owner) -eq 'OK') { $paths = @($dialog.SelectedPath) }
 } else {
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
@@ -61,13 +65,21 @@ class PickerBusy(RuntimeError):
     pass
 
 
-async def pick(kind: PickKind) -> list[Path]:
-    """Show the picker and return what the person chose (empty if they cancelled)."""
+async def pick(kind: PickKind, *, start_in: Path | None = None) -> list[Path]:
+    """Show the picker and return what the person chose (empty if they cancelled).
+
+    `start_in` is the folder a folder picker opens in (such as the Dropbox
+    folder DataLab found); the person still chooses.
+    """
+    env = dict(os.environ)
+    start = str(start_in) if kind == "folder" and start_in is not None else ""
     if sys.platform == "darwin":
-        script = f"const KIND = {json.dumps(kind)};\n" + _MAC
+        script = f"const KIND = {json.dumps(kind)};\nconst START = {json.dumps(start)};\n" + _MAC
         command = ["osascript", "-l", "JavaScript", "-e", script]
     elif sys.platform == "win32":
         script = _WINDOWS.replace("{kind}", kind)  # "files" or "folder" only
+        # Passed in the environment, never spliced into the script.
+        env["DATALAB_PICK_START"] = start
         command = ["powershell", "-NoProfile", "-STA", "-NonInteractive", "-Command", script]
     else:
         raise PickerUnavailable("Choosing files needs DataLab on a Mac or Windows computer.")
@@ -75,7 +87,7 @@ async def pick(kind: PickKind) -> list[Path]:
         raise PickerBusy("A file picker is already open.")
     async with _lock:
         process = await asyncio.create_subprocess_exec(
-            *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env
         )
         try:
             out, _ = await process.communicate()
