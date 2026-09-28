@@ -401,6 +401,25 @@ it("attention: several fold into one 'N need attention' menu listing each in wor
   expect(screen.getByTestId("at")).toHaveTextContent('/settings/connections#connection-umgpt {"highlight":"connection-umgpt"}');
 });
 
+it("attention: no table catalog on the real DataLab points at GitHub's sign-in and sync", async () => {
+  vi.mocked(api.health).mockResolvedValue({ profile: "real", version: "0.2.0", catalog_state: "empty" } as never);
+  vi.mocked(githubApi.status).mockResolvedValue({ available: true, signed_in: true, account: null, message: null, repos: [] } as never);
+  show(<AttentionMenu />);
+  const button = await screen.findByRole("button", { name: "Needs attention: No table catalog" });
+  fireEvent.click(button);
+  const [item] = within(screen.getByRole("menu")).getAllByRole("menuitem");
+  expect(item).toHaveTextContent("sign in to GitHub and sync the knowledge base");
+  fireEvent.click(item);
+  expect(screen.getByTestId("at")).toHaveTextContent("/settings/connections#connection-github");
+});
+
+it("attention: practice DataLab building its own catalog isn't flagged", async () => {
+  vi.mocked(api.health).mockResolvedValue({ profile: "practice", version: "0.2.0", catalog_state: "empty" } as never);
+  show(<AttentionMenu />);
+  await waitFor(() => expect(api.health).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: /attention/i })).not.toBeInTheDocument();
+});
+
 it("each shortcut says its own words only from 2xl up (the attention menu says them below)", async () => {
   vi.mocked(settingsApi.connections).mockResolvedValue(connections({ key: "missing" }));
   show(<KeyShortcut />);

@@ -27,6 +27,7 @@ vi.mock("@/api/sql", () => ({
 vi.mock("@/api/client", () => ({
   api: {
     health: vi.fn(async () => ({ profile: "practice" })),
+    catalogStatus: vi.fn(async () => ({ state: "empty", tables: 0, detail: "Sign in to GitHub and sync it." })),
     conversations: vi.fn(async () => []),
     destinations: vi.fn(async () => [{ id: "practice", name: "Practice exports", path: "/x", available: true }]),
   },
@@ -177,6 +178,12 @@ it("puts a table's or a column's name in the query from the catalog", async () =
   fireEvent.click(screen.getByTitle(/Put TRACKERSTEPS in your query/));
   fireEvent.click(screen.getByTitle("Put IHS_2025.VFITBITDAILYDATA in your query"));
   await waitFor(() => expect(view.state.doc.toString()).toBe("SELECT TRACKERSTEPS IHS_2025.VFITBITDAILYDATA"));
+});
+
+it("with no catalog, the table list says why and how it gets one", async () => {
+  vi.mocked(sqlApi.catalog).mockResolvedValue([]);
+  show("");
+  expect(await screen.findByText(/no query can be checked or run\. Sign in to GitHub and sync it\./)).toBeInTheDocument();
 });
 
 it("quotes column names Oracle can't read bare", () => {

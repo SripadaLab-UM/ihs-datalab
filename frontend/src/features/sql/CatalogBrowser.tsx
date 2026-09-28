@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useEffect, useMemo, useState } from "react";
 
+import { api } from "@/api/client";
 import { type CatalogTable, sqlApi } from "@/api/sql";
 import { EmptyNote, Icon } from "@/components/ui";
 import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
@@ -13,6 +14,9 @@ import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
  */
 export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void }) {
   const catalog = useQuery({ queryKey: ["sql-catalog"], queryFn: sqlApi.catalog, staleTime: 10 * 60_000 });
+  const empty = catalog.isSuccess && catalog.data.length === 0;
+  // Why it's empty, and how it gets its tables (signed in only).
+  const why = useQuery({ queryKey: ["catalog-status", "sql"], queryFn: api.catalogStatus, enabled: empty });
   const [typed, setTyped] = useState("");
   const words = useDebounced(typed.trim(), 200);
   const hits = useQuery({
@@ -53,10 +57,10 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
           <LoadFailed message="The catalog couldn't be loaded." onRetry={() => void catalog.refetch()} retrying={catalog.isFetching} />
         )}
         {catalog.isPending && words.length <= 1 && <LoadingRows label="Loading the tables…" rows={5} dense />}
-        {catalog.isSuccess && cohorts.length === 0 && (
+        {empty && (
           <EmptyNote icon="table" title="No tables yet">
-            DataLab has no catalog of the cohorts' tables yet. Settings → About this DataLab says why, and what
-            happens next.
+            DataLab has no catalog of the cohorts' tables yet, so no query can be checked or run.{" "}
+            {why.data?.detail ?? "Settings → About this DataLab says why, and what happens next."}
           </EmptyNote>
         )}
         {words.length > 1 ? (
