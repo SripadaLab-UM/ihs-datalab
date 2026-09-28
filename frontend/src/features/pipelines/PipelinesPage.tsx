@@ -7,6 +7,7 @@ import { type PipelineProposal, pipelinesApi } from "@/api/pipelines";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, Icon, Tabs } from "@/components/ui";
+import { CHAT_DOCK, chatClass, NAV_DOCK, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { formatBytes } from "@/lib/csv";
 import { useTabState } from "@/features/sql/hooks";
 
@@ -14,7 +15,6 @@ import { FileTree } from "./FileTree";
 import { ACTIONABLE, languageOf, proposalChip, repoLine, when } from "./pipelines";
 import { ProposalView } from "./ProposalView";
 
-const WIDE = "(min-width: 1280px)";
 
 /** The ihsDataR code browser, agent-proposed changes to review, and tests, with a Data engineering chat docked beside them. */
 export function PipelinesPage() {
@@ -43,17 +43,19 @@ export function PipelinesPage() {
   const [proposalId, setProposalId] = useTabState("datalab:pipelines:proposal", "");
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
     "datalab:pipelines:chat-open",
-    typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
+    typeof window !== "undefined" && window.matchMedia?.(CHAT_DOCK).matches ? "open" : "closed",
   );
+  const panels = usePanels("pipelines", { chatOpen: chatOpen === "open" });
+  const chatKept = useKeptOnceOpen(chatOpen === "open");
   const [chatId, setChatId] = useTabState("datalab:pipelines:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
   // Below these widths each is a drawer over the page.
   const drawerBox = useRef<HTMLElement>(null);
   const chatBox = useRef<HTMLElement>(null);
-  useOverlay(drawer, () => setDrawer(false), drawerBox, "(min-width: 1024px)");
+  useOverlay(drawer, () => setDrawer(false), drawerBox, NAV_DOCK);
   // The button that opened the chat is gone while it's open: its successor gets focus back.
-  useOverlay(chatOpen === "open", () => setChatOpen("closed"), chatBox, WIDE, askButton);
+  useOverlay(chatOpen === "open", () => setChatOpen("closed"), chatBox, CHAT_DOCK, askButton);
 
   const file = useQuery({
     queryKey: ["pipelines-file", status.data?.head, path],
@@ -123,27 +125,15 @@ export function PipelinesPage() {
   );
 
   return (
-    <div
-      className={clsx(
-        "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)]",
-        chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
-      )}
-    >
-      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
-      <aside
-        ref={drawerBox}
-        aria-label="Files and changes"
-        className={clsx(
-          "min-h-0 overflow-hidden border-r border-line bg-rail",
-          drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
-        )}
-      >
+    <div ref={panels.ref} data-panels="pipelines" style={panels.style} className="relative grid h-full min-h-0">
+      {drawer && !panels.navDocked && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
+      <aside ref={drawerBox} aria-label="Files and changes" className={navClass(panels.navDocked, drawer)}>
         {sidePanel}
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show files and changes">
+          <Button variant="ghost" className={clsx("-ml-2 px-2", panels.navDocked && "hidden")} onClick={() => setDrawer(true)} aria-label="Show files and changes">
             <Icon name="menu" size={16} />
           </Button>
           <div className="min-w-0 flex-1">
@@ -222,25 +212,23 @@ export function PipelinesPage() {
         </div>
       </main>
 
-      {chatOpen === "open" && (
-        <>
-          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
-          <aside
-            ref={chatBox}
-            aria-label="Data engineering chat"
-            className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
-          >
-            <DockedChat
-              key={chatKey}
-              mode="engineering"
-              conversationId={chatId || undefined}
-              onConversation={(conversation) => setChatId(conversation.id)}
-              context={context}
-              headerActions={chatActions}
-            />
-          </aside>
-        </>
+      {chatOpen === "open" && !panels.chatDocked && (
+        <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />
       )}
+      {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
+      {chatKept && (
+        <aside ref={chatBox} aria-label="Data engineering chat" hidden={chatOpen !== "open"} className={chatClass(panels.chatDocked)}>
+          <DockedChat
+            key={chatKey}
+            mode="engineering"
+            conversationId={chatId || undefined}
+            onConversation={(conversation) => setChatId(conversation.id)}
+            context={context}
+            headerActions={chatActions}
+          />
+        </aside>
+      )}
+      {panels.dividers}
     </div>
   );
 }

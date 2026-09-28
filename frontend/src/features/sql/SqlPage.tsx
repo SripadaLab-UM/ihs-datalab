@@ -437,7 +437,8 @@ export function SqlPage() {
             // The editor as it is now: a proposal never replaces edits made while the agent works.
             onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
           />
-        </aside      )}
+        </aside>
+      )}
       {panels.dividers}
     </div>
   );

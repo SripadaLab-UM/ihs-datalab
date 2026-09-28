@@ -24,6 +24,7 @@ import { RunProgress } from "./RunView";
 import { dedupe, Findings, problemsOf, Where } from "./SaveAsWorkflow";
 import { StageCards } from "./StageCards";
 import { byLine, problemWhere, runPath, workflowPath } from "./words";
+import { PageHeader } from "./PageHeader";
 
 export const EXAMPLE =
   "Extract Fitbit daily data for a date range, remove body-composition fields, check for duplicate " +
@@ -105,14 +106,16 @@ export function NewWorkflow({
 
   return (
     <div className="flex flex-col gap-6 px-6 pt-4 pb-10">
-      <header className="flex flex-col gap-1 pr-32">
-        <p className="font-sans text-[12.5px] text-muted">
-          <Link to="/workflows" className="hover:text-ink">
-            Workflows
-          </Link>
-        </p>
-        <h1 className="font-serif text-[23px] leading-tight">New workflow</h1>
-      </header>
+      <PageHeader>
+        <div className="flex flex-col gap-1">
+          <p className="font-sans text-[12.5px] text-muted">
+            <Link to="/workflows" className="hover:text-ink">
+              Workflows
+            </Link>
+          </p>
+          <h1 className="font-serif text-[23px] leading-tight">New workflow</h1>
+        </div>
+      </PageHeader>
 
       {text || pasting ? (
         <>

@@ -264,7 +264,8 @@ it("closes the files drawer and the chat with Escape, and gives focus back", asy
   fireEvent.click(ask);
   expect(await screen.findByText("The engineering chat")).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "Escape" });
-  await waitFor(() => expect(screen.queryByText("The engineering chat")).toBeNull());
+  // Hidden, not gone: reopened, it's the same chat with its draft.
+  await waitFor(() => expect(screen.getByText("The engineering chat")).not.toBeVisible());
   expect(screen.getByRole("button", { name: /Ask the agent/ })).toHaveFocus();
 });
 

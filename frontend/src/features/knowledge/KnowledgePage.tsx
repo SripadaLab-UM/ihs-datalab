@@ -9,7 +9,8 @@ import { InternalLinks, Markdown } from "@/components/chat/Markdown";
 import { languageOf } from "@/components/chat/ProposalCard";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
-import { useMediaQuery, useOverlay } from "@/components/ui/overlay";
+import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
 import { KnowledgeTree } from "./KnowledgeTree";
@@ -17,9 +18,6 @@ import { findPage, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
 import { settingsLink } from "@/features/settings/highlight";
 
-const WIDE = "(min-width: 1280px)";
-// Below these widths the list and the chat are shown over the page.
-const LIST_BESIDE = "(min-width: 1024px)";
 // Knowledge writing (sessions/modes.py): helps write or tidy a page or skill,
 // with the catalog tools that table and query pages cite, and no queries. Its
 // edits to /work/kb come back as proposed-edit cards in this chat.
@@ -65,13 +63,16 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   const [drawer, setDrawer] = useState(false);
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
     "datalab:kb:chat-open",
-    typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
+    typeof window !== "undefined" && window.matchMedia?.(CHAT_DOCK).matches ? "open" : "closed",
   );
   const [chatId, setChatId] = useTabState("datalab:kb:chat", "");
   const [chatKey, setChatKey] = useState(0);
   // Over the page, each is a dialog: focus in it and kept there, Escape closes it.
-  const listBeside = useMediaQuery(LIST_BESIDE);
-  const chatBeside = useMediaQuery(WIDE);
+  // Below NAV_DOCK and CHAT_DOCK the list and the chat are shown over the page.
+  const panels = usePanels("knowledge", { chatOpen: chatOpen === "open" });
+  const chatKept = useKeptOnceOpen(chatOpen === "open");
+  const listBeside = panels.navDocked;
+  const chatBeside = panels.chatDocked;
   const drawerBox = useRef<HTMLElement>(null);
   const chatBox = useRef<HTMLElement>(null);
   const drawerOver = drawer && !listBeside;
@@ -123,30 +124,22 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
   );
 
   return (
-    <div
-      className={clsx(
-        "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)]",
-        chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
-      )}
-    >
-      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+    <div ref={panels.ref} data-panels="knowledge" style={panels.style} className="relative grid h-full min-h-0">
+      {drawerOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
       <aside
         ref={drawerBox}
         aria-label="Pages and skills"
         role={drawerOver ? "dialog" : undefined}
         aria-modal={drawerOver || undefined}
         tabIndex={-1}
-        className={clsx(
-          "min-h-0 overflow-hidden border-r border-line bg-rail",
-          drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
-        )}
+        className={navClass(listBeside, drawer)}
       >
         <KnowledgeTree entries={entries} selected={found?.path ?? path} reveal={Boolean(selected)} onOpen={open} loading={pages.isPending} />
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show pages and skills">
+          <Button variant="ghost" className={clsx("-ml-2 px-2", listBeside && "hidden")} onClick={() => setDrawer(true)} aria-label="Show pages and skills">
             <Icon name="menu" size={16} />
           </Button>
           <div className="min-w-0 flex-1">
@@ -188,28 +181,29 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         </div>
       </main>
 
-      {chatOpen === "open" && (
-        <>
-          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
-          <aside
-            ref={chatBox}
-            aria-label="Knowledge chat"
-            role={chatOver ? "dialog" : undefined}
-            aria-modal={chatOver || undefined}
-            tabIndex={-1}
-            className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
-          >
-            <DockedChat
-              key={chatKey}
-              mode={CHAT_MODE}
-              conversationId={chatId || undefined}
-              onConversation={(conversation) => setChatId(conversation.id)}
-              context={context}
-              headerActions={chatActions}
-            />
-          </aside>
-        </>
+      {chatOver && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />}
+      {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
+      {chatKept && (
+        <aside
+          ref={chatBox}
+          aria-label="Knowledge chat"
+          hidden={chatOpen !== "open"}
+          role={chatOver ? "dialog" : undefined}
+          aria-modal={chatOver || undefined}
+          tabIndex={-1}
+          className={chatClass(chatBeside)}
+        >
+          <DockedChat
+            key={chatKey}
+            mode={CHAT_MODE}
+            conversationId={chatId || undefined}
+            onConversation={(conversation) => setChatId(conversation.id)}
+            context={context}
+            headerActions={chatActions}
+          />
+        </aside>
       )}
+      {panels.dividers}
     </div>
   );
 }
