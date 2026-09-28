@@ -1,0 +1,89 @@
+// The agent's proposed queries (propose_sql, backend data/sql_drafts.py) and the
+// editor's draft: when a proposal may fill the editor, and when it only offers itself.
+import { useCallback, useState } from "react";
+
+import type { SqlProposal } from "@/api/sql";
+
+/** The bind values as the editor holds them: text, as typed. */
+export type DraftBinds = Record<string, string>;
+
+/** The proposal in the editor, and the SQL as it was put there (to tell whether it's been edited since). */
+export interface Origin {
+  proposal: SqlProposal;
+  insertedSql: string;
+}
+
+/** A draft kept aside by "Use this query", to go back to. */
+export interface KeptDraft {
+  sql: string;
+  binds: DraftBinds;
+  origin: Origin | null;
+}
+
+/** The latest proposal event this tab has acted on, for the chat it came from. */
+export interface Handled {
+  chat: string;
+  seq: number;
+}
+
+/**
+ * What a new proposal does to the editor. It fills an empty editor, and one
+ * that still holds the agent's last proposal untouched (a follow-up's revised
+ * draft). Anything else is the person's work: the proposal is only offered.
+ * `snapshot` is the editor as it was when the message was sent: if it has
+ * changed since (edits made while the agent worked), it's never replaced.
+ */
+export function onArrival(editorSql: string, lastInserted: string | null, snapshot: string | null): "fill" | "offer" {
+  if (!editorSql.trim()) return "fill";
+  if (snapshot !== null && editorSql !== snapshot) return "offer";
+  if (lastInserted !== null && editorSql === lastInserted) return "fill";
+  return "offer";
+}
+
+/**
+ * The proposal to act on, if any, and how far the list has now been read.
+ * Only a turn that finished well offers its proposal: a stopped or failed
+ * turn's is passed over (it never touches the editor). A running turn's
+ * waits. The latest proposal wins.
+ */
+export function nextProposal(proposals: SqlProposal[], handledSeq: number): { proposal: SqlProposal | null; seq: number } {
+  const finished = proposals.filter((p) => p.turn_status !== "running");
+  const seq = Math.max(handledSeq, ...finished.map((p) => p.seq));
+  const fresh = finished.filter((p) => p.seq > handledSeq && p.turn_status === "completed");
+  return { proposal: fresh.at(-1) ?? null, seq };
+}
+
+/** The proposal's bind values as the editor holds them. */
+export function bindsOf(proposal: SqlProposal): DraftBinds {
+  return Object.fromEntries(proposal.binds.map((b) => [b.name, b.value === null ? "" : String(b.value)]));
+}
+
+/** The person's question, as it reads beside the editor. */
+export function requestText(proposal: SqlProposal): string {
+  return proposal.request.trim() || "(no question text)";
+}
+
+/** A JSON value kept for this browser tab (sessionStorage), so a reload doesn't lose it. */
+export function useTabJson<T>(key: string, initial: T): [T, (value: T) => void] {
+  const [value, setValue] = useState<T>(() => {
+    try {
+      const saved = sessionStorage.getItem(key);
+      return saved === null ? initial : (JSON.parse(saved) as T);
+    } catch {
+      return initial;
+    }
+  });
+  const set = useCallback(
+    (next: T) => {
+      setValue(next);
+      try {
+        if (next === null || next === undefined) sessionStorage.removeItem(key);
+        else sessionStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // Storage can be unavailable (a private window): the value lasts until the page goes.
+      }
+    },
+    [key],
+  );
+  return [value, set];
+}

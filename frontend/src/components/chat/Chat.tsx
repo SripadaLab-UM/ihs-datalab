@@ -28,6 +28,8 @@ export function Chat({
   prepareMessage,
   composerNote,
   autoFocus,
+  placeholder,
+  sendLabel,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
@@ -39,6 +41,9 @@ export function Chat({
   composerNote?: ComposerNote;
   /** Put the cursor in the message box when the chat opens. */
   autoFocus?: boolean;
+  /** The message box's own wording, for a tab that asks for something particular. */
+  placeholder?: string;
+  sendLabel?: string;
 }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
@@ -172,6 +177,8 @@ export function Chat({
         prepareMessage={prepareMessage}
         note={composerNote}
         autoFocus={autoFocus}
+        placeholder={placeholder}
+        sendLabel={sendLabel}
       />
     </div>
   );
@@ -435,7 +442,7 @@ function TurnView({
   // A failed or stopped turn keeps its whole story in view.
   const finished = Boolean(answer) && turn.status === "completed" && !live;
   return (
-    <article className="flex flex-col gap-5">
+    <article className="flex flex-col gap-5" data-question-seq={turn.seq}>
       {turn.userText && <Question text={turn.userText} continues={turn.continues} />}
       {!finished && story}
       {live && !answer && (
@@ -779,6 +786,8 @@ function Composer({
   prepareMessage,
   note,
   autoFocus,
+  placeholder,
+  sendLabel,
 }: {
   conversation: Conversation;
   running: boolean;
@@ -786,6 +795,8 @@ function Composer({
   prepareMessage?: (text: string) => string;
   note?: ComposerNote;
   autoFocus?: boolean;
+  placeholder?: string;
+  sendLabel?: string;
 }) {
   const queryClient = useQueryClient();
   const send = useMutation({
@@ -807,6 +818,8 @@ function Composer({
       stopping={stop.isPending}
       note={note}
       autoFocus={autoFocus}
+      placeholder={placeholder}
+      sendLabel={sendLabel}
     />
   );
 }
@@ -824,6 +837,8 @@ export function ComposerBox({
   stopping = false,
   note,
   autoFocus,
+  placeholder = "Ask a question, or say what to do next",
+  sendLabel = "Send",
 }: {
   running: boolean;
   sending: boolean;
@@ -833,6 +848,8 @@ export function ComposerBox({
   stopping?: boolean;
   note?: ComposerNote;
   autoFocus?: boolean;
+  placeholder?: string;
+  sendLabel?: string;
 }) {
   const [text, setText] = useState("");
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
@@ -869,7 +886,7 @@ export function ComposerBox({
               }
             }}
             aria-label="Your question or instruction"
-            placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : "Ask a question, or say what to do next"}
+            placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : placeholder}
             className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
           />
           {running ? (
@@ -878,7 +895,7 @@ export function ComposerBox({
             </Button>
           ) : (
             <Button variant="primary" onClick={submit} disabled={!text.trim() || sending}>
-              <Icon name="send" size={14} /> Send
+              <Icon name="send" size={14} /> {sendLabel}
             </Button>
           )}
         </div>

@@ -156,6 +156,17 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
         },
       };
     }
+    case "propose_sql": {
+      // The query offered to the SQL Playground's editor (never run by the agent).
+      const title = str(args.title);
+      return {
+        ...base,
+        icon: "db",
+        title: title ? `Proposed a query for the editor: ${title}` : "Proposed a query for the editor",
+        chips: failed ? [{ text: "the SQL check refused it", tone: "bad" }] : [{ text: "not run", tone: "good" }],
+        detail: null,
+      };
+    }
     case "ask_research_helper":
     case "propose_plan":
       return null; // shown by their approval cards

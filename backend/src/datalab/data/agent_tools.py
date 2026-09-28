@@ -24,6 +24,7 @@ from datalab.data.helpers import find_concept as concept_candidates
 from datalab.data.helpers import join_keys
 from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
+from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
 from datalab.data.sqlcheck import SqlRejected
 from datalab.sessions import plan_schema
 from datalab.sessions.approvals import Unshowable, clean_question
@@ -53,6 +54,14 @@ work with the file for anything beyond the preview.
 """
 
 
+class SqlBind(BaseModel):
+    """One bind variable of a proposed query: its name, value and type."""
+
+    name: str
+    value: str | int | float | None
+    type: BindType = "text"
+
+
 class AdditionalSection(BaseModel):
     """A plan section with its own title, for what the registered sections don't cover."""
 
@@ -70,6 +79,7 @@ def build_agent_tools(
     helper: ResearchHelper | None = None,
     plans: PlanDesk | None = None,
     check_workflow_text: WorkflowCheck | None = None,
+    drafts: SqlDrafts | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
@@ -196,6 +206,65 @@ def build_agent_tools(
                     "note": "Fix every problem before you finish. DataLab checks the file "
                     "again before Save & share, with the pipelines in your change and the "
                     "real study data's small-cell rule, and a file that fails can't be saved.",
+                }
+            )
+
+    if drafts is not None:
+        sql_drafts = drafts
+
+        @server.tool()
+        async def propose_sql(
+            sql: str,
+            title: str,
+            ctx: Context,
+            binds: list[SqlBind] | None = None,
+            assumptions: list[str] | None = None,
+            tables: list[str] | None = None,
+            knowledge: list[str] | None = None,
+        ) -> str:
+            """Propose your final query for the person's SQL editor. It isn't run.
+
+            Call it once, when the query is ready, as the last step of the
+            turn. DataLab checks the SQL and offers it to the person in the SQL
+            Playground's editor, with its bind values; they review it and run
+            it themselves. Only this query reaches the editor: SQL in your
+            message and queries you ran don't. For a follow-up ("limit this to
+            April"), call it again with the whole revised query; the latest
+            proposal of a turn replaces the earlier ones.
+            sql: one SELECT (WITH is fine), every table schema-qualified, a bind
+              variable (:start_date) for each value the person may change.
+            title: one line saying what it returns, e.g. "Daily Fitbit steps, March 2025".
+            binds: every bind variable the SQL uses: name, value, and type
+              ("text", "number" or "date"; a date's value is "YYYY-MM-DD", used as
+              TO_DATE(:start_date, 'YYYY-MM-DD')).
+            assumptions: short statements the person should check, e.g. "Enrolled
+              means ENROLLED = 1 in VPARTICIPANTS".
+            tables: the tables you relied on, schema-qualified.
+            knowledge: knowledge-base pages you relied on (their ids or paths).
+            """
+            access = _session(ctx, tokens, "propose_sql")
+            try:
+                proposal = sql_drafts.propose(
+                    access.session_id,
+                    sql=sql,
+                    title=title,
+                    binds=[ProposedBind(b.name, b.value, b.type) for b in binds or []],
+                    assumptions=assumptions or [],
+                    tables=tables or [],
+                    knowledge=knowledge or [],
+                )
+            except DraftInvalid as error:
+                raise ToolError(str(error)) from error
+            return _json(
+                {
+                    "status": "proposed",
+                    "proposal_id": proposal["proposal_id"],
+                    "tables": proposal["tables"],
+                    "binds": proposal["binds"],
+                    "warnings": proposal["warnings"],
+                    "note": "It passed the SQL check and is offered in the person's SQL editor. "
+                    "It hasn't run: they review it and click Run. Don't repeat the SQL in your "
+                    "answer; say what it returns and what to double-check.",
                 }
             )
 
@@ -349,6 +418,11 @@ def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
     if access is None or access.kind != "data":
         raise ToolError("This session isn't allowed to query data.")
     if not access.allows(tool):
+        if tool == "propose_sql":
+            raise ToolError(
+                "propose_sql isn't available in this mode: it's for the SQL Playground's "
+                "chat. Show the SQL in your answer instead."
+            )
         raise ToolError(
             f"{tool} isn't available in this mode. Knowledge writing has the catalog tools "
             "only (metadata, no rows): write any SQL a page needs and say it needs checking "
