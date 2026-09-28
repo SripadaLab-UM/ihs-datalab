@@ -203,7 +203,10 @@ class SessionContainers:
     async def start(self, token: str) -> None:
         """Create or restart the session's network and containers."""
         self.paths.create()
-        self.paths.gateway_conf.write_text(render_gateway_conf(self.kind, self.host_port))
+        # Files the Linux containers read get Unix line ends, on Windows too.
+        self.paths.gateway_conf.write_text(
+            render_gateway_conf(self.kind, self.host_port), encoding="utf-8", newline="\n"
+        )
         if not await self._exists("network", self.network):
             await docker("network", "create", "--internal", *self._labels, self.network)
         await self._start_gateway()
@@ -312,7 +315,9 @@ class SessionContainers:
             return
         await docker("rm", "-f", self.proxy, check=False)
         self.paths.squid_conf.write_text(
-            resources.files(__package__).joinpath("squid.conf").read_text()
+            resources.files(__package__).joinpath("squid.conf").read_text(encoding="utf-8"),
+            encoding="utf-8",
+            newline="\n",
         )
         await docker(
             "run", "-d", "--name", self.proxy,
@@ -352,7 +357,7 @@ class SessionContainers:
             for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
                 env.append(f"{name}={_PROXY_URL}")
             env += ["NO_PROXY=gateway,localhost", "no_proxy=gateway,localhost"]
-        env_file.write_text("\n".join(env) + "\n")
+        env_file.write_text("\n".join(env) + "\n", encoding="utf-8", newline="\n")
         mounts = [
             "-v", f"{self.paths.work}:/work",
             "-v", f"{self.paths.codex_home}:/codex-home",
@@ -389,7 +394,7 @@ class SessionContainers:
 
 
 def render_gateway_conf(kind: SessionKind, host_port: int) -> str:
-    template = resources.files(__package__).joinpath("gateway.conf").read_text()
+    template = resources.files(__package__).joinpath("gateway.conf").read_text(encoding="utf-8")
     mcp = ""
     if kind == "data":
         mcp = (

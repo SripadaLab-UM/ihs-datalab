@@ -188,10 +188,14 @@ def sources(tmp_path: Path) -> tuple[Path, Path]:
     spine = repo / "spine"
     (spine / "registry").mkdir(parents=True)
     for name, data in REGISTRY.items():
-        (spine / "registry" / name).write_text(yaml.safe_dump(data, sort_keys=False))
+        (spine / "registry" / name).write_text(
+            yaml.safe_dump(data, sort_keys=False), encoding="utf-8"
+        )
     code = repo / "r/ihsDataR/R"
     code.mkdir(parents=True)
-    (code / "feature_steps_day.R").write_text("build_steps_day <- function() NULL\n")
+    (code / "feature_steps_day.R").write_text(
+        "build_steps_day <- function() NULL\n", encoding="utf-8"
+    )
     git(repo, "init", "-q")
     git(repo, "remote", "add", "origin", "https://github.com/lab/proto.git")
     git(repo, "add", "-A")
@@ -200,11 +204,13 @@ def sources(tmp_path: Path) -> tuple[Path, Path]:
     changed = dict(REGISTRY["sources.seed.yaml"])
     diary = dict(changed["data_sources"][1], known_limitations=["Edited later."])
     changed["data_sources"] = [changed["data_sources"][0], diary]
-    (spine / "registry" / "sources.seed.yaml").write_text(yaml.safe_dump(changed, sort_keys=False))
+    (spine / "registry" / "sources.seed.yaml").write_text(
+        yaml.safe_dump(changed, sort_keys=False), encoding="utf-8"
+    )
     export = tmp_path / "ihs_oracle_metadata_20260926T060331Z"
     export.mkdir()
     for name, rows in EXPORT.items():
-        with (export / f"{name}.csv").open("w", newline="") as handle:
+        with (export / f"{name}.csv").open("w", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, HEADERS[name])
             writer.writeheader()
             writer.writerows(rows)
@@ -217,7 +223,7 @@ def run(sources: tuple[Path, Path], out: Path) -> cs.Result:
 
 
 def meta(out: Path, path: str) -> dict:
-    fields, _ = kb.front_matter((out / path).read_text())
+    fields, _ = kb.front_matter((out / path).read_text(encoding="utf-8"))
     assert fields is not None
     return fields
 
@@ -230,7 +236,7 @@ def test_passes_the_check(sources, tmp_path):
     files, others = kb.read_folder(out)
     assert kb.check(files, others=others).blocking() == []
     assert (out / "generated/schema/IHS_2025/FITBITDAILYDATA.yml").exists()
-    assert (out / "index.md").read_text() == result.report.index
+    assert (out / "index.md").read_text(encoding="utf-8") == result.report.index
 
 
 def test_is_deterministic(sources, tmp_path):
@@ -256,7 +262,7 @@ def test_statuses(sources, tmp_path):
     # A manuscript without a DOI or path isn't evidence the check can verify.
     mood = meta(out, "features/mood_day.md")
     assert mood["status"] == "draft"
-    assert "MoodDriver" in (out / "features/mood_day.md").read_text()
+    assert "MoodDriver" in (out / "features/mood_day.md").read_text(encoding="utf-8")
     # A candidate on the page makes it a draft.
     assert meta(out, "tables/IHS_2025.FITBITDAILYDATA.md")["status"] == "draft"
     # Changed since the Spine's last commit.
@@ -270,13 +276,13 @@ def test_statuses(sources, tmp_path):
     assert meta(out, "papers/sleep-paper.md")["status"] == "draft"
     assert meta(out, "features/constructs.md")["status"] == "draft"
     for path in (out / "features").glob("*.md"):
-        assert "reviewed_by" not in path.read_text()
+        assert "reviewed_by" not in path.read_text(encoding="utf-8")
 
 
 def test_leaves_out_participant_data(sources, tmp_path):
     out = tmp_path / "kb"
     result = run(sources, out)
-    text = "\n".join(p.read_text() for p in out.rglob("*.md"))
+    text = "\n".join(p.read_text(encoding="utf-8") for p in out.rglob("*.md"))
     for value in ("41 rows", "12/40", "AUTO", "January returns no rows", "oracle_query_"):
         assert value not in text
     assert "read_fitbit_daily" in text  # the rest of `extra` is kept
@@ -291,19 +297,19 @@ def test_leaves_out_participant_data(sources, tmp_path):
 def test_rewords_what_the_check_would_misread(sources, tmp_path):
     out = tmp_path / "kb"
     run(sources, out)
-    rule = (out / "qc/steps_positive.md").read_text()
+    rule = (out / "qc/steps_positive.md").read_text(encoding="utf-8")
     assert "ORA-01843" not in rule and "Oracle error 01843" in rule
-    threshold = (out / "qc/phq9_threshold.md").read_text()
+    threshold = (out / "qc/phq9_threshold.md").read_text(encoding="utf-8")
     assert "NOSUCHTABLE in IHS_2025 (not in generated/schema)" in threshold
 
 
 def test_never_deletes_other_files(sources, tmp_path):
     out = tmp_path / "kb"
     out.mkdir()
-    (out / "notes.txt").write_text("mine")
+    (out / "notes.txt").write_text("mine", encoding="utf-8")
     with pytest.raises(SystemExit):
         run(sources, out)
-    assert (out / "notes.txt").read_text() == "mine"
+    assert (out / "notes.txt").read_text(encoding="utf-8") == "mine"
 
 
 def test_review_outside_the_knowledge_base(sources, tmp_path):
@@ -315,7 +321,7 @@ def test_review_outside_the_knowledge_base(sources, tmp_path):
         cs.main([*args, "--review", str(out / "REVIEW.md")])
     code = cs.main([*args, "--review", str(tmp_path / "REVIEW.md")])
     assert code == 0
-    assert "## Status changes" in (tmp_path / "REVIEW.md").read_text()
+    assert "## Status changes" in (tmp_path / "REVIEW.md").read_text(encoding="utf-8")
 
 
 def test_counts_each_entry_once(sources, tmp_path):
@@ -335,14 +341,14 @@ def test_says_what_was_cut_and_what_left(sources, tmp_path):
     assert "known_limitations[0]" in cut and "known_limitations[0]" not in altogether
     assert "known_limitations[1]" in altogether
     # The limitation itself is still on the page, without its count.
-    page = (tmp_path / "kb/sources/fitbit.md").read_text()
+    page = (tmp_path / "kb/sources/fitbit.md").read_text(encoding="utf-8")
     assert "Daily summaries only." in page
 
 
 def test_relabels_suffixes(sources, tmp_path):
     out = tmp_path / "kb"
     run(sources, out)
-    page = (out / "sources/fitbit.md").read_text()
+    page = (out / "sources/fitbit.md").read_text(encoding="utf-8")
     assert "followup_suffix_observed_2026" not in page
     assert "`followup_item_suffix_by_survey`" in page
     assert "its result identifiers end in 4" in page
@@ -360,7 +366,9 @@ def test_decisions_and_the_committed_version(sources, tmp_path):
     assert not any(
         e.changed for es in committed.converter.spine.entities.values() for e in es.values()
     )
-    assert "Edited later." not in (tmp_path / "kb-head/sources/diary.md").read_text()
+    assert "Edited later." not in (tmp_path / "kb-head/sources/diary.md").read_text(
+        encoding="utf-8"
+    )
     assert committed.from_commit == []
     head = cs.review_md(committed)
     assert head.index("## Decided: converted from") < head.index("## Inputs")
@@ -403,7 +411,7 @@ def test_stamps_the_reviewer_at_install(sources, tmp_path):
     assert report.blocking() == []
     assert not [f for f in report.findings if f.rule == "reviewed_by"]
     # Stamped exactly as DataLab's Save & share would stamp them.
-    text = (out / reviewed[0]).read_text()
+    text = (out / reviewed[0]).read_text(encoding="utf-8")
     assert kb.stamp_review(text, "ataxali", cs.datetime.date(2026, 10, 1)) == text
     with pytest.raises(SystemExit):
         cs.main(["--stamp-reviewer", "not a login", "--out", str(out)])
@@ -417,12 +425,18 @@ def pipelines(tmp_path: Path) -> tuple[Path, str]:
     """An ihs-pipelines checkout whose ihsDataR/ is the prototype's r/ihsDataR."""
     repo = tmp_path / "pipes"
     (repo / "ihsDataR/R").mkdir(parents=True)
-    (repo / "ihsDataR/R/feature_steps_day.R").write_text("build_steps_day <- function() NULL\n")
+    (repo / "ihsDataR/R/feature_steps_day.R").write_text(
+        "build_steps_day <- function() NULL\n", encoding="utf-8"
+    )
     git(repo, "init", "-q")
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "ihsDataR")
     commit = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
     ).stdout.strip()
     return repo, commit
 
@@ -506,7 +520,7 @@ def decisions_yaml(commit: str, **changes: object) -> dict:
 
 def load(tmp_path: Path, data: dict) -> cs.Decisions:
     path = tmp_path / "review_decisions.yaml"
-    path.write_text(yaml.safe_dump(data, sort_keys=False))
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     return cs.load_decisions(path)
 
 
@@ -527,7 +541,9 @@ def test_applies_the_decisions(sources, pipelines, tmp_path, held):
     assert {"paper": "10.1234/mood.2026"} in mood["evidence"]
     assert mood["cohorts"] == [2018, 2019] and mood["status"] == "reviewed"
     assert any("preprint" in x for x in mood["limitations"])
-    assert "A study of mood and wearables" in (out / "papers/mooddriver.md").read_text()
+    assert "A study of mood and wearables" in (out / "papers/mooddriver.md").read_text(
+        encoding="utf-8"
+    )
     assert meta(out, "papers/mooddriver.md")["status"] == "draft"
     # Code is re-pinned to ihs-pipelines.
     steps = meta(out, "features/steps_day.md")

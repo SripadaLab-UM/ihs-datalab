@@ -420,7 +420,10 @@ own slot, and the shared modules offer extension points:
   they leave only through an export (`POST /api/sql/results/{id}/export`).
 - **Catalog** is built from the `generated/schema/` metadata for every cohort.
   It powers `search_catalog`, `describe_table`, and the SQL Playground
-  browser.
+  browser. Practice DataLab, which names no catalog folder, builds its own
+  in `<data_dir>/catalog` from the synthetic database's catalog views the
+  first time it connects (metadata only; `data/autocatalog.py`). To rebuild
+  it, delete `<data_dir>/catalog` and start DataLab again.
 - **Audit log.** Every query appends one metadata-only row (see
   [SAFETY.md](SAFETY.md)). The same rows feed the Data accessed panel.
 - **Agent tools (`/mcp`).** The official MCP Python SDK, with streamable HTTP.

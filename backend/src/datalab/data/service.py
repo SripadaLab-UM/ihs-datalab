@@ -19,6 +19,7 @@ from typing import Any, Protocol
 
 from datalab.config import QueryLimits
 from datalab.data.access_log import AccessLog, Origin, check_owner
+from datalab.data.autocatalog import CatalogAutoBuild
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
 from datalab.data.sqlcheck import SqlRejected, TableRef, check_sql
@@ -61,15 +62,27 @@ class DataService:
         limits: QueryLimits,
         allowed_schemas: frozenset[str],
         catalog: Catalog,
+        *,
+        catalog_build: CatalogAutoBuild | None = None,
     ) -> None:
         self._database = database
         # Every column a query names is checked against the catalog: with an
-        # empty one, no query runs.
+        # empty one, no query runs. DataLab's own is built on first use.
         self._catalog = catalog
+        self._catalog_build = catalog_build
         self._log = access_log
         self._limits = limits
         self._allowed_schemas = allowed_schemas
         self._slots = asyncio.Semaphore(limits.max_concurrent_queries)
+
+    async def ensure_catalog(self) -> bool:
+        """Build DataLab's own catalog if it's empty and it's time to try
+        (autocatalog.py, rate-limited). False only while DataLab's own catalog
+        couldn't be built yet. Never raises."""
+        build = self._catalog_build
+        if build is None or len(self._catalog):
+            return True
+        return await asyncio.to_thread(build.ensure)
 
     async def run_query(
         self,
@@ -97,6 +110,15 @@ class DataService:
             raise ValueError("A workflow run's query needs the workflow's declared tables.")
         query_id = _new_query_id()
         binds = dict(binds or {})
+        if not await self.ensure_catalog():
+            reason = (
+                "DataLab has no catalog of the cohorts' tables yet, so it can't check "
+                "queries. Settings → About this DataLab says why."
+            )
+            self._log.rejected(
+                query_id=query_id, session_id=session_id, sql=sql, reason=reason, origin=origin
+            )
+            raise QueryFailed(reason)
         try:
             checked = check_sql(
                 sql, allowed_schemas=self._allowed_schemas, columns=self._catalog.column_index()

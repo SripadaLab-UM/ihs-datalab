@@ -428,7 +428,7 @@ class Knowledge:
                     log.warning("couldn't sync the knowledge base before copying it: %s", error)
             head = self.clone.remote_head()
             if head is None:
-                (staging / "README.md").write_text(UNAVAILABLE_NOTE)
+                (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
                 return None
             self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
         return head

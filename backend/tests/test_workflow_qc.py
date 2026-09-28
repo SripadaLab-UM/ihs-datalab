@@ -12,7 +12,7 @@ from datalab.workflows.qc import builtin_qc
 
 
 def write(path: Path, header: list[str], rows: list[list]) -> Path:
-    with path.open("w", newline="") as handle:
+    with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
         writer.writerow(header)
         writer.writerows(rows)

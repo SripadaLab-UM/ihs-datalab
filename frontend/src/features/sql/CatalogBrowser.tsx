@@ -51,7 +51,8 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
         {catalog.isError && <p className="font-sans text-[13px] text-danger">The catalog couldn't be loaded.</p>}
         {catalog.isSuccess && cohorts.length === 0 && (
           <EmptyNote icon="table" title="No tables yet">
-            DataLab has no catalog of the cohorts' tables. Build one with <code className="font-mono">datalab catalog</code>.
+            DataLab has no catalog of the cohorts' tables yet. Settings → About this DataLab says why, and what
+            happens next.
           </EmptyNote>
         )}
         {words.length > 1 ? (

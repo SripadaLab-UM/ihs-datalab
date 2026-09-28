@@ -228,7 +228,11 @@ class Spine:
 def _git(folder: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(folder), *args], capture_output=True, text=True, check=True
+            ["git", "-C", str(folder), *args],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
         )
     except (OSError, subprocess.CalledProcessError):
         return None

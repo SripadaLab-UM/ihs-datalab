@@ -99,7 +99,7 @@ def helper_args(python: str | None = None) -> list[str]:
         "-c",
         "credential.helper=",
         "-c",
-        f"credential.helper=!{quoted} -m datalab.repos.credential_helper",
+        f"credential.helper=!{quoted} -X utf8 -m datalab.repos.credential_helper",
     ]
 
 
@@ -293,11 +293,15 @@ class Clone:
         info = (git_dir or self.path / ".git") / "info"
         info.mkdir(parents=True, exist_ok=True)
         target = info / "attributes"
-        if not target.is_symlink() and target.exists() and target.read_text() == ATTRIBUTES:
+        if (
+            not target.is_symlink()
+            and target.exists()
+            and target.read_text(encoding="utf-8") == ATTRIBUTES
+        ):
             return
         fresh = info / "attributes.tmp"
         fresh.unlink(missing_ok=True)
-        fresh.write_text(ATTRIBUTES)
+        fresh.write_text(ATTRIBUTES, encoding="utf-8")
         fresh.replace(target)
 
     def fetch(self, *, timeout: float | None = None) -> None:

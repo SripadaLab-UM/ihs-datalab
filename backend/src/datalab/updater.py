@@ -112,12 +112,23 @@ class UpdateFailed(RuntimeError):
 
 
 def clean_environment() -> dict[str, str]:
-    """This process's environment, without anything that steers uv, pip or Python."""
-    return {
+    """This process's environment, without anything that steers uv, pip or Python.
+
+    Python started from here (the helper, and the new DataLab it opens) runs
+    in UTF-8 mode: on Windows its files and pipes would otherwise use the
+    locale's encoding (cp1252). DataLab says encoding="utf-8" everywhere
+    anyway; this is a second line of defence for anything that doesn't. The
+    other ways DataLab starts set it too: the launcher shims (installer/), for
+    `datalab serve`, and `-X utf8` on git's credential helper (repos/git.py).
+    A Python process can't switch UTF-8 mode on for itself once running.
+    """
+    env = {
         name: value
         for name, value in os.environ.items()
         if not name.upper().startswith(_UNSAFE_ENV) and name.upper() not in _UNSAFE_NAMES
     }
+    env["PYTHONUTF8"] = "1"
+    return env
 
 
 def run_command(
@@ -126,7 +137,8 @@ def run_command(
     return subprocess.run(
         list(command),
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
         cwd=cwd,

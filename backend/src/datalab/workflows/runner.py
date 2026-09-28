@@ -933,7 +933,9 @@ class WorkflowRunner:
             "inputs": spec_inputs,
             "outputs": {name: f"/run/out/{file}" for name, file in outputs.items()},
         }
-        (spec_dir / "step.json").write_text(json.dumps(spec, indent=2, sort_keys=True))
+        (spec_dir / "step.json").write_text(
+            json.dumps(spec, indent=2, sort_keys=True), encoding="utf-8"
+        )
         (spec_dir / "script.R").write_text(script, encoding="utf-8", newline="")
 
         budget = plan.budget - folder_bytes(plan.run_dir)
@@ -1026,8 +1028,8 @@ class WorkflowRunner:
         def lookup(name: str) -> Pipeline | None:
             folder = root / name
             try:
-                spec = load_pipeline_file((folder / "pipeline.yaml").read_text())
-                return Pipeline(name, spec, (folder / "run.R").read_text())
+                spec = load_pipeline_file((folder / "pipeline.yaml").read_text(encoding="utf-8"))
+                return Pipeline(name, spec, (folder / "run.R").read_text(encoding="utf-8"))
             except (OSError, WorkflowInvalid):
                 return None
 
@@ -1056,7 +1058,7 @@ class WorkflowRunner:
         cache = self.cache_dir / "libs" / f"{tree[:32]}-{plan.image.digest.split(':')[-1][:12]}"
         if not (cache / "library.json").is_file():
             await self._build(plan, source_copy, name, tree, cache)
-        info = json.loads((cache / "library.json").read_text())
+        info = json.loads((cache / "library.json").read_text(encoding="utf-8"))
         record = {
             "name": step.pipeline,
             "step": step.id,
@@ -1096,7 +1098,8 @@ class WorkflowRunner:
             raise _StepFailed(f"The {name} package didn't build (exit {outcome.exit_code}).")
         library_sha = await asyncio.to_thread(tree_sha256, staging / "lib")
         (staging / "library.json").write_text(
-            json.dumps({"package": name, "tree_sha256": tree, "library_sha256": library_sha})
+            json.dumps({"package": name, "tree_sha256": tree, "library_sha256": library_sha}),
+            encoding="utf-8",
         )
         try:
             staging.rename(cache)
@@ -1169,7 +1172,7 @@ class WorkflowRunner:
             )
             return
         manifest = result.folder / exports.MANIFEST
-        written = json.loads(manifest.read_text())["files"]
+        written = json.loads(manifest.read_text(encoding="utf-8"))["files"]
         self.store.add_delivery(
             {
                 "id": f"dl_{secrets.token_hex(6)}",
@@ -1326,9 +1329,9 @@ class WorkflowRunner:
             for pipeline in original["pipelines"]:
                 library = self.settings.data_dir / pipeline.get("library", "-") / "library.json"
                 with contextlib.suppress(OSError, ValueError):
-                    if json.loads(library.read_text())["library_sha256"] == pipeline.get(
+                    if json.loads(library.read_text(encoding="utf-8"))[
                         "library_sha256"
-                    ):
+                    ] == pipeline.get("library_sha256"):
                         continue
                 reasons.append(
                     f"The {pipeline['name']} pipeline's library would be rebuilt from the kept "
@@ -1612,7 +1615,8 @@ def who_is_running() -> str:
             done = subprocess.run(
                 ["git", "config", "--global", "--get", key],
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=5,
             )
             if done.returncode == 0 and done.stdout.strip():

@@ -61,7 +61,11 @@ PROTOTYPE_IMAGE = "lab-ai-routine-r:local"
 
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
     ).stdout.strip()
 
 
@@ -117,7 +121,8 @@ class V1Server:
         (self.data_dir / "settings.toml").write_text(
             f"port = {V1_PORT}\n"
             f"catalog_dir = {json.dumps(str(self.data_dir / 'catalog'))}\n"
-            f"\n[workflows]\nfolder = {json.dumps(str(workflows))}\n"
+            f"\n[workflows]\nfolder = {json.dumps(str(workflows))}\n",
+            encoding="utf-8",
         )
         sys.path.insert(0, str(ROOT / "backend" / "src"))
         from datalab.sessions.containers import instance_of
@@ -149,7 +154,7 @@ class V1Server:
         pattern = re.compile(rf"http://127\.0\.0\.1:{V1_PORT}(/sign-in\?token=[\w-]+)")
         deadline = time.time() + 180
         while time.time() < deadline:
-            match = pattern.search(self.log_path.read_text(errors="replace"))
+            match = pattern.search(self.log_path.read_text(errors="replace", encoding="utf-8"))
             if match:
                 client = httpx.Client(base_url=f"http://127.0.0.1:{V1_PORT}", timeout=60)
                 for _ in range(120):
@@ -178,7 +183,7 @@ class V1Server:
                     os.killpg(self.process.pid, signal.SIGKILL)
         left = subprocess.run(
             ["docker", "ps", "-aq", "--filter", f"label=datalab.instance={self.instance}"],
-            capture_output=True, text=True,
+            capture_output=True, encoding="utf-8", errors="replace",
         ).stdout.split()  # fmt: skip
         if left:
             subprocess.run(["docker", "rm", "-f", *left], capture_output=True)
@@ -226,7 +231,7 @@ def collect_v1(server: V1Server, name: str, run: dict[str, Any], out: Path) -> N
     status: dict[str, Any] = {"name": name, "side": "v1", "status": run["status"]}
     if run["status"] == "refused":
         status["error"] = run.get("error")
-        (target / "status.json").write_text(json.dumps(status, indent=2))
+        (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
         return
     status["run_id"] = run["id"]
     status["delivery_status"] = run.get("delivery_status")
@@ -268,8 +273,8 @@ def collect_v1(server: V1Server, name: str, run: dict[str, Any], out: Path) -> N
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, dest)
         status.setdefault("delivery_folders", []).append(folder.name.split(" ", 2)[-1])
-    (target / "qc.json").write_text(json.dumps(qc, indent=2))
-    (target / "status.json").write_text(json.dumps(status, indent=2))
+    (target / "qc.json").write_text(json.dumps(qc, indent=2), encoding="utf-8")
+    (target / "status.json").write_text(json.dumps(status, indent=2), encoding="utf-8")
 
 
 def _copy_outputs(step: dict[str, Any], source: Path, dest: Path) -> None:
@@ -290,7 +295,8 @@ def run_v1(args: argparse.Namespace, workflows: Path, names: list[str]) -> None:
                 target = out / name
                 target.mkdir(parents=True, exist_ok=True)
                 (target / "status.json").write_text(
-                    json.dumps({"name": name, "side": "v1", "status": "missing"}, indent=2)
+                    json.dumps({"name": name, "side": "v1", "status": "missing"}, indent=2),
+                    encoding="utf-8",
                 )
                 print(f"v1 {name}: no workflow file", flush=True)
                 continue
@@ -332,7 +338,7 @@ def run_prototype(args: argparse.Namespace, clone: Path, mode: str, names: list[
             raise SystemExit(f"Port {BROKER_PORT} is in use; stop whatever holds it first.")
         env["LAB_AI_ORACLE_PASSWORD"] = practice_password()
     config_path = args.work / f"proto-{mode}.json"
-    config_path.write_text(json.dumps(config, indent=2))
+    config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     before = _container_names()
     try:
         subprocess.run(
@@ -355,7 +361,10 @@ def _only_file(folder: Path) -> Path | None:
 
 def _container_names() -> set[str]:
     listed = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}"], capture_output=True, text=True
+        ["docker", "ps", "-a", "--format", "{{.Names}}"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return set(listed.stdout.split())
 
@@ -374,7 +383,10 @@ def _listening(port: int) -> bool:
     if port in FORBIDDEN_PORTS:
         raise SystemExit(f"Port {port} belongs to another DataLab; the harness never uses it.")
     found = subprocess.run(
-        ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"], capture_output=True, text=True
+        ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
     )
     return bool(found.stdout.strip())
 
@@ -393,7 +405,7 @@ def compare_side(proto: Path, v1: Path, names: list[str]) -> list[dict[str, Any]
 
 
 def _load(path: Path) -> Any:
-    return json.loads(path.read_text()) if path.is_file() else None
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 
 def compare_feature(name: str, proto: Path, v1: Path) -> dict[str, Any]:
@@ -557,11 +569,13 @@ def main() -> int:
             "live": compare_side(out / "proto-live", out / "v1", names),
             "extracts": compare_side(out / "proto-extracts", out / "v1", names),
         }
-        (args.work / "parity.json").write_text(json.dumps({"meta": meta, **results}, indent=2))
+        (args.work / "parity.json").write_text(
+            json.dumps({"meta": meta, **results}, indent=2), encoding="utf-8"
+        )
         text = write_report(meta, results)
-        (args.work / "parity.md").write_text(text)
+        (args.work / "parity.md").write_text(text, encoding="utf-8")
         if args.report:
-            args.report.write_text(text)
+            args.report.write_text(text, encoding="utf-8")
         print(f"Report: {args.work / 'parity.md'}")
     return 0
 

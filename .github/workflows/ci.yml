@@ -36,6 +36,22 @@ jobs:
       - name: Release parity check (comparison logic)
         run: uv run ruff check ../scripts/parity && uv run ruff format --check ../scripts/parity && uv run pytest -q ../scripts/parity
 
+  backend-windows:
+    # The Windows-only failures: text in the locale's encoding (cp1252), and
+    # asyncio's Proactor loop. Just those tests, to keep it quick.
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Text encoding and shutdown tests
+        run: uv run pytest -q tests/test_text_encoding.py tests/test_shutdown_noise.py
+
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with
     # this commit's code, backed up first and with every row kept, then rolls

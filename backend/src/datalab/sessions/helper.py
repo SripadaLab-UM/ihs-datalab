@@ -139,7 +139,9 @@ class ResearchHelper:
             paths.codex_config.write_text(
                 codex_config.render(
                     "research", model=settings.default_model, tool_timeout_seconds=60
-                )
+                ),
+                encoding="utf-8",
+                newline="\n",
             )
             await containers.start(token)
             # Its own instructions, written from inside its own fresh container.

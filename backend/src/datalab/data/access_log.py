@@ -20,7 +20,10 @@ import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import TYPE_CHECKING, Any, Literal, get_args
+
+if TYPE_CHECKING:
+    from datalab.data.catalog import Catalog
 
 Origin = Literal["conversation", "playground", "run"]
 ORIGINS: frozenset[str] = frozenset(get_args(Origin))
@@ -190,6 +193,19 @@ class AccessLog:
             "files": files,
             "contains_study_data": contains_study_data,
             **({"query_id": query_id} if query_id else {}),
+        }
+        with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+
+    def record_catalog_build(self, catalog: Catalog) -> None:
+        """DataLab built its own catalog from the database: how many tables,
+        of which cohorts. Metadata only, like the catalog itself."""
+        entry = {
+            "ts": _now(),
+            "event": "catalog_built",
+            "source": "database",
+            "tables": len(catalog),
+            "schemas": catalog.schemas,
         }
         with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")

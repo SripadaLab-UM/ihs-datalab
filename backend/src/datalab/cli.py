@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import io
 import sys
 from pathlib import Path
+from typing import Any
 
 from datalab.config import load_settings
 
 
 def main(argv: list[str] | None = None) -> int:
     from datalab import __version__
+
+    _console_never_fails()
 
     parser = argparse.ArgumentParser(prog="datalab")
     parser.add_argument("--version", action="version", version=f"datalab {__version__}")
@@ -97,8 +102,6 @@ def main(argv: list[str] | None = None) -> int:
         return _serve(settings, open_browser=not args.no_browser)
 
     if args.command == "try":
-        import asyncio
-
         from datalab.trial import run_trial
 
         return asyncio.run(run_trial(settings, args.question, args.image, args.research))
@@ -135,8 +138,6 @@ def main(argv: list[str] | None = None) -> int:
         return _db_check(settings)
 
     if args.command == "safety-check":
-        import asyncio
-
         from datalab.trial import run_safety_check
 
         return asyncio.run(run_safety_check(settings, strict=args.strict))
@@ -146,12 +147,23 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _console_never_fails() -> None:
+    """On Windows, output to a pipe or a file uses the locale's encoding
+    (cp1252), which has no "→" or "✓": print those as "?" rather than fail."""
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if encoding != "utf8" and isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
+
+
 def _serve(settings, *, open_browser: bool) -> int:
     from datalab.trial import refuse_if_running
 
     # The data folder's lock, held until DataLab exits: nothing else may
     # change the database while an interrupted update is sorted out, or after.
     refuse_if_running(settings)
+    if settings.profile == "practice":
+        _save_practice_password(settings)
     import threading
     import webbrowser
 
@@ -195,9 +207,15 @@ def _serve(settings, *, open_browser: bool) -> int:
     threading.Thread(
         target=app.state.update_checker.check_on_start, name="update-check", daemon=True
     ).start()
+
+    class Server(uvicorn.Server):
+        async def serve(self, sockets=None) -> None:
+            ignore_windows_connection_resets(asyncio.get_running_loop())
+            await super().serve(sockets)
+
     # Open event streams from browser tabs never end on their own, so give
     # shutdown a few seconds, then stop sessions and containers regardless.
-    server = uvicorn.Server(
+    server = Server(
         uvicorn.Config(
             app,
             host=settings.host,
@@ -215,6 +233,44 @@ def _serve(settings, *, open_browser: bool) -> int:
     app.state.shutdown = shutdown
     server.run()
     return 0
+
+
+def _save_practice_password(settings) -> None:
+    """A practice DataLab set up before `datalab setup` saved its synthetic
+    database's password (0.1.0) saves it now. Never for the real profile."""
+    from datalab.setup import save_practice_password
+
+    try:
+        save_practice_password(settings)
+    except Exception as error:  # Windows' keychain raises its own errors, too
+        # Best effort: the Safety check and Settings say what's missing. The
+        # error's type only, never its text.
+        print(
+            f"Couldn't save the practice database's password ({type(error).__name__}).",
+            flush=True,
+        )
+
+
+def ignore_windows_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
+    """Don't report the reset Windows' asyncio transport raises when a
+    browser's connection is already gone (WinError 10054), typically when
+    DataLab stops. It's asyncio's own noise, not a problem; every other
+    error is reported as before."""
+    report = loop.get_exception_handler()
+
+    def handler(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+        callback = repr(context.get("handle") or context.get("message") or "")
+        if (
+            isinstance(context.get("exception"), ConnectionResetError)
+            and "_ProactorBasePipeTransport._call_connection_lost" in callback
+        ):
+            return
+        if report is not None:
+            report(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(handler)
 
 
 def _pull_images(settings) -> int:
