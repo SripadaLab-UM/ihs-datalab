@@ -9,7 +9,8 @@ import { type HistoryItem, type SqlCheck, type SqlProposal, type SqlRun, sqlApi 
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Icon, InfoTip, Tabs } from "@/components/ui";
-import { useEscapeToClose, useMediaQuery } from "@/components/ui/overlay";
+import { CHAT_DOCK, chatClass, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
+import { useEscapeToClose } from "@/components/ui/overlay";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
@@ -32,7 +33,6 @@ import { SqlOrigin } from "./SqlOrigin";
 
 type Bridge = typeof import("./editorBridge");
 
-const WIDE = "(min-width: 1280px)";
 // The docked chat's mode (backend sessions/modes.py): its agent proposes queries for the editor.
 const CHAT_MODE = "sql";
 const CHAT_LABEL = "SQL drafting chat";
@@ -58,15 +58,15 @@ export function SqlPage() {
   const [saving, setSaving] = useState(false);
   const [side, setSide] = useState<"tables" | "history">("tables");
   const [drawer, setDrawer] = useState(false);
-  // Over the page on a narrow window, the drawer and the chat close on Escape, as on a click beside them.
-  const drawerDocked = useMediaQuery("(min-width: 1024px)");
-  const chatDocked = useMediaQuery(WIDE);
-  useEscapeToClose(drawer && !drawerDocked, () => setDrawer(false));
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
     "datalab:sql:chat-open",
-    typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
+    typeof window !== "undefined" && window.matchMedia?.(CHAT_DOCK).matches ? "open" : "closed",
   );
-  useEscapeToClose(chatOpen === "open" && !chatDocked, () => setChatOpen("closed"));
+  const panels = usePanels("sql", { chatOpen: chatOpen === "open" });
+  const chatKept = useKeptOnceOpen(chatOpen === "open");
+  // Over the page on a narrow window, the drawer and the chat close on Escape, as on a click beside them.
+  useEscapeToClose(drawer && !panels.navDocked, () => setDrawer(false));
+  useEscapeToClose(chatOpen === "open" && !panels.chatDocked, () => setChatOpen("closed"));
   const [chatId, setChatId] = useTabState("datalab:sql:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
@@ -254,26 +254,15 @@ export function SqlPage() {
   );
 
   return (
-    <div
-      className={clsx(
-        "relative grid h-full min-h-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[17rem_minmax(0,1fr)]",
-        chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
-      )}
-    >
-      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
-      <aside
-        aria-label="Tables and history"
-        className={clsx(
-          "min-h-0 overflow-hidden border-r border-line bg-rail",
-          drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
-        )}
-      >
+    <div ref={panels.ref} data-panels="sql" style={panels.style} className="relative grid h-full min-h-0">
+      {drawer && !panels.navDocked && <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setDrawer(false)} />}
+      <aside aria-label="Tables and history" className={navClass(panels.navDocked, drawer)}>
         {sidePanel}
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className="-ml-2 px-2 lg:hidden" onClick={() => setDrawer(true)} aria-label="Show tables and history">
+          <Button variant="ghost" className={clsx("-ml-2 px-2", panels.navDocked && "hidden")} onClick={() => setDrawer(true)} aria-label="Show tables and history">
             <Icon name="menu" size={16} />
           </Button>
           <div className="min-w-0 flex-1">
@@ -426,28 +415,30 @@ export function SqlPage() {
         />
       )}
 
-      {chatOpen === "open" && (
-        <>
-          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
-          <aside
-            aria-label={CHAT_LABEL}
-            className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
-          >
-            <DockedChat
-              key={chatKey}
-              mode={CHAT_MODE}
-              conversationId={chatId || undefined}
-              onConversation={(conversation) => setChatId(conversation.id)}
-              context={context}
-              headerActions={chatActions}
-              placeholder="Describe the data you want"
-              sendLabel="Generate SQL"
-              // The editor as it is now: a proposal never replaces edits made while the agent works.
-              onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
-            />
-          </aside>
-        </>
+      {chatOpen === "open" && !panels.chatDocked && (
+        <div data-scrim className="absolute inset-0 z-20 bg-black/30" onClick={() => setChatOpen("closed")} />
       )}
+      {/* Kept mounted while hidden, so closing and reopening it keeps its draft and place. */}
+      {chatKept && (
+        <aside
+          aria-label={CHAT_LABEL}
+          hidden={chatOpen !== "open"}
+          className={chatClass(panels.chatDocked)}
+        >
+          <DockedChat
+            key={chatKey}
+            mode={CHAT_MODE}
+            conversationId={chatId || undefined}
+            onConversation={(conversation) => setChatId(conversation.id)}
+            context={context}
+            headerActions={chatActions}
+            placeholder="Describe the data you want"
+            sendLabel="Generate SQL"
+            // The editor as it is now: a proposal never replaces edits made while the agent works.
+            onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
+          />
+        </aside      )}
+      {panels.dividers}
     </div>
   );
 }

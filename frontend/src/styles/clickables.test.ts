@@ -26,6 +26,8 @@ const NATIVE = new Set(["button", "a", "input", "select", "textarea", "summary",
 const INTERACTIVE_ROLES = new Set([
   "button", "link", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "switch", "checkbox",
   "radio", "treeitem", "gridcell", "row", "slider", "spinbutton", "combobox",
+  // Focusable, a separator is a widget (a window splitter: the panel dividers in components/layout/panels.tsx).
+  "separator",
 ]); // prettier-ignore
 
 /**
