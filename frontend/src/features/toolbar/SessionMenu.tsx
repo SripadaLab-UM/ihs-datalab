@@ -19,7 +19,7 @@ export function leaveApp(path: string) {
   window.location.assign(path);
 }
 
-export function SessionMenu() {
+export function SessionMenu({ onEnded = () => leaveApp(SESSION_ENDED_PATH) }: { onEnded?: () => void } = {}) {
   const [confirming, setConfirming] = useState(false);
   return (
     <>
@@ -45,26 +45,29 @@ export function SessionMenu() {
           </>
         )}
       </Shortcut>
-      {confirming && <EndSessionDialog onClose={() => setConfirming(false)} />}
+      {confirming && <EndSessionDialog onClose={() => setConfirming(false)} onEnded={onEnded} />}
     </>
   );
 }
 
-export function EndSessionDialog({ onClose }: { onClose: () => void }) {
+export function EndSessionDialog({ onClose, onEnded }: { onClose: () => void; onEnded: () => void }) {
   const end = useMutation({
     mutationFn: sessionApi.end,
     onSuccess: () => {
       clearAllDrafts(); // plan edits in this tab go with the sign-in
-      leaveApp(SESSION_ENDED_PATH);
+      onEnded();
     },
   });
   return (
     <Modal title="End this session?" onClose={onClose}>
       <p className="text-sm">You'll need a new sign-in link from the launcher.</p>
+      <p className="mt-2 text-sm font-medium">
+        DataLab only makes a sign-in link when it starts, so to get back in you'll have to quit DataLab and start it
+        again from its launcher.
+      </p>
       <p className="mt-2 text-sm text-muted">
-        Every DataLab window in this browser is signed out. DataLab itself keeps running, and anything already under
-        way carries on. To sign in again, quit DataLab and open it from its launcher: it makes a new sign-in link each
-        time it starts.
+        Every DataLab window in this browser is signed out. Until you quit it, DataLab keeps running, and anything
+        already under way carries on.
       </p>
       {end.isError && <p className="mt-3 text-sm text-danger">{end.error.message}</p>}
       <div className="mt-5 flex justify-end gap-2">
@@ -85,8 +88,8 @@ export function SessionEnded() {
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="font-serif text-[28px] text-ink">Session ended</p>
       <p className="max-w-[32rem] text-sm text-muted">
-        DataLab no longer knows this browser. To sign in again, quit DataLab and open it from its launcher: it makes a
-        new sign-in link each time it starts.
+        DataLab no longer knows this browser. To sign in again, quit DataLab and start it again from its launcher: it
+        makes a new sign-in link each time it starts.
       </p>
     </div>
   );
