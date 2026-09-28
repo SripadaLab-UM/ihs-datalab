@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>DataLab (practice)</title>
+  <rect class="tile" x="1.0" y="1.0" width="62.0" height="62.0" rx="9.0" fill="#f7f0e3" stroke="#8a5a12" stroke-width="2.0"/>
+  <circle class="letter" cx="26.0" cy="38.0" r="10.5" fill="none" stroke="#2b2a26" stroke-width="6.5"/>
+  <rect class="letter-fill" x="33.25" y="12.0" width="6.5" height="39.75" fill="#2b2a26"/>
+  <circle class="dot" cx="47.5" cy="47.5" r="4.25" fill="#8a5a12"/>
+</svg>

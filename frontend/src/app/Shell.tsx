@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
+import { Brand, usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
@@ -20,6 +21,8 @@ const TABS = [
 
 export function Shell() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const practice = health.data?.profile === "practice";
+  usePracticeTab(practice);
   const [signedOut, setSignedOut] = useState(false);
   useEffect(() => {
     const onSignedOut = () => {
@@ -39,7 +42,7 @@ export function Shell() {
       )}
       <UpdatingBanner />
       <header className="flex items-center gap-8 border-b border-line px-5">
-        <span className="py-3.5 font-serif text-[21px] leading-none">datalab.</span>
+        <Brand practice={practice} />
         <nav className="flex gap-1 self-stretch overflow-x-auto">
           {TABS.map((tab) => (
             <NavLink
@@ -60,7 +63,7 @@ export function Shell() {
             closer to each other than to the tabs. */}
         <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
           <UpdatePill />
-          {health.data?.profile === "practice" && (
+          {practice && (
             <span
               className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
               title="The practice profile: synthetic data only, never the real study database"
