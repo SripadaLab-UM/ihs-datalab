@@ -25,18 +25,25 @@ export const CHECK_DELAY_MS = 500;
 // DataLab's (the database, on this computer), for every browser.
 const UNSAVED = "datalab:kb:unsaved:";
 
-export function readUnsaved(editId: string): string | null {
+/** What was typed but not kept, and the version of the draft it was typed over. */
+export interface Unsaved {
+  text: string;
+  version: string;
+}
+
+export function readUnsaved(editId: string): Unsaved | null {
   try {
-    return localStorage.getItem(UNSAVED + editId);
+    const raw = JSON.parse(localStorage.getItem(UNSAVED + editId) ?? "null") as Partial<Unsaved> | null;
+    return raw && typeof raw.text === "string" && typeof raw.version === "string" ? { text: raw.text, version: raw.version } : null;
   } catch {
     return null;
   }
 }
 
-function writeUnsaved(editId: string, text: string | null) {
+function writeUnsaved(editId: string, unsaved: Unsaved | null) {
   try {
-    if (text === null) localStorage.removeItem(UNSAVED + editId);
-    else localStorage.setItem(UNSAVED + editId, text);
+    if (unsaved === null) localStorage.removeItem(UNSAVED + editId);
+    else localStorage.setItem(UNSAVED + editId, JSON.stringify(unsaved));
   } catch {
     // Storage can be unavailable (a private window): the text lasts while the page is open.
   }
@@ -143,16 +150,21 @@ function Editor({
 }) {
   const queryClient = useQueryClient();
   const open = ["draft", "conflict", "check_failed", "failed"].includes(edit.status);
-  // What's typed here, from this browser's unsaved copy if there is one.
-  const [restored] = useState(() => {
-    const unsaved = readUnsaved(edit.id);
-    return open && unsaved !== null && unsaved !== edit.text ? unsaved : null;
+  // What's typed here, from this browser's unkept copy if there is one. Typed
+  // over the draft as it still is, it comes back at once; over an older one
+  // (the draft was kept since, in another window), only if the person asks,
+  // so it never silently replaces the newer draft.
+  const [unkept] = useState(() => {
+    const found = open ? readUnsaved(edit.id) : null;
+    return found && found.text !== edit.text ? found : null;
   });
+  const restored = unkept && unkept.version === edit.updated_at ? unkept.text : null;
+  const [olderUnkept, setOlderUnkept] = useState(unkept && restored === null ? unkept.text : null);
   const [text, setText] = useState(restored ?? edit.text);
   const dirty = text !== edit.text;
   useEffect(() => {
-    if (open) writeUnsaved(edit.id, text !== edit.text ? text : null);
-  }, [edit.id, edit.text, text, open]);
+    if (open && olderUnkept === null) writeUnsaved(edit.id, text !== edit.text ? { text, version: edit.updated_at } : null);
+  }, [edit.id, edit.text, edit.updated_at, text, open, olderUnkept]);
   const [view, setView] = useState<EditorView>(initialView);
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
   const [discarding, setDiscarding] = useState(false);
@@ -298,6 +310,32 @@ function Editor({
       {restored !== null && (
         <p role="status" className="font-sans text-[12.5px] text-attn">
           Restored changes you hadn't kept yet, from this browser.
+        </p>
+      )}
+      {olderUnkept !== null && (
+        <p role="status" className="flex flex-wrap items-baseline gap-x-2 font-sans text-[12.5px] text-attn">
+          This browser has changes you hadn't kept, typed over an older version of this draft (it was kept since, in
+          another window). This is the newer draft.
+          <Button
+            variant="ghost"
+            className="px-1 py-0 text-[12.5px] underline"
+            onClick={() => {
+              setText(olderUnkept);
+              setOlderUnkept(null);
+            }}
+          >
+            Put back my unkept changes
+          </Button>
+          <Button
+            variant="ghost"
+            className="px-1 py-0 text-[12.5px]"
+            onClick={() => {
+              writeUnsaved(edit.id, null);
+              setOlderUnkept(null);
+            }}
+          >
+            Forget them
+          </Button>
         </p>
       )}
       {edit.upstream_changed && (

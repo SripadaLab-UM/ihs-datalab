@@ -152,8 +152,11 @@ async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(se
         },
         "propose_sql": {"sql": "SELECT 1 FROM DUAL", "title": "t"},
         "suggest_kb_update": {
-            "page": "sources/fitbit.md", "title": "t", "text": "x",
-            "evidence_query_ids": ["q_1"], "reason": "r",
+            "page": "sources/fitbit.md",
+            "title": "t",
+            "text": "x",
+            "evidence_query_ids": ["q_1"],
+            "reason": "r",
         },
     }
     assert set(calls) == set(DATA_TOOLS) - CATALOG_TOOLS

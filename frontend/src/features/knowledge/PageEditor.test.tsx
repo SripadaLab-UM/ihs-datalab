@@ -223,7 +223,7 @@ it("keeps what's typed across a reload, in this browser, until it's kept", async
   const first = editor();
   await screen.findByText(/The check passes/);
   type(FITBIT + "\nNot kept yet.\n");
-  await waitFor(() => expect(readUnsaved("ke_1")).toBe(FITBIT + "\nNot kept yet.\n"));
+  await waitFor(() => expect(readUnsaved("ke_1")).toEqual({ text: FITBIT + "\nNot kept yet.\n", version: "t1" }));
   first.unmount();
   editor();
   await waitFor(() => expect(source()).toHaveValue(FITBIT + "\nNot kept yet.\n"));
@@ -278,4 +278,14 @@ it("says why when the page can't be edited", async () => {
   vi.mocked(knowledgeApi.startEdit).mockRejectedValue(new Error("index.md can't be edited here."));
   editor({ path: "index.md" });
   expect(await screen.findByRole("alert")).toHaveTextContent("index.md can't be edited here.");
+});
+
+it("never lets unkept changes typed over an older draft replace the newer one unasked", async () => {
+  localStorage.setItem("datalab:kb:unsaved:ke_1", JSON.stringify({ text: FITBIT + "\nOld typing.\n", version: "t0" }));
+  vi.mocked(knowledgeApi.startEdit).mockResolvedValue(edit({ text: FITBIT + "\nKept elsewhere.\n", updated_at: "t5" }));
+  editor();
+  expect(await screen.findByText(/typed over an older version of this draft/)).toBeTruthy();
+  expect(source()).toHaveValue(FITBIT + "\nKept elsewhere.\n");
+  fireEvent.click(screen.getByRole("button", { name: "Put back my unkept changes" }));
+  expect(source()).toHaveValue(FITBIT + "\nOld typing.\n");
 });

@@ -207,7 +207,9 @@ def test_a_draft_kept_on_this_computer_never_touches_github(lab, monkeypatch):
     network: list[str] = []
     monkeypatch.setattr(lab.knowledge, "_fresh_token", lambda: network.append("token"))
     edit = start(lab, "sources/fitbit.md")
-    edit = keep(lab, edit, FITBIT.replace("Wear time isn't recorded.", "Wear time is in 2025 only."))
+    edit = keep(
+        lab, edit, FITBIT.replace("Wear time isn't recorded.", "Wear time is in 2025 only.")
+    )
     assert edit["status"] == "draft" and "2025 only" in edit["text"]
     checked(lab, edit)
     # Kept across reloads (the database), and opening the page again finds it.
@@ -238,7 +240,9 @@ def test_save_and_share_goes_through_the_existing_flow(lab, monkeypatch):
     monkeypatch.setattr(share, "save_and_share", spy)
     started = lab.remote.head()
     edit = start(lab, "sources/fitbit.md")
-    edit = keep(lab, edit, FITBIT.replace("Wear time isn't recorded.", "Wear time is in 2025 only."))
+    edit = keep(
+        lab, edit, FITBIT.replace("Wear time isn't recorded.", "Wear time is in 2025 only.")
+    )
     saved = share_edit(lab, edit).json()
     assert saved["status"] == "saved", saved["result"]
     [request] = calls
@@ -270,9 +274,18 @@ def test_a_new_page_starts_as_a_draft_from_the_template(lab):
     edit = start(lab, "qc/zero-steps.md", new=True)
     assert edit["new_page"] and edit["before"] is None
     fields, _ = kb.front_matter(edit["text"])
-    assert fields and (fields["id"], fields["kind"], fields["status"]) == ("zero-steps", "qc", "draft")
+    assert fields and (fields["id"], fields["kind"], fields["status"]) == (
+        "zero-steps",
+        "qc",
+        "draft",
+    )
     assert all(f["severity"] != "error" for f in checked(lab, edit)["findings"])
-    assert lab.client.post("/api/knowledge/edits", json={"path": "sources/fitbit.md", "new": True}).status_code == 409
+    assert (
+        lab.client.post(
+            "/api/knowledge/edits", json={"path": "sources/fitbit.md", "new": True}
+        ).status_code
+        == 409
+    )
     assert share_edit(lab, edit).json()["status"] == "saved"
     assert "zero-steps" in lab.remote.show("index.md")
 
@@ -281,7 +294,9 @@ def test_a_new_page_starts_as_a_draft_from_the_template(lab):
 
 
 def test_github_moving_on_is_a_conflict_to_see_never_a_silent_overwrite(lab):
-    edit = keep(lab, start(lab, "sources/fitbit.md"), FITBIT.replace("# Fitbit", "# Fitbit trackers"))
+    edit = keep(
+        lab, start(lab, "sources/fitbit.md"), FITBIT.replace("# Fitbit", "# Fitbit trackers")
+    )
     theirs = FITBIT.replace("Wear time isn't recorded.", "Wear time is recorded from 2026.")
     lab.remote.write({"sources/fitbit.md": theirs.encode()}, "Someone else's change")
     # Not synced yet: Save & share fetches, and stops rather than merging.
@@ -316,7 +331,10 @@ def test_overlapping_changes_are_marked_for_the_person_to_resolve(lab):
     tried = lab.client.post(
         f"/api/knowledge/edits/{edit['id']}/reapply", json={"version": now["updated_at"]}
     ).json()
-    assert "<<<<<<< Your edit" in tried["merged"] and ">>>>>>> The version now on GitHub" in tried["merged"]
+    assert (
+        "<<<<<<< Your edit" in tried["merged"]
+        and ">>>>>>> The version now on GitHub" in tried["merged"]
+    )
     assert tried["edit"]["text"] == mine and tried["edit"]["base"] == edit["base"]
     # Their own text for the new version.
     resolved = FITBIT.replace("Wear time isn't recorded.", "Wear time is in 2025, and 2026 on.")
@@ -409,7 +427,8 @@ def test_accepting_a_suggestion_starts_a_reviewable_edit_that_shares_as_usual(la
     cid = conversation(lab)
     made = lab.suggestions.suggest(
         cid, page="sources/fitbit.md", title="Zero-step days", text=SECTION,
-        reason="Analysts keep treating 0 as no activity.", evidence_query_ids=[ran(lab, cid, "q_1")],
+        reason="Analysts keep treating 0 as no activity.",
+        evidence_query_ids=[ran(lab, cid, "q_1")],
     )  # fmt: skip
     response = lab.client.post(f"/api/knowledge/suggestions/{cid}/{made['id']}/accept")
     assert response.status_code == 200, response.text
@@ -461,7 +480,9 @@ def test_practice_datalab_has_no_knowledge_base_to_edit(settings, tmp_path):
     store = ConversationStore(connection)
     manager = SessionManager(settings, store, SessionTokens())
     app = FastAPI()
-    app.include_router(build_knowledge_router(KnowledgeServices(settings, connection, store, manager)))
+    app.include_router(
+        build_knowledge_router(KnowledgeServices(settings, connection, store, manager))
+    )
     with TestClient(app) as client:
         response = client.post("/api/knowledge/edits", json={"path": "sources/fitbit.md"})
     assert response.status_code == 409 and "Practice" in response.json()["detail"]
