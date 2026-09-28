@@ -11,8 +11,10 @@ internal IHS tool, so the spark may cross the M; it's edged in the tile's
 colour so it reads there. The earlier options ("1", "2", "3": the IHS mark
 under the M) are a one-line change of DESIGN; `--options` draws them all.
 
-From 64 pixels up the icon is the whole design; at 32 the M and a smaller
-spark (as the header's tile); at 16, and in the favicon SVG, the M alone.
+From 64 pixels up the icon is the whole design; at 32 the M and its spark,
+drawn bigger for its size so it reads (as the header's tile, at 22); at 16, and
+in the favicon SVG, the M alone. Beside the header's tile, from 1280 px up,
+"IHS" in plain letters (HEADER_MARK): the tile already has the spark.
 Practice is the same icon inverted: Blue on Maize, so the two never look
 alike, even at 16 pixels.
 
@@ -100,6 +102,12 @@ def _spark() -> tuple[list[Shape], tuple[float, float]]:
     return shapes, (width + 11.0, 20.0)
 
 
+def _letters() -> tuple[list[Shape], tuple[float, float]]:
+    """Plain "IHS", no spark: the header's, beside a tile that has one."""
+    letters, width = _ihs_block()
+    return letters, (width, 20.0)
+
+
 def _network() -> tuple[list[Shape], tuple[float, float]]:
     """Option 2: "IHS" drawn as a small network: lines between nodes."""
     w, r = 2.2, 2.3
@@ -122,6 +130,7 @@ def _pulse() -> tuple[list[Shape], tuple[float, float]]:
 
 MARKS: dict[str, Callable[[], tuple[list[Shape], tuple[float, float]]]] = {
     "spark": _spark,
+    "letters": _letters,
     "network": _network,
     "pulse": _pulse,
 }
@@ -137,6 +146,9 @@ DESIGNS = {
     "1b": ("spark", "stack"),
 }
 AI_MARK, LAYOUT = DESIGNS[DESIGN]
+# The IHS mark beside the header's tile. With "stack" the tile has the spark,
+# so the letters go without one (one spark in the header, not two).
+HEADER_MARK = "letters" if LAYOUT == "stack" else AI_MARK
 
 # The icon, on a 64-unit square.
 TILE_RADIUS = 12.0
@@ -150,10 +162,13 @@ SMALL_FROM = 32  # pixels: from here to 64, the M and a smaller spark ("stack")
 # "stack", on the 64-unit tile. The M, and "IHS" a little narrower than it
 # (the letters are lighter, so a touch narrower looks the same width), on the
 # tile's axis; the pair sits a unit above the geometric middle (the optical
-# centre). The spark's centre is near the M's top-right corner.
+# centre). The spark's centre is near the M's top-right corner. At 32 px (and
+# the header's 22) it's half as big again as it once was (15.5 against 10.5),
+# about the full icon's spark for the M's size, so it reads; it's moved in
+# with it so its tips and edge stay on the tile.
 STACK = {
     "full": {"m": 32.0, "ihs": 27.0, "gap": 4.5, "top": 12.5, "spark": (47.0, 15.5, 12.5)},
-    "small": {"m": 40.0, "top": 19.5, "spark": (49.5, 20.0, 10.5)},
+    "small": {"m": 40.0, "top": 19.5, "spark": (46.0, 19.5, 15.5)},
     "tiny": {"m": 40.0, "top": 19.5, "spark": (50.0, 18.5, 12.0)},
 }
 HALO = 2.2  # the spark's knock-out edge, in the tile's colour
@@ -355,7 +370,7 @@ def brand_ts(mark: str) -> str:
         "spark: { d: string; halo: number } | null } = "
         f"{{ radius: {_n(TILE_RADIUS)}, x: {_n(tx)}, y: {_n(ty)}, scale: {_n(ts)}, spark: {spark} }};\n"
         f'export const COLOURS = {{ maize: "{MAIZE}", blue: "{BLUE}" }};\n\n'
-        f"/** The IHS + AI mark ({mark!r} in branding/build.py). */\n"
+        f"/** The IHS mark beside the tile ({mark!r} in branding/build.py). */\n"
         f"export const IHS_MARK: {{ name: string; width: number; height: number; paths: ArtPath[] }} = {{\n"
         f'  name: "{mark}",\n  width: {_n(aw)},\n  height: {_n(ah)},\n  paths: [\n'
         + "\n".join(paths)
@@ -576,7 +591,8 @@ def preview(design: str) -> Image.Image:
         pen.rectangle((hx, hy, hx + 360, hy + 84), fill=bg, outline=text)
         tile = draw("real", 44, design=design, tier_="small")
         sheet.paste(tile, (hx + 20, hy + 20), tile)
-        a = draw_art(shapes, size, fg, 22)
+        header = MARKS["letters" if layout == "stack" else mark]()
+        a = draw_art(*header, fg, 22)
         sheet.paste(a, (hx + 20 + 44 + 14, hy + 31), a)
         ink = "#2b2a26" if name == "light" else "#e9e6de"
         pen.text((hx + 20 + 44 + 14 + a.width + 16, hy + 20), "DataLab", fill=ink, font=_font(40))
@@ -612,7 +628,7 @@ def main() -> None:
             _block_m_shapes(), BLOCK_M_SIZE, MAIZE, "Block M"
         ).encode(),
         REPO / "branding" / "ihs-mark.svg": mark_svg(shapes, size, BLUE, "IHS").encode(),
-        BRAND_TS: brand_ts(AI_MARK).encode(),
+        BRAND_TS: brand_ts(HEADER_MARK).encode(),
     }
     for profile in ("real", "practice"):
         suffix = "-practice" if profile == "practice" else ""

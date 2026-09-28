@@ -45,7 +45,8 @@ function Paths({ paths }: { paths: ArtPath[] }) {
   );
 }
 
-/** The IHS + AI mark (branding/build.py's AI_MARK): U-M Blue on a light page
+/** "IHS" in plain letters (branding/build.py's HEADER_MARK; the tile beside it
+ * has the spark, so this has none): U-M Blue on a light page
  * and Maize on a dark one, by the page's own color-scheme (light-dark(); a
  * browser without it draws it in the ink). */
 export function IhsMark({ size = 11 }: { size?: number }) {
