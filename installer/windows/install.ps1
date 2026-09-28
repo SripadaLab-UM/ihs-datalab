@@ -1256,8 +1256,8 @@ if ($LASTEXITCODE -ne 0) {
 
 Step "Step 6 of 8: Your keys"
 Say "Next, DataLab asks for your U-M GPT API key (and the database password, if"
-Say "your lab uses one). Nothing shows on screen while you type or paste; that's"
-Say "normal. Press Enter when done. They're kept in Windows Credential Manager."
+Say "your lab uses one). Each character shows as *. Press Enter when done."
+Say "They're kept in Windows Credential Manager."
 if ($Settings) { & $DataLab --profile $DataLabProfile setup --settings $Settings } else { & $DataLab --profile $DataLabProfile setup }
 
 Step "Step 7 of 8: The lab's knowledge base and pipelines"

@@ -15,7 +15,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from datalab import __version__, credentials, db, release_keys, setup, updates
+from datalab import __version__, credentials, db, release_keys, secret_prompt, setup, updates
 from datalab.api.settings import SettingsServices, build_settings_router
 from datalab.config import OracleSettings, Settings
 from datalab.data.access_log import AccessLog
@@ -283,7 +283,7 @@ def test_datalab_setup_saves_through_the_same_checks(tmp_path, keychain, monkeyp
         '[oracle]\nhost = "h"\nservice = "s"\nuser = "U"\nallowed_schemas = ["IHS_2025"]\n'
     )
     answers = iter([f" {MODEL_KEY} ", PASSWORD])
-    monkeypatch.setattr(setup.getpass, "getpass", lambda prompt: next(answers))
+    monkeypatch.setattr(secret_prompt.getpass, "getpass", lambda prompt: next(answers))
     assert setup.setup(None, lab, update=False) == 0
     assert (
         keychain.saved[(credentials.MODEL_KEY_SERVICE, credentials.MODEL_KEY_ACCOUNT)] == MODEL_KEY

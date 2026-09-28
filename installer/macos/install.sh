@@ -190,6 +190,9 @@ step "4/7 Container images"
 "$DATALAB" --profile "$PROFILE" pull-images
 
 step "5/7 Settings and keys"
+echo "Next, DataLab asks for your U-M GPT API key (and the database password, if"
+echo "your lab uses one). Each character shows as *. Press Enter when done."
+echo "They're kept in your macOS Keychain."
 if [ -n "$SETTINGS" ]; then
   "$DATALAB" --profile "$PROFILE" setup --settings "$SETTINGS"
 else
