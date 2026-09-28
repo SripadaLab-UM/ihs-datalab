@@ -84,7 +84,11 @@ class CatalogAutoBuild:
         """
         if len(self._catalog):
             return True
-        with self._lock:
+        # One build at a time; other callers don't wait for it (they'd hold
+        # worker threads for up to the whole build).
+        if not self._lock.acquire(blocking=False):
+            return False
+        try:
             if len(self._catalog):
                 return True
             if self._clock() < self._next_try:
@@ -106,8 +110,13 @@ class CatalogAutoBuild:
             self.problem = None
             log.info("Built the catalog: %d tables and views.", len(built))
             if self._on_built is not None:
-                self._on_built(built)
+                try:
+                    self._on_built(built)
+                except Exception as error:
+                    log.warning("Couldn't record the catalog build: %s", type(error).__name__)
             return True
+        finally:
+            self._lock.release()
 
     def try_again_soon(self) -> None:
         """Try again at the next chance (a password was just saved)."""

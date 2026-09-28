@@ -190,9 +190,13 @@ def _non_utf8_environment() -> dict[str, str]:
     return env
 
 
-def test_a_slice_of_datalab_works_when_the_locale_is_not_utf8() -> None:
+def test_a_slice_of_datalab_works_when_the_locale_is_not_utf8(tmp_path: Path) -> None:
+    # From a file, not -c: Python reads source files as UTF-8, but decodes a
+    # -c command with the locale, and plain C (Linux CI) is ASCII.
+    script = tmp_path / "slice.py"
+    script.write_text(SLICE, encoding="utf-8")
     result = subprocess.run(
-        [sys.executable, "-X", "utf8=0", "-c", SLICE],
+        [sys.executable, "-X", "utf8=0", str(script)],
         capture_output=True,
         encoding="utf-8",
         errors="replace",
