@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 import { ApiError } from "@/api/http";
@@ -293,7 +293,7 @@ function Editor({
 
   return (
     <section aria-label={`Editing ${edit.path}`} className="flex flex-col gap-4">
-      <EditorHeading edit={edit} dirty={dirty} />
+      <EditorHeading edit={edit} dirty={dirty} unchanged={unchanged} />
       {edit.origin && <Origin origin={edit.origin} />}
       {restored !== null && (
         <p role="status" className="font-sans text-[12.5px] text-attn">
@@ -436,13 +436,14 @@ function Editor({
   );
 }
 
-function EditorHeading({ edit, dirty = false }: { edit: KbEdit; dirty?: boolean }) {
-  const kept = edit.status !== "saved" && edit.status !== "discarded";
+function EditorHeading({ edit, dirty = false, unchanged = false }: { edit: KbEdit; dirty?: boolean; unchanged?: boolean }) {
+  const kept = edit.status !== "saved" && edit.status !== "discarded" && !unchanged;
   return (
     <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
       <h2 className="font-serif text-[22px] leading-tight">{edit.new_page ? "New page" : "Editing"}</h2>
       <span className="font-mono text-[12.5px] text-muted">{edit.path}</span>
       {kept && (dirty ? <Chip tone="attn">changes not kept yet</Chip> : <Chip tone="you">draft on this computer · not shared</Chip>)}
+      {unchanged && <Chip>no changes yet</Chip>}
       {edit.status === "saved" && <Chip tone="good">shared to GitHub</Chip>}
       {edit.status === "conflict" && <Chip tone="attn">changed on GitHub since</Chip>}
     </header>
@@ -519,6 +520,11 @@ function Conflict({
 }) {
   const [sideBySide, setSideBySide] = useState(false);
   const [resolution, setResolution] = useState<string | null>(null);
+  // Shown when Save & share found it, at the bottom of the page: brought into view.
+  const box = useRef<HTMLElement>(null);
+  useEffect(() => {
+    box.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+  }, []);
   const language = languageOf(edit.path);
   const theirs = edit.theirs_state === "text" ? (edit.theirs ?? "") : null;
   const reapply = useMutation({
@@ -542,7 +548,7 @@ function Conflict({
     ["Where you started", edit.before ?? ""],
   ];
   return (
-    <section aria-label="Changed on GitHub since you started" className="flex flex-col gap-3 rounded-[4px] border border-attn/40 px-4 py-3">
+    <section ref={box} aria-label="Changed on GitHub since you started" className="flex flex-col gap-3 rounded-[4px] border border-attn/40 px-4 py-3">
       <p className="font-sans text-[14px] text-attn">
         <Icon name="alert" size={13} className="mr-1 inline translate-y-[-1px]" />
         {edit.theirs_state === "deleted"
@@ -550,14 +556,14 @@ function Conflict({
           : "Someone changed this page on GitHub since you started editing."}{" "}
         Nothing was overwritten, and nothing is shared until you choose.
       </p>
-      <div className="grid gap-3 @[56rem]:grid-cols-3">
+      <div className="grid gap-3 @[44rem]:grid-cols-3">
         {columns.map(([label, value]) => (
           <div key={label} className="flex min-w-0 flex-col gap-1">
             <h3 className="dl-label">{label}</h3>
             {value === null ? (
               <p className="font-sans text-[13px] text-muted">{edit.theirs_state === "deleted" ? "Deleted on GitHub." : "Not text."}</p>
             ) : (
-              <CodeEditor label={`${label}: ${edit.path}`} language={language} value={value} readOnly className="h-64" />
+              <CodeEditor label={`${label}: ${edit.path}`} language={language} value={value} readOnly className="h-80" />
             )}
           </div>
         ))}

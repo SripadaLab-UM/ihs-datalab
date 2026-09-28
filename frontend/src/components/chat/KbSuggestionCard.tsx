@@ -98,7 +98,8 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
                   title={`Query ${e.query_id}: show it in the Queries tab`}
                   className="inline-flex items-center gap-1 rounded-[3px] border border-line px-1.5 py-px text-ink hover:border-ink"
                 >
-                  <Icon name="db" size={12} /> {e.tables.map((t) => t.replace(/^IHS_\d{4}\./, "")).join(", ") || e.query_id}
+                  <Icon name="db" size={12} /> {e.tables.map((t) => t.replace(/^IHS_\d{4}\./, "")).join(", ") || "Query"}
+                  <span className="font-mono text-[11px] text-faint">{e.query_id}</span>
                 </button>
               ) : (
                 <span className="font-mono text-[12px]">{e.query_id}</span>
