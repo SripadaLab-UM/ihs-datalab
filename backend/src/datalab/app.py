@@ -14,6 +14,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import BaseModel
 
 from datalab import __version__, datalock, db, updates
 from datalab.api.conversations import build_conversations_router
@@ -33,7 +34,7 @@ from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
 from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
-from datalab.data.autocatalog import CatalogAutoBuild
+from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
@@ -100,9 +101,11 @@ def create_app(
     lazy: _LazyOracle | None = None
     if database is None:
         database = lazy = _LazyOracle(settings)
-    # DataLab's own catalog is built the first time it reaches the database.
+    # Practice DataLab's own catalog is built the first time it reaches the database.
     catalog_build = (
-        catalog_auto_build(settings, catalog, lazy.build_catalog)
+        catalog_auto_build(
+            settings, catalog, lazy.build_catalog, on_built=access_log.record_catalog_build
+        )
         if lazy is not None and loads_catalog
         else None
     )
@@ -339,8 +342,19 @@ def create_app(
             "database_configured": settings.oracle is not None,
             "catalog_tables": len(catalog),
             "catalog_schemas": catalog.schemas,
-            "catalog_problem": catalog_problem(settings, catalog, catalog_build),
+            # Coarse on purpose: health is the one route that needs no sign-in.
+            # The details (they can name the database user) are at /api/catalog/status.
+            "catalog_state": catalog_state(catalog, catalog_build),
         }
+
+    @app.get("/api/catalog/status")
+    def catalog_status() -> CatalogStatusOut:
+        """Why the catalog is empty and what happens next (signed in only)."""
+        return CatalogStatusOut(
+            state=catalog_state(catalog, catalog_build),
+            tables=len(catalog),
+            detail=catalog_problem(settings, catalog, catalog_build),
+        )
 
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(app, browser, web_dist)
@@ -354,34 +368,64 @@ def catalog_folder(settings: Settings) -> Path:
 
 
 def catalog_auto_build(
-    settings: Settings, catalog: Catalog, build: Callable[[], Catalog]
+    settings: Settings,
+    catalog: Catalog,
+    build: Callable[[], Catalog],
+    *,
+    on_built: Callable[[Catalog], None] | None = None,
 ) -> CatalogAutoBuild | None:
-    """Building the catalog from the database, for DataLab's own folder only:
-    a folder the lab's settings name is never written."""
-    if settings.catalog_dir is not None or settings.oracle is None:
+    """Building the catalog from the database: practice DataLab's own folder
+    only, for now. A folder the lab's settings name is never written."""
+    if settings.profile != "practice" or settings.catalog_dir is not None:
         return None
-    return CatalogAutoBuild(catalog, catalog_folder(settings), build)
+    if settings.oracle is None:
+        return None
+    return CatalogAutoBuild(catalog, catalog_folder(settings), build, on_built=on_built)
+
+
+class CatalogStatusOut(BaseModel):
+    state: CatalogState
+    tables: int
+    # Why it's empty and what happens next; None once it has tables.
+    detail: str | None
+
+
+def catalog_state(catalog: Catalog, build: CatalogAutoBuild | None) -> CatalogState:
+    if build is not None:
+        return build.state
+    return "ready" if len(catalog) else "empty"
 
 
 def catalog_problem(
     settings: Settings, catalog: Catalog, build: CatalogAutoBuild | None
 ) -> str | None:
-    """Why the catalog is empty, and what happens next, for Settings."""
+    """Why the catalog is empty, and what happens next, for Settings (signed in)."""
     if len(catalog):
         return None
     if build is not None:
+        if build.stopped:
+            return (
+                "DataLab stopped trying to build it, since trying again wouldn't help: "
+                f"{build.problem} Fix that (for a password: datalab --profile practice "
+                "setup --update), then start DataLab again."
+            )
         if build.problem:
             return (
-                "DataLab builds it (metadata only) once it can connect to the database. "
-                f"Last try: {build.problem}"
+                "DataLab builds it (metadata only) once it can connect to the database; "
+                f"it tries again at the next query, at most every 30 s. Last try: {build.problem}"
             )
         return "DataLab builds it (metadata only) the first time it connects to the database."
+    if settings.oracle is None:
+        return "No database is set up yet."
     if settings.catalog_dir is not None:
         return (
             f"The catalog folder in DataLab's settings ({settings.catalog_dir}) has no tables. "
             "Build it with: datalab catalog --from-database --out <folder>"
         )
-    return "No database is set up yet."
+    return (
+        "Build it with: datalab catalog --from-database --out <folder>, then name that "
+        "folder as catalog_dir in DataLab's settings.toml."
+    )
 
 
 def _password_changed(lazy: _LazyOracle | None, build: CatalogAutoBuild | None) -> None:
@@ -443,8 +487,10 @@ class _LazyOracle:
         """The catalog, read from the database's catalog views: metadata only."""
         oracle = self._settings.oracle
         assert oracle is not None
+        # 15 s to connect; the dictionary queries get the usual round-trip limit.
         connection = self._get().connect(timeout=15)
         try:
+            connection.call_timeout = int(self._settings.limits.round_trip_timeout_seconds * 1000)
             return Catalog.from_database(connection, sorted(oracle.allowed_schemas))
         finally:
             connection.close()

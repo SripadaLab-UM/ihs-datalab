@@ -87,6 +87,17 @@ def test_mistakes_in_a_section_are_refused_with_a_clear_message(settings_file, t
         load_settings("practice")
 
 
+def test_the_real_database_cant_use_the_practice_keychain_entry(settings_file):
+    """Practice DataLab saves the synthetic database's public password there."""
+    settings_file.write_text(
+        '[oracle]\nhost = "db.example.org"\nservice = "SVC"\nuser = "DATALAB_RO"\n'
+        'allowed_schemas = ["IHS_2025"]\nkeychain_service = "datalab-practice"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="practice DataLab's own keychain entry"):
+        load_settings("real")
+
+
 def test_optional_text_takes_text_and_numbers_take_whole_numbers():
     from datalab.config import _fits
 

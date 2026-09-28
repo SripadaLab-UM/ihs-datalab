@@ -180,6 +180,8 @@ print("ok")
 def _non_utf8_environment() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("LC_", "PYTHON"))}
     env["PYTHONUTF8"] = "0"
+    # Else, on Linux, Python turns the C locale into C.UTF-8 by itself.
+    env["PYTHONCOERCECLOCALE"] = "0"
     if sys.platform != "win32":
         # Latin-1 where the computer has it (macOS does), else plain C: ASCII,
         # once UTF-8 mode is off. Windows' own default is cp1252.

@@ -1697,6 +1697,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/catalog/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog Status
+         * @description Why the catalog is empty and what happens next (signed in only).
+         */
+        get: operations["catalog_status_api_catalog_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1819,6 +1839,18 @@ export interface components {
             comment: string;
             /** Matching Columns */
             matching_columns: string[];
+        };
+        /** CatalogStatusOut */
+        CatalogStatusOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "ready" | "building" | "waiting-for-database" | "stopped" | "empty";
+            /** Tables */
+            tables: number;
+            /** Detail */
+            detail: string | null;
         };
         /** CatalogTable */
         CatalogTable: {
@@ -6706,6 +6738,26 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    catalog_status_api_catalog_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogStatusOut"];
                 };
             };
         };

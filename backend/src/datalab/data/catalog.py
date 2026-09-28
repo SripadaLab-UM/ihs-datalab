@@ -17,6 +17,10 @@ from pathlib import Path
 import oracledb
 import yaml
 
+# Unquoted Oracle identifiers: nothing a path could trip over (no dots,
+# slashes, spaces or Windows device names' punctuation).
+_PLAIN_NAME = re.compile(r"[A-Za-z0-9_$#]+")
+
 
 @dataclass
 class Column:
@@ -113,6 +117,18 @@ class Catalog:
         return cls(tables)
 
     def save(self, directory: Path) -> None:
+        """One YAML file per table. Refuses (ValueError, before writing
+        anything) a schema or table name that isn't a plain Oracle
+        identifier, since those become folder and file names. Column names
+        only go inside the YAML, and can be anything Oracle allows: the IHS
+        databases have quoted ones such as "Black tea"."""
+        for table in self._tables.values():
+            for name in (table.schema, table.name):
+                if not _PLAIN_NAME.fullmatch(name):
+                    raise ValueError(
+                        f"Not saving the catalog: {name!r} in {table.qualified_name!r} "
+                        "isn't a plain Oracle name."
+                    )
         for table in self._tables.values():
             folder = directory / table.schema
             folder.mkdir(parents=True, exist_ok=True)

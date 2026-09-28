@@ -74,6 +74,27 @@ class MemoryKeychain:
 
 
 @pytest.fixture(autouse=True)
+def memory_keychain(monkeypatch: pytest.MonkeyPatch) -> MemoryKeychain:
+    """No test reads or writes this computer's keychain. The keyring module's
+    functions use an in-memory keychain instead (every module calls them
+    through the module), and DataLab processes a test starts get keyring's
+    "fail" backend: nothing is saved, nothing is found."""
+    import keyring
+
+    fake = MemoryKeychain()
+    for name in ("get_password", "set_password", "delete_password"):
+        monkeypatch.setattr(keyring, name, getattr(fake, name))
+
+    def no_backend(*_: object, **__: object) -> None:
+        raise AssertionError("A test reached the real keychain's backend.")
+
+    monkeypatch.setattr(keyring, "get_keyring", no_backend)
+    monkeypatch.setattr(keyring, "get_credential", no_backend)
+    monkeypatch.setenv("PYTHON_KEYRING_BACKEND", "keyring.backends.fail.Keyring")
+    return fake
+
+
+@pytest.fixture(autouse=True)
 def github_keychain(monkeypatch: pytest.MonkeyPatch) -> MemoryKeychain:
     """No test reads or writes a real GitHub sign-in in this computer's keychain."""
     from datalab.repos import github

@@ -39,16 +39,11 @@ def test_the_summary_never_calls_an_unverified_check_a_pass():
 
 
 @pytest.fixture
-def keychain(monkeypatch):
-    """The OS keychain, in memory: no test writes to this computer's."""
-    fake = MemoryKeychain()
-    monkeypatch.setattr(credentials, "keyring", fake)
-    monkeypatch.setattr(
-        credentials, "_from_keychain", lambda service, account: fake.saved.get((service, account))
-    )
+def keychain(monkeypatch, memory_keychain: MemoryKeychain) -> MemoryKeychain:
+    """The in-memory keychain every test gets (conftest.py), with no prompts."""
     monkeypatch.delenv("DATALAB_ORACLE_PASSWORD", raising=False)
     monkeypatch.setattr(installing, "model_api_key", lambda: "saved")  # no prompt
-    return fake
+    return memory_keychain
 
 
 def test_practice_setup_saves_the_synthetic_databases_password(
@@ -115,3 +110,23 @@ def test_practice_datalab_saves_its_password_when_it_starts(tmp_path, keychain):
     assert keychain.saved == {("datalab-practice", "DATALAB_RO"): "datalab_ro"}
     _save_practice_password(Settings(profile="real", data_dir=tmp_path, oracle=PRACTICE_ORACLE))
     assert keychain.writes == 1
+
+
+def test_a_keychain_that_fails_its_own_way_doesnt_stop_practice_datalab(
+    tmp_path, keychain, monkeypatch, capsys
+):
+    """Windows' keychain raises pywintypes.error, which isn't a KeyringError."""
+    import keyring
+
+    from datalab.cli import _save_practice_password
+
+    class NotAKeyringError(Exception):
+        pass
+
+    def refuse(service, account, value):
+        raise NotAKeyringError("secret-looking detail")
+
+    monkeypatch.setattr(keyring, "set_password", refuse)
+    _save_practice_password(Settings(profile="practice", data_dir=tmp_path, oracle=PRACTICE_ORACLE))
+    out = capsys.readouterr().out
+    assert "NotAKeyringError" in out and "secret-looking" not in out

@@ -285,8 +285,9 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         ]
 
     @router.get("/catalog")
-    def browse() -> list[CatalogCohort]:
+    async def browse() -> list[CatalogCohort]:
         """Every cohort's tables and columns, with their comments. Metadata only."""
+        await services.data.ensure_catalog()
         cohorts = []
         for schema in catalog.schemas:
             tables = [catalog.get(f"{schema}.{name}") for name in catalog.names(schema)]
@@ -296,12 +297,13 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         return cohorts
 
     @router.get("/catalog/search")
-    def search(
+    async def search(
         q: str = Query(max_length=200),
         schemas: Annotated[list[str] | None, Query()] = None,
         limit: int = Query(default=30, ge=1, le=100),
     ) -> list[CatalogHit]:
         """Tables whose names, columns or comments match, best first."""
+        await services.data.ensure_catalog()
         return [
             CatalogHit(
                 schema_name=hit.table.schema,

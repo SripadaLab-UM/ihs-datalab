@@ -380,12 +380,19 @@ def _env_profile() -> Profile:
 
 
 def _oracle_from(raw: dict) -> OracleSettings:
+    keychain_service = raw.get("keychain_service", "datalab-oracle")
+    if keychain_service == PRACTICE_ORACLE.keychain_service:
+        # Practice DataLab saves the synthetic database's public password there.
+        raise ValueError(
+            f"[oracle] keychain_service can't be {keychain_service!r}: that's practice "
+            "DataLab's own keychain entry."
+        )
     return OracleSettings(
         host=raw["host"],
         port=int(raw.get("port", 1521)),
         service=raw["service"],
         user=raw["user"],
-        keychain_service=raw.get("keychain_service", "datalab-oracle"),
+        keychain_service=keychain_service,
         read_only_roles=tuple(r.upper() for r in raw.get("read_only_roles", [])),
         allowed_schemas=frozenset(s.upper() for s in raw["allowed_schemas"]),
     )

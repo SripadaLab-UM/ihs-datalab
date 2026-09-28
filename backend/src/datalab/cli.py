@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import io
 import sys
 from pathlib import Path
@@ -239,13 +238,17 @@ def _serve(settings, *, open_browser: bool) -> int:
 def _save_practice_password(settings) -> None:
     """A practice DataLab set up before `datalab setup` saved its synthetic
     database's password (0.1.0) saves it now. Never for the real profile."""
-    from keyring.errors import KeyringError
-
     from datalab.setup import save_practice_password
 
-    # If the keychain refuses, the Safety check and Settings say what's missing.
-    with contextlib.suppress(KeyringError):
+    try:
         save_practice_password(settings)
+    except Exception as error:  # Windows' keychain raises its own errors, too
+        # Best effort: the Safety check and Settings say what's missing. The
+        # error's type only, never its text.
+        print(
+            f"Couldn't save the practice database's password ({type(error).__name__}).",
+            flush=True,
+        )
 
 
 def ignore_windows_connection_resets(loop: asyncio.AbstractEventLoop) -> None:

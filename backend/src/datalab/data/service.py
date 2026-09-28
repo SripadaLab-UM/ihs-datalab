@@ -75,6 +75,15 @@ class DataService:
         self._allowed_schemas = allowed_schemas
         self._slots = asyncio.Semaphore(limits.max_concurrent_queries)
 
+    async def ensure_catalog(self) -> bool:
+        """Build DataLab's own catalog if it's empty and it's time to try
+        (autocatalog.py, rate-limited). False only while DataLab's own catalog
+        couldn't be built yet. Never raises."""
+        build = self._catalog_build
+        if build is None or len(self._catalog):
+            return True
+        return await asyncio.to_thread(build.ensure)
+
     async def run_query(
         self,
         *,
@@ -101,16 +110,10 @@ class DataService:
             raise ValueError("A workflow run's query needs the workflow's declared tables.")
         query_id = _new_query_id()
         binds = dict(binds or {})
-        build = self._catalog_build
-        if (
-            build is not None
-            and not len(self._catalog)
-            and not await asyncio.to_thread(build.ensure)
-        ):
+        if not await self.ensure_catalog():
             reason = (
                 "DataLab has no catalog of the cohorts' tables yet, so it can't check "
-                "queries. It builds one as soon as it can connect to the database: "
-                f"{build.problem or 'not connected yet'}"
+                "queries. Settings → About this DataLab says why."
             )
             self._log.rejected(
                 query_id=query_id, session_id=session_id, sql=sql, reason=reason, origin=origin

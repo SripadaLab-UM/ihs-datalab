@@ -99,7 +99,7 @@ def helper_args(python: str | None = None) -> list[str]:
         "-c",
         "credential.helper=",
         "-c",
-        f"credential.helper=!{quoted} -m datalab.repos.credential_helper",
+        f"credential.helper=!{quoted} -X utf8 -m datalab.repos.credential_helper",
     ]
 
 
