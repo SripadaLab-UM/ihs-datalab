@@ -719,6 +719,7 @@ async def test_uv_installs_only_what_requirements_txt_pins_by_hash(world):
         ["--require-hashes"],
         ["--only-binary", ":all:"],
         ["--default-index", "https://pypi.org/simple"],
+        ["--link-mode", "copy"],
     ):
         at = pip.index(flag[0])
         assert pip[at : at + len(flag)] == flag

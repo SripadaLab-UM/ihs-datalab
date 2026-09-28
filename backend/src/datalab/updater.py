@@ -811,6 +811,10 @@ class Updater:
                 ":all:",
                 "--default-index",
                 PYPI,
+                # Copies, not hardlinks into uv's cache (a hardlink fails in a
+                # cloud-synced or redirected folder on Windows).
+                "--link-mode",
+                "copy",
                 "--python",
                 str(self.layout.python(version)),
                 # By its plain name, from its own folder: uv cuts a path at its

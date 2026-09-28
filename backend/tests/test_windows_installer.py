@@ -140,3 +140,10 @@ def test_the_uninstaller_removes_only_what_the_installer_put_in_the_app_folder()
     assert 'foreach ($name in "versions", "bin")' in body
     assert "$left.Count -eq 0) { Remove-Tree $Root }" in body
     assert 'Remove-Tree (Join-Path $StateDir "install")' in body
+
+
+def test_uv_copies_files_and_the_earlier_start_menu_entry_goes():
+    # A hardlink into uv's cache fails in a cloud-synced or redirected folder.
+    assert "--default-index https://pypi.org/simple --link-mode copy" in INSTALL
+    # 0.1.0's "DataLab" entry opened the removed uv tool copy: removed only if so.
+    assert '-like "*\\.local\\bin\\datalab*"' in INSTALL

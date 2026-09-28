@@ -204,7 +204,7 @@ def test_uv_installs_only_what_requirements_txt_pins_by_hash(machine):
     [pip] = machine["uvlog"].read_text().splitlines()
     assert (
         "pip install -q --no-config --require-hashes --only-binary :all: "
-        "--default-index https://pypi.org/simple --python "
+        "--default-index https://pypi.org/simple --link-mode copy --python "
     ) in pip
     assert pip.split(" (in ")[0].endswith("-r requirements.txt")
     assert "UV_INDEX_URL=unset" in pip  # the environment can't steer uv

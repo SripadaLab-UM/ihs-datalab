@@ -145,7 +145,7 @@ else
   # Every file checked against requirements.txt's hashes, only wheels, and
   # only from PyPI.
   (cd "$STAGE" && uv pip install -q --no-config --require-hashes --only-binary :all: \
-    --default-index https://pypi.org/simple --python "$TARGET/bin/python" -r requirements.txt)
+    --default-index https://pypi.org/simple --link-mode copy --python "$TARGET/bin/python" -r requirements.txt)
   SAID="$("$TARGET/bin/datalab" --version)"
   if [ "$SAID" != "datalab $VERSION" ]; then
     echo "The installed DataLab says '$SAID', not $VERSION."

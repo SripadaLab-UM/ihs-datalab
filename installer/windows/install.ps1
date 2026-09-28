@@ -1170,8 +1170,10 @@ if ((Test-Path -LiteralPath $Complete) -and ((Get-Content -LiteralPath $Complete
     # Every file checked against requirements.txt's hashes, only wheels, and only from PyPI.
     Push-Location $Stage
     try {
+        # Copies, not hardlinks into uv's cache: a hardlink fails in a
+        # cloud-synced or redirected folder ("incompatible hardlinks").
         & $Uv pip install -q --no-config --require-hashes --only-binary :all: `
-            --default-index https://pypi.org/simple `
+            --default-index https://pypi.org/simple --link-mode copy `
             --python (Join-Path $Target "Scripts\python.exe") -r requirements.txt
     } finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) {
@@ -1258,6 +1260,17 @@ Step "Step 8 of 8: Adding DataLab to the Start menu"
 # own entry, so neither replaces the other.
 $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 $LinkName = if ($Practice) { "DataLab (practice)" } else { "DataLab" }
+# An earlier installer's "DataLab" entry opens the uv tool copy removed in
+# step 4, so it would only give an error. It goes, but only if that's what it
+# opens (a real DataLab's own entry is left alone, or rewritten just below).
+$Earlier = Join-Path $StartMenu "DataLab.lnk"
+if (Test-Path -LiteralPath $Earlier) {
+    $Link = (New-Object -ComObject WScript.Shell).CreateShortcut($Earlier)
+    if ("$($Link.TargetPath) $($Link.Arguments)" -like "*\.local\bin\datalab*") {
+        Remove-Item -LiteralPath $Earlier -Force
+        Say "(Removed the Start menu entry an earlier installer made.)"
+    }
+}
 $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "$LinkName.lnk"))
 $Shortcut.TargetPath = $WindowsPowerShell
 $Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$([System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab))' --profile $DataLabProfile serve`""
