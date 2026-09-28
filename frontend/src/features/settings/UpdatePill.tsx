@@ -42,7 +42,7 @@ export function UpdatingBanner() {
   const check = useUpdateCheck().data;
   if (!check?.updating) return null;
   return (
-    <div role="status" className="bg-attn px-4 py-2 text-center text-sm font-medium text-white">
+    <div role="status" className="border-b border-attn/30 bg-attn-soft px-4 py-2 text-center text-sm font-medium text-ink">
       DataLab is being updated to {check.install.version ?? "a new version"}. Nothing new can start until it has
       restarted; it opens again in a new window.
     </div>
