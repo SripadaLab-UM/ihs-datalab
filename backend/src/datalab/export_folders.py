@@ -534,7 +534,13 @@ def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = Fa
 
 
 def _fingerprint(info: os.stat_result) -> tuple[int, ...]:
-    """A file as it is now: which file, and its size and last change."""
+    """A file as it is now: which file, and its size and last change.
+
+    On Windows the file is closed before it's compared, and closing it can
+    update its times, so there it's which file and its size only. NTFS doesn't
+    reuse a file's id at once, so the id alone tells a replacement apart."""
+    if sys.platform == "win32":
+        return (info.st_dev, info.st_ino, info.st_size)
     return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
 
 
