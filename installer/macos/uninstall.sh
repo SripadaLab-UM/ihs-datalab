@@ -6,7 +6,9 @@
 # Removes DataLab (every version installed side by side), its apps and their
 # Desktop shortcuts, its container images, and the keys it saved in your
 # Keychain. It asks before deleting DataLab's data folder (conversations and
-# query results). It never touches your export folders, uv, or Docker Desktop.
+# query results), and before deleting the practice database (its Docker container
+# and volume, made-up data only; --delete-data and --keep-data answer for both).
+# It never touches your export folders, uv, or Docker Desktop.
 set -eu
 export PATH="$HOME/.local/bin:$PATH"
 ROOT="${DATALAB_INSTALL_DIR:-$HOME/Library/Application Support/DataLab/app}"

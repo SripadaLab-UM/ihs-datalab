@@ -41,9 +41,36 @@ Michigan Medicine VPN. Everything in [What DataLab will and won't do](safety.md)
 applies. Outside AI tools must not be used with it. Nothing technical stops
 a tool that controls your terminal or browser, so this is a rule for people.
 
+## What practice needs
+
+The practice DataLab needs Docker Desktop, and nothing from the lab: no
+database password, no VPN and no GitHub account. Its installer sets up the
+synthetic database for you (a few minutes, the first time), and the database
+runs in Docker on your computer only, where nothing else can reach it.
+
+A U-M GPT (Toolkit) API key is optional:
+
+| Needs the key | Works without it |
+|---|---|
+| Conversations with the agent, in the Workspace | The SQL Playground |
+| Drafting a workflow with the agent | Save as workflow, and running workflows |
+| (In the real DataLab) Knowledge's Edit with agent, and the agent's suggested updates | Exports and Settings |
+
+To add a key later, run `datalab --profile practice setup --update`.
+
 ## Opening the practice DataLab
 
-The practice DataLab runs as a separate DataLab on your computer, with the
-synthetic database running in Docker. Ask the DataLab maintainer to set it
-up if it isn't already. The first time it opens, the
-[tour](tour.md) starts; you can take it again at any time from Help.
+Open **DataLab (practice)** from the Desktop, the Start menu or Applications.
+If the synthetic database isn't running, the practice DataLab starts it: the
+first screen says so while it starts, and Settings → Connections shows how
+it's going. If it can't (Docker Desktop isn't running, say), Settings →
+Connections says why, with **Try again**.
+
+The made-up data is kept when DataLab is updated or installed again. To start
+over from scratch, use **Reset practice data** in Settings → Connections (it
+asks first), or run `datalab --profile practice practice-db reset`. Your
+practice conversations and exports aren't touched. Uninstalling DataLab asks
+whether to delete the practice database too.
+
+The first time it opens, the [tour](tour.md) starts; you can take it again
+at any time from Help.

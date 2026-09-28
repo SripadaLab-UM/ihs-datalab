@@ -15,18 +15,70 @@ it uses the same dialect as the real database.
 
 ## Quick start
 
-Needs Docker and [uv](https://docs.astral.sh/uv/).
+**Practice DataLab needs none of this.** It sets up and starts this database
+itself, in Python, on Mac and Windows alike: the installer runs
+`datalab --profile practice practice-db setup`, and practice DataLab starts it
+again whenever it opens (see "In practice DataLab" below).
+
+For development and CI, `db.sh` runs the same code (`python -m
+datalab.practice_db`, in `backend/`) for the development container. It needs
+Docker and [uv](https://docs.astral.sh/uv/).
 
 ```sh
 synthetic/db.sh start      # create/start container datalab-synthetic-oracle, wait until ready
 synthetic/db.sh generate   # drop and recreate the schemas, then load the data (~20 s)
 synthetic/db.sh verify     # check privileges, row counts and quirks as DATALAB_RO
-synthetic/db.sh stop       # stop (data is kept); `reset` deletes the container
+synthetic/db.sh stop       # stop (data is kept); `reset` deletes the container and its volume
 ```
 
-The first `start` takes about a minute. The image is
-`container-registry.oracle.com/database/free:latest-lite`. You can also run
-the scripts directly: `uv run --project synthetic python synthetic/generate.py`.
+`db.sh` looks after a container without DataLab's label only if it's
+called `datalab-synthetic-oracle`; for another name
+(`DATALAB_PRACTICE_DB_CONTAINER`) pass `--force`.
+
+The first `start` takes about a minute. The image is Oracle's
+`container-registry.oracle.com/database/free:latest-lite`, pinned by digest in
+`backend/src/datalab/practice_db/__init__.py` (`IMAGE`). Or run it yourself:
+`cd backend && uv run python -m datalab.practice_db generate`.
+
+## In practice DataLab
+
+- **Set up once.** The container `datalab-practice-oracle` keeps its data in
+  the Docker volume `datalab-practice-oracle-data`, both labelled
+  `datalab.practice-db`. Reinstalling or updating DataLab finds them again,
+  and the data is loaded only when the database has none (no marker table:
+  the generator creates it last, so a load that stopped part way is done
+  again).
+- **Started when needed.** Practice DataLab starts the container in the
+  background when it opens (Settings → Connections says how it's going), then
+  builds its catalog.
+- **Reset only when asked:** `datalab --profile practice practice-db reset`,
+  or Reset practice data in Settings → Connections (confirmed). Both delete
+  the container and its volume and set them up again from scratch.
+- **Left alone:** a container or volume of that name without DataLab's
+  label, and a synthetic database already answering on port 1522 that
+  DataLab didn't set up (this development container, say): practice DataLab
+  uses that one as it is, and never loads data into it or resets it. It
+  does so only if Docker says an Oracle Database Free container publishes
+  the port, and then only `DATALAB_RO` checks the marker, once: DataLab
+  never logs in as SYSTEM to a database it didn't make, and doesn't log in
+  at all to anything else on the port (an SSH tunnel, say).
+- **Upgrading from this development container:** if it's stopped when
+  practice DataLab is set up or opens, practice DataLab starts it and uses
+  it (a terminal asks first), rather than making a second database on its
+  port.
+- **One at a time.** Loading and resetting hold a lock in the practice data
+  folder (`practice-db/.lock`), and `practice-db setup` leaves the database
+  to a practice DataLab that's running.
+- **Oracle's image** is downloaded for a first setup only; an update or a
+  reinstall with a practice database already there downloads nothing. A
+  busy registry never stops an install or an update.
+- **Uninstalling** asks whether to delete the practice database too.
+- `datalab --profile practice practice-db status | setup | start | stop | reset`.
+  The real profile refuses these.
+
+Tests and a second copy beside the first can move it with
+`DATALAB_PRACTICE_DB_CONTAINER`, `DATALAB_PRACTICE_DB_VOLUME` and
+`DATALAB_PRACTICE_DB_PORT` (always on 127.0.0.1).
 
 ## Connecting
 
@@ -39,8 +91,7 @@ the scripts directly: `uv run --project synthetic python synthetic/generate.py`.
 The port is published on **127.0.0.1 only**, so no other computer can reach
 it. These passwords are **fixed, public, dev-only** values. That is acceptable
 only because the container holds nothing but synthetic data. Never reuse them.
-You can override them with `SYNTH_ORACLE_PWD`, `SYNTH_RO_PWD`,
-`SYNTH_ORACLE_PORT` and `SYNTH_ORACLE_DSN`.
+`db.sh` takes another port from `SYNTH_ORACLE_PORT`.
 
 ```python
 import oracledb
@@ -64,7 +115,7 @@ conn = oracledb.connect(user="DATALAB_RO", password="datalab_ro", dsn="localhost
 
 `SET ROLE IHS_2025_RO, IHS_2026_RO` drops the write role. After that,
 `session_privs` contains only `CREATE SESSION`, and every cohort stays
-readable. `verify.py` checks both states. Unlike the real account,
+readable. `verify` checks both states. Unlike the real account,
 `DATALAB_RO` has no direct grants on IHS_2025 objects or IHS_2026 views. That
 makes the test stricter, because reading those objects after `SET ROLE` proves
 the read-only roles really are enabled.
@@ -75,7 +126,7 @@ log in as them.
 ## Seed and determinism
 
 The seed is in `spec/cohorts.yaml` (`seed: 20260926`). Override it with
-`generate.py --seed N`. The same seed and spec always produce identical rows.
+`synthetic/db.sh generate --seed N`. The same seed and spec always produce identical rows.
 The cohort windows and data end dates are fixed dates, never "today". Each
 cohort gets its own random stream, so changing one cohort does not change the
 others. Re-running always drops and recreates everything: the cohort users,
@@ -136,7 +187,7 @@ objects are views in reality but plain tables here, filled by the generator.
 
 ## Quirks included (on purpose)
 
-These are the real-world problems the legacy R pipelines handle. `verify.py`
+These are the real-world problems the legacy R pipelines handle. `verify`
 counts each one.
 
 | Quirk | Where |
@@ -168,15 +219,20 @@ slightly higher PHQ-9 items.
 
 ## Files
 
+In `backend/src/datalab/practice_db/`, so the installed DataLab carries them:
+
 - `spec/objects.yaml`: objects, columns, Oracle types and per-cohort drift,
   copied from the metadata export. Large tables keep all their columns. The
   ~200-column survey views keep a subset.
 - `spec/cohorts.yaml`: seed, cohort windows, device mix, survey waves and items.
 - `generate.py`: creates users, roles, tables and views, then generates and
-  bulk-loads the data.
-- `verify.py`: privilege, row-count and quirk checks as DATALAB_RO. Exits
-  non-zero on failure.
-- `db.sh`: container lifecycle.
+  bulk-loads the data, and creates the marker last.
+- `verify.py`: privilege, row-count and quirk checks as DATALAB_RO.
+- `guard.py`: the checks below, and the marker.
+- `__init__.py`: the container's lifecycle, through the `docker` command.
+- `__main__.py`: the commands `db.sh` runs.
+
+Here, `db.sh` only.
 
 ## Invented details
 
@@ -197,9 +253,10 @@ dictionary rather than against this database.
 
 ## Safeguards
 
-- **Local only.** `db.sh` publishes the port on `127.0.0.1`, never on the
-  network.
-- **The scripts refuse real databases.** `generate.py` and `verify.py` check
+- **Local only.** The port is published on `127.0.0.1`, never on the
+  network. Practice DataLab stops, and won't use, a container of its own
+  that's published anywhere else.
+- **The code refuses real databases.** The generator and `verify` check
   that the address is this computer and that the server is Oracle Database
   Free (`FREEPDB1`) before doing anything (see `guard.py`).
 - **Marker table.** The generator creates `DATALAB_SYNTHETIC.MARKER`.

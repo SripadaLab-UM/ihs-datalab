@@ -6,7 +6,9 @@
 # shortcuts, its container images, and the keys it saved in Credential Manager,
 # and what the installer left behind (its after-restart task or shortcut, and
 # its progress files). It asks before deleting DataLab's data folder
-# (conversations and query results). It never touches your export folders, and
+# (conversations and query results), and before deleting the practice database
+# (its Docker container and volume, made-up data only; -DeleteData and -KeepData
+# answer for both). It never touches your export folders, and
 # leaves Docker Desktop, WSL and uv installed; at the end it says how to remove
 # each of them, if nothing else on the computer needs them.
 param([switch]$DeleteData, [switch]$KeepData)

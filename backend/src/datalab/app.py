@@ -44,6 +44,7 @@ from datalab.data.service import Database, DataService
 from datalab.data.sql_drafts import SqlDrafts
 from datalab.exports import DestinationStore
 from datalab.knowledge.suggestions import KbSuggestions
+from datalab.practice_db import PracticeDatabaseKeeper
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
 from datalab.releases import UpdateChecker
@@ -100,6 +101,7 @@ def create_app(
     protect_api: bool = True,
     web_dist: Path | None = None,
     recovery: updates.Recovery | None = None,
+    practice_database: PracticeDatabaseKeeper | None = None,
 ) -> FastAPI:
     require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
@@ -123,6 +125,12 @@ def create_app(
     data = DataService(
         database, access_log, settings.limits, allowed, catalog, catalog_build=catalog_build
     )
+    if practice_database is not None:
+        # Practice only (cli._serve): once its database is up, connect again
+        # and build the catalog if it hasn't been.
+        if settings.profile != "practice":
+            raise ValueError("Only the practice DataLab looks after a synthetic database.")
+        practice_database.on_ready = lambda: _practice_database_ready(lazy, catalog_build)
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
@@ -208,11 +216,15 @@ def create_app(
         access_log.end_cut_off_queries()
         # DataLab's own catalog, if it has none yet. In the background: the
         # database may not be up yet (then it's tried again at the first query).
+        # Practice builds it once its database is up (practice_database.on_ready).
         building = (
             asyncio.create_task(asyncio.to_thread(catalog_build.ensure))
-            if catalog_build is not None
+            if catalog_build is not None and practice_database is None
             else None
         )
+        if practice_database is not None:
+            # In the background: pages open while it starts, and say so.
+            practice_database.start()
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         # Support reports still waiting to reach the lab's repository: tried once.
         retrying = asyncio.create_task(asyncio.to_thread(support_router.retry_pending))  # type: ignore[attr-defined]
@@ -362,6 +374,8 @@ def create_app(
                 recovery=recovery,
                 checker=update_checker,
                 updater=updater,
+                practice_database=practice_database,
+                practice_busy=lambda: _practice_busy(sessions.any_busy, connection),
             )
         )
     )
@@ -389,6 +403,8 @@ def create_app(
             # Coarse on purpose: health is the one route that needs no sign-in.
             # The details (they can name the database user) are at /api/catalog/status.
             "catalog_state": catalog_state(catalog, catalog_build),
+            # Practice only: how its synthetic database stands (details in Settings).
+            "practice_database": practice_database.phase if practice_database else None,
         }
 
     @app.get("/api/catalog/status")
@@ -480,6 +496,45 @@ def catalog_problem(
         "Build it with: datalab catalog --from-database --out <folder>, then name that "
         "folder as catalog_dir in DataLab's settings.toml."
     )
+
+
+# After practice's database is set up, the first sessions can meet a
+# passing error (MarkerNotVerified): the catalog build is tried again at
+# these intervals, then at the next query as usual (autocatalog.py).
+CATALOG_RETRY_DELAYS = (2.0, 5.0, 10.0, 20.0, 40.0)
+
+
+def _practice_database_ready(
+    lazy: _LazyOracle | None,
+    build: CatalogAutoBuild | None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    _password_changed(lazy, build)
+    if build is None:
+        return
+    for delay in (*CATALOG_RETRY_DELAYS, None):
+        # Stopped (a wrong password, or truly not the synthetic database): no more tries.
+        if build.ensure() or build.stopped or delay is None:
+            return
+        sleep(delay)
+        build.try_again_soon()
+
+
+def _practice_busy(
+    conversations_busy: Callable[[], bool], connection: sqlite3.Connection
+) -> str | None:
+    """Why the practice database shouldn't be reset now: something may be reading it."""
+    if conversations_busy():
+        return "The agent is working in a conversation. Wait until it's done, or stop it."
+    try:
+        run = connection.execute(
+            "SELECT 1 FROM workflow_runs WHERE status IN ('queued', 'running') LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:
+        run = None
+    if run is not None:
+        return "A workflow is running. Wait until it's done, or cancel it."
+    return None
 
 
 def _password_changed(lazy: _LazyOracle | None, build: CatalogAutoBuild | None) -> None:

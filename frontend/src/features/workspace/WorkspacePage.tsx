@@ -9,6 +9,8 @@ import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/prove
 import { SHOW_STEP } from "@/components/chat/showStep";
 import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
+import { settingsLink } from "@/features/settings/highlight";
+import { useConnections, whilePracticeDatabaseStarts } from "@/features/toolbar/ConnectionShortcuts";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
 import { DeleteConversation } from "./DeleteConversation";
@@ -218,6 +220,7 @@ export function WorkspacePage() {
                 <Icon name="pen" size={14} /> New conversation
               </Button>
             </div>
+            <WelcomeNotes />
           </div>
         )}
       </main>
@@ -269,6 +272,43 @@ export function WorkspacePage() {
             setDeleting(null);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * On the first screen, what's missing for a conversation, and what works
+ * meanwhile: no U-M GPT key yet, or (practice) its database still starting.
+ */
+function WelcomeNotes() {
+  const connections = useConnections().data;
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: whilePracticeDatabaseStarts });
+  const noKey = connections?.model.key === "missing";
+  const database = health.data?.practice_database;
+  if (!noKey && (!database || database === "ready")) return null;
+  return (
+    <div className="flex max-w-[46ch] flex-col gap-2 border-l-2 border-attn/50 pl-3 text-sm text-muted">
+      {database && database !== "ready" && (
+        <p role="status">
+          {database === "problem"
+            ? "The practice database isn't running."
+            : database === "waiting-for-docker"
+              ? "DataLab is waiting for Docker Desktop, to start the practice database."
+              : "DataLab is starting the practice database on this computer; queries can run once it's up."}{" "}
+          <Link {...settingsLink("connections", "connection-database")} className="underline">
+            See how it's going
+          </Link>
+        </p>
+      )}
+      {noKey && (
+        <p>
+          No U-M GPT key is saved, so conversations with the agent can't start yet. The SQL Playground, workflows and
+          exports work without one.{" "}
+          <Link {...settingsLink("connections", "connection-umgpt")} className="underline">
+            What the key is for
+          </Link>
+        </p>
       )}
     </div>
   );

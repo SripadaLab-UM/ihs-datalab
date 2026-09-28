@@ -15,11 +15,14 @@
 #   3. Installs DataLab, with its own Python, in your user account (no admin rights).
 #      Each version gets its own folder, so an update installs beside the one in use
 #      and the previous version is kept (docs/DISTRIBUTION.md).
-#   4. Downloads the pinned container images.
+#   4. Downloads the pinned container images (for practice, Oracle Database Free too).
 #   5. Saves the lab's settings and asks for your U-M GPT key and database password,
-#      which go into your macOS Keychain.
+#      which go into your macOS Keychain. Practice asks for no password, and the key
+#      is optional there.
 #   6. Offers the GitHub sign-in for the lab's knowledge base and pipelines, then
-#      downloads both. Skipped for the practice profile.
+#      downloads both. For practice, instead: sets up the practice database (a
+#      container on this computer only, with made-up data), keeping any data it
+#      already has.
 #   7. Adds the DataLab app ("DataLab (practice)" for practice, with its own icon) to
 #      /Applications, or to ~/Applications if you can't add to /Applications without
 #      sudo, and a shortcut to it on your Desktop. At the end it says where everything
@@ -190,18 +193,32 @@ step "4/7 Container images"
 "$DATALAB" --profile "$PROFILE" pull-images
 
 step "5/7 Settings and keys"
-echo "Next, DataLab asks for your U-M GPT API key (and the database password, if"
-echo "your lab uses one). Each character shows as *. Press Enter when done."
-echo "They're kept in your macOS Keychain."
+if [ "$PROFILE" = "practice" ]; then
+  echo "Next, DataLab asks for your U-M GPT API key. It's optional for practice: press"
+  echo "Enter to skip it. No database password, VPN or GitHub account is needed."
+else
+  echo "Next, DataLab asks for your U-M GPT API key (and the database password, if"
+  echo "your lab uses one)."
+fi
+echo "Each character shows as *. Press Enter when done. Keys are kept in your macOS Keychain."
 if [ -n "$SETTINGS" ]; then
   "$DATALAB" --profile "$PROFILE" setup --settings "$SETTINGS"
 else
   "$DATALAB" --profile "$PROFILE" setup
 fi
 
-step "6/7 The lab's knowledge base and pipelines"
 if [ "$PROFILE" = "practice" ]; then
-  echo "Skipped: practice DataLab doesn't use the lab's repositories."
+  step "6/7 Setting up the practice database"
+else
+  step "6/7 The lab's knowledge base and pipelines"
+fi
+if [ "$PROFILE" = "practice" ]; then
+  echo "Skipped: practice DataLab doesn't use the lab's repositories. Instead it runs its"
+  echo "own database of made-up data, in Docker, reachable from this computer only."
+  echo "The first time, this takes a few minutes; data it already has is kept."
+  # Not a reason to stop: DataLab sets it up (or starts it) each time it opens.
+  "$DATALAB" --profile "$PROFILE" practice-db setup \
+    || echo "It isn't ready yet (the messages above say why). DataLab tries again each time it opens."
 elif [ "$GITHUB" = "no" ]; then
   echo "Skipped. Sign in later in DataLab, under Settings → GitHub."
 elif ask "Sign in to GitHub now, to download them? [Y/n]"; then

@@ -4,7 +4,9 @@
   password and U-M GPT key are saved, lets the person save or replace them
   (into the keychain only: nothing here ever returns a secret), and tests
   them. It shares `datalab setup`'s logic (setup.py). The practice profile
-  only shows its synthetic database; nothing can be changed there.
+  only shows its synthetic database; nothing can be changed there, but it
+  says how the database stands (DataLab starts it: practice_db) and can
+  start it again, or reset it once the person has confirmed.
 - **Storage** lists what uses disk in the data folder, and removes one item
   the person chose (storage.py says what can go, and what never does).
 - **Updates** shows the installed version, what the last check for a newer
@@ -37,6 +39,7 @@ from datalab import __version__, db, diagnostics, setup, updates
 from datalab.config import Settings
 from datalab.credentials import model_api_key
 from datalab.db import backups as backups_module
+from datalab.practice_db import Phase, PracticeDatabaseKeeper
 from datalab.relay.policy import model_allowed
 from datalab.releases import UpdateChecker
 from datalab.storage import Storage, StorageRefused
@@ -71,6 +74,10 @@ class SettingsServices:
     # router's own (tests); the updater then can't restart anything.
     checker: UpdateChecker | None = None
     updater: Updater | None = None
+    # Practice only: its synthetic database (practice_db), and why it
+    # shouldn't be reset now (a conversation or workflow may be reading it).
+    practice_database: PracticeDatabaseKeeper | None = None
+    practice_busy: Callable[[], str | None] = _nothing
     # Stand-ins for tests: the database check, and Docker's version.
     check_database: Callable[..., setup.DatabaseCheck] = setup.check_database
     docker_version: Callable[[], str] = diagnostics.docker_version
@@ -127,6 +134,25 @@ class ConnectionCheckOut(BaseModel):
 class DatabaseCheckOut(ConnectionCheckOut):
     enabled_roles: list[str]
     read_only: bool | None
+
+
+class PracticeDatabaseOut(BaseModel):
+    phase: Phase
+    message: str
+    container: str
+    volume: str
+    port: int
+    # Whether it's one DataLab set up (else a synthetic database already on
+    # the port, left as it is: it can't be reset from here).
+    managed: bool
+    busy: bool
+    # Why Reset isn't offered now, if it isn't.
+    cant_reset_because: str | None
+
+
+class PracticeResetIn(BaseModel):
+    # Reset only after the person confirmed it.
+    confirmed: bool
 
 
 class ConnectionTestOut(BaseModel):
@@ -351,9 +377,10 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
                 can_set_key=not practice,
             ),
             read_only_because=(
-                "Practice DataLab uses the local synthetic database, whose settings are "
-                "fixed. It uses the U-M GPT key the real DataLab saved, or one saved with "
-                "datalab setup --profile practice --update."
+                "Practice DataLab uses the synthetic database on this computer, which it "
+                "sets up and starts itself, so there's no password to enter. It uses the U-M "
+                "GPT key the real DataLab saved, or one saved with datalab --profile practice "
+                "setup --update. Practice needs no VPN or GitHub account."
                 if practice
                 else None
             ),
@@ -461,6 +488,58 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             ok=True,
             message=f"U-M GPT accepted the key and offers {len(approved)} approved model{plural}.",
         )
+
+    # The practice database ----------------------------------------------
+
+    def keeper() -> PracticeDatabaseKeeper:
+        if not practice or services.practice_database is None:
+            raise HTTPException(404, "Only the practice DataLab has a synthetic database.")
+        return services.practice_database
+
+    def practice_database_out(keeper: PracticeDatabaseKeeper) -> PracticeDatabaseOut:
+        target = keeper.database.target
+        busy = keeper.busy
+        why = (
+            "It's being set up or reset now."
+            if busy
+            else "It's a synthetic database DataLab didn't set up, so it's left as it is."
+            if keeper.adopted
+            else services.practice_busy()
+        )
+        return PracticeDatabaseOut(
+            phase=keeper.phase,
+            message=keeper.message,
+            container=target.container,
+            volume=target.volume,
+            port=target.port,
+            managed=not keeper.adopted,
+            busy=busy,
+            cant_reset_because=why,
+        )
+
+    @router.get("/practice-database")
+    def practice_database() -> PracticeDatabaseOut:
+        return practice_database_out(keeper())
+
+    @router.post("/practice-database/start")
+    def start_practice_database() -> PracticeDatabaseOut:
+        """Start it (and load its data if it has none), in the background."""
+        found = keeper()
+        found.start()
+        return practice_database_out(found)
+
+    @router.post("/practice-database/reset")
+    def reset_practice_database(body: PracticeResetIn) -> PracticeDatabaseOut:
+        """Delete it and set it up again from scratch, once confirmed."""
+        found = keeper()
+        if not body.confirmed:
+            raise HTTPException(422, "Resetting the practice database needs confirming first.")
+        why = practice_database_out(found).cant_reset_because
+        if why:
+            raise HTTPException(409, why)
+        if not found.reset():
+            raise HTTPException(409, "It's being set up or reset now.")
+        return practice_database_out(found)
 
     # Storage ------------------------------------------------------------
 

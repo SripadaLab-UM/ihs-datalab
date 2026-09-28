@@ -37,6 +37,20 @@ def main(argv: list[str] | None = None) -> int:
     choice.add_argument("--delete-data", action="store_true", default=None)
     choice.add_argument("--keep-data", dest="delete_data", action="store_false")
     commands.add_parser("pull-images", help="download the pinned container images")
+    practice_db = commands.add_parser(
+        "practice-db", help="practice DataLab's synthetic database (--profile practice only)"
+    )
+    practice_db_commands = practice_db.add_subparsers(dest="practice_db_command", required=True)
+    practice_db_commands.add_parser("status", help="how the practice database stands")
+    practice_db_commands.add_parser(
+        "setup", help="start it, and load the made-up data if it has none (the installer runs this)"
+    )
+    practice_db_commands.add_parser("start", help="start it (the same as setup)")
+    practice_db_commands.add_parser("stop", help="stop it; its data is kept")
+    reset = practice_db_commands.add_parser(
+        "reset", help="delete the practice database and set it up again from scratch"
+    )
+    reset.add_argument("--yes", action="store_true", help="don't ask first")
     commands.add_parser("backup", help="back up DataLab's database now")
     back = commands.add_parser(
         "rollback", help="restore the database from a backup, for an older DataLab"
@@ -120,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "pull-images":
         return _pull_images(settings)
 
+    if args.command == "practice-db":
+        return _practice_db(settings, args)
+
     if args.command == "backup":
         return _backup(settings)
 
@@ -185,8 +202,23 @@ def _serve(settings, *, open_browser: bool) -> int:
     if recovery is not None:
         print(recovery.message, flush=True)
     browser = BrowserSession(settings.port)
+    practice_database = None
+    if settings.profile == "practice":
+        from datalab.practice_db import PracticeDatabase, PracticeDatabaseKeeper
+
+        # Started (and set up, the first time) in the background once DataLab
+        # is up; the pages say how it's going.
+        practice_database = PracticeDatabaseKeeper(
+            PracticeDatabase(lock_dir=settings.data_dir / "practice-db")
+        )
     try:
-        app = create_app(settings, browser=browser, web_dist=_web_dist(), recovery=recovery)
+        app = create_app(
+            settings,
+            browser=browser,
+            web_dist=_web_dist(),
+            recovery=recovery,
+            practice_database=practice_database,
+        )
     except db.DatabaseNewerThanApp as error:
         print(error)
         return 1
@@ -330,7 +362,124 @@ def _pull_images(settings) -> int:
             print(f"Couldn't download {image}.")
             print(_pull_failure_hint(error))
             return 1
+    if settings.profile == "practice":
+        return _pull_practice_database_image()
     return 0
+
+
+def _pull_practice_database_image() -> int:
+    """Practice only: Oracle Database Free, for the synthetic database, from
+    Oracle's registry (tried again a few times when it's busy). Only for a
+    first setup: an existing practice database already has what it needs,
+    so an update never downloads it again. Never a reason to stop an
+    install or an update either: the practice database's setup downloads it
+    when it creates the container."""
+    from datalab import practice_db
+
+    try:
+        database = practice_db.PracticeDatabase()
+        if not database.image_needed():
+            print("Oracle Database Free (the practice database): nothing to download.")
+            return 0
+        database.pull(say=lambda text: print(text, flush=True), show=True)
+    except ValueError as problem:
+        print(problem)
+    except practice_db.PracticeDatabaseProblem as problem:
+        print(problem)
+        print(
+            "Carrying on: setting up the practice database downloads it, and practice "
+            "DataLab tries again each time it opens."
+        )
+    return 0
+
+
+def _practice_db(settings, args) -> int:
+    """`datalab --profile practice practice-db ...`. Never for the real profile."""
+    import oracledb
+
+    from datalab import practice_db
+    from datalab.practice_db.guard import NotTheSyntheticDatabase
+
+    if settings.profile != "practice":
+        print(
+            "practice-db is for the practice DataLab's synthetic database only. Run: "
+            f"datalab --profile practice practice-db {args.practice_db_command}"
+        )
+        return 2
+
+    def say(text: str) -> None:
+        print(text, flush=True)
+
+    def use_legacy(name: str) -> bool:
+        if not sys.stdin.isatty():
+            return True
+        print(
+            f"The development synthetic database ({name}) is on this computer, stopped, and "
+            "uses the practice database's port."
+        )
+        answer = input("Start it and use it, rather than set up a second one? [Y/n] ")
+        return answer.strip().lower() in ("", "y", "yes")
+
+    command = args.practice_db_command
+    try:
+        database = practice_db.PracticeDatabase(
+            lock_dir=settings.data_dir / "practice-db", use_legacy=use_legacy
+        )
+        if command == "status":
+            say(database.describe())
+            return 0
+        if command == "stop":
+            say(database.stop())
+            return 0
+        if command in ("setup", "start"):
+            if _practice_running(settings):
+                say(
+                    "Practice DataLab is running, and it looks after its database itself: "
+                    "Settings → Connections says how it stands."
+                )
+                return 0
+            say(database.ensure(say, show_download=True).message)
+            return 0
+        # reset: a running practice DataLab would be querying what's removed.
+        from datalab.trial import refuse_if_running
+
+        refuse_if_running(settings)
+        if not args.yes:
+            print(
+                "This deletes the practice database (the container "
+                f"{database.target.container} and its volume {database.target.volume}) and sets "
+                "it up again from scratch, with the same made-up data. Your practice "
+                "conversations, results and exports aren't touched."
+            )
+            if input("Reset it? [y/N] ").strip().lower() not in ("y", "yes"):
+                say("Nothing was changed.")
+                return 1
+        say(database.reset(say, show_download=True).message)
+        return 0
+    except (practice_db.PracticeDatabaseProblem, NotTheSyntheticDatabase, ValueError) as problem:
+        say(str(problem))
+        return 1
+    except oracledb.DatabaseError as error:
+        # Only the error's code: the practice database's own, never a secret.
+        code = str(error).split(":", 1)[0].strip()[:20]
+        say(
+            f"The practice database refused a step ({code}). Try again; if it happens "
+            "again, reset it."
+        )
+        return 1
+
+
+def _practice_running(settings) -> bool:
+    """Whether practice DataLab is running on this data folder (or its port)."""
+    import socket
+
+    from datalab import datalock
+
+    if datalock.in_use(settings.data_dir):
+        return True
+    with socket.socket() as probe:
+        probe.settimeout(0.3)
+        return probe.connect_ex(("127.0.0.1", settings.port)) == 0
 
 
 def _pull_failure_hint(error: str) -> str:

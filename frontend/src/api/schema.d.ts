@@ -1895,6 +1895,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/practice-database": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Practice Database */
+        get: operations["practice_database_api_settings_practice_database_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/practice-database/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Practice Database
+         * @description Start it (and load its data if it has none), in the background.
+         */
+        post: operations["start_practice_database_api_settings_practice_database_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/practice-database/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Practice Database
+         * @description Delete it and set it up again from scratch, once confirmed.
+         */
+        post: operations["reset_practice_database_api_settings_practice_database_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/storage": {
         parameters: {
             query?: never;
@@ -4209,6 +4266,33 @@ export interface components {
             end_line: number;
             /** End Column */
             end_column: number;
+        };
+        /** PracticeDatabaseOut */
+        PracticeDatabaseOut: {
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "checking" | "waiting-for-docker" | "downloading" | "creating" | "starting" | "loading" | "resetting" | "ready" | "problem";
+            /** Message */
+            message: string;
+            /** Container */
+            container: string;
+            /** Volume */
+            volume: string;
+            /** Port */
+            port: number;
+            /** Managed */
+            managed: boolean;
+            /** Busy */
+            busy: boolean;
+            /** Cant Reset Because */
+            cant_reset_because: string | null;
+        };
+        /** PracticeResetIn */
+        PracticeResetIn: {
+            /** Confirmed */
+            confirmed: boolean;
         };
         /** PreviewOut */
         PreviewOut: {
@@ -8974,6 +9058,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConnectionTestOut"];
+                };
+            };
+        };
+    };
+    practice_database_api_settings_practice_database_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PracticeDatabaseOut"];
+                };
+            };
+        };
+    };
+    start_practice_database_api_settings_practice_database_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PracticeDatabaseOut"];
+                };
+            };
+        };
+    };
+    reset_practice_database_api_settings_practice_database_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PracticeResetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PracticeDatabaseOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

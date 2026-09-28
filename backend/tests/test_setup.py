@@ -233,3 +233,33 @@ def test_no_key_entered_says_conversations_need_one_and_how_to_add_it(
     said = capsys.readouterr().out
     assert "No U-M GPT key was entered, so none was saved." in said
     assert "datalab --profile practice setup --update" in said
+
+
+def test_practice_says_the_key_is_optional_and_what_it_unlocks(
+    tmp_path, monkeypatch, keychain, capsys
+):
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "practice"))
+    monkeypatch.setattr(installing, "model_api_key", credentials.model_api_key)  # none saved
+    asked = []
+    monkeypatch.setattr(installing, "ask_secret", lambda what, **_: asked.append(what) or "")
+
+    assert installing.setup("practice", None, update=False) == 0
+    said = capsys.readouterr().out
+    assert asked == ["U-M GPT API key"]  # never a database password
+    assert "The U-M GPT key is optional on the practice DataLab." in said
+    for feature in (
+        "conversations in the Workspace",
+        "Safety check's model checks",
+        "running workflows",
+    ):
+        assert feature in said
+    assert "No database password, VPN or GitHub account is needed" in said
+    assert "the SQL Playground, workflows and exports work without it" in said
+
+
+def test_the_real_profile_isnt_told_the_key_is_optional(tmp_path, monkeypatch, keychain, capsys):
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "real"))
+    monkeypatch.setattr(installing, "model_api_key", credentials.model_api_key)
+    monkeypatch.setattr(installing, "ask_secret", lambda what, **_: "")
+    installing.setup("real", None, update=False)
+    assert "optional" not in capsys.readouterr().out

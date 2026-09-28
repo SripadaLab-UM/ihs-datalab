@@ -37,7 +37,7 @@ export function useAttention(): AttentionItem[] {
   const github = useQuery({ queryKey: ["github-status"], queryFn: githubApi.status, enabled: real }).data;
   const update = useUpdateCheck().data;
   const items: AttentionItem[] = [];
-  const db = databaseStanding(connections, test?.database);
+  const db = databaseStanding(connections, test?.database, health.data?.practice_database);
   if (db.attention) {
     items.push({ id: "database", text: db.attention, hint: "The study database: open connection settings", section: "connections", anchor: "connection-database" });
   }

@@ -33,7 +33,7 @@ class OracleSettings:
     allowed_schemas: frozenset[str]
     # The practice profile must only ever talk to the synthetic database, even
     # if something else answers on its port (an SSH tunnel, say). It checks for
-    # a marker table that exists only there (see synthetic/guard.py).
+    # a marker table that exists only there (see practice_db/guard.py).
     require_synthetic_marker: bool = False
 
     @property
@@ -213,11 +213,29 @@ class Settings:
         return self.data_dir / "datalab.sqlite"
 
 
+def _practice_db_port() -> int:
+    """The synthetic database's port on this computer: 1522, or
+    DATALAB_PRACTICE_DB_PORT (tests and development, beside another one).
+    A value that isn't a port is refused where practice uses it
+    (`practice_db_port_problem`), never at import: the real profile and
+    every other command carry on regardless."""
+    value = os.environ.get("DATALAB_PRACTICE_DB_PORT") or "1522"
+    return int(value) if practice_db_port_problem() is None else 1522
+
+
+def practice_db_port_problem() -> str | None:
+    value = os.environ.get("DATALAB_PRACTICE_DB_PORT") or "1522"
+    if not value.isdigit() or not 1024 <= int(value) <= 65535:
+        return f"DATALAB_PRACTICE_DB_PORT must be a port number, not {value!r}"
+    return None
+
+
 # The practice profile always uses the local synthetic database, so its
-# connection details are fixed (see synthetic/README.md).
+# connection details are fixed (see synthetic/README.md). DataLab runs that
+# database itself (datalab.practice_db), on 127.0.0.1 only.
 PRACTICE_ORACLE = OracleSettings(
     host="127.0.0.1",
-    port=1522,
+    port=_practice_db_port(),
     service="FREEPDB1",
     user="DATALAB_RO",
     keychain_service="datalab-practice",
@@ -290,6 +308,9 @@ def load_settings(profile: Profile | None = None) -> Settings:
     raw = tomllib.loads(file.read_text(encoding="utf-8")) if file.exists() else {}
 
     if profile == "practice":
+        problem = practice_db_port_problem()
+        if problem:
+            raise ValueError(problem)
         oracle: OracleSettings | None = PRACTICE_ORACLE
     else:
         oracle = _oracle_from(raw["oracle"]) if "oracle" in raw else None
