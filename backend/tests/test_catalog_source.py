@@ -108,6 +108,14 @@ def test_the_repo_name_comes_from_the_settings_not_a_fixed_one(tmp_path: Path) -
     settings = real(tmp_path, repos=RepoSettings(knowledge="OtherLab/lab-kb"))
     clone = knowledge_clone(settings)
     assert clone is not None and clone.path == tmp_path / "data" / "repos" / "lab-kb"
+    # Where the installers' `datalab repos sync` and the Knowledge tab clone it.
+    from types import SimpleNamespace
+
+    from datalab.repos.sync import RepoSync
+
+    auth = SimpleNamespace(token_for_git=lambda: None)
+    installer = RepoSync("knowledge", "OtherLab/lab-kb", settings.data_dir, auth, None)  # type: ignore[arg-type]
+    assert installer.clone.path == clone.path
 
 
 def test_a_catalog_folder_in_the_settings_wins(tmp_path: Path) -> None:
