@@ -70,10 +70,11 @@ def machine(tmp_path) -> dict[str, Path]:
     tools.mkdir()
     executable(tools / "docker", "#!/bin/sh\nexit 0\n")
     executable(tools / "open", "#!/bin/sh\nexit 0\n")
-    # Logs what it's asked to run, one argument a line.
+    # Logs what it's asked to run: each argument as ARG:<value>, then the
+    # script it reads from its input.
     executable(
         tools / "osascript",
-        '#!/bin/sh\nfor a; do echo "$a"; done >> "${DATALAB_TEST_OSA:-/dev/null}"\n',
+        '#!/bin/sh\n{ for a; do echo "ARG:$a"; done; cat; } >> "${DATALAB_TEST_OSA:-/dev/null}"\n',
     )
     executable(tools / "curl", "#!/bin/sh\necho 'no downloads in tests' >&2\nexit 1\n")
     executable(tools / "uv", FAKE_UV)
@@ -156,7 +157,8 @@ def test_it_installs_a_version_in_its_own_folder_then_signs_in_and_syncs(machine
     ]
     launcher = machine["apps"] / "DataLab.app" / "Contents" / "MacOS" / "DataLab"
     text = launcher.read_text()
-    assert f'\\"{app}/bin/datalab\\" --profile real serve' in text
+    assert f"exec osascript - '{app}/bin/datalab' <<'OSA'" in text
+    assert 'do script (quoted form of item 1 of argv) & " --profile real serve"' in text
     # The updater recognises what the installer made.
     layout = Layout(app, windows=False, prefix=app / "versions" / "0.1.0a3")
     assert layout.running_version() == "0.1.0a3" and layout.installed() == ["0.1.0a3"]
@@ -291,6 +293,38 @@ def test_it_refuses_to_run_as_root(machine, tmp_path):
 UNINSTALLER = INSTALLER.with_name("uninstall.sh")
 
 
+def open_app(machine, launcher: Path, tmp_path: Path) -> tuple[str, str]:
+    """Run the app's launch script. Returns the program path it hands
+    AppleScript, and the command Terminal would then run (AppleScript's
+    `quoted form of` the path, then the profile's arguments)."""
+    osa = tmp_path / "osa"
+    osa.unlink(missing_ok=True)
+    env = {**os.environ, "PATH": f"{machine['tools']}:/usr/bin:/bin", "DATALAB_TEST_OSA": str(osa)}
+    subprocess.run([str(launcher)], env=env, check=True)
+    lines = osa.read_text().splitlines()
+    args = [line.removeprefix("ARG:") for line in lines if line.startswith("ARG:")]
+    assert args[0] == "-" and len(args) == 2  # the script on its input, the path its argument
+    script = "\n".join(line for line in lines if not line.startswith("ARG:"))
+    assert "on run argv" in script
+    profile = script.split('of argv) & " --profile ', 1)[1].split('"', 1)[0]
+    quoted = "'" + args[1].replace("'", "'\\''") + "'"  # AppleScript's quoted form
+    return args[1], f"{quoted} --profile {profile}"
+
+
+def run_in_terminal(machine, command: str, tmp_path: Path) -> str:
+    """Run what Terminal would; returns which DataLab program ran."""
+    who = tmp_path / "who"
+    who.unlink(missing_ok=True)
+    env = {
+        **os.environ,
+        "DATALAB_TEST_LOG": str(machine["log"]),
+        "DATALAB_TEST_WHO": str(who),
+        "DATALAB_TEST_VERSION": "x",
+    }
+    subprocess.run(["sh", "-c", command], env=env, check=True)
+    return who.read_text().strip()
+
+
 def test_the_app_goes_in_applications_with_its_icon_and_a_desktop_shortcut(machine):
     done = install(machine, "0.1.0a3")
     assert done.returncode == 0, done.stdout + done.stderr
@@ -380,21 +414,11 @@ def test_the_app_and_its_shortcut_keep_working_after_an_update(machine, tmp_path
     (new / ".complete").write_text("{}")
     layout.switch("0.1.0a4", previous="0.1.0a3")
     assert layout.prune({"0.1.0a4"}) == ["0.1.0a3"]
-    # Open the app through the Desktop shortcut; osascript is asked to run...
-    osa = tmp_path / "osa"
-    env = {**os.environ, "PATH": f"{machine['tools']}:/usr/bin:/bin", "DATALAB_TEST_OSA": str(osa)}
-    subprocess.run([str(launcher)], env=env, check=True)
-    script = osa.read_text().splitlines()[-1]
-    command = script.split('do script "', 1)[1].rsplit('"', 1)[0].replace('\\"', '"')
-    assert command == f'"{layout.shim}" --profile real serve'
-    # ...the shim, which runs the new version.
-    who = tmp_path / "who"
-    subprocess.run(
-        ["sh", "-c", command],
-        env={**env, "DATALAB_TEST_LOG": str(machine["log"]), "DATALAB_TEST_WHO": str(who)},
-        check=True,
-    )
-    assert Path(who.read_text().strip()) == layout.executable("0.1.0a4")
+    # Open the app through the Desktop shortcut: it runs the shim...
+    shim, command = open_app(machine, launcher, tmp_path)
+    assert shim == str(layout.shim)
+    # ...which runs the new version.
+    assert Path(run_in_terminal(machine, command, tmp_path)) == layout.executable("0.1.0a4")
     assert (machine["apps"] / "DataLab.app" / "Contents" / "Resources" / "DataLab.icns").is_file()
 
 
@@ -425,3 +449,106 @@ def test_uninstall_removes_the_apps_and_their_desktop_shortcuts_only(machine):
     assert [p.name for p in machine["apps"].iterdir()] == ["Other.app"]
     assert [p.name for p in (machine["home"] / "Desktop").iterdir()] == ["notes.txt"]
     assert not root(machine).exists()
+
+
+def uninstall(machine) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", str(UNINSTALLER), "--keep-data"],
+        env={
+            "HOME": str(machine["home"]),
+            "PATH": f"{machine['tools']}:/usr/bin:/bin",
+            "DATALAB_TEST_LOG": str(machine["log"]),
+            "DATALAB_TEST_VERSION": "0.1.0a3",
+            "DATALAB_SYSTEM_APPLICATIONS": str(machine["apps"]),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+        start_new_session=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def test_the_app_opens_from_a_home_folder_with_an_apostrophe(machine, tmp_path):
+    home = tmp_path / "o'brien"
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / "Desktop").mkdir()
+    machine = {**machine, "home": home}
+    done = install(machine, "0.1.0a3", "--profile", "practice")
+    assert done.returncode == 0, done.stdout + done.stderr
+    launcher = machine["apps"] / "DataLab (practice).app" / "Contents" / "MacOS" / "DataLab"
+    subprocess.run(["sh", "-n", str(launcher)], check=True)  # the launch script parses
+    shim, command = open_app(machine, launcher, tmp_path)
+    assert shim == str(root(machine) / "bin" / "datalab") and "o'brien" in shim
+    assert command.endswith(" --profile practice serve")
+    ran = run_in_terminal(machine, command, tmp_path)
+    assert Path(ran) == root(machine) / "versions" / "0.1.0a3" / "bin" / "datalab"
+
+
+def test_someone_elses_app_in_your_applications_stops_the_install_there(machine):
+    machine["apps"].chmod(0o555)
+    theirs = machine["home"] / "Applications" / "DataLab.app" / "Contents"
+    theirs.mkdir(parents=True)
+    (theirs / "Info.plist").write_text("<string>org.example.datalab</string>")
+    try:
+        done = install(machine, "0.1.0a3")
+    finally:
+        machine["apps"].chmod(0o755)
+    assert done.returncode == 1
+    assert "is another app, not DataLab's, so it was left alone" in done.stdout
+    assert (theirs / "Info.plist").read_text() == "<string>org.example.datalab</string>"
+    assert not (machine["home"] / "Desktop" / "DataLab").exists()
+
+
+def test_our_app_that_cant_be_replaced_in_applications_falls_back_to_yours(machine):
+    install(machine, "0.1.0a3")
+    stuck = machine["apps"] / "DataLab.app" / "Contents"
+    stuck.chmod(0o555)  # rm can't empty it
+    try:
+        done = install(machine, "0.1.0a3")
+    finally:
+        stuck.chmod(0o755)
+    assert done.returncode == 0, done.stdout + done.stderr
+    app = machine["home"] / "Applications" / "DataLab.app"
+    assert f"The app:           {app}" in done.stdout
+    assert "An earlier copy is still in" in done.stdout
+    assert Path(os.readlink(machine["home"] / "Desktop" / "DataLab")) == app
+
+
+def test_our_app_that_cant_be_replaced_in_your_applications_says_what_to_do(machine):
+    machine["apps"].chmod(0o555)
+    try:
+        install(machine, "0.1.0a3")
+        stuck = machine["home"] / "Applications" / "DataLab.app" / "Contents"
+        stuck.chmod(0o555)
+        try:
+            done = install(machine, "0.1.0a3")
+        finally:
+            stuck.chmod(0o755)
+    finally:
+        machine["apps"].chmod(0o755)
+    assert done.returncode == 1
+    assert "couldn't be replaced. Quit DataLab if it's open" in done.stdout
+    assert "rm:" not in done.stdout + done.stderr
+
+
+def test_a_desktop_link_to_another_datalab_app_is_left_alone(machine):
+    link = machine["home"] / "Desktop" / "DataLab"
+    link.symlink_to("/Vendor/DataLab.app")
+    done = install(machine, "0.1.0a3")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "to something else; it was left alone" in done.stdout
+    assert os.readlink(link) == "/Vendor/DataLab.app"
+    uninstall(machine)
+    assert os.readlink(link) == "/Vendor/DataLab.app"
+
+
+def test_uninstall_leaves_someone_elses_app_in_your_applications(machine):
+    install(machine, "0.1.0a3")
+    theirs = machine["home"] / "Applications" / "DataLab (practice).app" / "Contents"
+    theirs.mkdir(parents=True)
+    (theirs / "Info.plist").write_text("<string>org.example.datalab</string>")
+    done = uninstall(machine)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert (theirs / "Info.plist").is_file()
+    assert not (machine["apps"] / "DataLab.app").exists()

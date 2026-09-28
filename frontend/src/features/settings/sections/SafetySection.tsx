@@ -21,6 +21,7 @@ export function safetySummary(report: SafetyReport | null | undefined): SafetySu
   const checkedAt = report.finished_at;
   if (!report.passed) {
     const problems = failed + unverified;
+    if (problems === 0) return { text: "Didn't pass", tone: "bad", checkedAt };
     return { text: `${problems} problem${problems === 1 ? "" : "s"}`, tone: "bad", checkedAt };
   }
   if (unverified) {

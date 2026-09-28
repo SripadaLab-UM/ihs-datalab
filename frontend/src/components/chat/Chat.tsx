@@ -488,7 +488,7 @@ function TurnView({
             trace: turn.trace,
             review: reviews.at(-1),
             reviewing: reviews.at(-1)?.status === "running" && running,
-            failed: live ? [] : failures(storyRows, turn.status),
+            failed: live ? [] : failures(storyRows),
           })}
         />
       )}
@@ -501,7 +501,7 @@ function TurnView({
       ))}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && (
-        <HowItWasMade rows={storyRows} status={turn.status}>
+        <HowItWasMade rows={storyRows}>
           {story}
         </HowItWasMade>
       )}
@@ -558,7 +558,7 @@ function MadeHere({ items, conversationId }: { items: Item[]; conversationId: st
  * amounted to. Failed steps and the plan are named on the row itself, so
  * folding never hides them.
  */
-function HowItWasMade({ rows, status, children }: { rows: Row[]; status: Turn["status"]; children: ReactNode }) {
+function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   if (rows.length === 0) return null;
   const steps = rows.flatMap((row) => (row.type === "step" ? [row.step] : row.type === "group" ? row.steps : []));
@@ -567,8 +567,8 @@ function HowItWasMade({ rows, status, children }: { rows: Row[]; status: Turn["s
     steps.flatMap((step) => (step.detail?.kind === "files" ? step.detail.paths : [])),
   ).size;
   // Failed steps and error notices are named on the row, so folding never hides them,
-  // with whether they were retried successfully.
-  const failedChip = failureChip(failures(rows, status));
+  // with whether a later step of the same kind worked.
+  const failedChip = failureChip(failures(rows));
   const facts = [
     steps.length > 0 && `${steps.length} step${steps.length === 1 ? "" : "s"}`,
     count("db") && `${count("db")} quer${count("db") === 1 ? "y" : "ies"}`,

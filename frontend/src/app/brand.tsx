@@ -22,13 +22,20 @@ export function BrandMark({ practice = false, size = 22 }: { practice?: boolean;
   );
 }
 
-/** The mark and the name, with a quiet "practice" beside them on practice. */
+/** The mark and the name, with a quiet "practice" beside them on practice.
+ * Below `lg` only the mark, so the tabs fit (the badge still says practice). */
 export function Brand({ practice }: { practice: boolean }) {
   return (
-    <span className="flex shrink-0 items-center gap-2 py-3" data-testid="brand">
+    <span
+      className="flex shrink-0 items-center gap-2 py-3"
+      data-testid="brand"
+      title={practice ? "DataLab (practice)" : "DataLab"}
+    >
       <BrandMark practice={practice} />
-      <span className="font-serif text-[20px] leading-none">DataLab</span>
-      {practice && <span className="font-serif text-[13px] leading-none text-attn italic">practice</span>}
+      <span className="hidden font-serif text-[20px] leading-none lg:inline">DataLab</span>
+      {practice && (
+        <span className="hidden font-serif text-[13px] leading-none text-attn italic lg:inline">practice</span>
+      )}
     </span>
   );
 }

@@ -11,7 +11,7 @@ function tokens(block: string): Record<string, string> {
   return Object.fromEntries([...block.matchAll(/--color-([a-z-]+):\s*(#[0-9a-f]{6})/gi)].map((m) => [m[1], m[2]]));
 }
 const light = tokens(css.split("@theme {")[1].split("}")[0]);
-const dark = { ...light, ...tokens(css.split("prefers-color-scheme: dark")[1].split(":root {")[1].split("}")[0]) };
+const dark = { ...light, ...tokens(css.split("prefers-color-scheme: dark")[1].split("{")[2].split("}")[0]) };
 
 function luminance(hex: string): number {
   const [r, g, b] = [1, 3, 5].map((i) => {
