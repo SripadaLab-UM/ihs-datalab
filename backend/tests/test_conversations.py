@@ -342,12 +342,12 @@ def test_modes_come_with_descriptions_and_starters(app):
     with TestClient(app) as client:
         modes = {m["id"]: m for m in client.get("/api/modes").json()}
     assert set(modes) == {
-        "analysis", "extraction", "engineering", "workflows", "knowledge", "sql", "research"
+        "analysis", "extraction", "engineering", "pipelines", "workflows", "knowledge", "sql", "research"
     }  # fmt: skip
     assert all(m["description"] and m["starters"] for m in modes.values())
     assert modes["research"]["kind"] == "research"
-    # Docked by the Workflows, Knowledge and SQL tabs only; Knowledge writing can't query.
-    assert {i for i, m in modes.items() if m["tab_only"]} == {"workflows", "knowledge", "sql"}
+    # Docked by the Workflows, Knowledge, SQL and Pipelines tabs only; Knowledge writing can't query.
+    assert {i for i, m in modes.items() if m["tab_only"]} == {"workflows", "knowledge", "sql", "pipelines"}
     assert {i for i, m in modes.items() if not m["queries"]} == {"knowledge"}
 
 
@@ -358,13 +358,14 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
     with TestClient(app) as client:
         made = {
             mode: client.post("/api/conversations", json={"mode": mode}).json()
-            for mode in ("knowledge", "workflows")
+            for mode in ("knowledge", "workflows", "pipelines")
         }
         assert all(m["kind"] == "data" and not m["rigor_review"] for m in made.values())
         sessions = app.state.services.sessions
         store = app.state.services.conversations
         knowledge = sessions._runtime(store.get(made["knowledge"]["id"]))
         workflows = sessions._runtime(store.get(made["workflows"]["id"]))
+        pipelines = sessions._runtime(store.get(made["pipelines"]["id"]))
     assert knowledge._tools == CATALOG_TOOLS
     assert set(knowledge._tools_off) == set(DATA_TOOLS) - CATALOG_TOOLS
     assert (workflows._tools, workflows._tools_off) == (
@@ -373,6 +374,10 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
     )
     assert "Knowledge writing mode" in knowledge._instructions
     assert "Workflow authoring mode" in workflows._instructions
+    # The Pipelines tab's chat: no analysis plans, no SQL proposals.
+    assert pipelines._tools == CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"}
+    assert set(pipelines._tools_off) == {"propose_plan", "propose_sql"}
+    assert "Pipelines tab" in pipelines._instructions
 
 
 def test_the_plan_card_gets_the_plan_types_and_sections(app):

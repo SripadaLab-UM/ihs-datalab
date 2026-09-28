@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { type ReactNode, use, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, use, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, type Conversation, type Effort } from "@/api/client";
 import { Button, Chip, FileGlyph, Icon, InfoTip, SessionBadge } from "@/components/ui";
+import type { AnyIcon } from "@/components/ui/Icon";
 import { KnownFilesContext, OpenFileContext, workspaceFile } from "@/lib/files";
 
 import { ApprovalCard } from "./ApprovalCard";
+import { ASSISTANTS, type AssistantId, CompactContext } from "./assistants";
 import { Markdown } from "./Markdown";
 import { planStatus } from "./plan";
 import { ProposalCard } from "./ProposalCard";
@@ -33,6 +35,8 @@ export function Chat({
   placeholder,
   sendLabel,
   pending: firstPending,
+  assistant,
+  draftKey,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
@@ -49,7 +53,12 @@ export function Chat({
   sendLabel?: string;
   /** A message already on its way (DockedChat's first one): shown until its event arrives. */
   pending?: PendingMessage;
+  /** Docked beside this tab: the compact presentation, with this assistant's title. */
+  assistant?: AssistantId;
+  /** Where the message box keeps what's typed (sessionStorage), so hiding the chat doesn't lose it. */
+  draftKey?: string;
 }) {
+  const compact = Boolean(assistant);
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
   const last = turns.at(-1);
@@ -164,37 +173,59 @@ export function Chat({
   }, [events.length, following, sending]);
 
   return (
+    <CompactContext value={compact}>
     <div className="flex h-full min-h-0 flex-col">
-      <ChatHeader
-        start={headerStart}
-        title={<Title conversation={conversation} />}
-        kind={conversation.kind}
-        model={conversation.model}
-        effort={effort}
-        onEffort={setEffort}
-        actions={
-          <>
-            {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
-            {headerActions}
-          </>
-        }
-      />
+      {assistant ? (
+        <CompactHeader
+          assistant={assistant}
+          kind={conversation.kind}
+          title={<Title conversation={conversation} compact />}
+          model={conversation.model}
+          effort={effort}
+          onEffort={setEffort}
+          actions={headerActions}
+        />
+      ) : (
+        <ChatHeader
+          start={headerStart}
+          title={<Title conversation={conversation} />}
+          kind={conversation.kind}
+          model={conversation.model}
+          effort={effort}
+          onEffort={setEffort}
+          actions={
+            <>
+              {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
+              {headerActions}
+            </>
+          }
+        />
+      )}
       <div
-        className="relative min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8"
+        className={clsx("relative min-h-0 flex-1 overflow-y-auto", compact ? "px-4 py-4" : "px-4 py-8 sm:px-8")}
         onScroll={(e) => {
           const el = e.currentTarget;
           setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
         }}
       >
-        <div className="mx-auto flex max-w-[48rem] flex-col gap-14 2xl:max-w-[54rem]">
-          {turns.length === 0 && !sending && (
-            <EmptyState
-              mode={conversation.mode}
-              kind={conversation.kind}
-              onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
-              starting={send.isPending || running}
-            />
-          )}
+        <div className={clsx("mx-auto flex flex-col", compact ? "gap-8" : "max-w-[48rem] gap-14 2xl:max-w-[54rem]")}>
+          {turns.length === 0 && !sending &&
+            (assistant ? (
+              <CompactIntro
+                assistant={assistant}
+                mode={conversation.mode}
+                kind={conversation.kind}
+                onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
+                starting={send.isPending || running}
+              />
+            ) : (
+              <EmptyState
+                mode={conversation.mode}
+                kind={conversation.kind}
+                onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
+                starting={send.isPending || running}
+              />
+            ))}
           <KnownFilesContext value={known}>
             {turns.map((turn, index) => (
               <TurnView
@@ -231,10 +262,13 @@ export function Chat({
         draft={draft}
         note={composerNote}
         autoFocus={autoFocus}
-        placeholder={placeholder}
+        placeholder={placeholder ?? (assistant && ASSISTANTS[assistant].placeholder)}
         sendLabel={sendLabel}
+        compact={compact}
+        draftKey={draftKey}
       />
     </div>
+    </CompactContext>
   );
 }
 
@@ -295,6 +329,48 @@ export function ChatHeader({
   );
 }
 
+/**
+ * The line over a docked chat: the tab's assistant, which session it is, and
+ * the tab's own actions; under it the conversation (once there is one), the
+ * model and how hard it thinks. Two short lines that fit a narrow panel.
+ */
+export function CompactHeader({
+  assistant,
+  kind,
+  title,
+  model,
+  effort,
+  onEffort,
+  actions,
+}: {
+  assistant: AssistantId;
+  kind: "data" | "research";
+  /** The conversation's title, once it has started. */
+  title?: ReactNode;
+  model: string;
+  effort: Effort;
+  onEffort: (effort: Effort) => void;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className="flex flex-col gap-0.5 border-b border-line px-4 py-2">
+      <div className="flex min-w-0 items-center gap-2">
+        <h2 className="min-w-0 truncate font-sans text-[14px] font-semibold text-ink">{ASSISTANTS[assistant].title}</h2>
+        <SessionBadge kind={kind} short />
+        <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 font-mono text-[11.5px] text-faint">
+        {title && <span className="min-w-0 flex-1 truncate">{title}</span>}
+        <span className={clsx("flex shrink-0 items-center gap-1.5", !title && "ml-0")}>
+          {model}
+          <span aria-hidden>·</span>
+          <EffortSelect effort={effort} onChange={onEffort} />
+        </span>
+      </div>
+    </header>
+  );
+}
+
 // What DataLab calls a conversation until its first question names it.
 const DEFAULT_TITLE = "New conversation";
 
@@ -309,7 +385,7 @@ export function titleToSend(draft: string, began: string, current: string): stri
 }
 
 /** The conversation's title: written from the first question, renamed by clicking it. */
-export function Title({ conversation }: { conversation: Conversation }) {
+export function Title({ conversation, compact = false }: { conversation: Conversation; compact?: boolean }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState<string | null>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -342,12 +418,13 @@ export function Title({ conversation }: { conversation: Conversation }) {
           if (e.key === "Enter") finish(true);
           if (e.key === "Escape") finish(false);
         }}
-        className="min-w-0 border-b border-ink bg-transparent font-serif text-[19px] outline-none"
+        className={clsx("min-w-0 border-b border-ink bg-transparent outline-none", compact ? "w-full font-sans text-[13px] text-ink" : "font-serif text-[19px]")}
       />
     );
   }
+  const Heading = compact ? "p" : "h1";
   return (
-    <h1 className="min-w-0 truncate font-serif text-[19px]">
+    <Heading className={clsx("min-w-0 truncate", compact ? "font-sans text-[12.5px] text-muted" : "font-serif text-[19px]")}>
       <button
         ref={button}
         type="button"
@@ -361,7 +438,7 @@ export function Title({ conversation }: { conversation: Conversation }) {
         className="max-w-full truncate text-left hover:underline hover:decoration-faint hover:underline-offset-4">
         {conversation.title}
       </button>
-    </h1>
+    </Heading>
   );
 }
 
@@ -411,27 +488,14 @@ export function EmptyState({
   const data = kind === "data";
   return (
     <div className="mt-6 flex flex-col gap-10">
+      {/* The Workspace's own: a docked chat has CompactIntro instead. */}
       <div>
         <p className="dl-label">{mode?.label ?? "New conversation"}</p>
         <h2 className="mt-3 font-serif text-[42px] leading-[1.1] tracking-[-0.01em] text-balance">{mode?.question ?? "What would you like to find out?"}</h2>
         <p className="mt-4 max-w-[52ch] font-serif text-[18px] leading-relaxed text-muted">{mode?.description}</p>
       </div>
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
-        {(data
-          ? [
-              // Knowledge writing has the catalog tools only.
-              mode?.queries === false
-                ? ["db", "Reads the database catalog (tables and columns), never rows"]
-                : ["db", "Queries the IHS database, read-only"],
-              ["eye", "Shows you everything it reads and runs"],
-              ["lock", "Websites blocked; the model is U-M's approved GPT service"],
-            ]
-          : [
-              ["globe", "Searches the web and reads papers"],
-              ["eye", "Shows you everything it reads"],
-              ["lock", "No connection to the study database"],
-            ]
-        ).map(([icon, text]) => (
+        {safetyLines(kind, mode?.queries).map(([icon, text]) => (
           <li key={text} className="flex items-start gap-2">
             <Icon name={icon as "db"} size={14} className={clsx("mt-0.5 shrink-0", data ? "text-data" : "text-research")} />
             {text}
@@ -462,6 +526,99 @@ export function EmptyState({
   );
 }
 
+/** What a session may and may not do, said wherever a conversation starts. */
+export function safetyLines(kind: "data" | "research", queries: boolean | undefined): [AnyIcon, string][] {
+  return kind === "data"
+    ? [
+        // Knowledge writing has the catalog tools only.
+        queries === false
+          ? ["db", "Reads the database catalog (tables and columns), never rows"]
+          : ["db", "Queries the IHS database, read-only"],
+        ["eye", "Shows you everything it reads and runs"],
+        ["lock", "Websites blocked; the model is U-M's approved GPT service"],
+      ]
+    : [
+        ["globe", "Searches the web and reads papers"],
+        ["eye", "Shows you everything it reads"],
+        ["lock", "No connection to the study database"],
+      ];
+}
+
+/**
+ * A docked chat before its first message: one sentence on what this tab's
+ * assistant is for, one or two starters, and what it can do folded into a
+ * single line to open.
+ */
+export function CompactIntro({
+  assistant,
+  mode: modeId,
+  kind,
+  onPick,
+  starting,
+  error,
+}: {
+  assistant: AssistantId;
+  mode: string;
+  kind: "data" | "research";
+  onPick: (text: string) => void;
+  starting: boolean;
+  error?: string;
+}) {
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const mode = modes.data?.find((m) => m.id === modeId);
+  const copy = ASSISTANTS[assistant];
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const lines = [...copy.can, ...safetyLines(kind, mode?.queries)];
+  return (
+    <div data-testid="compact-intro" className="flex flex-col gap-4">
+      <p className="font-serif text-[15.5px] leading-snug text-muted">{copy.description}</p>
+      {mode && mode.starters.length > 0 && (
+        <div>
+          <p className="dl-label mb-1">Try</p>
+          {error && <p className="mb-1 font-sans text-[12.5px] text-danger">{error}</p>}
+          <ul className="border-t border-line">
+            {mode.starters.slice(0, 2).map((starter) => (
+              <li key={starter} className="border-b border-line">
+                <button
+                  onClick={() => onPick(starter)}
+                  disabled={starting}
+                  className="group flex w-full items-baseline gap-3 py-2 text-left font-serif text-[15px] leading-snug text-ink"
+                >
+                  <span className="flex-1 group-enabled:group-hover:underline group-enabled:group-hover:decoration-faint group-enabled:group-hover:underline-offset-4">{starter}</span>
+                  <Icon name="chevron" size={12} className="shrink-0 text-faint group-enabled:group-hover:text-ink" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="font-sans text-[12.5px]">
+        <button
+          type="button"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          aria-controls={listId}
+          className="group flex items-center gap-1.5 text-muted hover:text-ink"
+        >
+          <Icon name="chevron" size={11} className={clsx("transition-transform", open && "rotate-90")} />
+          <span className={HOVER_TITLE}>What it can do</span>
+        </button>
+        {open && (
+          <ul id={listId} className="mt-2 flex flex-col gap-1.5 text-muted">
+            {lines.map(([icon, text]) => (
+              <li key={text} className="flex items-start gap-2">
+                <Icon name={icon} size={13} className={clsx("mt-0.5 shrink-0", kind === "data" ? "text-data" : "text-research")} />
+                {text}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function TurnView({
   turn,
   conversationId,
@@ -486,42 +643,54 @@ function TurnView({
     mutationFn: () => api.stop(conversationId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
-  const story = (
-    <Story
-      rows={storyRows}
-      renderRow={(row) => {
-        switch (row.type) {
-          case "step":
-            return <StepRow step={row.step} />;
-          case "group":
-            return <GroupRow row={row} />;
-          case "say":
-            return <SayRow text={row.text} />;
-          case "approval":
-            return (
-              <div className="py-2">
-                <ApprovalCard conversationId={conversationId} approval={row.approval} />
-              </div>
-            );
-          case "notice":
-            return (
-              <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
-                <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
-                {row.text}
-              </p>
-            );
-          default:
-            return null;
-        }
-      }}
-    />
-  );
+  const compact = use(CompactContext);
+  // Docked, a long story in progress shows its latest steps; the earlier ones fold into one line.
+  const [allSteps, setAllSteps] = useState(false);
+  const { shown: shownRows, folded } = compact && !allSteps ? latestRows(storyRows) : { shown: storyRows, folded: 0 };
+  const renderRow = (row: Row) => {
+    switch (row.type) {
+      case "step":
+        return <StepRow step={row.step} />;
+      case "group":
+        return <GroupRow row={row} />;
+      case "say":
+        return <SayRow text={row.text} />;
+      case "approval":
+        return (
+          <div className="py-2">
+            <ApprovalCard conversationId={conversationId} approval={row.approval} />
+          </div>
+        );
+      case "notice":
+        return (
+          <p className={clsx("flex items-baseline gap-3 py-1 font-sans text-[13.5px]", row.tone === "error" ? "text-danger" : "text-muted")}>
+            <Marker tone={row.tone === "error" ? "error" : "done"} open={null} />
+            {row.text}
+          </p>
+        );
+      default:
+        return null;
+    }
+  };
+  const story = <Story rows={shownRows} renderRow={renderRow} />;
   // Completed with an answer: the answer leads, the work behind it folds away.
   // A failed or stopped turn keeps its whole story in view.
   const finished = Boolean(answer) && turn.status === "completed" && !live;
   return (
-    <article className="flex flex-col gap-5" data-question-seq={turn.seq}>
+    <article className={clsx("flex flex-col", compact ? "gap-3" : "gap-5")} data-question-seq={turn.seq}>
       {turn.userText && <Question text={turn.userText} continues={turn.continues} />}
+      {!finished && folded > 0 && (
+        <button
+          type="button"
+          onClick={() => setAllSteps(true)}
+          className="group flex items-start gap-3 text-left font-sans text-[13px] text-muted"
+        >
+          <Marker tone="done" open={false} />
+          <span className={HOVER_TITLE}>
+            {folded} earlier step{folded === 1 ? "" : "s"}
+          </span>
+        </button>
+      )}
       {!finished && story}
       {live && !answer && (
         <NowCard
@@ -562,7 +731,7 @@ function TurnView({
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && (
         <HowItWasMade rows={storyRows}>
-          {story}
+          <Story rows={storyRows} renderRow={renderRow} />
         </HowItWasMade>
       )}
       {last && !running && canContinue(turn) && <ContinueButton conversationId={conversationId} />}
@@ -658,6 +827,25 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
   );
 }
 
+// A docked chat's story in progress: this many of its latest rows show.
+const LATEST_ROWS = 4;
+
+/**
+ * The rows a docked chat shows of a story in progress: the latest few, and
+ * every approval waiting for the person and every error, wherever they are.
+ */
+export function latestRows(rows: Row[]): { shown: Row[]; folded: number } {
+  if (rows.length <= LATEST_ROWS + 1) return { shown: rows, folded: 0 };
+  const cut = rows.length - LATEST_ROWS;
+  const kept = (row: Row, i: number) =>
+    i >= cut ||
+    row.type === "approval" ||
+    (row.type === "notice" && row.tone === "error") ||
+    (row.type === "step" && row.step.tone === "error");
+  const shown = rows.filter(kept);
+  return { shown, folded: rows.length - shown.length };
+}
+
 /** The first line of Markdown text, without its markup. */
 function firstLine(text: string): string {
   const line = text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
@@ -666,7 +854,16 @@ function firstLine(text: string): string {
 
 /** The person's question, set large; a long, pasted one reads as text, not as a heading. */
 function Question({ text, continues }: { text: string; continues?: boolean }) {
+  const compact = use(CompactContext);
   if (continues) return <p className="dl-label">Continued after an interruption</p>;
+  if (compact) {
+    // Docked: the question as a message, not a heading.
+    return (
+      <p className={clsx("font-serif leading-snug break-words whitespace-pre-wrap text-ink", text.length > 220 ? "text-[15px]" : "text-[17px]")}>
+        {text}
+      </p>
+    );
+  }
   if (text.length > 220) {
     return <p className="font-serif text-[19px] leading-relaxed break-words whitespace-pre-wrap text-ink">{text}</p>;
   }
@@ -738,6 +935,7 @@ function AnswerCard({
 }) {
   const openFile = use(OpenFileContext);
   const openQuery = use(ShowQueryContext);
+  const compact = use(CompactContext);
   // Where each number appears, once the turn's provenance has arrived.
   const numbers = useMemo(() => {
     if (!turn.provenance || streaming) return undefined;
@@ -758,7 +956,13 @@ function AnswerCard({
     };
   }, [turn, streaming, openFile, openQuery]);
   return (
-    <section data-tour="answer" className="mt-2 rounded-[4px] border border-line border-t-2 border-t-ink bg-surface px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]">
+    <section
+      data-tour="answer"
+      className={clsx(
+        "rounded-[4px] border border-line border-t-2 border-t-ink bg-surface",
+        compact ? "min-w-0 px-4 pt-3 pb-4 [&_.prose-datalab]:text-[1rem]" : "mt-2 px-6 pt-4 pb-5 [&_.prose-datalab]:text-[1.2rem]",
+      )}
+    >
       <h3 className="mb-3 flex items-center gap-2 font-sans text-[12px] font-semibold tracking-[0.08em] text-ink uppercase">
         {streaming ? "Writing the answer…" : "Answer"}
       </h3>
@@ -769,7 +973,7 @@ function AnswerCard({
           weren't checked for where {turn.provenance.more_numbers === 1 ? "it appears" : "they appear"}.
         </p>
       )}
-      {!streaming && checks.length > 0 && <Checks lines={checks} untraced={trace?.untraced ?? []} />}
+      {!streaming && checks.length > 0 && <Checks lines={checks} untraced={trace?.untraced ?? []} folded={compact} />}
     </section>
   );
 }
@@ -779,13 +983,27 @@ function AnswerCard({
  * problem remains: DataLab's own number check first, then the agent's rigor
  * review, why they differ when they seem to, and the steps that failed.
  */
-function Checks({ lines, untraced }: { lines: CheckLine[]; untraced: string[] }) {
+function Checks({ lines, untraced, folded = false }: { lines: CheckLine[]; untraced: string[]; folded?: boolean }) {
+  // Docked, the checks fold into their heading, which says whether any needs a look.
+  const [open, setOpen] = useState(!folded);
+  const listId = useId();
+  const worst = lines.some((l) => l.tone === "bad") ? "bad" : lines.some((l) => l.tone === "attn") ? "attn" : null;
   return (
-    <div data-testid="answer-checks" className="mt-6 flex flex-col gap-1.5 border-t border-line pt-3 font-sans text-[13px] leading-snug">
+    <div data-testid="answer-checks" className={clsx("flex flex-col gap-1.5 border-t border-line font-sans text-[13px] leading-snug", folded ? "mt-4 pt-2" : "mt-6 pt-3")}>
       <h4 className="dl-label flex items-center gap-1.5">
-        Checks on this answer <InfoTip term="trace-and-provenance" />
+        {folded ? (
+          <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls={listId} className="group flex items-center gap-1.5 uppercase">
+            <Icon name="chevron" size={11} className={clsx("transition-transform", open && "rotate-90")} />
+            <span className={HOVER_TITLE}>Checks on this answer</span>
+            {!open && worst && <Chip tone={worst}>{worst === "bad" ? "a problem" : "needs a look"}</Chip>}
+          </button>
+        ) : (
+          "Checks on this answer"
+        )}{" "}
+        <InfoTip term="trace-and-provenance" />
       </h4>
-      <ul className="flex flex-col gap-1.5">
+      {open && (
+      <ul id={listId} className="flex flex-col gap-1.5">
         {lines.map((line) => (
           <li
             key={line.key}
@@ -825,6 +1043,7 @@ function Checks({ lines, untraced }: { lines: CheckLine[]; untraced: string[] })
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }
@@ -934,6 +1153,8 @@ function Composer({
   autoFocus,
   placeholder,
   sendLabel,
+  compact,
+  draftKey,
 }: {
   conversation: Conversation;
   running: boolean;
@@ -945,6 +1166,8 @@ function Composer({
   autoFocus?: boolean;
   placeholder?: string;
   sendLabel?: string;
+  compact?: boolean;
+  draftKey?: string;
 }) {
   const queryClient = useQueryClient();
   const stop = useMutation({
@@ -964,6 +1187,8 @@ function Composer({
       autoFocus={autoFocus}
       placeholder={placeholder}
       sendLabel={sendLabel}
+      compact={compact}
+      draftKey={draftKey}
     />
   );
 }
@@ -983,6 +1208,33 @@ export type ComposerNote = ReactNode | ((sending: boolean) => ReactNode);
 /** Text to put back in the message box (a message that couldn't be sent); a new `key` puts it back again. */
 export type ComposerDraft = { text: string; key: number };
 
+// The box grows with what's typed (wrapped lines too), up to about eight lines;
+// docked, about six, and then it scrolls.
+const BOX_MAX = 220;
+const COMPACT_BOX_MAX = 150;
+
+/** What's typed in a message box, kept under `key` for this browser tab (sessionStorage) when there is one. */
+function useDraftText(key: string | undefined): [string, (next: string | ((current: string) => string)) => void] {
+  const [text, setText] = useState(() => {
+    if (!key) return "";
+    try {
+      return sessionStorage.getItem(key) ?? "";
+    } catch {
+      return "";
+    }
+  });
+  useEffect(() => {
+    if (!key) return;
+    try {
+      if (text) sessionStorage.setItem(key, text);
+      else sessionStorage.removeItem(key);
+    } catch {
+      // Storage can be unavailable (a private window): the draft lasts while the box is open.
+    }
+  }, [key, text]);
+  return [text, setText];
+}
+
 /** The message box under a chat. It clears as Send is pressed, and gets the text back if `onSend` fails. */
 export function ComposerBox({
   running,
@@ -996,6 +1248,8 @@ export function ComposerBox({
   autoFocus,
   placeholder = "Ask a question, or say what to do next",
   sendLabel = "Send",
+  compact = false,
+  draftKey,
 }: {
   running: boolean;
   sending: boolean;
@@ -1008,20 +1262,26 @@ export function ComposerBox({
   autoFocus?: boolean;
   placeholder?: string;
   sendLabel?: string;
+  /** Docked beside a tab: a smaller box whose button shrinks to its icon in a narrow panel. */
+  compact?: boolean;
+  /** Keep what's typed under this key (sessionStorage), so closing or reopening the chat doesn't lose it. */
+  draftKey?: string;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useDraftText(draftKey);
   // A message that couldn't be sent comes back, before anything typed meanwhile.
   useEffect(() => {
     if (draft) setText((current) => restored(draft.text, current));
-  }, [draft]);
-  // The box grows with what's typed (wrapped lines too), up to about eight lines.
+  }, [draft, setText]);
   const box = useRef<HTMLTextAreaElement>(null);
+  const max = compact ? COMPACT_BOX_MAX : BOX_MAX;
   useLayoutEffect(() => {
     const element = box.current;
     if (!element) return;
     element.style.height = "auto";
-    element.style.height = `${Math.min(element.scrollHeight, 220)}px`;
-  }, [text]);
+    element.style.height = `${Math.min(element.scrollHeight, max)}px`;
+    // Past its most, it scrolls within itself: the messages above keep their room.
+    element.style.overflowY = element.scrollHeight > max ? "auto" : "hidden";
+  }, [text, max]);
 
   const submit = () => {
     const typed = text;
@@ -1033,13 +1293,21 @@ export function ComposerBox({
     onSend(message).catch(() => setText((current) => restored(typed, current)));
   };
 
+  // Docked, the button's label shows only where the panel has room for it and the box.
+  const label = (words: string) => (compact ? <span className="hidden @[20rem]:inline">{words}</span> : words);
   return (
-    <footer data-tour="composer" className="px-4 pt-2 pb-6 sm:px-8">
-      <div className="mx-auto max-w-[48rem] 2xl:max-w-[54rem]">
+    <footer data-tour="composer" className={clsx("shrink-0", compact ? "@container px-3 pt-1.5 pb-3" : "px-4 pt-2 pb-6 sm:px-8")}>
+      <div className={clsx(!compact && "mx-auto max-w-[48rem] 2xl:max-w-[54rem]")}>
         {error && <p className="mb-2 text-sm text-danger">{error}</p>}
         {typeof note === "function" ? note(sending) : note}
         {/* The hint sits under the box, so the box itself asks a plain question. */}
-        <div className="flex items-end gap-2 rounded-[4px] border border-edge bg-field p-2 pl-3 transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]">
+        <div
+          data-testid="composer-box"
+          className={clsx(
+            "flex min-w-0 items-end gap-2 rounded-[4px] border border-edge bg-field transition-colors focus-within:border-ink focus-within:shadow-[0_0_0_1px_var(--color-ink)]",
+            compact ? "p-1.5 pl-2.5" : "p-2 pl-3",
+          )}
+        >
           <textarea
             ref={box}
             autoFocus={autoFocus}
@@ -1053,21 +1321,45 @@ export function ComposerBox({
               }
             }}
             aria-label="Your question or instruction"
-            placeholder={running ? "The agent is working. You can stop it, or wait to ask more." : placeholder}
-            className="min-h-10 flex-1 resize-none bg-transparent py-1.5 font-sans text-[15px] leading-relaxed outline-none placeholder:text-faint"
+            placeholder={
+              running
+                ? compact
+                  ? "Working… Stop it, or wait"
+                  : "The agent is working. You can stop it, or wait to ask more."
+                : placeholder
+            }
+            className={clsx(
+              "min-w-0 flex-1 resize-none bg-transparent font-sans leading-relaxed outline-none placeholder:text-faint",
+              compact ? "min-h-8 py-1 text-[14px] placeholder:truncate" : "min-h-10 py-1.5 text-[15px]",
+            )}
           />
           {running ? (
-            <Button variant="secondary" onClick={onStop} disabled={stopping || !onStop}>
-              <Icon name="stop" size={14} /> Stop
+            <Button
+              variant="secondary"
+              onClick={onStop}
+              disabled={stopping || !onStop}
+              aria-label={compact ? "Stop" : undefined}
+              className={clsx(compact && "shrink-0 px-2 @[20rem]:px-3")}
+            >
+              <Icon name="stop" size={14} /> {label("Stop")}
             </Button>
           ) : (
-            <Button variant="primary" onClick={submit} disabled={!text.trim() || sending}>
-              <Icon name="send" size={14} /> {sendLabel}
+            <Button
+              variant="primary"
+              onClick={submit}
+              disabled={!text.trim() || sending}
+              aria-label={compact ? sendLabel : undefined}
+              title={compact ? sendLabel : undefined}
+              className={clsx(compact && "shrink-0 px-2 @[20rem]:px-3")}
+            >
+              <Icon name="send" size={14} /> {label(sendLabel)}
             </Button>
           )}
         </div>
-        <p className="mt-1.5 px-1 font-sans text-[11.5px] text-faint">
-          Enter to send · Shift+Enter for a new line · the agent shows its steps as it works
+        <p className="mt-1 px-1 font-sans text-[11.5px] text-faint">
+          {compact
+            ? "Enter to send · Shift+Enter for a new line"
+            : "Enter to send · Shift+Enter for a new line · the agent shows its steps as it works"}
         </p>
       </div>
     </footer>

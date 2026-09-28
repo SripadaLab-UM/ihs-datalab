@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
@@ -13,7 +14,10 @@ import {
   type WorkflowsStatus,
   workflowsApi,
 } from "@/api/workflows";
+import { activityRows, answerOf, nowLine } from "@/components/chat/activity";
 import { SendingLine } from "@/components/chat/Pending";
+import { buildTranscript } from "@/components/chat/transcript";
+import { useConversationEvents } from "@/components/chat/useConversationEvents";
 import { CodeEditor, type EditorDiagnostic } from "@/components/editor/CodeEditor";
 import { Button, Icon } from "@/components/ui";
 import { ACTIONABLE } from "@/features/pipelines/pipelines";
@@ -143,7 +147,7 @@ export function NewWorkflow({
           />
         </>
       ) : chatId ? (
-        <Waiting onShowChat={onShowChat} onPaste={() => setPasting(true)} />
+        <Waiting chatId={chatId} onShowChat={onShowChat} onPaste={() => setPasting(true)} />
       ) : (
         <Describe practice={practice} onStart={onStart} onPaste={() => setPasting(true)} />
       )}
@@ -184,8 +188,8 @@ function Describe({
           What should this workflow do?
         </span>
         <span className="font-sans text-[13.5px] text-muted">
-          Describe the task in your own words. The assistant asks about anything it needs (dates, cohort, fields,
-          where the files go), then drafts it for you to review.
+          Describe the task in your own words. The assistant then asks about anything it needs (dates, cohort,
+          fields, where the files go) in the chat beside this page, and drafts it here for you to review.
         </span>
         <textarea
           autoFocus
@@ -224,12 +228,17 @@ function Describe({
   );
 }
 
-function Waiting({ onShowChat, onPaste }: { onShowChat: () => void; onPaste: () => void }) {
+function Waiting({ chatId, onShowChat, onPaste }: { chatId: string; onShowChat: () => void; onPaste: () => void }) {
+  const status = useAssistantStatus(chatId);
   return (
     <div className="flex max-w-[52rem] flex-col gap-4">
-      <p role="status" className="flex items-center gap-2.5 font-serif text-[20px]">
-        <span aria-hidden className="dl-breathe size-2 rounded-full bg-ink" /> The assistant is working out the details.
-      </p>
+      <div role="status" className="flex flex-col gap-1">
+        {status.label && <p className="dl-label">{status.label}</p>}
+        <p className="flex items-center gap-2.5 font-serif text-[20px]">
+          <span aria-hidden className={clsx("size-2 shrink-0 rounded-full", status.working ? "dl-breathe bg-ink" : "bg-line")} />
+          {status.line}
+        </p>
+      </div>
       <p className="font-sans text-[13.5px] text-muted">
         Answer its questions in the chat. When it has a draft, it appears here as three stages for you to review and edit.
       </p>
@@ -244,6 +253,31 @@ function Waiting({ onShowChat, onPaste }: { onShowChat: () => void; onPaste: () 
       <StagesExplainer />
     </div>
   );
+}
+
+/**
+ * What the Workflow assistant is doing, in a line for the page: the step it's
+ * on while it works, and once it's waiting, that its questions are in the chat.
+ */
+export function useAssistantStatus(chatId: string): { working: boolean; line: string; label?: string } {
+  const events = useConversationEvents(chatId || undefined);
+  const turns = useMemo(() => buildTranscript(events), [events]);
+  const conversations = useQuery({ queryKey: ["conversations"], queryFn: api.conversations, enabled: Boolean(chatId) });
+  const busy = Boolean(conversations.data?.find((c) => c.id === chatId)?.busy);
+  const last = turns.at(-1);
+  if (!last) return { working: true, line: "Starting the assistant…" };
+  if (last.status === "running" || (busy && last.status !== "failed")) {
+    const reasoning = last.items.findLast((item) => item.kind === "reasoning");
+    const now = nowLine(activityRows(last.items, true), reasoning?.kind === "reasoning" ? reasoning.text : "");
+    return { working: true, line: now, label: "The assistant is working" };
+  }
+  if (last.status === "failed" || last.status === "interrupted") {
+    return { working: false, line: "The assistant stopped before it finished. See the chat →" };
+  }
+  return {
+    working: false,
+    line: answerOf(last).includes("?") ? "The assistant is asking a few questions →" : "The assistant has answered in the chat →",
+  };
 }
 
 // ------------------------------------------------------------------ the agent's draft

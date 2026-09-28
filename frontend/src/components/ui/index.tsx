@@ -53,17 +53,19 @@ export function Chip({
 }
 
 /** Which kind of session this is: always visible, so nobody is unsure. Its tooltip says what that means. */
-export function SessionBadge({ kind }: { kind: "data" | "research" }) {
+/** Which kind of session it is. `short`: just its name (a docked chat's header), the rest in the tip. */
+export function SessionBadge({ kind, short = false }: { kind: "data" | "research"; short?: boolean }) {
+  const size = short ? "text-[12px]" : "text-[13px]";
   return kind === "data" ? (
     <InfoTip term="data-session">
-      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-data">
-        <Icon name="lock" size={13} /> Data session · database access, web blocked
+      <span className={clsx("inline-flex shrink-0 items-center gap-1.5 font-sans font-medium text-data", size)}>
+        <Icon name="lock" size={short ? 12 : 13} /> Data session{!short && " · database access, web blocked"}
       </span>
     </InfoTip>
   ) : (
     <InfoTip term="research-session">
-      <span className="inline-flex items-center gap-1.5 font-sans text-[13px] font-medium text-research">
-        <Icon name="globe" size={13} /> Research session · web access, no database connection
+      <span className={clsx("inline-flex shrink-0 items-center gap-1.5 font-sans font-medium text-research", size)}>
+        <Icon name="globe" size={short ? 12 : 13} /> Research session{!short && " · web access, no database connection"}
       </span>
     </InfoTip>
   );

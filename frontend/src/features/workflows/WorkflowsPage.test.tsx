@@ -502,7 +502,8 @@ it("docks a chat that is offered the workflow file, not sent it", async () => {
     expect(chatProps).toHaveBeenLastCalledWith(
       expect.objectContaining({
         mode: "workflows",
-        context: { label: "The workflow file weekly_steps.yaml", text: YAML, language: "yaml" },
+        assistant: "workflows",
+        context: { label: "The workflow file weekly_steps.yaml", name: "weekly_steps.yaml", text: YAML, language: "yaml" },
       }),
     ),
   );

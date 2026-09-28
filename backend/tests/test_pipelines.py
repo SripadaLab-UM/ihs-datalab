@@ -219,6 +219,10 @@ def test_only_engineering_and_workflow_authoring_conversations_get_a_copy_of_the
     authoring = conversation(lab, mode="workflows")
     assert (copy_of(lab, authoring) / "workflows" / "weekly.yaml").is_file()
     assert lab.pipelines.base(authoring) == lab.remote.head()
+    # The Pipelines tab's own chat works on the same copy.
+    tab = conversation(lab, mode="pipelines")
+    assert (copy_of(lab, tab) / "ihsDataR" / "R" / "steps.R").read_text() == STEPS_R
+    assert lab.pipelines.base(tab) == lab.remote.head()
 
 
 def test_a_workflow_authoring_draft_becomes_a_pipelines_proposal(lab):

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -40,6 +40,9 @@ vi.mock("@/api/client", () => ({
     modes: vi.fn(async () => []),
   },
 }));
+// The authoring chat's events, for the page's line about what the assistant is doing.
+const events = vi.hoisted(() => ({ list: [] as { seq: number; type: string; data: Record<string, unknown> }[] }));
+vi.mock("@/components/chat/useConversationEvents", () => ({ useConversationEvents: () => events.list }));
 const chatProps = vi.fn();
 vi.mock("@/components/chat/DockedChat", () => ({
   DockedChat: (props: unknown) => {
@@ -92,6 +95,7 @@ const workflow = (extra: Partial<Workflow> = {}): Workflow => ({
 }); // prettier-ignore
 
 beforeEach(() => {
+  events.list = [];
   sessionStorage.clear();
   chatProps.mockReset();
   vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/p/workflows-local", profile: "practice", target: LOCAL });
@@ -153,7 +157,7 @@ it("asks what the workflow should do, and starts the authoring chat with the des
   expect(api.createConversation).toHaveBeenCalledWith("workflows");
   // The chat opens on that conversation, and the panel waits for its draft.
   await waitFor(() => expect(chatProps).toHaveBeenLastCalledWith(expect.objectContaining({ conversationId: "conv_1", mode: "workflows" })));
-  expect(await screen.findByText(/working out the details/)).toBeInTheDocument();
+  expect(await screen.findByText("Starting the assistant…")).toBeInTheDocument();
 });
 
 it("says at once that the draft is starting, and starts it once however often it's clicked", async () => {
@@ -171,7 +175,52 @@ it("says at once that the draft is starting, and starts it once however often it
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
   expect(api.createConversation).toHaveBeenCalledTimes(1);
   started();
-  expect(await screen.findByText(/working out the details/)).toBeInTheDocument();
+  expect(await screen.findByText("Starting the assistant…")).toBeInTheDocument();
+});
+
+it("asks what it should do in one place: the side chat hands over to the page's form until drafting starts", async () => {
+  sessionStorage.setItem("datalab:workflows:chat-open", "open");
+  show("/workflows/new");
+  const box = await screen.findByRole("textbox", { name: /What should this workflow do\?/ });
+  // The page asks; the chat, docked beside it, has no message box of its own yet.
+  await waitFor(() => expect(chatProps).toHaveBeenCalled());
+  const before = chatProps.mock.lastCall![0] as { handoff?: unknown; conversationId?: string; assistant?: string };
+  expect(before).toMatchObject({ assistant: "workflows", conversationId: undefined });
+  expect(before.handoff).toBeTruthy();
+  expect(screen.getAllByText(/What should this workflow do\?/)).toHaveLength(1);
+  fireEvent.change(box, { target: { value: EXAMPLE } });
+  fireEvent.click(screen.getByRole("button", { name: /Start drafting/ }));
+  // Once it's started, the chat takes over: its conversation, with its own message box for the answers.
+  await waitFor(() =>
+    expect(chatProps).toHaveBeenLastCalledWith(expect.objectContaining({ conversationId: "conv_1", handoff: undefined })),
+  );
+  // Elsewhere in Workflows the chat is an ordinary one.
+  expect(screen.queryByTestId("describe-first")).toBeNull();
+});
+
+it("says what the assistant is working on, and then that its questions are in the chat", async () => {
+  sessionStorage.setItem("datalab:workflows:chat", "conv_1");
+  vi.mocked(api.conversations).mockResolvedValue([{ id: "conv_1", busy: true }] as never);
+  events.list = [
+    { seq: 1, type: "user_message", data: { text: EXAMPLE } },
+    { seq: 2, type: "turn_started", data: {} },
+    { seq: 3, type: "tool_call", data: { id: "t1", server: "ihs-data", tool: "search_catalog", status: "started", arguments: { query: "fitbit" } } },
+  ];
+  show("/workflows/new");
+  const status = await screen.findByRole("status");
+  expect(status).toHaveTextContent("The assistant is working");
+  expect(status.textContent).toMatch(/…$/);
+  cleanup();
+  vi.mocked(api.conversations).mockResolvedValue([{ id: "conv_1", busy: false }] as never);
+  events.list = [
+    ...events.list.slice(0, 2),
+    { seq: 3, type: "answer", data: { text: "A few questions first: which cohort? And which date range?" } },
+    { seq: 4, type: "turn_finished", data: { status: "completed" } },
+  ];
+  show("/workflows/new");
+  expect(await screen.findByText("The assistant is asking a few questions →")).toBeInTheDocument();
+  // The stages come as before once it has a draft; nothing else changed on the way.
+  expect(screen.getByRole("button", { name: /Show the chat/ })).toBeInTheDocument();
 });
 
 it("keeps the description and shows why when the draft couldn't start", async () => {

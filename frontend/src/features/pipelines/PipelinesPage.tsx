@@ -15,8 +15,11 @@ import { ACTIONABLE, languageOf, proposalChip, repoLine, when } from "./pipeline
 import { ProposalView } from "./ProposalView";
 
 const WIDE = "(min-width: 1280px)";
+// The Pipelines tab's own chat (backend sessions/modes.py): Data engineering's rules, with
+// the file open here; its changes come back as a proposal to review in this tab.
+export const CHAT_MODE = "pipelines";
 
-/** The ihsDataR code browser, agent-proposed changes to review, and tests, with a Data engineering chat docked beside them. */
+/** The ihsDataR code browser, agent-proposed changes to review, and tests, with the Pipelines assistant docked beside them. */
 export function PipelinesPage() {
   const queryClient = useQueryClient();
   const status = useQuery({ queryKey: ["pipelines-status"], queryFn: pipelinesApi.status });
@@ -64,7 +67,7 @@ export function PipelinesPage() {
   const context = useMemo<ChatContext | undefined>(
     () =>
       file.data?.text != null && !proposalId
-        ? { label: `${path}, as on main`, text: file.data.text, language: languageOf(path) }
+        ? { label: `${path}, as on main`, name: path, text: file.data.text, language: languageOf(path) }
         : undefined,
     [file.data, path, proposalId],
   );
@@ -232,7 +235,8 @@ export function PipelinesPage() {
           >
             <DockedChat
               key={chatKey}
-              mode="engineering"
+              mode={CHAT_MODE}
+              assistant="pipelines"
               conversationId={chatId || undefined}
               onConversation={(conversation) => setChatId(conversation.id)}
               context={context}
@@ -259,8 +263,8 @@ function ProposalList({
   if (proposals.length === 0) {
     return (
       <p className="px-4 py-4 font-sans text-[13px] leading-relaxed text-muted">
-        Nothing proposed yet. When the Data engineering or Workflow authoring agent changes ihsDataR or a workflow
-        file, the change appears here after its turn.
+        Nothing proposed yet. When the Pipelines or Workflow assistant (or a Data engineering conversation) changes
+        ihsDataR or a workflow file, the change appears here after its turn.
       </p>
     );
   }

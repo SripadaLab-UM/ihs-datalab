@@ -215,6 +215,7 @@ export function SqlPage() {
   const context = useMemo<ChatContext>(
     () => ({
       label: "The query in the SQL editor",
+      name: "The query in the editor",
       text: sql.trim() ? sql.replace(/\n+$/, "") + bindLines(bindNames, binds) : sql,
       language: "sql",
     }),
@@ -440,7 +441,7 @@ export function SqlPage() {
               onConversation={(conversation) => setChatId(conversation.id)}
               context={context}
               headerActions={chatActions}
-              placeholder="Describe the data you want"
+              assistant="sql"
               sendLabel="Generate SQL"
               // The editor as it is now: a proposal never replaces edits made while the agent works.
               onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
