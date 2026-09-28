@@ -1,18 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
+import { useId, useState } from "react";
 
 import { api, type CheckResult, type SafetyReport } from "@/api/client";
 import { Button, Icon } from "@/components/ui";
 
-/** The Safety check: live tests of DataLab's safety promises, and the last report. */
+export interface SafetySummary {
+  /** "Every check passed", "2 problems", "Not run yet". */
+  text: string;
+  tone: "good" | "attn" | "bad" | "none";
+  /** When the last check finished, if there was one. */
+  checkedAt: string | null;
+}
+
+/** The last report in a line: how it went and when. Shared with the section list's mark. */
+export function safetySummary(report: SafetyReport | null | undefined): SafetySummary {
+  if (!report) return { text: "Not run yet", tone: "none", checkedAt: null };
+  const failed = report.results.filter((r) => r.status === "fail").length;
+  const unverified = report.results.filter((r) => r.status === "skip" && r.required).length;
+  const checkedAt = report.finished_at;
+  if (!report.passed) {
+    const problems = failed + unverified;
+    return { text: `${problems} problem${problems === 1 ? "" : "s"}`, tone: "bad", checkedAt };
+  }
+  if (unverified) {
+    return { text: `${unverified} check${unverified === 1 ? "" : "s"} couldn't be verified`, tone: "attn", checkedAt };
+  }
+  return { text: "Every check passed", tone: "good", checkedAt };
+}
+
+/**
+ * The Safety check: live tests of DataLab's safety promises. How the last one
+ * went sits in a line at the top; the full report is under Details.
+ */
 export function SafetySection() {
   const queryClient = useQueryClient();
   const last = useQuery({ queryKey: ["safety"], queryFn: api.lastSafetyReport });
+  const [open, setOpen] = useState(false);
+  const details = useId();
   const run = useMutation({
     mutationFn: api.runSafetyCheck,
-    onSuccess: (report) => queryClient.setQueryData(["safety"], report),
+    onSuccess: (report) => {
+      queryClient.setQueryData(["safety"], report);
+      // Something needs looking at: open the report.
+      if (!report.passed) setOpen(true);
+    },
   });
   const report = last.data;
+  const summary = safetySummary(report);
 
   return (
     <section className="border-t border-ink pt-6">
@@ -30,8 +65,55 @@ export function SafetySection() {
           {run.isPending ? "Checking… (about 20 s)" : "Run safety check"}
         </Button>
       </div>
+      <p
+        className={clsx(
+          "mt-5 flex flex-wrap items-center gap-x-2 gap-y-1 border-l-2 pl-3 text-[15px]",
+          summary.tone === "good" && "border-data",
+          summary.tone === "attn" && "border-research",
+          summary.tone === "bad" && "border-danger",
+          summary.tone === "none" && "border-line",
+        )}
+        role="status"
+        aria-label="Safety check summary"
+      >
+        <span
+          className={clsx(
+            "inline-flex items-center gap-1.5 font-medium",
+            summary.tone === "good" && "text-data",
+            summary.tone === "attn" && "text-research",
+            summary.tone === "bad" && "text-danger",
+            summary.tone === "none" && "text-muted",
+          )}
+        >
+          {summary.tone !== "none" && (
+            <Icon name={summary.tone === "good" ? "check" : summary.tone === "bad" ? "close" : "alert"} size={14} />
+          )}
+          {summary.text}
+        </span>
+        {summary.checkedAt && (
+          <span className="text-muted">
+            · checked <time dateTime={summary.checkedAt}>{new Date(summary.checkedAt).toLocaleString()}</time>
+          </span>
+        )}
+      </p>
       {run.error && <p className="mt-3 text-sm text-danger">{run.error.message}</p>}
-      {report ? <Report report={report} /> : !run.isPending && <p className="mt-4 text-sm text-muted">Not run yet.</p>}
+      {report && (
+        <div className="mt-4">
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-controls={details}
+            onClick={() => setOpen(!open)}
+            className="inline-flex items-center gap-1.5 font-sans text-[13.5px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
+          >
+            <Icon name="chevron" size={13} className={clsx("transition-transform", open && "rotate-90")} />
+            Details
+          </button>
+          <div id={details} hidden={!open}>
+            {open && <Report report={report} />}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

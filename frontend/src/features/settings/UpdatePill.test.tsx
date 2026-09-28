@@ -54,7 +54,7 @@ it("shows Update available, linking to Settings → Updates", async () => {
   mocked.updateCheck.mockResolvedValue({ ...CHECK, state: "available", available: RELEASE, can_install: true });
   show();
   const pill = await screen.findByRole("link", { name: "Update available" });
-  expect(pill.getAttribute("href")).toBe("/settings#updates");
+  expect(pill.getAttribute("href")).toBe("/settings/updates");
   expect(pill.getAttribute("title")).toContain("DataLab 0.1.0a3 is available (this is 0.1.0a2)");
 });
 

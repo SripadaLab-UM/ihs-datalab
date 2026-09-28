@@ -8,6 +8,7 @@ import { Brand, usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
+import { GitHubEntry } from "@/features/settings/GitHubEntry";
 import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
 
 const TABS = [
@@ -63,6 +64,7 @@ export function Shell() {
             closer to each other than to the tabs. */}
         <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
           <UpdatePill />
+          <GitHubEntry />
           {practice && (
             <span
               className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"

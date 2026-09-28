@@ -29,7 +29,7 @@ export function App() {
             <Route path="workflows/*" element={<WorkflowsPage />} />
             <Route path="pipelines/*" element={<PipelinesPage />} />
             <Route path="knowledge/*" element={<KnowledgePage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="settings/:section?" element={<SettingsPage />} />
             <Route path="help/:slug?" element={<HelpPage />} />
             <Route path="signed-out" element={<SignedOut />} />
           </Route>

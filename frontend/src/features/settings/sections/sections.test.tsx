@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import type { Connections, Storage, StorageItem, UpdateCheck, Updates } from "@/api/settings";
@@ -11,6 +12,9 @@ import { DestinationKeysSection } from "./DestinationKeysSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { StorageSection } from "./StorageSection";
 import { UpdatesSection } from "./UpdatesSection";
+
+// GitHub has its own tests (GitHubSection.test.tsx).
+vi.mock("./GitHubSection", () => ({ GitHubSection: () => null }));
 
 vi.mock("@/api/client", () => ({
   api: {
@@ -42,7 +46,11 @@ vi.mock("@/api/settings", async (original) => ({
 const mocked = vi.mocked(settingsApi);
 
 function wrap(children: ReactNode) {
-  return render(<QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter>{children}</MemoryRouter>
+    </QueryClientProvider>,
+  );
 }
 
 const REAL: Connections = {
@@ -67,8 +75,12 @@ beforeEach(() => vi.clearAllMocks());
 it("saves a password write-only and clears the field", async () => {
   mocked.connections.mockResolvedValue(REAL);
   wrap(<ConnectionsSection />);
-  expect(await screen.findByText("Not saved yet")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Save the password…" }));
+  expect(await screen.findByText("Not saved")).toBeTruthy();
+  // The real profile: the key is saved and can be replaced; nothing is fixed.
+  expect(within(screen.getByRole("region", { name: "U-M GPT" })).getByText("Saved in keychain")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Replace key" })).toBeTruthy();
+  expect(screen.queryByText(/Fixed on the practice/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Save password" }));
   const field = screen.getByLabelText("Database password for SVC_READER") as HTMLInputElement;
   expect(field.type).toBe("password");
   fireEvent.change(field, { target: { value: "s3cret" } });
@@ -77,7 +89,7 @@ it("saves a password write-only and clears the field", async () => {
   expect(await screen.findByText("Saved")).toBeTruthy();
   expect(screen.queryByLabelText("Database password for SVC_READER")).toBeNull();
   expect(document.body.textContent).not.toContain("s3cret");
-  expect(screen.getByRole("button", { name: "Replace the key…" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Replace key" })).toBeTruthy();
 });
 
 it("tests the connection and says how it went", async () => {
@@ -87,8 +99,8 @@ it("tests the connection and says how it went", async () => {
     model: { ok: true, message: "U-M GPT accepted the key and offers 3 approved models." },
   });
   wrap(<ConnectionsSection />);
-  await screen.findByText("Not saved yet");
-  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  await screen.findByText("Not saved");
+  fireEvent.click(screen.getAllByRole("button", { name: "Test connection" })[0]);
   expect(await screen.findByText(/are you on the VPN/)).toBeTruthy();
   expect(screen.getByText(/offers 3 approved models/)).toBeTruthy();
 });
@@ -104,7 +116,12 @@ it("practice shows its synthetic database and offers no changes", async () => {
   wrap(<ConnectionsSection />);
   expect(await screen.findByText(/whose settings are fixed/)).toBeTruthy();
   expect(screen.getByText("Fixed: the synthetic database's own")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: /Save the|Replace the/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^(Save|Replace) (key|password)$/ })).toBeNull();
+  // What practice fixes is labelled, not missing, and can still be tested.
+  expect(screen.getByText("Fixed on the practice DataLab: the synthetic database")).toBeTruthy();
+  expect(screen.getByText("Fixed on the practice DataLab")).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Test connection" })).toHaveLength(2);
+  expect(screen.getByText("Saved in keychain")).toBeTruthy();
 });
 
 function item(overrides: Partial<StorageItem>): StorageItem {
@@ -388,7 +405,7 @@ it("warns that saving won't take effect while an environment variable sets the s
   mocked.connections.mockResolvedValue({ ...REAL, oracle: { ...REAL.oracle, password: "environment" } });
   wrap(<ConnectionsSection />);
   expect(await screen.findByText(/saving here won't take effect/)).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Replace the password…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Replace password" }));
   const field = screen.getByLabelText("Database password for SVC_READER") as HTMLInputElement;
   expect(field.autocomplete).toBe("new-password");
   expect(screen.getByText(/saving here won't take effect/)).toBeTruthy();

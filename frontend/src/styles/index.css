@@ -42,8 +42,39 @@
   --color-danger-soft: #f9ece9;
 }
 
+/* Dark: when the computer is dark and the person hasn't chosen Light, or when
+   they chose Dark (Settings → Appearance sets data-theme on <html>). The two
+   blocks below hold the same values. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-canvas: #161614;
+  --color-surface: #161614;
+  --color-rail: #1b1a17;
+  --color-field: #1d1c19;
+  --color-sunken: #1f1e1b;
+  --color-line: #2e2d29;
+  --color-ink: #e9e6de;
+  --color-muted: #a39f94;
+  --color-faint: #8f8b81;
+  --color-accent: #e9e6de;
+  --color-accent-soft: #26251f;
+  --color-accent-ink: #161614;
+  --color-data: #86c3a2;
+  --color-data-soft: #1b2a22;
+  --color-research: #d9a95a;
+  --color-research-soft: #2e2618;
+  --color-attn: #d9a95a;
+  --color-attn-soft: #2e2618;
+  --color-you: #aab6de;
+  --color-you-soft: #20242f;
+  --color-danger: #e58a7c;
+  --color-danger-soft: #33201c;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --color-canvas: #161614;
     --color-surface: #161614;
