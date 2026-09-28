@@ -235,3 +235,50 @@ it("over a narrow page, the chat and the list are dialogs: focus in, kept there,
   expect(drawer.getAttribute("role")).toBeNull();
   expect(document.activeElement).toBe(menu);
 });
+
+it("shows a loading state while the pages load, not 'Nothing here yet', and Retry when they fail", async () => {
+  let resolve!: (value: { head: string; pages: KbEntry[] }) => void;
+  vi.mocked(knowledgeApi.pages).mockReturnValueOnce(new Promise((r) => (resolve = r)));
+  show();
+  expect(await screen.findByText("Loading the knowledge base…")).toBeTruthy();
+  expect(screen.queryByText("Nothing here yet")).toBeNull();
+  resolve({ head: "abc1234def", pages: ENTRIES });
+  expect(await screen.findByRole("heading", { name: "Knowledge base index" })).toBeTruthy();
+});
+
+it("says when the pages couldn't be read, and Retry reads them again", async () => {
+  vi.mocked(knowledgeApi.pages).mockRejectedValueOnce(new Error("Couldn't read the clone."));
+  show();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't read the clone.");
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+  expect(await screen.findByRole("heading", { name: "Knowledge base index" })).toBeTruthy();
+});
+
+it("reads in a centred column with responsive margins; wide tables and code scroll in their own blocks", async () => {
+  const wide = "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |\n\n```sql\nSELECT 1;\n```\n";
+  vi.mocked(knowledgeApi.page).mockImplementation(async (path) =>
+    path === "index.md" ? { ...PAGES["index.md"], front_matter: { id: "index", status: "reviewed", kind: "index" }, body: `# Index\n\n${wide}` } : PAGES[path],
+  );
+  show();
+  await screen.findByRole("table");
+  const column = document.querySelector("[data-reading-column]")!;
+  expect(column.className).toMatch(/\bmx-auto\b/);
+  expect(column.className).toMatch(/\bmax-w-\[46rem\]/);
+  expect(column.className).toMatch(/\bdl-reading\b/);
+  expect(column.className).toMatch(/\bmin-w-0\b/);
+  // The margins: at least 16px, growing with the page, never sideways scrolling.
+  const scroller = document.querySelector("[data-reading-scroll]")!;
+  expect(scroller.className).toContain("px-[clamp(16px,4cqi,48px)]");
+  expect(scroller.className).toMatch(/\boverflow-x-hidden\b/);
+  expect(scroller.closest("main")!.className).toMatch(/@container/);
+  // The title, facts and body are all children of the one column: one left edge.
+  const title = screen.getByRole("heading", { level: 2, name: "index" });
+  expect(column).toContainElement(title);
+  expect(column).toContainElement(screen.getByRole("table"));
+  // The table sits in its own scrolling block.
+  const table = screen.getByRole("table");
+  expect(table.parentElement).toHaveAttribute("data-scroll-x");
+  expect(table.parentElement!.className).toContain("dl-scroll-x");
+  expect(column.querySelector("pre")).toBeTruthy();
+});
