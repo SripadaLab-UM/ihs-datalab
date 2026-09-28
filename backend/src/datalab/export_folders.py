@@ -380,7 +380,11 @@ def check_new_folder(chosen: Path, *, protected: list[Path]) -> Path:
     folder but leads out of it is refused, so the folder's kind can't be
     disguised.
     """
-    real, kind = check_attachable(chosen, protected=protected)
+    try:
+        real, kind = check_attachable(chosen, protected=protected)
+    except NotAttachable as error:
+        # Said for an export folder, not for attaching.
+        raise NotAttachable(_refusal(str(error))) from error
     if kind != "folder":
         raise NotAttachable("Choose a folder.")
     if real != chosen:

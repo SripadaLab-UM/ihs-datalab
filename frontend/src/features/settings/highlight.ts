@@ -73,9 +73,16 @@ function headingOf(target: HTMLElement): HTMLElement {
  * arrives (a new element with the same id): it waits up to 5 s for the first,
  * and moves the highlight to the new one. It runs on its own, apart from
  * React, so the page dropping the navigation's state doesn't cut it short.
- * Returns what ends it early (the page going away).
+ * Returns what ends it early (the page going away). For a part lit up from
+ * the same page (a folder just added, say), `focus: false` leaves focus where
+ * the person is still reading what they did, and `block: "nearest"` scrolls
+ * only as far as it takes to show the part.
  */
-export function lightUp(id: string, onFound: () => void): () => void {
+export function lightUp(
+  id: string,
+  onFound: () => void,
+  { focus = true, block = "center" }: { focus?: boolean; block?: ScrollLogicalPosition } = {},
+): () => void {
   const still = reducedMotion();
   const className = still ? "dl-highlight-still" : "dl-highlight";
   let current: HTMLElement | null = null;
@@ -88,9 +95,9 @@ export function lightUp(id: string, onFound: () => void): () => void {
   const mark = (target: HTMLElement) => {
     const first = current === null;
     current = target;
-    target.scrollIntoView?.({ block: "center", behavior: still || !first ? "auto" : "smooth" });
+    target.scrollIntoView?.({ block, behavior: still || !first ? "auto" : "smooth" });
     // Focus goes to the part's heading (again if the part is drawn again), unless the person has moved it.
-    if (mayFocus()) headingOf(target).focus({ preventScroll: true });
+    if (focus && mayFocus()) headingOf(target).focus({ preventScroll: true });
     // Restarted if the same part is asked for again.
     target.classList.remove("dl-highlight", "dl-highlight-still");
     void target.offsetWidth;

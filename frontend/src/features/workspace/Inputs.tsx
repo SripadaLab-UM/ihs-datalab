@@ -4,6 +4,7 @@ import { useState } from "react";
 import { api, type Conversation } from "@/api/client";
 import { Button, EmptyNote, FileGlyph, Icon } from "@/components/ui";
 import { kindOf } from "@/lib/files";
+import { pickerOpenHint } from "@/lib/picker";
 
 /** Files and folders attached to a conversation. The agent reads them; it can't change them. */
 export function Inputs({ conversation, practice }: { conversation: Conversation; practice: boolean }) {
@@ -70,7 +71,11 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
           </Button>
         </div>
       )}
-      {attach.isPending && !practice && <p className="text-xs text-muted">Choose in the window that opened…</p>}
+      {attach.isPending && !practice && attach.variables?.source !== "sample" && (
+        <p className="text-xs text-attn" role="status">
+          {pickerOpenHint(attach.variables?.source === "folder" ? "folder" : "files")}
+        </p>
+      )}
       {conversation.busy && <p className="text-xs text-muted">You can attach once the agent has finished.</p>}
       {attach.error && <p className="text-xs text-danger">{attach.error.message}</p>}
       {detach.error && <p className="text-xs text-danger">{detach.error.message}</p>}

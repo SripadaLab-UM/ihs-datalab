@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
-import { api, type Destination, type DestinationPlaces, type FolderTest } from "@/api/client";
+import { api, type Destination, type DestinationPlace, type DestinationPlaces, type FolderTest } from "@/api/client";
+import { ApiError } from "@/api/http";
 import { Button, Chip, FileGlyph, Icon } from "@/components/ui";
+import { pickerOpenHint } from "@/lib/picker";
+
+import { lightUp } from "../highlight";
 
 import { FixedOnPractice, Part, Section } from "./Section";
 
@@ -58,18 +62,42 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
   );
 }
 
+/** The element id of a folder's row, so a folder just added can be lit up there. */
+export function folderRowId(id: string): string {
+  return `export-folder-${id}`;
+}
+
+/** A folder just added, and the found sync folder the picker opened in, if one. */
+interface Added {
+  folder: Destination;
+  place?: DestinationPlace;
+}
+
 /** Add a folder: a name, then the computer's own folder picker (opening in a found Dropbox, say). */
 function AddFolder({ places, onAdded }: { places?: DestinationPlaces; onAdded: () => void }) {
   const [name, setName] = useState("");
+  const [added, setAdded] = useState<Added | null>(null);
+  const stopHighlight = useRef<() => void>(undefined);
+  useEffect(() => () => stopHighlight.current?.(), []);
+  const found = places?.places ?? [];
   const add = useMutation({
     mutationFn: (startIn?: string) => api.addDestination({ name: name.trim() || undefined, startIn }),
-    onSuccess: () => {
+    onMutate: () => setAdded(null),
+    onSuccess: (folder, startIn) => {
       setName("");
+      setAdded({ folder, place: found.find((p) => p.id === startIn) });
       onAdded();
+      showInList(folder.id);
     },
   });
-  const found = places?.places ?? [];
+  // Lights up its row in the list above once it's drawn, leaving focus on the confirmation.
+  const showInList = (id: string) => {
+    stopHighlight.current?.();
+    stopHighlight.current = lightUp(folderRowId(id), () => {}, { focus: false, block: "nearest" });
+  };
   const choosing = add.isPending;
+  // Cancelling the picker isn't a problem: nothing was added, and that's all.
+  const cancelled = add.error instanceof ApiError && add.error.status === 400;
 
   return (
     <Part title="Add a folder" className="mt-6">
@@ -101,13 +129,26 @@ function AddFolder({ places, onAdded }: { places?: DestinationPlaces; onAdded: (
         </div>
         {choosing && (
           <p className="text-sm text-attn" role="status">
-            Choose the folder in the window that opened.
+            {pickerOpenHint("folder")}
           </p>
         )}
-        {add.error && (
-          <p className="text-sm text-danger" role="alert">
-            {add.error.message}
-          </p>
+        {add.error &&
+          (cancelled ? (
+            <p className="text-sm text-muted" role="status">
+              No folder was chosen, so nothing was added.
+            </p>
+          ) : (
+            <p className="border-l-2 border-danger pl-3 text-sm text-danger" role="alert">
+              Not added: {add.error.message}
+            </p>
+          ))}
+        {added && (
+          <AddedFolder
+            added={added}
+            onShow={() => showInList(added.folder.id)}
+            onDone={() => setAdded(null)}
+            onTested={onAdded}
+          />
         )}
         <p className="text-xs text-muted">
           {found.length
@@ -118,6 +159,77 @@ function AddFolder({ places, onAdded }: { places?: DestinationPlaces; onAdded: (
         </p>
       </div>
     </Part>
+  );
+}
+
+/**
+ * Right where the folder was chosen: that it was added, where it is, and
+ * whether exports can go there now. A folder outside the sync folder the
+ * picker opened in is added (it's a folder like any other), but its files
+ * won't be uploaded by that app, so it says so.
+ */
+function AddedFolder({
+  added: { folder, place },
+  onShow,
+  onDone,
+  onTested,
+}: {
+  added: Added;
+  onShow: () => void;
+  onDone: () => void;
+  onTested: () => void;
+}) {
+  const test = useMutation({ mutationFn: () => api.testDestination(folder.id), onSuccess: onTested });
+  const ready = folder.status === "ready";
+  const outside = place && folder.sync_provider !== place.provider;
+  return (
+    <div
+      className={`rounded-lg border-l-2 px-3 py-2.5 text-sm ${ready ? "border-data bg-data-soft" : "border-attn bg-attn-soft"}`}
+      role="status"
+      aria-label="Folder added"
+    >
+      <p className="flex items-center gap-1.5 font-medium">
+        {ready ? (
+          <>
+            <Icon name="check" size={14} className="text-data" /> Added: {folder.name} — exports can go here.
+          </>
+        ) : (
+          <>Added: {folder.name}, but exports can't go here yet.</>
+        )}
+      </p>
+      <p className="mt-1 min-w-0 truncate font-mono text-xs text-muted" title={folder.path}>
+        {folder.where}
+      </p>
+      <p className="mt-0.5 text-xs text-muted">{folder.location_note}</p>
+      {!ready && folder.status_message && <p className="mt-1 text-xs text-danger">{folder.status_message}</p>}
+      {ready && folder.warning && <p className="mt-1 text-xs text-attn">{folder.warning}</p>}
+      {outside && (
+        <p className="mt-1 text-xs text-attn">
+          This folder isn't inside {place.label}, so the {place.provider_name} app won't upload what's saved here. To
+          export to {place.provider_name}, add a folder inside {place.where} instead.
+        </p>
+      )}
+      <p className="mt-1 text-xs text-muted">
+        It's now in the list above, and exports and workflow destinations offer it by this name.
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-1">
+        <Button className="px-2 py-0.5 text-xs" onClick={() => test.mutate()} disabled={test.isPending}>
+          {test.isPending ? "Testing…" : "Test it now"}
+        </Button>
+        <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={onShow}>
+          Show in list
+        </Button>
+        <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={onDone}>
+          Done
+        </Button>
+      </div>
+      {test.data && (
+        <div className="mt-2">
+          <TestOutcome result={test.data} />
+        </div>
+      )}
+      {test.error && <p className="mt-2 text-xs text-danger">{test.error.message}</p>}
+    </div>
   );
 }
 
@@ -168,7 +280,11 @@ function FolderRow({ folder, onChanged }: { folder: Destination; onChanged: () =
   };
 
   return (
-    <li aria-label={folder.name} className="flex flex-col gap-1.5 rounded-lg bg-canvas px-3 py-2.5 text-sm">
+    <li
+      id={folderRowId(folder.id)}
+      aria-label={folder.name}
+      className="flex scroll-mt-6 flex-col gap-1.5 rounded-lg bg-canvas px-3 py-2.5 text-sm"
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <FileGlyph kind="folder" size={28} />
         {renaming ? (
