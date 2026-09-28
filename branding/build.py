@@ -3,20 +3,18 @@
     uv run --with pillow python branding/build.py
     uv run --with pillow python branding/build.py --options <folder>   # the AI-mark options, side by side
 
-Two marks, always side by side and never merged (U-M's brand rules forbid
-altering the Block M or combining it with other shapes):
+The logo (DESIGN "1b"): U-M's Block M, as the prototype used it
+(um-gpt-local-proxy/deploy/cognito/logo.png, traced here to its polygon), in
+Maize (#FFCB05) on Blue (#00274C), with "IHS" centred under it and a big
+four-point spark, the AI cue, over its top-right corner. DataLab is an
+internal IHS tool, so the spark may cross the M; it's edged in the tile's
+colour so it reads there. The earlier options ("1", "2", "3": the IHS mark
+under the M) are a one-line change of DESIGN; `--options` draws them all.
 
-- The Block M, the University's mark, as the prototype used it
-  (um-gpt-local-proxy/deploy/cognito/logo.png, traced here to its polygon):
-  Maize (#FFCB05) on Blue (#00274C), with clear space round it of at least
-  the height of its serifs.
-- The IHS + AI mark: "IHS" with an AI cue. AI_MARK picks which of the three
-  designs below is used (a one-line change); `--options` draws all three.
-
-The app icon is Blue with the Block M and, from 64 pixels up, the IHS mark
-under it; below 64 pixels (and in the favicon) the Block M alone, as the IHS
-letters can't be read that small. Practice is the same icon inverted: Blue on
-Maize, so the two never look alike, even at 16 pixels.
+From 64 pixels up the icon is the whole design; at 32 the M and a smaller
+spark (as the header's tile); at 16, and in the favicon SVG, the M alone.
+Practice is the same icon inverted: Blue on Maize, so the two never look
+alike, even at 16 pixels.
 
 This script writes the SVGs (branding/*.svg, frontend/public/favicon*.svg),
 the header's copy of the geometry (frontend/src/app/brandArt.ts), and draws
@@ -154,7 +152,7 @@ SMALL_FROM = 32  # pixels: from here to 64, the M and a smaller spark ("stack")
 # tile's axis; the pair sits a unit above the geometric middle (the optical
 # centre). The spark's centre is near the M's top-right corner.
 STACK = {
-    "full": {"m": 32.0, "ihs": 27.0, "gap": 4.5, "top": 12.5, "spark": (47.0, 14.0, 12.5)},
+    "full": {"m": 32.0, "ihs": 27.0, "gap": 4.5, "top": 12.5, "spark": (47.0, 15.5, 12.5)},
     "small": {"m": 40.0, "top": 19.5, "spark": (49.5, 20.0, 10.5)},
     "tiny": {"m": 40.0, "top": 19.5, "spark": (50.0, 18.5, 12.0)},
 }
@@ -348,7 +346,7 @@ def brand_ts(mark: str) -> str:
     return (
         "// Written by branding/build.py: change the geometry there and run it again.\n\n"
         'export type ArtPath = { d: string; stroke?: number; cap?: "butt" | "round" };\n\n'
-        "/** The Block M, the University's mark (never altered or merged with another shape). */\n"
+        "/** The Block M, the University's mark, as traced from the prototype. */\n"
         f'export const BLOCK_M = {{ width: {_n(mw)}, height: {_n(mh)}, d: "{m}" }};\n\n'
         "/** The icon's tile as the header draws it, 64 units square (the 32 px icon): the\n"
         " * Block M and, over its top-right corner, the spark, with an edge knocked out of the\n"

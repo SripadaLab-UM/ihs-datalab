@@ -2,7 +2,7 @@
 
 export type ArtPath = { d: string; stroke?: number; cap?: "butt" | "round" };
 
-/** The Block M, the University's mark (never altered or merged with another shape). */
+/** The Block M, the University's mark, as traced from the prototype. */
 export const BLOCK_M = { width: 132, height: 104, d: "M0 0 46 0 66 52 86 0 132 0 132 24 119 24 119 82 132 82 132 104 81 104 81 82 92 82 92 30.5 72.5 82 59.5 82 40 30.5 40 82 51 82 51 104 0 104 0 82 13 82 13 24 0 24Z" };
 
 /** The icon's tile as the header draws it, 64 units square (the 32 px icon): the
