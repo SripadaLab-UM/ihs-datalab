@@ -927,3 +927,10 @@ def test_feedback_contact_without_an_address_or_unset(real, practice):
     for harness in (real, practice):
         shown = harness.client.get("/api/settings/feedback-contact").json()
         assert shown == {"contact": None, "email": None}
+
+
+def test_a_feedback_contact_cant_smuggle_mail_headers():
+    from datalab.api.settings import _EMAIL
+
+    found = _EMAIL.search("Maintainer (a%0ABcc%3Aevil@x.com)")
+    assert found is None or "%" not in found.group(0)
