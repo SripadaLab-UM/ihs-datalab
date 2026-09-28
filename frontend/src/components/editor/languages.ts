@@ -25,6 +25,18 @@ export async function loadLanguage(language: EditorLanguage): Promise<Extension>
       const { r } = await import("@codemirror/legacy-modes/mode/r");
       return StreamLanguage.define(r);
     }
+    case "python": {
+      const { python } = await import("@codemirror/legacy-modes/mode/python");
+      return StreamLanguage.define(python);
+    }
+    case "shell": {
+      const { shell } = await import("@codemirror/legacy-modes/mode/shell");
+      return StreamLanguage.define(shell);
+    }
+    case "json": {
+      const { json } = await import("@codemirror/legacy-modes/mode/javascript");
+      return StreamLanguage.define(json);
+    }
     case "text":
       return [];
   }

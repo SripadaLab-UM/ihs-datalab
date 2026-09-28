@@ -2,7 +2,7 @@
 // them without pulling the editor into the main bundle.
 import type { Extension } from "@codemirror/state";
 
-export type EditorLanguage = "sql" | "yaml" | "markdown" | "r" | "text";
+export type EditorLanguage = "sql" | "yaml" | "markdown" | "r" | "python" | "shell" | "json" | "text";
 
 /** A problem to mark in the text: 1-based line and column, as a checker reports them. */
 export interface EditorDiagnostic {

@@ -20,6 +20,9 @@ export function languageOf(path: string): EditorLanguage {
   if (ext === "yml" || ext === "yaml") return "yaml";
   if (ext === "r") return "r";
   if (ext === "sql") return "sql";
+  if (ext === "py") return "python";
+  if (ext === "sh" || ext === "bash") return "shell";
+  if (ext === "json") return "json";
   return "text";
 }
 

@@ -94,6 +94,30 @@ says "one of the turn's commands". The chain describes the latest
 checkpoint, not the file as it may be now. Nothing here shows data: no query
 rows and no command output.
 
+## The Code tab
+
+**Code** beside the chat lists the scripts, SQL and notebooks the agent
+wrote or changed in this conversation, newest first, marked **new** or
+**modified**, with the turn each last changed in. Copies of the lab's
+repositories that it left alone aren't listed unless you ask.
+
+Open one to read it, highlighted. **Version** picks any saved version, and
+**Diff with previous** (or **Diff with…**) shows what changed. Each version
+says which copy it is: **Current file in the workspace**, or **Saved at
+turn N**, a snapshot from a [checkpoint](glossary.md#checkpoint), not the
+live file. A notebook shows its cells but never their outputs, which can
+hold data.
+
+The agent saves the code behind a result as a named script and runs it,
+for example:
+
+```sh
+Rscript /work/scripts/steps_by_week.R
+```
+
+Code it ran without saving a file is under **Inline code**, and **Show in
+the activity** opens that step in "How this answer was made".
+
 ## The Queries tab
 
 In a data session, **Queries** beside the chat is the

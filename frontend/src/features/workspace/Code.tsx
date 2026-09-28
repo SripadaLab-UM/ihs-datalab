@@ -332,12 +332,12 @@ export function SnapshotLabel({ file, version }: { file: CodeFile; version: Code
       <Icon name={current ? "file" : "history"} size={13} />
       {current ? (
         <>
-          <b className="font-medium">Current file in the workspace</b>
+          <b className="font-medium">Current file in the workspace</b>{" "}
           <span className="text-muted">· as saved after {version.turn != null ? `turn ${version.turn}` : "the latest checkpoint"}</span>
         </>
       ) : (
         <>
-          <b className="font-medium">{saved}</b>
+          <b className="font-medium">{saved}</b>{" "}
           <span>
             · snapshot, not the live file{!file.current && version === file.versions.at(-1) ? " (it has since been deleted)" : ""}
           </span>

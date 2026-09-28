@@ -120,6 +120,12 @@ palette that follows the system setting.
   text, with problems marked by line and column) and `DiffView`. Both use the
   paper tokens, so they follow light and dark, and load as their own chunk.
   Syntax is weight and italics, not colour; only problems are coloured.
+- `components/code`: `CodeBlock` (and `HighlightedCode`, for a Markdown
+  block's own `<code>`) and `CodeDiff`, for code that's shown, not edited:
+  answers, guides, commands, queries, the file viewer and the Code tab.
+  Static highlighting with CodeMirror's parsers (each language its own
+  chunk), in the same style as the editor (`.tok-*` in index.css). Tokens
+  are React text nodes, never HTML; code over 200 KB is shown plain.
 
 ## Cursor, hover and focus
 

@@ -6,6 +6,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Conversation } from "@/api/client";
 import { ShowQueryContext } from "@/components/chat/provenance";
+import { SHOW_STEP } from "@/components/chat/showStep";
 
 import { WorkspacePage } from "./WorkspacePage";
 
@@ -19,6 +20,17 @@ vi.mock("@/api/client", () => ({
     dataAccessed: vi.fn(),
     health: vi.fn(),
     fileUrl: vi.fn(() => "/x"),
+  },
+}));
+vi.mock("@/api/code", () => ({
+  codeApi: {
+    list: vi.fn(async () => ({
+      files: [],
+      inline: [{ id: "c9", step: "cmd-c9", turn: 1, language: "python", code: "print(1)", truncated: false, exit_code: 0 }],
+      unchanged: 0,
+      more: 0,
+      latest_checkpoint: 1,
+    })),
   },
 }));
 vi.mock("@/components/chat/DockedChat", () => ({
@@ -72,4 +84,32 @@ it("opens the side panel's drawer on a narrower window to show a query asked for
     return found;
   });
   expect(panel).toContainElement(entry);
+});
+
+it("closes the side panel's drawer to show a step of the agent's work in the chat", async () => {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter initialEntries={["/workspace/c1"]}>
+        <Routes>
+          <Route path="workspace/:conversationId" element={<WorkspacePage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const panel = document.getElementById("conversation-files")!;
+  // Opened (as a query asked for opens it), then on its Code tab.
+  const opener = await screen.findByRole("button", { name: "in the Queries tab" });
+  opener.focus();
+  fireEvent.click(opener);
+  expect(panel).not.toHaveClass("hidden");
+  fireEvent.click(screen.getByRole("tab", { name: "Code" }));
+  const asked: string[] = [];
+  const listen = (event: Event) => asked.push((event as CustomEvent<{ key: string }>).detail.key);
+  window.addEventListener(SHOW_STEP, listen);
+  fireEvent.click(await screen.findByRole("button", { name: /Show in the activity/ }));
+  window.removeEventListener(SHOW_STEP, listen);
+  expect(asked).toEqual(["cmd-c9"]);
+  expect(panel).toHaveClass("hidden");
+  // Focus is left to the step: not sent back to what opened the drawer.
+  expect(document.activeElement).not.toBe(opener);
 });

@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { api, type Conversation, type Mode } from "@/api/client";
 import { DockedChat } from "@/components/chat/DockedChat";
 import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
+import { SHOW_STEP } from "@/components/chat/showStep";
 import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
@@ -58,6 +59,16 @@ export function WorkspacePage() {
     };
     window.addEventListener(SHOW_QUERY, show);
     return () => window.removeEventListener(SHOW_QUERY, show);
+  }, []);
+  // A step of the agent's work asked for (the Code tab's inline code): it's in
+  // the chat, so a drawer over the chat closes, leaving focus on the step.
+  useEffect(() => {
+    const show = () => {
+      opener.current = null;
+      setDrawer(null);
+    };
+    window.addEventListener(SHOW_STEP, show);
+    return () => window.removeEventListener(SHOW_STEP, show);
   }, []);
   useEffect(() => {
     if (!railOpen && !panelOpen) return;

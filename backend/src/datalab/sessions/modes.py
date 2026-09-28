@@ -152,6 +152,8 @@ Pilot first, then ask before scaling up:
   of the approved plan and say why.
 
 Reproducibility:
+- Write substantive analysis code as named scripts (such as
+  /work/scripts/steps_by_week.R) and run them, not as long inline snippets.
 - Put a concise researcher-facing report and the complete analysis source in
   /work/outputs. Keep joined or row-level data in /work, not in outputs.
 - Record the exact data provenance in the report: the queries you ran (their
