@@ -410,6 +410,14 @@ access. It never gains it.
     deliveries say "Saved to *name* (on this computer)", and for a sync
     folder, that the app will upload it when it's running and signed in,
     which DataLab can't confirm. Removing a folder only forgets it.
+    Writes can't be redirected after the check: the checked folder is
+    opened (`O_DIRECTORY | O_NOFOLLOW`), must be the same folder (device and
+    inode) the check saw, and every folder, file and removal is made
+    relative to that open folder (`dir_fd`), never by path; a subfolder that
+    is a link is refused. (Windows, which lacks `dir_fd`, re-checks the
+    folder's identity before each step.) DataLab's own data folder is
+    recognised by what's on disk as well as by name, so another spelling
+    (case, composed or decomposed accents, a link) doesn't get past.
   - **Exported files can't act on the computer by themselves.** The agent's
     files go under `files/`, apart from DataLab's report and manifest. Types
     that run code or open something when double-clicked (`.bat`, `.lnk`,

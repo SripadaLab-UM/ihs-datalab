@@ -30,7 +30,6 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 
 import yaml
@@ -618,14 +617,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                     name=name,
                     path=where,
                     available=practice
-                    or bool(
-                        destination
-                        and destination.offered
-                        and export_folders.check_folder(
-                            Path(destination.path),
-                            protected=export_folders.protected_folders(settings),
-                        ).ready
-                    ),
+                    or bool(destination and export_folders.usable(settings, destination)),
                 )
             )
         return out

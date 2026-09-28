@@ -362,8 +362,10 @@ async def test_the_dated_delivery_folder_is_named_after_the_workflow(tmp_path):
 )
 def test_the_delivery_title_still_loses_an_identifier(tmp_path, name, title):
     assert runner_module.delivery_title(name) == title
-    folder = exports._new_folder(tmp_path, runner_module.delivery_title(name), "run_x")
-    assert folder.name.endswith(f" {title} run_x"), folder.name
+    with exports.Folder.at(tmp_path) as root:
+        made, folder = exports._new_folder(root, runner_module.delivery_title(name), "run_x")
+        folder.close()
+    assert made.endswith(f" {title} run_x"), made
 
 
 async def test_real_profile_delivers_to_the_folder_its_key_names(tmp_path, monkeypatch):

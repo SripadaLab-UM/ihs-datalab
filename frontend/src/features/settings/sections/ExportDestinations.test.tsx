@@ -29,6 +29,7 @@ function folder(overrides: Partial<Destination> = {}): Destination {
     available: true,
     status: "ready",
     status_message: null,
+    warning: null,
     location: "sync_folder",
     sync_provider: "dropbox",
     sync_provider_name: "Dropbox",
@@ -96,6 +97,7 @@ it("Test folder: saved locally, and never claims Dropbox uploaded it", async () 
     ok: true,
     status: "ready",
     message: null,
+    note: null,
     test_file: "datalab-test-20260928-101500-abc123.txt",
     removed: true,
     saved_to: "Saved to Lab Dropbox (on this computer)",
@@ -121,6 +123,7 @@ it("a failed test says why", async () => {
     ok: false,
     status: "not_writable",
     message: "Your account can't save files in this folder.",
+    note: null,
     test_file: null,
     removed: true,
     saved_to: null,
@@ -137,7 +140,7 @@ it("unavailable folders say what's wrong in plain words", async () => {
   vi.mocked(api.destinations).mockResolvedValue([
     folder({ id: "a", name: "Gone", status: "missing", available: false, status_message: "Check that the Dropbox app is installed and signed in." }),
     folder({ id: "b", name: "Locked", status: "not_writable", available: false, status_message: "Your account can't save files in this folder." }),
-    folder({ id: "c", name: "Cloud only", status: "online_only", available: false, status_message: "This folder is online-only in Dropbox." }),
+    folder({ id: "c", name: "Cloud only", warning: "This folder may be online-only in Dropbox. Press Test folder to check." }),
     folder({ id: "d", name: "Inside DataLab", status: "refused", available: false, location: "this_computer", sync_provider: null, sync_provider_name: null, status_message: "This is inside DataLab's own data folder, which can't be an export folder." }), // prettier-ignore
     folder({ id: "e", name: "Old drive", status: "missing", available: false, location: "external_drive", sync_provider: null, sync_provider_name: null, status_message: "The drive this folder is on isn't connected." }), // prettier-ignore
     folder({ id: "f", name: "Paused", offered: false, available: false }),
@@ -146,7 +149,7 @@ it("unavailable folders say what's wrong in plain words", async () => {
   const expectations: [string, string, string | null][] = [
     ["Gone", "Not found", "Dropbox app is installed"],
     ["Locked", "Can't save here", "can't save files"],
-    ["Cloud only", "Online-only", "online-only in Dropbox"],
+    ["Cloud only", "May be online-only", "online-only in Dropbox"],
     ["Inside DataLab", "Not allowed", "DataLab's own data folder"],
     ["Old drive", "Not found", "isn't connected"],
     ["Paused", "Turned off", null],
@@ -211,6 +214,7 @@ it("practice: its own folder can be tested; Dropbox setup is on the real DataLab
     ok: true,
     status: "ready",
     message: null,
+    note: null,
     test_file: "datalab-test-x.txt",
     removed: true,
     saved_to: "Saved to Practice exports (on this computer)",
@@ -226,4 +230,25 @@ it("practice: its own folder can be tested; Dropbox setup is on the real DataLab
   expect(await screen.findByText(/Practice DataLab saves only to its own practice folder/)).toBeTruthy();
   fireEvent.click(within(row).getByRole("button", { name: "Test folder" }));
   expect((await within(row).findByRole("status")).textContent).toContain("Saved locally ✓");
+});
+
+it("a test of a folder that's switched off says so", async () => {
+  vi.mocked(api.destinations).mockResolvedValue([folder({ offered: false, available: false })]);
+  vi.mocked(api.testDestination).mockResolvedValue({
+    ok: true,
+    status: "ready",
+    message: null,
+    note: "This folder is switched off as a destination, so exports and workflows won't use it until you turn it on.",
+    test_file: "datalab-test-y.txt",
+    removed: true,
+    saved_to: "Saved to Lab Dropbox (on this computer)",
+    sync_note: null,
+    destination: folder(),
+  });
+  show();
+  const row = await screen.findByRole("listitem", { name: "Lab Dropbox" });
+  fireEvent.click(within(row).getByRole("button", { name: "Test folder" }));
+  const outcome = await within(row).findByRole("status");
+  expect(outcome.textContent).toContain("Saved locally ✓");
+  expect(outcome.textContent).toContain("switched off as a destination");
 });

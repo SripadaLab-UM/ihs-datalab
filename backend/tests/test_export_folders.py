@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from datalab import export_folders
+from datalab import export_folders, exports
 from datalab.api.workflows import _delivery_fields
 from datalab.app import create_app
 from datalab.export_folders import Target, check_folder, check_new_folder, describe, sync_roots
@@ -79,7 +79,18 @@ def test_sync_folders_are_found_by_name_on_a_mac(home, monkeypatch):
     assert roots[0].provider == "dropbox"  # Dropbox first
     # Only the home folder and CloudStorage were listed, never a sync folder's insides.
     assert set(scanned) == {str(home), str(home / "Library" / "CloudStorage")}
-    assert all(":" in r.id and "/" not in r.id for r in roots)
+    # Ids are unique, and name where each is under the home folder.
+    ids = [r.id for r in roots]
+    assert len(set(ids)) == len(ids)
+    assert "dropbox:Library/CloudStorage/Dropbox-UniversityofMichigan" in ids
+
+
+def test_place_ids_dont_collide(home):
+    """~/Dropbox and ~/Library/CloudStorage/Dropbox are two different folders here."""
+    cloud(home, "Dropbox")
+    (home / "Dropbox").mkdir()
+    ids = [r.id for r in sync_roots(home, "darwin")]
+    assert sorted(ids) == ["dropbox:Dropbox", "dropbox:Library/CloudStorage/Dropbox"]
 
 
 def test_sync_folders_on_windows_are_in_the_home_folder(home, monkeypatch):
@@ -169,14 +180,21 @@ def test_online_only_folders(home, monkeypatch):
     assert export_folders._online_only(Stat())  # type: ignore[arg-type]
     Stat.st_flags, Stat.st_file_attributes = 0, 0x00400000  # RECALL_ON_DATA_ACCESS
     assert export_folders._online_only(Stat())  # type: ignore[arg-type]
+    # "Always keep on this device" in OneDrive: not online-only.
+    Stat.st_file_attributes = 0x00400000 | 0x00080000
+    assert not export_folders._online_only(Stat())  # type: ignore[arg-type]
     Stat.st_file_attributes = 0
     assert not export_folders._online_only(Stat())  # type: ignore[arg-type]
 
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
     monkeypatch.setattr(export_folders, "_online_only", lambda info: True)
+    # A warning, not a refusal: saving usually works, and Test settles it.
     checked = check_folder(folder, protected=[])
-    assert checked.status == "online_only" and "online-only in Dropbox" in (checked.message or "")
+    assert checked.status == "ready" and checked.message is None
+    assert "online-only in Dropbox" in (checked.warning or "")
+    assert "Test folder" in (checked.warning or "")
+    assert export_folders.write_test_file(folder, protected=[]).ok
 
 
 def test_datalab_and_system_folders_are_refused(home, tmp_path, monkeypatch):
@@ -232,7 +250,9 @@ def test_the_test_writes_a_synthetic_file_and_removes_it(home, monkeypatch):
 
     def unlink(path, *args, **kwargs):
         seen["name"] = Path(path).name
-        seen["text"] = Path(path).read_text(encoding="utf-8")
+        fd = os.open(path, os.O_RDONLY, dir_fd=kwargs.get("dir_fd"))
+        with os.fdopen(fd, encoding="utf-8") as reader:
+            seen["text"] = reader.read()
         real_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "unlink", unlink)
@@ -356,6 +376,7 @@ def test_adding_naming_testing_and_removing_a_dropbox_folder(
         assert tested.status_code == 200
         body = tested.json()
         assert body["ok"] and body["removed"] and body["test_file"].startswith("datalab-test-")
+        assert body["note"] is None
         assert body["saved_to"] == "Saved to Lab Dropbox (on this computer)"
         assert body["sync_note"].startswith("Dropbox will upload it when its app is running")
         no_sync_words(tested)
@@ -409,6 +430,9 @@ def test_adding_naming_testing_and_removing_a_dropbox_folder(
                   "checkpoint": shown(client, cid)},
         )  # fmt: skip
         assert refused.status_code == 422 and "turned off" in refused.json()["detail"]
+        # Test still works, and says it's switched off.
+        tested_off = client.post(f"/api/export-destinations/{did}/test").json()
+        assert tested_off["ok"] and "switched off" in tested_off["note"]
         client.patch(f"/api/export-destinations/{did}", json={"offered": True})
 
         # Removing forgets the folder; it and everything in it stay.
@@ -510,3 +534,133 @@ def prepare(app, client) -> str:
 
 def shown(client, cid: str) -> int:
     return client.get(f"/api/conversations/{cid}/files").json()[0]["checkpoint"]
+
+
+# Folders swapped after they were checked ---------------------------------------
+
+
+def swap_for_link(folder: Path, elsewhere: Path) -> Path:
+    """Move `folder` aside and put a link to `elsewhere` in its place."""
+    aside = folder.with_name(folder.name + " (moved)")
+    folder.rename(aside)
+    folder.symlink_to(elsewhere)
+    return aside
+
+
+def test_an_export_to_a_folder_swapped_after_its_check_is_refused(home, tmp_path):
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    fake_data = tmp_path / "fake-datalab-data"
+    fake_data.mkdir()
+    checked = check_folder(folder, protected=[fake_data])
+    target = Target("dest_1", "Lab", folder, "dropbox", checked.identity)
+    swap_for_link(folder, fake_data)
+    with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
+        export_folders.open_target(target)
+    # Swapped for another real folder: refused too.
+    folder.unlink()
+    folder.mkdir()
+    with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
+        export_folders.open_target(target)
+    assert list(fake_data.iterdir()) == []
+
+
+def test_a_swap_during_an_export_doesnt_redirect_it(home, tmp_path):
+    """Once open, everything goes into the folder that was checked, wherever it moves."""
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    fake_data = tmp_path / "fake-datalab-data"
+    fake_data.mkdir()
+    checked = check_folder(folder, protected=[fake_data])
+    target = Target("dest_1", "Lab", folder, "dropbox", checked.identity)
+    with export_folders.open_target(target) as opened:
+        aside = swap_for_link(folder, fake_data)
+        result = exports.export(
+            opened, title="t", sources=[], extra_files={"a/b.txt": b"synthetic"}, about={}
+        )
+    assert list(fake_data.iterdir()) == []
+    [made] = list(aside.iterdir())
+    assert (made / "a" / "b.txt").read_bytes() == b"synthetic"
+    assert (made / exports.MANIFEST).is_file() and result.manifest_sha256
+
+
+def test_the_test_write_never_follows_a_swapped_folder(home, tmp_path, monkeypatch):
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    fake_data = tmp_path / "fake-datalab-data"
+    fake_data.mkdir()
+    real_check = export_folders.check_folder
+
+    def check_then_swap(path, **kwargs):
+        checked = real_check(path, **kwargs)
+        swap_for_link(folder, fake_data)
+        return checked
+
+    monkeypatch.setattr(export_folders, "check_folder", check_then_swap)
+    result = export_folders.write_test_file(folder, protected=[fake_data])
+    assert not result.ok and result.status == "refused"
+    assert list(fake_data.iterdir()) == []
+
+
+def test_the_test_leaves_a_file_that_isnt_its_own(home, monkeypatch):
+    """Removed only if it's still the file it wrote."""
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    real_lstat = exports.Folder.lstat
+
+    def replaced(self, name):
+        (folder / name).unlink()
+        (folder / name).write_text("the person's own file")
+        return real_lstat(self, name)
+
+    monkeypatch.setattr(exports.Folder, "lstat", replaced)
+    result = export_folders.write_test_file(folder, protected=[])
+    assert result.ok and not result.removed
+    [left] = list(folder.iterdir())
+    assert left.read_text() == "the person's own file"
+
+
+def test_a_delivery_subfolder_that_is_a_link_is_refused(home, tmp_path):
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (folder / "weekly").symlink_to(elsewhere)
+    with exports.Folder.at(folder) as root, pytest.raises(exports.ExportError):
+        root.child("weekly")
+
+
+def test_datalab_data_folder_spelt_decomposed_is_still_refused(home, tmp_path):
+    data = tmp_path / "Caf\u00e9 data"  # composed é
+    (data / "exports").mkdir(parents=True)
+    decomposed = tmp_path / "Cafe\u0301 data" / "exports"
+    if not decomposed.exists():  # a disk that tells them apart (Linux)
+        decomposed.mkdir(parents=True)
+    with pytest.raises(NotAttachable, match="DataLab's own data folder"):
+        check_new_folder(decomposed, protected=[data])
+    assert check_folder(decomposed, protected=[data]).status == "refused"
+
+
+def test_the_same_folder_by_another_name_is_refused(home, tmp_path):
+    """Compared by what's on disk: a hard-to-spot second path to the data folder."""
+    data = tmp_path / "datalab-data"
+    (data / "exports").mkdir(parents=True)
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    link = other / "looks-harmless"
+    link.symlink_to(data)
+    with pytest.raises(NotAttachable):
+        check_new_folder(link / "exports", protected=[data])
+
+
+def test_usable_means_switched_on_and_ready(settings, home):
+    folder = cloud(home, "Dropbox") / "IHS"
+    folder.mkdir()
+    on = exports.Destination("d1", "Lab", str(folder), "then")
+    assert export_folders.usable(settings, on)
+    assert not export_folders.usable(settings, dataclasses.replace(on, offered=False))
+    gone = dataclasses.replace(on, path=str(home / "gone"))
+    assert not export_folders.usable(settings, gone)
+    inside = settings.data_dir / "exports"
+    inside.mkdir(parents=True)
+    assert not export_folders.usable(settings, dataclasses.replace(on, path=str(inside)))

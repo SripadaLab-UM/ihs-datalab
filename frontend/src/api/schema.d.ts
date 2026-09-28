@@ -2193,9 +2193,11 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "online_only" | "refused";
+            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "refused";
             /** Status Message */
             status_message: string | null;
+            /** Warning */
+            warning: string | null;
             /**
              * Location
              * @enum {string}
@@ -2503,9 +2505,11 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "online_only" | "refused";
+            status: "ready" | "missing" | "not_a_folder" | "not_writable" | "refused";
             /** Message */
             message: string | null;
+            /** Note */
+            note: string | null;
             /** Test File */
             test_file: string | null;
             /** Removed */

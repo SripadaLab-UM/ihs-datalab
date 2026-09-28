@@ -28,7 +28,7 @@ from datalab.export_folders import Location, Provider, Status
 from datalab.exports import Destination, DestinationStore, ExportError, ExportSource
 from datalab.sessions import picker
 from datalab.sessions.checkpoints import UnsafePath, check_relative, open_workspace_file
-from datalab.sessions.inputs import AttachmentStore, NotAttachable
+from datalab.sessions.inputs import AttachmentStore, NotAttachable, _same
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import scrub_title
@@ -53,8 +53,10 @@ class DestinationOut(BaseModel):
     where: str  # the path with the home folder as ~
     # Offered and ready now: what export and delivery choosers may pick.
     available: bool
-    status: Status  # ready, missing, not_a_folder, not_writable, online_only, refused
+    status: Status  # ready, missing, not_a_folder, not_writable, refused
     status_message: str | None  # why it isn't ready, in plain words
+    # Ready, but worth knowing: it may be online-only in the sync app. Test settles it.
+    warning: str | None
     location: Location  # this_computer, sync_folder, external_drive
     sync_provider: Provider | None  # dropbox, onedrive, box, google_drive, icloud
     sync_provider_name: str | None  # "Dropbox"
@@ -95,6 +97,8 @@ class FolderTestOut(BaseModel):
     ok: bool
     status: Status
     message: str | None  # why it failed
+    # Said as well, e.g. that the folder is switched off as a destination.
+    note: str | None
     test_file: str | None  # the synthetic file's name
     removed: bool  # the test file is gone again
     saved_to: str | None  # "Saved to Lab Dropbox (on this computer)", when ok
@@ -143,6 +147,7 @@ def destination_out(settings: Settings, destination: Destination) -> Destination
         path, protected=export_folders.protected_folders(settings)
     )
     info = export_folders.describe(path)
+    # The same as export_folders.usable(), from the check made here.
     return DestinationOut(
         id=destination.id,
         name=destination.name,
@@ -151,6 +156,7 @@ def destination_out(settings: Settings, destination: Destination) -> Destination
         available=destination.offered and checked.ready,
         status=checked.status,
         status_message=checked.message,
+        warning=checked.warning,
         location=info.location,
         sync_provider=info.sync_provider,
         sync_provider_name=export_folders.PROVIDER_NAMES.get(info.sync_provider or ""),
@@ -170,6 +176,7 @@ def practice_destination_out(settings: Settings) -> DestinationOut:
         available=True,
         status="ready",
         status_message=None,
+        warning=None,
         location="this_computer",
         sync_provider=None,
         sync_provider_name=None,
@@ -280,7 +287,7 @@ def build_exports_router(
             real = export_folders.check_new_folder(chosen[0], protected=protected)
         except NotAttachable as error:
             raise HTTPException(422, str(error)) from error
-        if any(Path(d.path) == real for d in destinations.list()):
+        if any(_same(Path(d.path), real) for d in destinations.list()):
             raise HTTPException(409, "That folder is already an export folder.")
         if name is None:
             name = _free_name(real.name or str(real), destinations)
@@ -312,16 +319,24 @@ def build_exports_router(
                 export_folders.write_test_file, target.path, protected=protected, skip_checks=True
             )
             shown = practice_destination_out(settings)
+            note = None
         else:
             destination = find(destination_id)
             result = await asyncio.to_thread(
                 export_folders.write_test_file, Path(destination.path), protected=protected
             )
             shown = destination_out(settings, destination)
+            note = (
+                None
+                if destination.offered
+                else "This folder is switched off as a destination, so exports and workflows "
+                "won't use it until you turn it on."
+            )
         return FolderTestOut(
             ok=result.ok,
             status=result.status,
             message=result.message,
+            note=note,
             test_file=result.test_file,
             removed=result.removed,
             saved_to=export_folders.saved_to(shown.name) if result.ok else None,
@@ -373,14 +388,16 @@ def build_exports_router(
             extra = {}
             if report is not None:
                 extra["conversation.html"] = exports.report_document(title, report.html, report.css)
-            return exports.export(
-                folder,
-                title=title,
-                tag=conversation.id,
-                sources=sources,
-                extra_files=extra,
-                about=about,
-            )
+            # Written inside the very folder that was checked.
+            with export_folders.open_target(target) as opened:
+                return exports.export(
+                    opened,
+                    title=title,
+                    tag=conversation.id,
+                    sources=sources,
+                    extra_files=extra,
+                    about=about,
+                )
 
         try:
             result = await asyncio.to_thread(run)

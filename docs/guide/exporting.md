@@ -27,15 +27,19 @@ Then press **Test folder**. DataLab saves a small synthetic test file there,
 reads it back and removes it, and says **Saved locally ✓**. That shows
 DataLab can save there. It doesn't show that Dropbox has uploaded anything:
 the Dropbox app uploads files when it's running and signed in, and DataLab
-can't see whether it has. After every export DataLab says "Saved to *your
+can't see whether it has. In a shared Dropbox folder, the people it's shared
+with may briefly see the test file appear and disappear; it holds no study
+data. After every export DataLab says "Saved to *your
 folder's name* (on this computer)", and for a Dropbox folder adds that
 Dropbox will upload it.
 
 A folder that can't be used says why: it isn't there (Dropbox not installed
 or signed in, the folder moved, or a separate drive unplugged), your account
-can't save in it, it's online-only in your sync app, or it's somewhere
+can't save in it, or it's somewhere
 DataLab never writes (system folders, a whole home folder, DataLab's own
-data folder, or a link that leads out of your Dropbox). **Rename** changes
+data folder, or a link that leads out of your Dropbox). A folder that may be
+online-only in your sync app gets a warning rather than a refusal: saving to
+it usually works, and **Test folder** tells you. **Rename** changes
 the name exports and workflows show; **Remove** only makes DataLab forget
 the folder, and never deletes it or anything in it. Untick **Offer for
 exports and workflow deliveries** to keep a folder without anything being

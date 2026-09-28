@@ -15,7 +15,6 @@ const STATUS_LABELS: Record<Destination["status"], string> = {
   missing: "Not found",
   not_a_folder: "Not a folder",
   not_writable: "Can't save here",
-  online_only: "Online-only",
   refused: "Not allowed",
 };
 
@@ -207,6 +206,7 @@ function FolderRow({ folder, onChanged }: { folder: Destination; onChanged: () =
         ) : (
           <Chip tone="attn">Turned off</Chip>
         )}
+        {ready && folder.warning && <Chip tone="attn">May be online-only</Chip>}
         {!folder.practice && !renaming && (
           <span className="ml-auto flex flex-wrap items-center gap-1">
             <Button variant="ghost" className="px-2 py-0.5 text-xs" onClick={() => test.mutate()} disabled={test.isPending}>
@@ -236,6 +236,7 @@ function FolderRow({ folder, onChanged }: { folder: Destination; onChanged: () =
       </p>
       <p className="text-xs text-muted">{folder.location_note}</p>
       {!ready && folder.status_message && <p className="text-xs text-danger">{folder.status_message}</p>}
+      {ready && folder.warning && <p className="text-xs text-attn">{folder.warning}</p>}
       {folder.workflow_keys.length > 0 && (
         <p className="text-xs text-muted">
           Workflows deliver here as{" "}
@@ -301,6 +302,7 @@ function TestOutcome({ result }: { result: FolderTest }) {
         </span>
       </p>
       {result.sync_note && <p className="mt-0.5 text-muted">{result.sync_note}</p>}
+      {result.note && <p className="mt-0.5 text-attn">{result.note}</p>}
     </div>
   );
 }

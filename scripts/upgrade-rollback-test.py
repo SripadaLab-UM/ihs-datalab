@@ -98,6 +98,8 @@ def run(ref: str, scratch: Path) -> None:
     expect(backup["migrations"] == old_names, "the backup holds the database from before")
     expect(snapshot(data / "backups" / backup["folder"] / "datalab.sqlite") == before, "…exactly")
     expect(snapshot(database, like=before) == before, "every row survived the upgrade")
+    if "0011_export_folders.sql" in new_names and "0011_export_folders.sql" not in old_names:
+        check_new_columns(database)
 
     step("A conversation and a query are recorded, then the previous release rolls back")
     connection = sqlite3.connect(database, isolation_level=None)
@@ -168,18 +170,22 @@ def check_migrations_only_go_forward(ref: str, new: list[str]) -> None:
 
 
 def fill(database: Path) -> None:
-    """Synthetic conversations, messages, and queries, in the 0001/0002 layout."""
+    """Synthetic conversations, messages, queries, export folders and a delivered
+    workflow run, in whichever of those tables the database has. Columns are
+    named: later migrations add columns to these tables."""
     connection = sqlite3.connect(database, isolation_level=None)
     tables = {r[0] for r in connection.execute("SELECT name FROM sqlite_master")}
     for n in range(1, 4):
         when = f"2026-09-0{n}T10:00:00"
         if "conversations" in tables:
             connection.execute(
-                "INSERT INTO conversations VALUES (?, 'data', 'explore', ?, 'gpt-5.5', ?, ?)",
+                "INSERT INTO conversations (id, kind, mode, title, model, created_at, updated_at) "
+                "VALUES (?, 'data', 'explore', ?, 'gpt-5.5', ?, ?)",
                 (f"c{n}", f"Synthetic question {n}", when, when),
             )
             connection.execute(
-                "INSERT INTO events VALUES (?, 1, ?, 'user_message', ?)",
+                "INSERT INTO events (conversation_id, seq, created_at, type, data_json) "
+                "VALUES (?, 1, ?, 'user_message', ?)",
                 (f"c{n}", when, json.dumps({"text": f"How many in cohort {n}?"})),
             )
         connection.execute(
@@ -187,7 +193,52 @@ def fill(database: Path) -> None:
             "row_count) VALUES (?, ?, ?, ?, 'succeeded', 'SELECT COUNT(*) FROM IHS_2025.T', 1)",
             (f"q{n}", f"c{n}", when, when),
         )
+        if "export_destinations" in tables:
+            connection.execute(
+                "INSERT INTO export_destinations (id, name, path, added_at) VALUES (?, ?, ?, ?)",
+                (f"dest_{n}", f"Synthetic folder {n}", f"/synthetic/exports/{n}", when),
+            )
+    if "workflow_run_deliveries" in tables:
+        when = "2026-09-04T10:00:00"
+        connection.execute(
+            "INSERT INTO workflow_runs (id, workflow_name, mode, status, started_at, finished_at, "
+            "started_by, workflow_path, workflow_source, workflow_blob, workflow_text, image_ref, "
+            "image_digest, image_platform, host_platform, r_packages_sha256, runner_version, "
+            "runtime_json, params_json, seed, reads_json, run_dir, delivery_status, "
+            "delivery_message) VALUES ('run_20260904T100000_aaaaaa', 'synthetic_extract', 'run', "
+            "'succeeded', ?, ?, 'Synthetic Person <s@example.org>', 'workflows/synthetic.yaml', "
+            "'file', 'sha256:00', 'name: synthetic_extract', 'datalab-r:dev', 'sha256:11', "
+            "'linux/arm64', 'linux/arm64', 'sha256:22', '0.0.0', '{}', '{}', 1, '[]', "
+            "'runs/run_20260904T100000_aaaaaa', 'delivered', '1 file delivered.')",
+            (when, when),
+        )
+        connection.execute(
+            "INSERT INTO workflow_run_deliveries (id, run_id, destination_key, destination_id, "
+            "destination_path, folder, files_json, manifest_sha256, delivered_at) VALUES "
+            "('dl_1', 'run_20260904T100000_aaaaaa', 'synthetic-dropbox', 'dest_1', "
+            "'/synthetic/exports/1', '/synthetic/exports/1/2026-09-04 1000 synthetic', "
+            "'[]', 'sha256:33', ?)",
+            (when,),
+        )
     connection.close()
+
+
+def check_new_columns(database: Path) -> None:
+    """What 0011 added: folders offered by default, and no name or sync app
+    recorded for deliveries made before it."""
+    connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+    try:
+        offered = [r[0] for r in connection.execute("SELECT offered FROM export_destinations")]
+        expect(offered and set(offered) == {1}, "export folders are offered after 0011")
+        delivered = connection.execute(
+            "SELECT destination_name, sync_provider FROM workflow_run_deliveries"
+        ).fetchall()
+        expect(
+            delivered and all(tuple(r) == (None, None) for r in delivered),
+            "…and earlier deliveries have no folder name or sync app recorded",
+        )
+    finally:
+        connection.close()
 
 
 def snapshot(database: Path, like: dict | None = None) -> dict:

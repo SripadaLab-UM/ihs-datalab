@@ -23,7 +23,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from datalab import exports
+from datalab import export_folders, exports
 from datalab.api.exports import ExportOut, export_out, export_target
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, QueryRecord
@@ -349,9 +349,10 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         )
 
         def run() -> exports.ExportResult:
-            return exports.export(
-                folder, title="SQL Playground", tag=record.id, sources=[source], about=about
-            )
+            with export_folders.open_target(target) as opened:
+                return exports.export(
+                    opened, title="SQL Playground", tag=record.id, sources=[source], about=about
+                )
 
         try:
             done = await asyncio.to_thread(run)

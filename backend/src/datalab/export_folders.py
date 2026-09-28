@@ -29,6 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+from datalab import exports
 from datalab.config import Settings, default_data_dir
 from datalab.exports import Destination, DestinationStore, ExportError
 from datalab.sessions.inputs import NotAttachable, check_attachable
@@ -45,7 +46,9 @@ PROVIDER_NAMES: dict[str, str] = {
 # app's folder, or on a removable or external drive.
 Location = Literal["this_computer", "sync_folder", "external_drive"]
 # Whether DataLab can write there now.
-Status = Literal["ready", "missing", "not_a_folder", "not_writable", "online_only", "refused"]
+# (An online-only folder is "ready" with a warning: writing to it usually
+# works, and Test settles it.)
+Status = Literal["ready", "missing", "not_a_folder", "not_writable", "refused"]
 
 PRACTICE_ID = "practice"
 PRACTICE_NAME = "Practice exports"
@@ -71,10 +74,11 @@ _DROPBOX_MARKERS = (".dropbox", ".dropbox.cache")
 
 # A macOS File Provider file or folder whose contents are only in the cloud.
 _SF_DATALESS = 0x40000000
-# Windows: a cloud placeholder (OneDrive / Dropbox "online-only").
-_WIN_ONLINE_ONLY = (
-    0x00400000 | 0x00040000 | 0x00001000
-)  # RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN, OFFLINE
+# Windows: a cloud placeholder (OneDrive / Dropbox "online-only"):
+# RECALL_ON_DATA_ACCESS, RECALL_ON_OPEN, OFFLINE. Not when PINNED ("Always
+# keep on this device").
+_WIN_ONLINE_ONLY = 0x00400000 | 0x00040000 | 0x00001000
+_WIN_PINNED = 0x00080000
 
 _UNPRINTABLE = re.compile(
     "[\\x00-\\x1f\\x7f\\u0085\\u061c\\u200b-\\u200f\\u2028-\\u202e\\u2060-\\u2069\\ufeff]"
@@ -99,6 +103,10 @@ class SyncRoot:
 class FolderCheck:
     status: Status
     message: str | None  # a plain explanation when it isn't ready
+    # Ready, but worth knowing (an online-only folder): Test settles it.
+    warning: str | None = None
+    # The folder that was checked (device, inode): writes must go to it.
+    identity: exports.Identity | None = None
 
     @property
     def ready(self) -> bool:
@@ -125,6 +133,7 @@ class Target:
     name: str
     path: Path
     sync_provider: Provider | None
+    identity: exports.Identity | None = None
 
 
 # Finding sync folders ------------------------------------------------------
@@ -152,7 +161,10 @@ def sync_roots(home: Path | None = None, platform: str | None = None) -> list[Sy
         if real in seen:
             return
         seen.add(real)
-        found.append(SyncRoot(f"{provider}:{path.name}", provider, label, path))
+        # Named for where it is under the home folder, so ~/Dropbox and
+        # ~/Library/CloudStorage/Dropbox get different ids.
+        where = path.relative_to(home).as_posix() if path.is_relative_to(home) else str(path)
+        found.append(SyncRoot(f"{provider}:{where}", provider, label, path))
 
     if platform == "darwin":
         for name in _names(home / "Library" / "CloudStorage"):
@@ -310,20 +322,47 @@ def check_folder(path: Path, *, protected: list[Path]) -> FolderCheck:
         check_attachable(path, protected=protected)
     except NotAttachable as error:
         return FolderCheck("refused", _refusal(str(error)))
-    if _online_only(info):
-        app = PROVIDER_NAMES.get(sync_provider(path) or "", "your sync app")
-        return FolderCheck(
-            "online_only",
-            f"This folder is online-only in {app}: it isn't kept on this computer. Make it "
-            "available offline (right-click it in Finder or File Explorer), then test again.",
-        )
     if not os.access(path, os.W_OK | os.X_OK):
         return FolderCheck(
             "not_writable",
             "Your account can't save files in this folder. Choose another, or change the "
             "folder's permissions.",
         )
-    return FolderCheck("ready", None)
+    try:
+        again = os.lstat(path)
+    except OSError:
+        return FolderCheck("missing", _missing_reason(path))
+    if exports.identity(again) != exports.identity(info):
+        return FolderCheck("refused", exports.FOLDER_CHANGED)
+    warning = None
+    if _online_only(info):
+        app = PROVIDER_NAMES.get(sync_provider(path) or "", "your sync app")
+        warning = (
+            f"This folder may be online-only in {app}. Saving to it usually works while {app} "
+            "is running; press Test folder to check. To keep it on this computer, make it "
+            "available offline (right-click it in Finder or File Explorer)."
+        )
+    return FolderCheck("ready", None, warning, exports.identity(info))
+
+
+def usable(settings: Settings, destination: Destination) -> bool:
+    """Whether to offer a folder as a choice for exports and workflow deliveries:
+    switched on in Settings, and ready now (there, a folder, writable, not a
+    link, not a system or DataLab folder).
+
+    Every chooser uses this (DestinationOut.available, the Workflows page's
+    destination keys, the Deliver stage), so none lists a folder that's
+    switched off or can't be written to.
+    """
+    if not destination.offered:
+        return False
+    return check_folder(Path(destination.path), protected=protected_folders(settings)).ready
+
+
+def open_target(target: Target) -> exports.Folder:
+    """Open a checked folder for writing: the very folder that was checked, or
+    ExportError. Write through it (exports.export takes it), never by path."""
+    return exports.Folder.at(target.path, expected=target.identity)
 
 
 def check_new_folder(chosen: Path, *, protected: list[Path]) -> Path:
@@ -372,6 +411,8 @@ def _refusal(reason: str) -> str:
 def _online_only(info: os.stat_result) -> bool:
     flags = getattr(info, "st_flags", 0) or 0
     attributes = getattr(info, "st_file_attributes", 0) or 0
+    if attributes & _WIN_PINNED:
+        return False  # "Always keep on this device"
     return bool(flags & _SF_DATALESS) or bool(attributes & _WIN_ONLINE_ONLY)
 
 
@@ -408,59 +449,76 @@ class WriteTest:
 def write_test_file(path: Path, *, protected: list[Path], skip_checks: bool = False) -> WriteTest:
     """Save a small synthetic file in the folder, read it back, and remove it.
 
+    Everything goes through the folder opened just after it was checked, so
+    a folder swapped in the meantime is refused, not written to. The file is
+    read back through the handle that wrote it, and removed only if it's
+    still that file.
+
     `skip_checks` is for practice's own folder, which lives in DataLab's
     data folder and so would be refused as an export folder anywhere else.
     """
+    expected = None
     if not skip_checks:
         checked = check_folder(path, protected=protected)
         if not checked.ready:
             return WriteTest(False, checked.status, checked.message, None, True)
+        expected = checked.identity
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     name = f"datalab-test-{stamp}-{secrets.token_hex(3)}.txt"
-    target = path / name
     body = TEST_TEXT.encode()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(target, flags, 0o644)
-    except PermissionError:
-        return WriteTest(
-            False,
-            "not_writable",
-            "Your account can't save files in this folder. Choose another, or change the "
-            "folder's permissions.",
-            name,
-            True,
-        )
-    except OSError as error:
-        return WriteTest(
-            False,
-            "not_writable",
-            f"DataLab couldn't save a file here: {error.strerror}.",
-            name,
-            True,
-        )
-    try:
-        with os.fdopen(fd, "wb") as out:
-            out.write(body)
-            out.flush()
-            os.fsync(out.fileno())
-        with open(target, "rb") as back:
-            same = back.read() == body
-    except OSError as error:
-        same = False
-        failure = f"DataLab couldn't finish saving a file here: {error.strerror}."
-    else:
-        failure = "The file DataLab saved didn't read back the same."
-    removed = True
-    try:
-        os.unlink(target)
-    except FileNotFoundError:
-        pass
-    except OSError:
-        removed = False
+        folder = exports.Folder.at(path, expected=expected)
+    except ExportError as error:
+        return WriteTest(False, "refused", str(error), None, True)
+    with folder:
+        try:
+            fd = folder.open_file(name, os.O_RDWR | os.O_CREAT | os.O_EXCL)
+        except PermissionError:
+            return WriteTest(False, "not_writable", _CANT_WRITE, name, True)
+        except OSError as error:
+            return WriteTest(
+                False,
+                "not_writable",
+                f"DataLab couldn't save a file here: {error.strerror}.",
+                name,
+                True,
+            )
+        try:
+            os.write(fd, body)
+            os.fsync(fd)
+            os.lseek(fd, 0, os.SEEK_SET)
+            back = b""
+            while chunk := os.read(fd, 65536):
+                back += chunk
+            same = back == body
+            failure = "The file DataLab saved didn't read back the same."
+            mine = exports.identity(os.fstat(fd))
+        except OSError as error:
+            same = False
+            failure = f"DataLab couldn't finish saving a file here: {error.strerror}."
+            mine = exports.identity(os.fstat(fd))
+        finally:
+            os.close(fd)
+        removed = True
+        try:
+            there = folder.lstat(name)
+            if stat.S_ISREG(there.st_mode) and exports.identity(there) == mine:
+                folder.unlink(name)
+            else:
+                removed = False  # something else is there now: leave it alone
+        except FileNotFoundError:
+            pass
+        except (OSError, ExportError):
+            removed = False
     if not same:
         return WriteTest(False, "not_writable", failure, name, removed)
     return WriteTest(True, "ready", None, name, removed)
+
+
+_CANT_WRITE = (
+    "Your account can't save files in this folder. Choose another, or change the "
+    "folder's permissions."
+)
 
 
 def saved_to(name: str) -> str:
@@ -516,7 +574,7 @@ def target_for_key(settings: Settings, destinations: DestinationStore, key: str)
 def practice_target(settings: Settings) -> Target:
     folder = settings.data_dir / "practice-exports"
     folder.mkdir(parents=True, exist_ok=True)
-    return Target(None, PRACTICE_NAME, folder, None)
+    return Target(None, PRACTICE_NAME, folder, None, exports.identity(os.lstat(folder)))
 
 
 def _checked(settings: Settings, destination: Destination) -> Target:
@@ -529,4 +587,4 @@ def _checked(settings: Settings, destination: Destination) -> Target:
     checked = check_folder(folder, protected=protected_folders(settings))
     if not checked.ready:
         raise ExportError(f"DataLab can't save to {destination.name} now. {checked.message}")
-    return Target(destination.id, destination.name, folder, sync_provider(folder))
+    return Target(destination.id, destination.name, folder, sync_provider(folder), checked.identity)

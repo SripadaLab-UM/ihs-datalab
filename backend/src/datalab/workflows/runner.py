@@ -1139,10 +1139,6 @@ class WorkflowRunner:
         try:
             destination = self._destination(spec.destination)
             folder = destination.path
-            target = folder / exports.safe_name(spec.folder)
-            target.mkdir(exist_ok=True)
-            if os.path.realpath(target) != os.path.join(os.path.realpath(folder), target.name):
-                raise ExportError("The delivery folder points somewhere else.")
             sources = []
             chosen = []
             for ref in spec.files:
@@ -1158,14 +1154,21 @@ class WorkflowRunner:
                     )
                 )
             about = self._manifest_about(plan, chosen)
-            result = await asyncio.to_thread(
-                exports.export,
-                target,
-                title=delivery_title(plan.workflow.name),
-                tag=plan.run_id,
-                sources=sources,
-                about=about,
-            )
+            title = delivery_title(plan.workflow.name)
+            subfolder = exports.safe_name(spec.folder)
+
+            def write() -> exports.ExportResult:
+                # Everything goes inside the very folder that was checked,
+                # and its subfolder is never followed through a link.
+                with export_folders.open_target(destination) as root:
+                    with contextlib.suppress(FileExistsError):
+                        root.mkdir(subfolder)
+                    with root.child(subfolder) as target:
+                        return exports.export(
+                            target, title=title, tag=plan.run_id, sources=sources, about=about
+                        )
+
+            result = await asyncio.to_thread(write)
         except ExportError as error:
             self.store.update_run(
                 plan.run_id, delivery_status="failed", delivery_message=str(error)
@@ -1179,8 +1182,7 @@ class WorkflowRunner:
                 delivery_message="DataLab couldn't write to the export folder.",
             )
             return
-        manifest = result.folder / exports.MANIFEST
-        written = json.loads(manifest.read_text(encoding="utf-8"))["files"]
+        written = result.entries
         self.store.add_delivery(
             {
                 "id": f"dl_{secrets.token_hex(6)}",
@@ -1192,7 +1194,7 @@ class WorkflowRunner:
                 "sync_provider": destination.sync_provider,
                 "folder": str(result.folder),
                 "files": [{k: f[k] for k in ("path", "bytes", "sha256")} for f in written],
-                "manifest_sha256": sha256_file(manifest),
+                "manifest_sha256": result.manifest_sha256,
                 "delivered_at": now(),
             }
         )

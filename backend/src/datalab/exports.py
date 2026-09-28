@@ -18,11 +18,12 @@ import re
 import secrets
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,125 @@ class ExportSource:
 class ExportResult:
     folder: Path
     files: list[str]
+    # The manifest's "files" entries, and the manifest file's own sha256.
+    entries: list[dict[str, Any]] = field(default_factory=list)
+    manifest_sha256: str = ""
+
+
+# Folders written to through an open handle ------------------------------------
+
+# Where the system can: every write is made relative to an open folder
+# (dir_fd), so a folder swapped for a link, or for another folder, after it
+# was checked can't redirect anything. Elsewhere (Windows), the folder's
+# identity is checked again before each step.
+_BY_FD = (
+    hasattr(os, "O_DIRECTORY")
+    and hasattr(os, "O_NOFOLLOW")
+    and {os.open, os.mkdir, os.unlink, os.stat} <= os.supports_dir_fd
+    and shutil.rmtree.avoids_symlink_attacks
+)
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+Identity = tuple[int, int]
+FOLDER_CHANGED = (
+    "The export folder changed after DataLab checked it (it was moved, or replaced by a "
+    "link or another folder), so nothing was written. Test it again in Settings."
+)
+
+
+def identity(info: os.stat_result) -> Identity:
+    """Which folder this is on disk, whatever it's called."""
+    return (info.st_dev, info.st_ino)
+
+
+class Folder:
+    """An open folder: files made through it stay in it, even if its path changes.
+
+    `path` is only for showing and for the manifest; writes never go by it
+    where the system can open files relative to a folder.
+    """
+
+    def __init__(self, path: Path, fd: int | None, ident: Identity) -> None:
+        self.path = path
+        self._fd = fd
+        self.identity = ident
+
+    @classmethod
+    def at(cls, path: Path, expected: Identity | None = None) -> Folder:
+        """Open a folder that isn't a link. With `expected`, it must be the very
+        folder that was checked (same device and inode), else ExportError."""
+        fd = None
+        try:
+            if _BY_FD:
+                fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC)
+                info = os.fstat(fd)
+            else:
+                info = os.lstat(path)
+                if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                    raise NotADirectoryError(str(path))
+        except FileNotFoundError as error:
+            raise ExportError(
+                "The export folder isn't there any more. Choose it again in Settings."
+            ) from error
+        except OSError as error:
+            raise ExportError(FOLDER_CHANGED) from error
+        if expected is not None and identity(info) != expected:
+            if fd is not None:
+                os.close(fd)
+            raise ExportError(FOLDER_CHANGED)
+        return cls(path, fd, identity(info))
+
+    def __enter__(self) -> Folder:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._fd is not None:
+            os.close(self._fd)
+            self._fd = None
+
+    def _where(self, name: str) -> tuple[Any, dict[str, Any]]:
+        if "/" in name or "\\" in name or name in ("", ".", ".."):
+            raise ExportError(f"Can't write {name!r}.")
+        if self._fd is not None:
+            return name, {"dir_fd": self._fd}
+        info = os.lstat(self.path)
+        if stat.S_ISLNK(info.st_mode) or identity(info) != self.identity:
+            raise ExportError(FOLDER_CHANGED)
+        return self.path / name, {}
+
+    def mkdir(self, name: str) -> None:
+        where, kw = self._where(name)
+        os.mkdir(where, 0o777, **kw)
+
+    def child(self, name: str) -> Folder:
+        """A folder inside this one, opened the same way (never through a link)."""
+        where, kw = self._where(name)
+        try:
+            if self._fd is not None:
+                fd = os.open(where, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC, **kw)
+                return Folder(self.path / name, fd, identity(os.fstat(fd)))
+        except OSError as error:
+            raise ExportError(f"{name} in the export folder is a link or a file.") from error
+        return Folder.at(self.path / name)
+
+    def open_file(self, name: str, flags: int, mode: int = 0o644) -> int:
+        where, kw = self._where(name)
+        return os.open(where, flags | _NOFOLLOW | _CLOEXEC, mode, **kw)
+
+    def lstat(self, name: str) -> os.stat_result:
+        where, kw = self._where(name)
+        return os.stat(where, follow_symlinks=False, **kw)
+
+    def unlink(self, name: str) -> None:
+        where, kw = self._where(name)
+        os.unlink(where, **kw)
+
+    def rmtree(self, name: str) -> None:
+        where, kw = self._where(name)
+        shutil.rmtree(where, ignore_errors=True, **kw)
 
 
 class DestinationStore:
@@ -174,7 +294,7 @@ class DestinationStore:
 
 
 def export(
-    destination: Path,
+    destination: Path | Folder,
     *,
     title: str,
     tag: str = "",
@@ -183,6 +303,10 @@ def export(
     about: dict[str, Any],
 ) -> ExportResult:
     """Copy files into a new dated folder in `destination`, with a manifest.
+
+    `destination` is best a Folder opened from the folder that was checked
+    (export_folders.open_target): then everything is written inside that
+    very folder. A path is opened here (never through a link).
 
     The folder is named for the date, the title with anything shaped like a
     study identifier taken out, and `tag` (the conversation's ID), so the
@@ -193,38 +317,65 @@ def export(
     every file is marked as downloaded, so the computer treats it with the
     same caution as a file from the internet.
     """
-    if not destination.is_dir():
-        raise ExportError("The export folder isn't there any more. Choose it again in Settings.")
-    folder = _new_folder(destination, title, tag)
+    if isinstance(destination, Folder):
+        return _export(destination, title, tag, sources, extra_files, about)
+    with Folder.at(destination) as root:
+        return _export(root, title, tag, sources, extra_files, about)
+
+
+def _export(
+    root: Folder,
+    title: str,
+    tag: str,
+    sources: list[ExportSource],
+    extra_files: dict[str, bytes] | None,
+    about: dict[str, Any],
+) -> ExportResult:
+    name, folder = _new_folder(root, title, tag)
     written: list[dict[str, Any]] = []
     try:
-        for source in sources:
-            entry = _copy(folder, source)
-            written.append(entry)
-        for name, data in (extra_files or {}).items():
-            target = _target(folder, name)
-            with open(target, "xb") as out:
-                out.write(data)
-            mark_downloaded(target)
-            written.append(
-                {"path": name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-            )
-        manifest = {
-            "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "datalab_version": __version__,
-            **about,
-            "files": written,
-        }
-        with open(folder / MANIFEST, "x", encoding="utf-8") as out:
-            out.write(json.dumps(manifest, indent=2) + "\n")
+        with folder:
+            for source in sources:
+                written.append(_copy(folder, source))
+            for relative, data in (extra_files or {}).items():
+                size, digest = _write(folder, relative, [data])
+                written.append({"path": relative, "bytes": size, "sha256": digest})
+            manifest = {
+                "exported_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "datalab_version": __version__,
+                **about,
+                "files": written,
+            }
+            text = (json.dumps(manifest, indent=2) + "\n").encode()
+            _, manifest_sha256 = _write(folder, MANIFEST, [text], downloaded=False)
     except BaseException:
         # Leave no half-finished export behind.
-        shutil.rmtree(folder, ignore_errors=True)
+        root.rmtree(name)
         raise
-    return ExportResult(folder, [w["path"] for w in written])
+    return ExportResult(root.path / name, [w["path"] for w in written], written, manifest_sha256)
 
 
-def _copy(folder: Path, source: ExportSource) -> dict[str, Any]:
+def _write(folder: Folder, relative: str, chunks, *, downloaded: bool = True) -> tuple[int, str]:
+    """Write a new file at `relative` inside `folder`; its size and sha256."""
+    parent, name = _target(folder, relative)
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        fd = parent.open_file(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        with os.fdopen(fd, "wb") as out:
+            for chunk in chunks:
+                digest.update(chunk)
+                size += len(chunk)
+                out.write(chunk)
+    finally:
+        if parent is not folder:
+            parent.close()
+    if downloaded:
+        mark_downloaded(folder.path.joinpath(*relative.split("/")))
+    return size, digest.hexdigest()
+
+
+def _copy(folder: Folder, source: ExportSource) -> dict[str, Any]:
     """Copy one of the agent's files into the export, made inert where needed."""
     # The name Windows would actually use: it drops trailing dots and spaces,
     # so "run.bat." is run.bat. Classify (and write) that name.
@@ -245,21 +396,14 @@ def _copy(folder: Path, source: ExportSource) -> dict[str, Any]:
     else:
         name = f"{FILES}/{inert_name(path)}"
         data = None
-    target = _target(folder, name)
-    digest = hashlib.sha256()
-    with open(target, "xb") as out:
-        if data is not None:
-            digest.update(data)
-            out.write(data)
-        else:
-            with os.fdopen(source.open(), "rb") as reader:
-                while chunk := reader.read(1024 * 1024):
-                    digest.update(chunk)
-                    out.write(chunk)
-    mark_downloaded(target)
+    if data is not None:
+        size, digest = _write(folder, name, [data])
+    else:
+        with os.fdopen(source.open(), "rb") as reader:
+            size, digest = _write(folder, name, iter(lambda: reader.read(1024 * 1024), b""))
     if name != f"{FILES}/{source.path}":
         entry["renamed_from"] = source.path
-    return {"path": name, **entry, "bytes": target.stat().st_size, "sha256": digest.hexdigest()}
+    return {"path": name, **entry, "bytes": size, "sha256": digest}
 
 
 _IMAGE_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
@@ -371,27 +515,36 @@ def report_document(title: str, body_html: str, css: str) -> bytes:
     ).encode()
 
 
-def _new_folder(destination: Path, title: str, tag: str = "") -> Path:
+def _new_folder(destination: Folder, title: str, tag: str = "") -> tuple[str, Folder]:
+    """A new dated folder in `destination`: its name, and the folder, open."""
     stamp = datetime.now().strftime("%Y-%m-%d %H%M")
     name = safe_name(scrub_title(title))
     base = f"{stamp} {name} {safe_name(tag, 40)}" if tag else f"{stamp} {name}"
     for number in range(1, 1000):
-        candidate = destination / (base if number == 1 else f"{base} ({number})")
+        candidate = base if number == 1 else f"{base} ({number})"
         try:
-            candidate.mkdir()
-            return candidate
+            destination.mkdir(candidate)
         except FileExistsError:
             continue
+        return candidate, destination.child(candidate)
     raise ExportError("Couldn't make a new folder for the export.")
 
 
-def _target(folder: Path, relative: str) -> Path:
+def _target(folder: Folder, relative: str) -> tuple[Folder, str]:
+    """The open folder a file at `relative` goes in (made as needed), and its name.
+    The caller closes the folder unless it's `folder` itself."""
     parts = relative.split("/")
     if any(p in ("", ".", "..") or "\\" in p or ":" in p for p in parts):
         raise ExportError(f"Can't export {relative!r}.")
-    target = folder.joinpath(*parts)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    return target
+    current = folder
+    for part in parts[:-1]:
+        with contextlib.suppress(FileExistsError):
+            current.mkdir(part)
+        inner = current.child(part)
+        if current is not folder:
+            current.close()
+        current = inner
+    return current, parts[-1]
 
 
 def safe_name(title: str, limit: int = 60, max_bytes: int = 120) -> str:
