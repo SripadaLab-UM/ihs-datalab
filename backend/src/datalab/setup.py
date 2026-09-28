@@ -77,9 +77,10 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
 # workflow runner, exports).
 KEY_UNLOCKS = (
     "With a U-M GPT (Toolkit) API key you can work with the agent: conversations in the "
-    "Workspace, and drafting a workflow with the agent (and, in the real DataLab, the "
-    "Knowledge tab's Edit with agent and the agent's suggested updates). Without one, "
-    "everything else works: the SQL Playground, Save as workflow, running workflows, and exports."
+    "Workspace (which DataLab also titles with it), and drafting a workflow with the agent "
+    "(and, in the real DataLab, the Knowledge tab's Edit with agent and the agent's suggested "
+    "updates). The Safety check's model checks need it too. Without one, the SQL Playground, "
+    "Save as workflow, running workflows, and exports all work."
 )
 
 
@@ -326,6 +327,9 @@ def uninstall(*, delete_data: bool | None) -> int:
         if oracle is not None and oracle.keychain_service.startswith("datalab-"):
             _forget(oracle.keychain_service, oracle.user)
 
+    # --delete-data / --keep-data answer for the practice database too; without
+    # either, it gets a question of its own (the data folders' answer isn't it).
+    chosen = delete_data
     folders = [default_data_dir(p) for p in ("real", "practice")]  # type: ignore[arg-type]
     existing = [f for f in folders if f.exists()]
     if existing:
@@ -341,7 +345,7 @@ def uninstall(*, delete_data: bool | None) -> int:
             print("Deleted.")
         else:
             print("Kept. You can delete them yourself later.")
-    _uninstall_practice_database(delete_data)
+    _uninstall_practice_database(chosen)
     print("Your export folders were not touched.")
     return 0
 
@@ -351,7 +355,11 @@ def _uninstall_practice_database(delete: bool | None) -> None:
     if they're labelled as DataLab's. Asked about like the data folders."""
     from datalab import practice_db
 
-    database = practice_db.PracticeDatabase()
+    try:
+        database = practice_db.PracticeDatabase()
+    except ValueError as problem:  # an override that isn't usable
+        print(f"\nThe practice database was left: {problem}")
+        return
     target = database.target
     try:
         container = database.inspect()
@@ -370,19 +378,42 @@ def _uninstall_practice_database(delete: bool | None) -> None:
         "\nThe practice database (made-up data only): the Docker container "
         f"{target.container} and its volume {target.volume}."
     )
+    chosen = delete
     if delete is None:
-        answer = input("Delete it too? Installing practice DataLab sets it up again. [y/N] ")
+        answer = input(
+            "Delete the practice database too? Installing practice DataLab sets it up again. [y/N] "
+        )
         delete = answer.strip().lower() in ("y", "yes")
     try:
         if delete:
             database.remove(volume=True)
             print("Deleted.")
+            _uninstall_oracle_image(database, delete=chosen)
         else:
             if ours and container is not None and container.status == "running":
                 database.stop()
             print("Kept (stopped). A practice DataLab installed again uses it as it is.")
     except practice_db.PracticeDatabaseProblem as problem:
         print(problem)
+
+
+def _uninstall_oracle_image(database, *, delete: bool | None) -> None:
+    """Oracle's image (the practice database's), once nothing uses it."""
+    from datalab.practice_db import IMAGE_SIZE
+
+    image = database.target.image
+    if delete is None:
+        answer = input(
+            f"Remove Oracle Database Free's image too ({IMAGE_SIZE})? It's "
+            "downloaded again if practice DataLab is installed again. [y/N] "
+        )
+        delete = answer.strip().lower() in ("y", "yes")
+    if not delete:
+        print(f"Oracle Database Free's image was kept ({image.split('@')[0]}).")
+    elif database.remove_image():
+        print("Removed Oracle Database Free's image.")
+    else:
+        print("Oracle Database Free's image was kept: another container still uses it.")
 
 
 def _saved(get) -> bool:

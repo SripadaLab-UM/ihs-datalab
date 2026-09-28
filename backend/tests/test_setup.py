@@ -247,7 +247,11 @@ def test_practice_says_the_key_is_optional_and_what_it_unlocks(
     said = capsys.readouterr().out
     assert asked == ["U-M GPT API key"]  # never a database password
     assert "The U-M GPT key is optional on the practice DataLab." in said
-    for feature in ("conversations in the Workspace", "the SQL Playground", "running workflows"):
+    for feature in (
+        "conversations in the Workspace",
+        "Safety check's model checks",
+        "running workflows",
+    ):
         assert feature in said
     assert "No database password, VPN or GitHub account is needed" in said
     assert "the SQL Playground, workflows and exports work without it" in said
