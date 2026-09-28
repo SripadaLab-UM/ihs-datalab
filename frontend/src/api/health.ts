@@ -6,6 +6,8 @@ export interface Health {
   profile: "real" | "practice";
   database_configured: boolean;
   catalog_tables: number;
+  /** Why the catalog is empty and what happens next; null once it has tables. */
+  catalog_problem?: string | null;
 }
 
 export const healthApi = {

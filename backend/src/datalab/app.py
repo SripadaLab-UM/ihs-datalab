@@ -33,6 +33,7 @@ from datalab.config import Settings
 from datalab.credentials import model_api_key, oracle_password
 from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
+from datalab.data.autocatalog import CatalogAutoBuild
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
@@ -91,14 +92,23 @@ def create_app(
     require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
     access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
+    loads_catalog = catalog is None
     if catalog is None:
-        catalog = Catalog.load(settings.catalog_dir) if settings.catalog_dir else Catalog([])
+        catalog = Catalog.load(catalog_folder(settings))
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
     # Connects on first use (and again after a new password is saved).
     lazy: _LazyOracle | None = None
     if database is None:
         database = lazy = _LazyOracle(settings)
-    data = DataService(database, access_log, settings.limits, allowed, catalog)
+    # DataLab's own catalog is built the first time it reaches the database.
+    catalog_build = (
+        catalog_auto_build(settings, catalog, lazy.build_catalog)
+        if lazy is not None and loads_catalog
+        else None
+    )
+    data = DataService(
+        database, access_log, settings.limits, allowed, catalog, catalog_build=catalog_build
+    )
     tokens = SessionTokens()
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
@@ -168,10 +178,19 @@ def create_app(
         sessions.end_cut_off_turns()
         # And the queries it was running, for chat, the Playground and workflows.
         access_log.end_cut_off_queries()
+        # DataLab's own catalog, if it has none yet. In the background: the
+        # database may not be up yet (then it's tried again at the first query).
+        building = (
+            asyncio.create_task(asyncio.to_thread(catalog_build.ensure))
+            if catalog_build is not None
+            else None
+        )
         reaper = asyncio.create_task(sessions.reap_idle_forever())
         async with agent_tools.session_manager.run():
             yield
         reaper.cancel()
+        if building is not None:
+            building.cancel()
         await sessions.close_all()
         await titles.aclose()  # before the model client and database close
         await model_http.aclose()
@@ -297,7 +316,7 @@ def create_app(
                 turn_running=sessions.is_busy,
                 model_http=model_http,
                 model_key=model_key,
-                password_changed=lazy.reset if lazy else lambda: None,
+                password_changed=lambda: _password_changed(lazy, catalog_build),
                 recovery=recovery,
                 checker=update_checker,
                 updater=updater,
@@ -320,11 +339,56 @@ def create_app(
             "database_configured": settings.oracle is not None,
             "catalog_tables": len(catalog),
             "catalog_schemas": catalog.schemas,
+            "catalog_problem": catalog_problem(settings, catalog, catalog_build),
         }
 
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(app, browser, web_dist)
     return app
+
+
+def catalog_folder(settings: Settings) -> Path:
+    """The lab's catalog folder (the knowledge base's generated/schema), or
+    else DataLab's own in the data folder."""
+    return settings.catalog_dir or settings.data_dir / "catalog"
+
+
+def catalog_auto_build(
+    settings: Settings, catalog: Catalog, build: Callable[[], Catalog]
+) -> CatalogAutoBuild | None:
+    """Building the catalog from the database, for DataLab's own folder only:
+    a folder the lab's settings name is never written."""
+    if settings.catalog_dir is not None or settings.oracle is None:
+        return None
+    return CatalogAutoBuild(catalog, catalog_folder(settings), build)
+
+
+def catalog_problem(
+    settings: Settings, catalog: Catalog, build: CatalogAutoBuild | None
+) -> str | None:
+    """Why the catalog is empty, and what happens next, for Settings."""
+    if len(catalog):
+        return None
+    if build is not None:
+        if build.problem:
+            return (
+                "DataLab builds it (metadata only) once it can connect to the database. "
+                f"Last try: {build.problem}"
+            )
+        return "DataLab builds it (metadata only) the first time it connects to the database."
+    if settings.catalog_dir is not None:
+        return (
+            f"The catalog folder in DataLab's settings ({settings.catalog_dir}) has no tables. "
+            "Build it with: datalab catalog --from-database --out <folder>"
+        )
+    return "No database is set up yet."
+
+
+def _password_changed(lazy: _LazyOracle | None, build: CatalogAutoBuild | None) -> None:
+    if lazy is not None:
+        lazy.reset()
+    if build is not None:
+        build.try_again_soon()
 
 
 class DataFolderNotLocked(RuntimeError):
@@ -374,6 +438,16 @@ class _LazyOracle:
             preview_rows=preview_rows,
             cancel=cancel,
         )
+
+    def build_catalog(self) -> Catalog:
+        """The catalog, read from the database's catalog views: metadata only."""
+        oracle = self._settings.oracle
+        assert oracle is not None
+        connection = self._get().connect(timeout=15)
+        try:
+            return Catalog.from_database(connection, sorted(oracle.allowed_schemas))
+        finally:
+            connection.close()
 
     def reset(self) -> None:
         """Connect with the password saved now, from the next query on."""

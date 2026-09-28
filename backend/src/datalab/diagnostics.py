@@ -139,7 +139,10 @@ def build(
     section("This DataLab")
     fact("Profile", settings.profile)
     fact("Data folder", home_as_tilde(settings.data_dir))
-    fact("Catalog folder", home_as_tilde(settings.catalog_dir) if settings.catalog_dir else "none")
+    fact(
+        "Catalog folder",
+        home_as_tilde(settings.catalog_dir) if settings.catalog_dir else "DataLab's own",
+    )
     if settings.workflows.folder:
         fact("Workflows folder", home_as_tilde(Path(settings.workflows.folder)))
     with contextlib.suppress(OSError):

@@ -14,7 +14,10 @@ export function AboutSection({ health }: { health?: Health }) {
         <dt className="text-muted">Database</dt>
         <dd>{health?.database_configured ? "Configured" : "Not configured"}</dd>
         <dt className="text-muted">Catalog</dt>
-        <dd>{health?.catalog_tables.toLocaleString()} tables and views</dd>
+        <dd>
+          {health?.catalog_tables.toLocaleString()} tables and views
+          {health?.catalog_problem && <p className="mt-1 text-[13px] text-muted">{health.catalog_problem}</p>}
+        </dd>
       </dl>
     </Section>
   );

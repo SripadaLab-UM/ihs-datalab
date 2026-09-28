@@ -54,6 +54,11 @@ class Catalog:
     def __len__(self) -> int:
         return len(self._tables)
 
+    def replace(self, other: Catalog) -> None:
+        """Take `other`'s tables, in place: everything holding this catalog
+        sees them at once (DataLab building its own, autocatalog.py)."""
+        self._tables = dict(other._tables)
+
     @property
     def schemas(self) -> list[str]:
         return sorted({schema for schema, _ in self._tables})
