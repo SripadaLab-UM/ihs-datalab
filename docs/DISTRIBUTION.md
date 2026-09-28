@@ -61,16 +61,25 @@ It comes from the install page in the app repo. The installer then:
    "DataLab (practice)") and with that profile's icon (see "Branding"):
    - Mac: an app in `/Applications` if the person can add to it without
      `sudo` (an administrator account can), otherwise in `~/Applications`.
-     An app of the same name in `/Applications` that isn't DataLab's (another
-     bundle id) is left alone, and DataLab goes in `~/Applications`; an
-     earlier installer's copy in the other folder is removed. A link to the
-     app goes on the Desktop (`~/Desktop/DataLab`), replacing only a link to
-     a DataLab app of that name. The installer ends by printing where the
+     Only DataLab's own app (its bundle id) is ever replaced: another app of
+     the same name in `/Applications` is left alone and DataLab goes in
+     `~/Applications`; one in `~/Applications` stops the installer there,
+     saying to move it (DataLab itself is installed by then). If DataLab's
+     own copy in `/Applications` can't be replaced, it falls back to
+     `~/Applications`; in `~/Applications` it says to quit DataLab and try
+     again. An earlier installer's copy in the other folder is removed. A
+     link to the app goes on the Desktop (`~/Desktop/DataLab`), replacing
+     only a link to exactly `~/Applications/DataLab.app` or
+     `/Applications/DataLab.app`. The launch script hands the program's path
+     to AppleScript as an argument (`osascript - <path>`, `quoted form of`),
+     so a home folder like `/Users/o'brien` works. The installer ends by printing where the
      app, the Desktop shortcut and the program files are, then, only when
      run from a terminal (not a pipe or script), offers "Show in Finder"
      (`open -R`) and "Open DataLab now?". `DATALAB_SYSTEM_APPLICATIONS`
      stands in for `/Applications` in tests.
    - Windows: a Start menu entry and a Desktop shortcut, the same for both.
+     A Desktop shortcut of that name that doesn't run this `bin\datalab.cmd`
+     is left alone, and the installer says so.
    Both run the launcher's command (`bin/datalab`, `bin\datalab.cmd`), never
    a version's own folder, so they keep working after an update. The icon is
    copied out of the package into the app bundle (Mac) or `<app>\icons`
@@ -474,9 +483,10 @@ deleted from the Workspace.
 ## Uninstalling
 
 The uninstaller removes the app, the launchers and their Desktop shortcuts
-(on Mac, `/Applications` copies only if their bundle id is DataLab's, and
-Desktop links only if they point at a DataLab app; on Windows, Desktop
-shortcuts only if they run `bin\datalab.cmd`), the images, and the keychain
+(on Mac, apps in either Applications folder only if their bundle id is
+DataLab's, and Desktop links only if they point at exactly one of those apps;
+on Windows, Desktop shortcuts only if they run this DataLab's
+`bin\datalab.cmd`), the images, and the keychain
 entries. It asks separately, showing sizes, whether to delete the data folder.
 It never touches export destinations. On Windows it also removes what the
 installer left: the after-restart logon task or Startup shortcut, its

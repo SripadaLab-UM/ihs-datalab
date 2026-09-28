@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router";
 
 import { formatBytes, settingsApi, type UpdateCheck, type UpdateRelease, type Updates } from "@/api/settings";
 import { Button, Chip, Icon, Modal } from "@/components/ui";
 
+import { settingsPath } from "../sectionIds";
 import { installing, UPDATE_CHECK, useUpdateCheck } from "../updateCheck";
 import { Section } from "./Section";
 
@@ -70,14 +72,14 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
   const working = installing(check);
   const failed = check.install.state === "failed";
   return (
-    <div className="mt-5">
-      <div className="flex items-start gap-3">
-        <p className="min-w-0 flex-1 text-sm" role="status">
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-3 rounded-[3px] border border-line px-4 py-3">
+        <p className="min-w-0 flex-1 text-[15px]" role="status">
           {check.message}
           {check.checked_at && <span className="block text-xs text-muted">Last checked {when(check.checked_at)}</span>}
         </p>
         {check.state !== "not-configured" && (
-          <Button onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
+          <Button variant="primary" onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
             {checkNow.isPending ? "Checking…" : "Check now"}
           </Button>
         )}
@@ -206,7 +208,9 @@ function Status({ updates }: { updates: Updates }) {
   const needsYou = recovery?.outcome === "needs-you";
   return (
     <>
-      <dl className="mt-3 grid grid-cols-[10rem_1fr] gap-y-1.5 text-sm">
+      <NewVersions initial={updates.check} />
+
+      <dl className="mt-5 grid grid-cols-[10rem_1fr] gap-y-1.5 text-sm">
         <dt className="text-muted">Installed</dt>
         <dd className="font-mono text-xs leading-5">DataLab {updates.version}</dd>
         <dt className="text-muted">Database layout</dt>
@@ -215,8 +219,6 @@ function Status({ updates }: { updates: Updates }) {
           <span className="font-sans text-muted">({updates.migrations_applied} changes applied)</span>
         </dd>
       </dl>
-
-      <NewVersions initial={updates.check} />
 
       {recovery && (
         <p
@@ -228,7 +230,13 @@ function Status({ updates }: { updates: Updates }) {
             {needsYou && <span className="block font-medium">This needs you</span>}
             {recovery.message}
             {recovery.outcome === "finishing" && (
-              <span className="block">Run the Safety check, at the top of this page, to see everything still holds.</span>
+              <span className="block">
+                Run the{" "}
+                <Link to={settingsPath("safety")} className="underline decoration-faint underline-offset-4 hover:decoration-ink">
+                  Safety check
+                </Link>{" "}
+                to see everything still holds.
+              </span>
             )}
           </span>
         </p>
@@ -242,7 +250,7 @@ function Status({ updates }: { updates: Updates }) {
       {updates.marker_unreadable && (
         <p className="mt-4 border-l-2 border-attn pl-3 text-sm text-attn">
           An update left a note DataLab can't read. Start DataLab again to sort it out; if it stays, copy the
-          diagnostics below and send them to the DataLab maintainer.
+          diagnostics (in About) and send them to the DataLab maintainer.
         </p>
       )}
 
@@ -272,7 +280,11 @@ function Status({ updates }: { updates: Updates }) {
         <h3 className="dl-label">Database backups</h3>
         <p className="mt-1 text-xs text-muted">
           Taken before an update changes the database. <code className="font-mono">datalab rollback</code> can go
-          back to one this version can read. Remove old ones in Storage, above.
+          back to one this version can read. Remove old ones in{" "}
+          <Link to={settingsPath("storage")} className="underline hover:text-ink">
+            Storage
+          </Link>
+          .
         </p>
         {updates.backups.length === 0 ? (
           <p className="mt-2 text-sm text-muted">No backups yet. The first is taken before an update changes the database.</p>

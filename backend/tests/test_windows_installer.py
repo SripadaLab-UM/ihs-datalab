@@ -169,11 +169,17 @@ def test_the_start_menu_and_desktop_shortcuts_run_the_shim_with_each_profiles_ic
     part = launcher_part(INSTALL)
     assert '$Links = @(Join-Path $StartMenu "$LinkName.lnk")' in part
     assert '[Environment]::GetFolderPath("Desktop")' in part
-    assert '$Links += Join-Path $Desktop "$LinkName.lnk"' in part
+    assert '$DesktopLink = Join-Path $Desktop "$LinkName.lnk"' in part
+    assert "$Links += $DesktopLink" in part
     # bin\datalab.cmd, which runs whichever version `current` names: never a
     # version's own folder, so an update doesn't break them.
     assert '$DataLab = Join-Path $Bin "datalab.cmd"' in INSTALL
     assert "EscapeSingleQuotedStringContent($DataLab)" in part
+    assert "-Command `\"& '$QuotedShim' --profile $DataLabProfile serve`\"" in part
+    # Someone else's Desktop shortcut of that name (one that doesn't run this
+    # shim) is left alone, and it says so.
+    assert '"$($Existing.Arguments)".IndexOf("\'$QuotedShim\'"' in part
+    assert "that isn't DataLab's; it was left alone." in part
     assert "versions\\" not in part and "Scripts\\datalab.exe" not in part
     # The icon comes from the package, and is kept beside bin\ (not in a
     # version's folder, which an update removes).
@@ -187,8 +193,12 @@ def test_uninstall_removes_the_desktop_shortcuts_and_the_icons():
     assert 'foreach ($name in "versions", "bin", "icons")' in UNINSTALL
     part = UNINSTALL[UNINSTALL.index('[Environment]::GetFolderPath("Desktop")') :]
     assert 'foreach ($name in "DataLab.lnk", "DataLab (practice).lnk")' in part
-    # Only DataLab's own: a shortcut that runs bin\datalab.cmd.
-    assert '-like "*\\bin\\datalab.cmd*") { Remove-Item -LiteralPath $Link }' in part
+    # Only DataLab's own: a shortcut that runs this DataLab's bin\datalab.cmd,
+    # quoted as install.ps1 writes it.
+    assert '$Shim = Join-Path $Root "bin\\datalab.cmd"' in UNINSTALL
+    assert "EscapeSingleQuotedStringContent($Shim)" in UNINSTALL
+    assert '"$($Shortcut.Arguments)".IndexOf("\'$QuotedShim\'"' in part
+    assert "-like" not in part.split('Write-Host "DataLab has been removed."')[0]
 
 
 def test_the_icons_the_installers_name_come_with_the_package():

@@ -2,6 +2,7 @@
 title: What DataLab will and won't do
 summary: The safety boundaries DataLab enforces, and the things it doesn't promise.
 order: 1
+screens: /settings/safety
 keywords: safety, promises, privacy, PHI, study data, internet, boundary, safety check, sealed, container
 ---
 
@@ -9,7 +10,8 @@ keywords: safety, promises, privacy, PHI, study data, internet, boundary, safety
 
 These are the boundaries DataLab enforces. The first three (the rest of your
 computer, the database, and where data can go) are tested live by the
-**Safety check** in Settings & Safety when you press **Run safety check**.
+**Safety check** in **Settings & Safety → Safety** when you press **Run
+safety check**.
 Until you do, it says "Not run yet".
 
 ## What DataLab enforces

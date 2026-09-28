@@ -24,21 +24,23 @@ fi
 if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^datalab '; then
   uv tool uninstall datalab
 fi
-# The apps, in ~/Applications or /Applications (only DataLab's own there), and
-# the Desktop shortcuts to them (only links to a DataLab app).
+# The apps, in ~/Applications or /Applications (only DataLab's own: its bundle
+# id), and the Desktop shortcuts to them (only links to one of those apps).
 SYSTEM_APPS="${DATALAB_SYSTEM_APPLICATIONS:-/Applications}"
-rm -rf "$HOME/Applications/DataLab.app" "$HOME/Applications/DataLab (practice).app"
 for pair in "DataLab|edu.umich.ihs.datalab" "DataLab (practice)|edu.umich.ihs.datalab.practice"; do
   name="${pair%%|*}"
   bundle="${pair#*|}"
-  app="$SYSTEM_APPS/$name.app"
-  if [ ! -L "$app" ] && [ -f "$app/Contents/Info.plist" ] \
-    && grep -qF "<string>$bundle</string>" "$app/Contents/Info.plist"; then
-    rm -rf "$app" || echo "$app couldn't be removed; drag it to the Trash."
-  fi
+  for app in "$HOME/Applications/$name.app" "$SYSTEM_APPS/$name.app"; do
+    if [ ! -L "$app" ] && [ -f "$app/Contents/Info.plist" ] \
+      && grep -qF "<string>$bundle</string>" "$app/Contents/Info.plist"; then
+      rm -rf "$app" 2>/dev/null || echo "$app couldn't be removed; drag it to the Trash."
+    fi
+  done
   link="$HOME/Desktop/$name"
   if [ -L "$link" ]; then
-    case "$(readlink "$link")" in */"$name.app") rm -f "$link" ;; esac
+    case "$(readlink "$link")" in
+      "$HOME/Applications/$name.app" | "$SYSTEM_APPS/$name.app") rm -f "$link" ;;
+    esac
   fi
 done
 echo "DataLab has been removed."

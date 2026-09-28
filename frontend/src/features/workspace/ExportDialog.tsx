@@ -170,7 +170,7 @@ export function ExportDialog({
             <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-xs text-muted">
-                No export folders yet. Add one in <Link to="/settings" className="text-accent underline">Settings</Link>.
+                No export folders yet. Add one in <Link to="/settings/export-folders" className="text-accent underline">Settings</Link>.
               </p>
             ) : (
               <select
