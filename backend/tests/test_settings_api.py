@@ -254,6 +254,24 @@ def test_test_connection_says_what_went_wrong(tmp_path, keychain):
     )
 
 
+def test_a_missing_key_on_practice_names_the_command_not_the_fixed_settings_page(
+    settings, keychain
+):
+    def missing() -> str:
+        raise credentials.MissingCredential(
+            "No U-M GPT key saved. Add it in Settings → Connections."
+        )
+
+    h = Harness(
+        settings,
+        check_database=lambda *a, **k: setup.DatabaseCheck(True, "Connected"),
+        model_key=missing,
+    )
+    message = h.client.post("/api/settings/connections/test").json()["model"]["message"]
+    assert "datalab --profile practice setup --update" in message
+    assert "Settings → Connections" not in message
+
+
 def test_database_problems_name_the_code_never_the_server():
     class OracleError(Exception):
         pass

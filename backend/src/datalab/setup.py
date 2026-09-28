@@ -80,6 +80,14 @@ def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> i
             except SecretRefused as refused:
                 print(f"{refused} Nothing was saved.")
                 return 1
+        elif not _saved(model_api_key):
+            # Carrying on is fine (the SQL Playground and workflows don't need
+            # it), but conversations can't start until there's a key.
+            print(
+                "No U-M GPT key was entered, so none was saved. Conversations with the agent "
+                "can't start until there is one. To add it later, run: "
+                f"datalab --profile {profile} setup --update"
+            )
 
     oracle = asks_for_oracle_password(settings)
     if oracle is not None:

@@ -431,7 +431,7 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
         try:
             key = await asyncio.to_thread(services.model_key)
         except Exception as error:  # MissingCredential, or a keychain that won't answer
-            return ConnectionCheckOut(ok=False, message=_safe_key_error(error))
+            return ConnectionCheckOut(ok=False, message=_safe_key_error(error, practice=practice))
         url = f"{settings.model_base_url.rstrip('/')}/models"
         client = services.model_http or httpx.AsyncClient()
         try:
@@ -642,9 +642,15 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _safe_key_error(error: Exception) -> str:
+def _safe_key_error(error: Exception, *, practice: bool = False) -> str:
     from datalab.credentials import MissingCredential
 
     if isinstance(error, MissingCredential):
+        if practice:
+            # Settings → Connections can't change anything on the practice DataLab.
+            return (
+                "No U-M GPT key saved. Practice uses the one the real DataLab saved; to save "
+                "one here, run: datalab --profile practice setup --update"
+            )
         return str(error)
     return "Couldn't read the U-M GPT key from the keychain."

@@ -321,7 +321,9 @@ it("End session needs confirming, says a restart is needed, and only then ends i
   fireEvent.click(screen.getByRole("menuitem", { name: "End session…" }));
   const dialog = screen.getByRole("dialog", { name: "End this session?" });
   expect(dialog).toHaveTextContent("You'll need a new sign-in link from the launcher.");
-  expect(dialog).toHaveTextContent("quit DataLab (close its Terminal window or press Ctrl-C in it) and start it again");
+  expect(dialog).toHaveTextContent(
+    "quit DataLab (close its window, Terminal on a Mac or PowerShell on Windows, or press Ctrl-C in it) and start it",
+  );
   expect(sessionApi.end).not.toHaveBeenCalled();
   // Cancel is the safe default, and does nothing.
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();

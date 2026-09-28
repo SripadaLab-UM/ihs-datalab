@@ -67,7 +67,8 @@ export function EndSessionDialog({ onClose, onEnded }: { onClose: () => void; on
       <p className="text-sm">You'll need a new sign-in link from the launcher.</p>
       <p className="mt-2 text-sm font-medium">
         DataLab only makes a sign-in link when it starts, so to get back in you'll have to quit DataLab (close its
-        Terminal window or press Ctrl-C in it) and start it again from its launcher. The old link won't work again.
+        window, Terminal on a Mac or PowerShell on Windows, or press Ctrl-C in it) and start it again from its
+        launcher. The old link won't work again.
       </p>
       {stillGoing && (
         <p role="status" className="mt-2 flex items-start gap-2 text-sm font-medium text-attn">
@@ -116,9 +117,9 @@ export function SessionEnded() {
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="font-serif text-[28px] text-ink">Session ended</p>
       <p className="max-w-[32rem] text-sm text-muted">
-        DataLab no longer knows this browser. To sign in again, quit DataLab (close its Terminal window or press Ctrl-C
-        in it) and start it again from its launcher: it makes a new sign-in link each time it starts. The old link
-        won't work again.
+        DataLab no longer knows this browser. To sign in again, quit DataLab (close its window, Terminal on a Mac or
+        PowerShell on Windows, or press Ctrl-C in it) and start it again from its launcher: it makes a new sign-in
+        link each time it starts. The old link won't work again.
       </p>
     </div>
   );

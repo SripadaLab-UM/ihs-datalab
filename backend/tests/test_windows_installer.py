@@ -207,3 +207,9 @@ def test_the_icons_the_installers_name_come_with_the_package():
         assert (branding / name).stat().st_size > 1000, name
     assert (branding / "DataLab.ico").read_bytes()[:4] == b"\x00\x00\x01\x00"
     assert (branding / "DataLab.icns").read_bytes()[:4] == b"icns"
+
+
+def test_a_failed_key_step_stops_the_installer_instead_of_saying_all_done():
+    step6 = INSTALL[INSTALL.index('Step "Step 6 of 8') : INSTALL.index('Step "Step 7 of 8')]
+    assert step6.index("setup") < step6.index("if ($LASTEXITCODE -ne 0) {")
+    assert "Stop-Install" in step6

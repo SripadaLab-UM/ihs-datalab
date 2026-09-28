@@ -218,3 +218,18 @@ def test_the_installers_practice_command_saves_the_password(tmp_path, monkeypatc
     monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "practice"))
     assert cli.main(["--profile", "practice", "setup"]) == 0
     assert keychain.saved[("datalab-practice", "DATALAB_RO")] == "datalab_ro"
+
+
+def test_no_key_entered_says_conversations_need_one_and_how_to_add_it(
+    tmp_path, monkeypatch, keychain, capsys
+):
+    """Pressing Enter at the key prompt is allowed (the SQL Playground and
+    workflows don't need it), but it mustn't look like everything is set up."""
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "practice"))
+    monkeypatch.setattr(installing, "model_api_key", credentials.model_api_key)  # none saved
+    monkeypatch.setattr(installing.getpass, "getpass", lambda prompt: "")
+
+    assert installing.setup("practice", None, update=False) == 0
+    said = capsys.readouterr().out
+    assert "No U-M GPT key was entered, so none was saved." in said
+    assert "datalab --profile practice setup --update" in said
