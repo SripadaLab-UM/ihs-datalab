@@ -86,7 +86,7 @@ const workflow = (extra: Partial<Workflow> = {}): Workflow => ({
   ],
   reads: ["IHS_2025.WEARABLE_DAILY"],
   deliver: { destination: "practice-folder", folder: "weekly_steps", files: ["summary"] },
-  source: "file", blob: "sha256:abc", commit: null, last_run: null,
+  source: "file", blob: "sha256:abc", commit: null, last_run: null, builtin: false,
   ...extra,
 }); // prettier-ignore
 
@@ -133,7 +133,7 @@ beforeEach(() => {
   editorProps.mockReset();
   FakeEventSource.last = null;
   vi.stubGlobal("EventSource", FakeEventSource);
-  vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/data/workflows-local" });
+  vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/data/workflows-local", profile: "practice" });
   vi.mocked(workflowsApi.list).mockReset().mockResolvedValue([workflow()]);
   vi.mocked(workflowsApi.text).mockReset().mockResolvedValue({ path: "weekly_steps.yaml", text: YAML, source: "file", blob: "sha256:abc", commit: null });
   vi.mocked(workflowsApi.runs).mockReset().mockResolvedValue([]);

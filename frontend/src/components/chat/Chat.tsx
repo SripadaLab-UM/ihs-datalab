@@ -328,7 +328,7 @@ export function EmptyState({
     <div className="mt-6 flex flex-col gap-10">
       <div>
         <p className="dl-label">{mode?.label ?? "New conversation"}</p>
-        <h2 className="mt-3 font-serif text-[42px] leading-[1.1] tracking-[-0.01em] text-balance">What would you like to find out?</h2>
+        <h2 className="mt-3 font-serif text-[42px] leading-[1.1] tracking-[-0.01em] text-balance">{mode?.question ?? "What would you like to find out?"}</h2>
         <p className="mt-4 max-w-[52ch] font-serif text-[18px] leading-relaxed text-muted">{mode?.description}</p>
       </div>
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">

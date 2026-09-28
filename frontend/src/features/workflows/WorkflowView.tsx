@@ -118,9 +118,9 @@ export function WorkflowView({ workflow }: { workflow: Workflow }) {
           The file
         </h2>
         <p className="font-sans text-[12.5px] text-muted">
-          Read-only here. New workflows come from Save as workflow in the SQL Playground, or Turn this into a workflow
-          in a conversation; to change this one, edit the file in its folder (or, in the pipelines repo, ask the Data
-          engineering agent) and it's checked again when you come back.
+          {workflow.builtin
+            ? "Read-only: it comes with Practice DataLab. To make your own version, start a New workflow on the Workflows page."
+            : "Read-only here. New workflows come from New workflow on the Workflows page, Save as workflow in the SQL Playground, or Turn this into a workflow in a conversation; to change this one, edit the file in its folder (or, in the pipelines repo, ask the Workflow authoring agent) and it's checked again when you come back."}
         </p>
         {text.data && text.data.blob !== workflow.blob && workflow.problems.length > 0 && (
           <p className="font-sans text-[12.5px] text-attn">

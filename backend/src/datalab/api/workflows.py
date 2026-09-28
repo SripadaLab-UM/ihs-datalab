@@ -71,6 +71,14 @@ from datalab.workflows.records import RunStore
 from datalab.workflows.runner import ReplayNotExact, RunRefused, WorkflowRunner
 from datalab.workflows.sandbox import DockerSandbox, Sandbox, StepLimits
 from datalab.workflows.source import SourceError, workflows_folder
+from datalab.workflows.stages import (
+    StageEdits,
+    Stages,
+    StagesRefused,
+    apply_edits,
+    read_model,
+    stages_of,
+)
 
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
@@ -103,6 +111,9 @@ class WorkflowsStatus(BaseModel):
     folder: str
     # Why the files come from that folder, when it isn't the expected one.
     message: str | None = None
+    profile: Literal["real", "practice"] = "real"
+    # Where New workflow saves go, said before anything is saved.
+    target: SaveTargetOut | None = None
 
 
 class ProblemOut(BaseModel):
@@ -168,6 +179,8 @@ class WorkflowOut(BaseModel):
     commit: str | None
     # The newest run of this file, in the list only.
     last_run: WorkflowRunOut | None = None
+    # One of practice DataLab's built-in workflows: read-only, never saved over.
+    builtin: bool = False
 
 
 class WorkflowTextOut(BaseModel):
@@ -335,8 +348,47 @@ class SaveIn(BaseModel):
     # Ids of the check's findings the person has confirmed aren't participant data.
     confirmed: list[str] = Field(default_factory=list, max_length=200)
     # Where the draft came from, for the commit message when it's shared.
-    source: Literal["playground", "conversation"] = "playground"
+    source: Literal["playground", "conversation", "authoring"] = "playground"
     conversation_id: str | None = Field(default=None, max_length=100)
+
+
+class DestinationChoice(BaseModel):
+    """An export folder the Deliver card can choose, as the destination key a file names."""
+
+    key: str
+    name: str
+    path: str
+    available: bool
+    destination_id: str | None
+    # Whether the key already means this folder here (a new one is mapped when chosen).
+    mapped: bool
+
+
+class StagesIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+    edits: StageEdits | None = None
+    # The export folder the Deliver card chose (real DataLab): its key is set
+    # to `edits.deliver.destination` if neither has a mapping yet.
+    map_destination: str | None = Field(default=None, max_length=100)
+
+
+class StagesOut(BaseModel):
+    """A draft as Extract → Process & QC → Deliver, checked."""
+
+    text: str
+    # None when the model can't read the file: fix it in the YAML view.
+    stages: Stages | None
+    valid: bool
+    problems: list[ProblemOut]
+    findings: list[PipelineFindingOut]
+    target: SaveTargetOut
+    destinations: list[DestinationChoice]
+
+
+class TestRunIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+    params: dict[str, Scalar] = Field(default_factory=dict)
+    seed: int | None = Field(default=None, ge=0, lt=2**31)
 
 
 # already_there: the same file was saved by someone else meanwhile; nothing new was shared.
@@ -415,13 +467,20 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 
     @router.get("/status")
     def status() -> WorkflowsStatus:
-        return WorkflowsStatus(available=True, folder=str(folder.root), message=folder.note)
+        return WorkflowsStatus(
+            available=True,
+            folder=str(folder.root),
+            message=folder.note,
+            profile=settings.profile,
+            target=save_target(),
+        )
 
     @router.get("")
     def list_workflows() -> list[WorkflowOut]:
         out = []
         for path in folder.paths():
             described = describe(path)
+            described.builtin = folder.is_builtin(path)
             last = runner.store.list_runs(path, limit=1)
             if last:
                 described.last_run = WorkflowRunOut.model_validate(_run_fields(last[0]))
@@ -731,6 +790,12 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             )
         assert services.pipelines is not None
         trailers: tuple[tuple[str, str], ...] = (("DataLab-Workflow-From", "SQL Playground"),)
+        if body.source == "authoring":
+            trailers = (("DataLab-Workflow-From", "New workflow (Workflow authoring)"),)
+            if body.conversation_id:
+                with contextlib.suppress(ValueError):
+                    check_owner("conversation", body.conversation_id)
+                    trailers += (("DataLab-Conversation", body.conversation_id),)
         if body.source == "conversation":
             trailers = (("DataLab-Workflow-From", "a conversation's queries"),)
             if body.conversation_id:
@@ -751,6 +816,102 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         except (GitHubUnavailable, GitError) as error:
             raise HTTPException(502, str(error)) from error
         return _save_out(job)
+
+    def destination_choices(current: str | None) -> list[DestinationChoice]:
+        if practice:
+            where = settings.data_dir / "practice-exports"
+            return [
+                DestinationChoice(
+                    key=current or "practice-exports",
+                    name="Practice exports",
+                    path=str(where),
+                    available=True,
+                    destination_id=None,
+                    mapped=True,
+                )
+            ]
+        listed = destinations.list()
+        taken = {d.key for d in listed if d.key}
+        out = []
+        for d in listed:
+            key = d.key
+            if key is None:
+                base = _slug(d.name) or "export-folder"
+                key, n = base, 2
+                while key in taken:
+                    key, n = f"{base}-{n}", n + 1
+                taken.add(key)
+            out.append(
+                DestinationChoice(
+                    key=key,
+                    name=d.name,
+                    path=d.path,
+                    available=d.available,
+                    destination_id=d.id,
+                    mapped=d.key is not None,
+                )
+            )
+        return out
+
+    @router.post("/stages")
+    def stages(body: StagesIn) -> StagesOut:
+        """A draft as its three stages, after the edits if any: the YAML is
+        written again from the workflow model (workflows/stages.py), then
+        checked as every draft is. Nothing is saved."""
+        text = body.text
+        if body.edits is not None:
+            try:
+                text = apply_edits(text, body.edits)
+            except StagesRefused as error:
+                raise HTTPException(422, str(error)) from error
+            except WorkflowInvalid as error:
+                raise _unprocessable(error) from error
+        view: Stages | None
+        try:
+            view = stages_of(read_model(text))
+        except WorkflowInvalid:
+            view = None
+        try:
+            runner.check_text(text)
+        except WorkflowInvalid as error:
+            problems = _problems_out(error.problems, text)
+        else:
+            problems = []
+        chosen = view.deliver.destination if view and view.deliver else None
+        if body.map_destination and chosen and not practice and _KEY.fullmatch(chosen):
+            # The person chose this folder for the new key: map it, only if
+            # neither the key nor the folder means anything else here yet.
+            picked = destinations.get(body.map_destination)
+            if picked is not None and picked.key is None and destinations.by_key(chosen) is None:
+                destinations.set_key(picked.id, chosen)
+        return StagesOut(
+            text=text,
+            stages=view,
+            valid=not problems,
+            problems=problems,
+            findings=_findings(text),
+            target=save_target(),
+            destinations=destination_choices(chosen),
+        )
+
+    @router.post("/test-runs", status_code=201)
+    async def test_run(body: TestRunIn) -> WorkflowRunOut:
+        """Run a draft on practice data, without saving it and without delivering."""
+        if not practice:
+            raise HTTPException(
+                403,
+                "Test runs of a draft run on synthetic data, in Practice DataLab. Here, save "
+                "the workflow and check its first run before you rely on it.",
+            )
+        try:
+            run_id = await runner.start_test(body.text, body.params, seed=body.seed)
+        except SourceError as error:
+            raise HTTPException(422, str(error)) from error
+        except WorkflowInvalid as error:
+            raise _unprocessable(error) from error
+        except RunRefused as error:
+            raise HTTPException(409, str(error)) from error
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(run_id)))
 
     @router.get("/saves/{save_id}")
     def save_status(save_id: str) -> WorkflowSaveOut:
@@ -776,6 +937,11 @@ def _problems_out(problems: list[Problem], text: str | None = None) -> list[Prob
         line, column = where or (None, None)
         out.append(ProblemOut(path=p.path, message=p.message, line=line, column=column))
     return out
+
+
+def _slug(text: str) -> str:
+    """A destination key from a folder's name: lower case letters, digits and -."""
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:64]
 
 
 def _repo_path(name: str) -> str:
@@ -886,3 +1052,6 @@ def _run_fields(run: dict[str, Any]) -> dict[str, Any]:
             for s in out["steps"]
         ]
     return json.loads(json.dumps(out, default=str))
+
+
+WorkflowsStatus.model_rebuild()

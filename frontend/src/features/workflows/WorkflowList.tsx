@@ -1,23 +1,14 @@
 import { Link } from "react-router";
 
 import type { Workflow } from "@/api/workflows";
-import { Chip, EmptyNote } from "@/components/ui";
+import { Chip } from "@/components/ui";
 
 import { DeliveryChip } from "./WorkflowView";
 import { byLine, deliveryProblems, isLive, MODE, problemWhere, runStatus, when, workflowPath } from "./words";
 
-/** Every workflow in the folder: whether it passes its checks (and if not, where), and how it last ran. */
-export function WorkflowList({ workflows, folder }: { workflows: Workflow[]; folder?: string }) {
-  if (workflows.length === 0) {
-    return (
-      <EmptyNote icon="file" title="No workflows yet">
-        Workflow files (.yaml) in {folder ? <span className="font-mono text-[12px]">{folder}</span> : "the workflows folder"}{" "}
-        appear here, checked and ready to run. To make one, use <strong className="font-medium">Save as workflow</strong> in
-        the SQL Playground, or <strong className="font-medium">Turn this into a workflow</strong> in a conversation's
-        Queries.
-      </EmptyNote>
-    );
-  }
+/** Every workflow in the folder: whether it passes its checks (and if not, where), and how it last ran.
+ *  The page shows New workflow instead when there are none. */
+export function WorkflowList({ workflows }: { workflows: Workflow[] }) {
   return (
     <ul aria-label="Workflows" className="flex flex-col border-t border-line">
       {workflows.map((w) => (
@@ -44,6 +35,7 @@ function WorkflowRow({ workflow: w }: { workflow: Workflow }) {
         </Link>
         <span className="font-mono text-[11.5px] text-faint">{w.path}</span>
         <span className="ml-auto flex flex-wrap gap-1.5">
+          {w.builtin && <Chip title="Comes with Practice DataLab, read-only. It runs on synthetic data.">built-in</Chip>}
           {w.valid ? (
             <Chip tone="good">ready to run</Chip>
           ) : blocked.length > 0 && others.length === 0 ? (

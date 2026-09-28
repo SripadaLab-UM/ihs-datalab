@@ -446,7 +446,7 @@ function Review({
 }
 
 /** Where Save puts the file, said before it's pressed. */
-function Where({ target }: { target: WorkflowDraft["target"] }) {
+export function Where({ target }: { target: WorkflowDraft["target"] }) {
   if (target.kind === "share") {
     return (
       <p className="flex items-baseline gap-1.5 text-[13px] text-muted">
@@ -505,7 +505,7 @@ function useChecked(text: string, draft: WorkflowDraft) {
   return { ...state, checking };
 }
 
-function Findings({
+export function Findings({
   findings,
   confirmed,
   onConfirm,
@@ -563,11 +563,11 @@ function Findings({
   );
 }
 
-function dedupe(findings: WorkflowFinding[]): WorkflowFinding[] {
+export function dedupe(findings: WorkflowFinding[]): WorkflowFinding[] {
   return [...new Map(findings.map((f) => [f.id, f])).values()];
 }
 
-function problemsOf(error: ApiError): WorkflowProblem[] {
+export function problemsOf(error: ApiError): WorkflowProblem[] {
   const detail = error.detail as { problems?: { path: string; message: string }[] } | undefined;
   return (detail?.problems ?? []).map((p) => ({ ...p, line: null, column: null }));
 }

@@ -1261,6 +1261,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workflows/stages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stages
+         * @description A draft as its three stages, after the edits if any: the YAML is
+         *     written again from the workflow model (workflows/stages.py), then
+         *     checked as every draft is. Nothing is saved.
+         */
+        post: operations["stages_api_workflows_stages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/test-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Run
+         * @description Run a draft on practice data, without saving it and without delivering.
+         */
+        post: operations["test_run_api_workflows_test_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workflows/saves/{save_id}": {
         parameters: {
             query?: never;
@@ -1916,6 +1958,32 @@ export interface components {
             /** Names File */
             names_file: boolean;
         };
+        /**
+         * CheckEdit
+         * @description A built-in check's rules as the card shows them: each one given replaces the file's.
+         */
+        CheckEdit: {
+            /** Description */
+            description?: string | null;
+            /** File */
+            file?: string | null;
+            /** Min Rows */
+            min_rows?: number | string | null;
+            /** Max Rows */
+            max_rows?: number | string | null;
+            /** Required Columns */
+            required_columns?: string[] | null;
+            /** No Missing */
+            no_missing?: string[] | null;
+            /** Unique By */
+            unique_by?: string[] | null;
+            small_cells?: components["schemas"]["SmallCellsEdit"] | null;
+            /**
+             * Remove
+             * @default []
+             */
+            remove: ("min_rows" | "max_rows" | "unique_by" | "small_cells")[];
+        };
         /** CheckOut */
         CheckOut: {
             /** Ok */
@@ -2039,6 +2107,19 @@ export interface components {
             /** Read Only */
             read_only: boolean | null;
         };
+        /** DeliverEdit */
+        DeliverEdit: {
+            /** Destination */
+            destination?: string | null;
+            /** Folder */
+            folder?: string | null;
+            /** Files */
+            files?: string[] | null;
+            /** Without Small Cells */
+            without_small_cells?: {
+                [key: string]: string;
+            } | null;
+        };
         /** DeliverOut */
         DeliverOut: {
             /** Destination */
@@ -2047,6 +2128,19 @@ export interface components {
             folder: string;
             /** Files */
             files: string[];
+        };
+        /** DeliverView */
+        DeliverView: {
+            /** Destination */
+            destination: string;
+            /** Folder */
+            folder: string;
+            /** Files */
+            files: string[];
+            /** Without Small Cells */
+            without_small_cells: {
+                [key: string]: string;
+            };
         };
         /** DeliveryOut */
         DeliveryOut: {
@@ -2078,6 +2172,24 @@ export interface components {
             message: string | null;
             /** Deliveries */
             deliveries: components["schemas"]["DeliveryOut"][];
+        };
+        /**
+         * DestinationChoice
+         * @description An export folder the Deliver card can choose, as the destination key a file names.
+         */
+        DestinationChoice: {
+            /** Key */
+            key: string;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Available */
+            available: boolean;
+            /** Destination Id */
+            destination_id: string | null;
+            /** Mapped */
+            mapped: boolean;
         };
         /** DestinationKeyOut */
         DestinationKeyOut: {
@@ -2218,6 +2330,19 @@ export interface components {
             folder: string;
             /** Files */
             files: string[];
+        };
+        /** ExtractStep */
+        ExtractStep: {
+            /** Id */
+            id: string;
+            /** Description */
+            description: string;
+            /** Sql */
+            sql: string;
+            /** Output */
+            output: string;
+            /** Tables */
+            tables: string[];
         };
         /** FileDetail */
         FileDetail: {
@@ -2578,6 +2703,11 @@ export interface components {
              * @default true
              */
             attachments: boolean;
+            /**
+             * Question
+             * @default What would you like to find out?
+             */
+            question: string;
         };
         /** ModelKeyIn */
         ModelKeyIn: {
@@ -2606,6 +2736,31 @@ export interface components {
             /** Available */
             available: string[];
         };
+        /** NewCheck */
+        NewCheck: {
+            /** Description */
+            description?: string | null;
+            /** File */
+            file: string;
+            /** Min Rows */
+            min_rows?: number | string | null;
+            /** Max Rows */
+            max_rows?: number | string | null;
+            /** Required Columns */
+            required_columns?: string[] | null;
+            /** No Missing */
+            no_missing?: string[] | null;
+            /** Unique By */
+            unique_by?: string[] | null;
+            small_cells?: components["schemas"]["SmallCellsEdit"] | null;
+            /**
+             * Remove
+             * @default []
+             */
+            remove: ("min_rows" | "max_rows" | "unique_by" | "small_cells")[];
+            /** Id */
+            id?: string | null;
+        };
         /** NewConversation */
         NewConversation: {
             /**
@@ -2620,6 +2775,25 @@ export interface components {
             title: string;
             /** Model */
             model?: string | null;
+        };
+        /**
+         * NewDropColumns
+         * @description A new drop-columns step on an earlier step's file, placed right after it.
+         */
+        NewDropColumns: {
+            /** Id */
+            id?: string | null;
+            /** Input */
+            input: string;
+            /** Columns */
+            columns: string[];
+            /** Output */
+            output?: string | null;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
         };
         /** NewExport */
         NewExport: {
@@ -2691,6 +2865,27 @@ export interface components {
              * Format: password
              */
             password: string;
+        };
+        /** OutputChoice */
+        OutputChoice: {
+            /** Ref */
+            ref: string;
+            /** Step */
+            step: string;
+            /** File */
+            file: string;
+        };
+        /** ParameterEdit */
+        ParameterEdit: {
+            /** Default */
+            default?: boolean | number | string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Clear Default
+             * @default false
+             */
+            clear_default: boolean;
         };
         /** ParameterOut */
         ParameterOut: {
@@ -3100,6 +3295,65 @@ export interface components {
             /** Column */
             column?: number | null;
         };
+        /**
+         * ProcessItem
+         * @description One step of Process & QC: an R step, a pipeline, or a check.
+         */
+        ProcessItem: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "r" | "pipeline" | "check" | "custom_check";
+            /** Description */
+            description: string;
+            /**
+             * Inputs
+             * @default {}
+             */
+            inputs: {
+                [key: string]: string;
+            };
+            /**
+             * Outputs
+             * @default {}
+             */
+            outputs: {
+                [key: string]: string;
+            };
+            /** Script */
+            script?: string | null;
+            /** Drop Columns */
+            drop_columns?: string[] | null;
+            /** Pipeline */
+            pipeline?: string | null;
+            /** File */
+            file?: string | null;
+            /** Min Rows */
+            min_rows?: number | string | null;
+            /** Max Rows */
+            max_rows?: number | string | null;
+            /**
+             * Required Columns
+             * @default []
+             */
+            required_columns: string[];
+            /**
+             * No Missing
+             * @default []
+             */
+            no_missing: string[];
+            /** Unique By */
+            unique_by?: string[] | null;
+            small_cells?: components["schemas"]["SmallCellsView"] | null;
+            /**
+             * Other Rules
+             * @default []
+             */
+            other_rules: string[];
+        };
         /** ProposalDetail */
         ProposalDetail: {
             proposal: components["schemas"]["ProposalOut"];
@@ -3411,7 +3665,7 @@ export interface components {
              * @default playground
              * @enum {string}
              */
-            source: "playground" | "conversation";
+            source: "playground" | "conversation" | "authoring";
             /** Conversation Id */
             conversation_id?: string | null;
         };
@@ -3475,6 +3729,23 @@ export interface components {
             /** Size */
             size: number | null;
         };
+        /** SmallCellsEdit */
+        SmallCellsEdit: {
+            /** Count Columns */
+            count_columns: string[];
+            /**
+             * Min
+             * @default 11
+             */
+            min: number | string;
+        };
+        /** SmallCellsView */
+        SmallCellsView: {
+            /** Count Columns */
+            count_columns: string[];
+            /** Min */
+            min: number | string;
+        };
         /** SqlIn */
         SqlIn: {
             /** Sql */
@@ -3495,6 +3766,95 @@ export interface components {
             /** Max Bytes */
             max_bytes: number;
         };
+        /** StageEdits */
+        StageEdits: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Parameters */
+            parameters?: {
+                [key: string]: components["schemas"]["ParameterEdit"];
+            };
+            /** Steps */
+            steps?: {
+                [key: string]: components["schemas"]["StepEdit"];
+            };
+            /** Checks */
+            checks?: {
+                [key: string]: components["schemas"]["CheckEdit"];
+            };
+            /** Add Checks */
+            add_checks?: components["schemas"]["NewCheck"][];
+            /** Add Drop Columns */
+            add_drop_columns?: components["schemas"]["NewDropColumns"][];
+            /** Remove Steps */
+            remove_steps?: string[];
+            deliver?: components["schemas"]["DeliverEdit"] | null;
+            /**
+             * No Deliver
+             * @default false
+             */
+            no_deliver: boolean;
+        };
+        /** StageParameter */
+        StageParameter: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "date" | "string" | "integer" | "number" | "boolean";
+            /** Default */
+            default: boolean | number | string | null;
+            /** Description */
+            description: string;
+        };
+        /** Stages */
+        Stages: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Parameters */
+            parameters: components["schemas"]["StageParameter"][];
+            /** Reads */
+            reads: string[];
+            /** Extract */
+            extract: components["schemas"]["ExtractStep"][];
+            /** Process */
+            process: components["schemas"]["ProcessItem"][];
+            deliver: components["schemas"]["DeliverView"] | null;
+            /** Outputs */
+            outputs: components["schemas"]["OutputChoice"][];
+        };
+        /** StagesIn */
+        StagesIn: {
+            /** Text */
+            text: string;
+            edits?: components["schemas"]["StageEdits"] | null;
+            /** Map Destination */
+            map_destination?: string | null;
+        };
+        /**
+         * StagesOut
+         * @description A draft as Extract → Process & QC → Deliver, checked.
+         */
+        StagesOut: {
+            /** Text */
+            text: string;
+            stages: components["schemas"]["Stages"] | null;
+            /** Valid */
+            valid: boolean;
+            /** Problems */
+            problems: components["schemas"]["ProblemOut"][];
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            target: components["schemas"]["SaveTargetOut"];
+            /** Destinations */
+            destinations: components["schemas"]["DestinationChoice"][];
+        };
         /** StartIn */
         StartIn: {
             /** Path */
@@ -3505,6 +3865,17 @@ export interface components {
             };
             /** Seed */
             seed?: number | null;
+        };
+        /** StepEdit */
+        StepEdit: {
+            /** Description */
+            description?: string | null;
+            /** Sql */
+            sql?: string | null;
+            /** R */
+            r?: string | null;
+            /** Drop Columns */
+            drop_columns?: string[] | null;
         };
         /** StepOut */
         StepOut: {
@@ -3653,6 +4024,17 @@ export interface components {
             id: string;
             /** Freed Bytes */
             freed_bytes: number;
+        };
+        /** TestRunIn */
+        TestRunIn: {
+            /** Text */
+            text: string;
+            /** Params */
+            params?: {
+                [key: string]: boolean | number | string;
+            };
+            /** Seed */
+            seed?: number | null;
         };
         /** UpdateCheckOut */
         UpdateCheckOut: {
@@ -3804,6 +4186,11 @@ export interface components {
             /** Commit */
             commit: string | null;
             last_run?: components["schemas"]["WorkflowRunOut"] | null;
+            /**
+             * Builtin
+             * @default false
+             */
+            builtin: boolean;
         };
         /** WorkflowRunOut */
         WorkflowRunOut: {
@@ -3899,6 +4286,13 @@ export interface components {
             folder: string;
             /** Message */
             message?: string | null;
+            /**
+             * Profile
+             * @default real
+             * @enum {string}
+             */
+            profile: "real" | "practice";
+            target?: components["schemas"]["SaveTargetOut"] | null;
         };
     };
     responses: never;
@@ -6073,6 +6467,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowSaveOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stages_api_workflows_stages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StagesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StagesOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_run_api_workflows_test_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestRunIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowRunOut"];
                 };
             };
             /** @description Validation Error */

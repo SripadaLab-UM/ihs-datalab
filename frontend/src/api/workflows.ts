@@ -23,6 +23,23 @@ export type WorkflowSave = Schemas["WorkflowSaveOut"];
 export type WorkflowSaveIn = Schemas["SaveIn"];
 export type WorkflowDraftCheck = Schemas["DraftCheckOut"];
 export type WorkflowFinding = Schemas["PipelineFindingOut"];
+export type WorkflowsStatus = Schemas["WorkflowsStatus"];
+export type Stages = Schemas["Stages"];
+export type StagesResult = Schemas["StagesOut"];
+type CheckEdit = Partial<Schemas["CheckEdit"]>;
+/** Edits to a draft's stages: only what changes is given (the backend's defaults fill the rest). */
+export type StageEdits = Partial<
+  Omit<Schemas["StageEdits"], "parameters" | "checks" | "add_checks" | "add_drop_columns" | "deliver">
+> & {
+  parameters?: Record<string, Partial<Schemas["ParameterEdit"]>>;
+  checks?: Record<string, CheckEdit>;
+  add_checks?: (CheckEdit & { file: string })[];
+  add_drop_columns?: (Partial<Schemas["NewDropColumns"]> & { input: string; columns: string[] })[];
+  deliver?: Partial<Schemas["DeliverEdit"]>;
+};
+export type StagesIn = { text: string; edits?: StageEdits; map_destination?: string | null };
+export type ProcessItem = Schemas["ProcessItem"];
+export type DestinationChoice = Schemas["DestinationChoice"];
 
 const post = (body?: unknown): RequestInit => ({
   method: "POST",
@@ -32,7 +49,7 @@ const id = encodeURIComponent;
 
 export const workflowsApi = {
   /** Whether the Workflows tab's backend is ready. */
-  status: () => request<Schemas["WorkflowsStatus"]>("/api/workflows/status"),
+  status: () => request<WorkflowsStatus>("/api/workflows/status"),
   /** Every workflow file in the folder, checked, with its newest run. */
   list: () => request<Workflow[]>("/api/workflows"),
   /** A workflow file's text as it is in the folder now. */
@@ -60,6 +77,12 @@ export const workflowsApi = {
    *  (`state: "saving"`, followed with `saveStatus`). A 422 has `problems`; a 409 says why not. */
   save: (body: WorkflowSaveIn) => request<WorkflowSave>("/api/workflows/saves", post(body)),
   saveStatus: (saveId: string) => request<WorkflowSave>(`/api/workflows/saves/${id(saveId)}`),
+  /** A draft as Extract → Process & QC → Deliver, after the edits if any (the YAML is written again from the
+   *  workflow model), checked as every draft is. Nothing is saved. A 422 says why an edit can't be made. */
+  stages: (body: StagesIn) => request<StagesResult>("/api/workflows/stages", post(body)),
+  /** Run a draft on practice data, unsaved and never delivered (Practice DataLab only: 403 elsewhere). */
+  testRun: (text: string, params: Record<string, ParamValue> = {}) =>
+    request<WorkflowRun>("/api/workflows/test-runs", post({ text, params })),
   /** The destination keys workflow files name, and the folder each maps to on this computer. */
   destinations: () => request<DestinationKey[]>("/api/workflows/destinations"),
 };

@@ -111,6 +111,8 @@ MAX_RESULT_BYTES = 64 * 1024
 MAX_MESSAGE_CHARS = 500
 MAX_MESSAGES = 50
 WRAPPER_NAME = "run_step.R"
+# A test run's `workflow_path`: a draft, not a file in the folder (see start_test).
+DRAFT_PREFIX = "draft:"
 
 
 class RunRefused(RuntimeError):
@@ -157,6 +159,8 @@ class _Plan:
     host_platform: str
     pipelines: PipelineLookup
     deliver: bool = True
+    # What the record says when `deliver` is off.
+    no_delivery: str = "Replays don't deliver unless asked to."
     original: dict[str, Any] | None = None
     set_id: str | None = None
     replay_exact: bool | None = None
@@ -342,6 +346,48 @@ class WorkflowRunner:
             await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
             raise
 
+    async def start_test(
+        self, text: str, params: Mapping[str, Any] | None = None, *, seed: int | None = None
+    ) -> str:
+        """A test run of a draft that isn't saved: its text, checked as any
+        file is, run as it would run, and never delivered. The record names it
+        `draft:<name>`, so it's never taken for a saved file's run: Run again
+        can't find it, and its Replay never delivers."""
+        workflow = self.check_text(text)
+        run_id = new_run_id()
+        try:
+            # The package as it is now, as for any run (the draft isn't a file here).
+            folder = await asyncio.to_thread(
+                self.folder.snapshot, self.runs_dir / run_id / "source"
+            )
+            workflow = self.check_text(text, folder=folder)
+            data = text.encode("utf-8")
+            file = WorkflowFile(
+                path=f"{DRAFT_PREFIX}{workflow.name}",
+                text=text,
+                source="file",
+                blob=f"sha256:{hashlib.sha256(data).hexdigest()}",
+                commit=None,
+            )
+            plan = await self._plan(
+                mode="run",
+                workflow=workflow,
+                file=file,
+                params=resolve_params(workflow, params or {}),
+                seed=secrets.randbelow(2**31) if seed is None else seed,
+                pipelines=folder.pipeline,
+                deliver=False,
+                run_id=run_id,
+                folder=folder,
+            )
+            plan.no_delivery = (
+                "A test run doesn't deliver. Save the workflow, then run it to deliver."
+            )
+            return self._launch(plan)
+        except BaseException:
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
+            raise
+
     async def run_again(self, run_id: str) -> str:
         """The current workflow file afresh: new extracts, the original parameters and seed."""
         original = self._original(run_id)
@@ -394,6 +440,8 @@ class WorkflowRunner:
         RunRefused when it can't run at all (the extracts are gone, say).
         """
         original = self._original(run_id)
+        if deliver and original["workflow_path"].startswith(DRAFT_PREFIX):
+            raise RunRefused("A test run of a draft never delivers, and nor does its Replay.")
         check = await self._replay_check(original)
         if check.blocking:
             raise RunRefused(" ".join(check.blocking))
@@ -1124,9 +1172,7 @@ class WorkflowRunner:
             return
         if not plan.deliver:
             self.store.update_run(
-                plan.run_id,
-                delivery_status="skipped",
-                delivery_message="Replays don't deliver unless asked to.",
+                plan.run_id, delivery_status="skipped", delivery_message=plan.no_delivery
             )
             return
         try:
@@ -1195,10 +1241,11 @@ class WorkflowRunner:
         self.store.update_run(
             plan.run_id,
             delivery_status="delivered",
+            # Written to a folder on this computer: saved locally, whatever syncs it later.
             delivery_message=(
-                "1 file delivered."
+                "1 file saved locally."
                 if len(result.files) == 1
-                else f"{len(result.files)} files delivered."
+                else f"{len(result.files)} files saved locally."
             ),
         )
 

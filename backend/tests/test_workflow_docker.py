@@ -21,6 +21,7 @@ import pytest
 
 from datalab.sessions.containers import instance_of
 from datalab.workflows.sandbox import DockerSandbox, StepLimits
+from datalab.workflows.stages import NewCheck, NewDropColumns, StageEdits, apply_edits
 from tests.workflow_fakes import Harness
 
 pytestmark = pytest.mark.docker
@@ -296,3 +297,27 @@ async def test_a_pipeline_runs_from_its_built_package(harness):
 
     replay = await h.finish(await h.runner.replay(run["id"]))
     assert replay["reproduced"] == 1, replay["replay_notes"]
+
+
+async def test_the_drop_columns_step_new_workflow_writes_runs_in_r(harness):
+    """New workflow's drop-columns step (workflows/stages.py), in R: the other
+    columns come out exactly as extracted, empty cells and all."""
+    from tests.test_workflow_stages import DAILY
+
+    h = harness
+    edits = StageEdits(
+        add_drop_columns=[NewDropColumns(input="extract", columns=["DEVICE"])],
+        add_checks=[
+            NewCheck(file="drop_extract", unique_by=["STUDY_PARTICIPANT_ID", "RECORD_DATE"])
+        ],
+    )
+    h.write("daily_clean.yaml", apply_edits(DAILY, edits))
+    run = await h.run("daily_clean.yaml")
+    assert run["status"] == "succeeded", [(s["step_id"], s["message"]) for s in run["steps"]]
+    raw = h.output(run, "extract").read_text().splitlines()
+    clean = h.output(run, "drop_extract").read_text().splitlines()
+    assert clean[0] == '"STUDY_PARTICIPANT_ID","RECORD_DATE","STEPS"'
+    assert len(clean) == len(raw)
+    # The kept values as they were (each read as text, so R quotes every one).
+    first = raw[1].split(",")
+    assert clean[1] == ",".join(f'"{v}"' for v in (first[0], first[1], first[3]))
