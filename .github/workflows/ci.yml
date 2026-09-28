@@ -169,6 +169,25 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile("installer/windows/$file", [ref]$null, [ref]$errors) | Out-Null
             if ($errors) { $errors | ForEach-Object { Write-Host "${file}: $_" }; exit 1 }
           }
+      - name: The file pickers' script parses, and its foreground part compiles (Windows PowerShell 5.1)
+        # The script DataLab runs to show the folder and file pickers, taken
+        # from picker.py as it is. The dialogs themselves can't be opened here.
+        shell: powershell
+        run: |
+          $source = Get-Content "backend/src/datalab/sessions/picker.py" -Raw
+          $start = $source.IndexOf('_WINDOWS = r"""') + '_WINDOWS = r"""'.Length
+          $script = $source.Substring($start, $source.IndexOf('"""', $start) - $start)
+          foreach ($kind in "files", "folder") {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseInput($script.Replace('{kind}', $kind), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Host "${kind}: $_" }; exit 1 }
+          }
+          $members = [regex]::Match($script, "(?s)-MemberDefinition @'\r?\n(.*?)\r?\n'@").Groups[1].Value
+          if (-not $members) { Write-Host "No user32 definitions found"; exit 1 }
+          Add-Type -Namespace DataLabPicker -Name Front -MemberDefinition $members
+          $thread = [DataLabPicker.Front]::GetCurrentThreadId()
+          if (-not $thread) { exit 1 }
+          Write-Host "Both pickers parse; the foreground helpers compile (thread $thread)."
       - name: Without -Package, the one package beside the installer is used (and only one)
         shell: powershell
         run: |
