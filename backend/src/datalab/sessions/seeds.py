@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from datalab.sessions.checkpoints import Checkpoints
+from datalab.sessions.code import is_code
 from datalab.sessions.containers import SessionPaths
 from datalab.sessions.hooks import WorkspaceSeed
 from datalab.sessions.store import Conversation
@@ -119,6 +121,7 @@ def _run(seed: Seed, conversation: Conversation, paths: SessionPaths) -> str | N
     staging = tempfile.mkdtemp(prefix=f"{seed.name}-", dir=staging_root)
     try:
         result = seed.run(conversation, Path(staging))
+        _record_baseline(paths, Path(staging), seed.into)
         # Checked again just before: nothing may have appeared meanwhile.
         if _taken(target):
             raise FileExistsError(f"/work/{seed.into} already exists")
@@ -129,6 +132,15 @@ def _run(seed: Seed, conversation: Conversation, paths: SessionPaths) -> str | N
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
     return result
+
+
+def _record_baseline(paths: SessionPaths, staging: Path, into: str) -> None:
+    """Keep the code files as copied, so the Code tab can tell which the agent changed."""
+    try:
+        Checkpoints(paths.checkpoints, paths.work).record_baseline(staging, into, is_code)
+    except OSError:
+        # Only the Code tab's "modified or not" depends on it.
+        log.exception("couldn't record the baseline of /work/%s", into)
 
 
 def _taken(path: Path) -> bool:

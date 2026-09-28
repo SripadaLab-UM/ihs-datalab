@@ -18,6 +18,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from datalab import __version__, datalock, db, updates
+from datalab.api.code import build_code_router
 from datalab.api.conversations import build_conversations_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
@@ -275,6 +276,7 @@ def create_app(
     app.state.previews = previews
     app.include_router(build_files_router(conversations, sessions, previews))
     app.include_router(build_preview_router(previews))
+    app.include_router(build_code_router(conversations, sessions))
     app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
     destinations = DestinationStore(connection)
     app.include_router(

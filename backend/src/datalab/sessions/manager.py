@@ -164,6 +164,11 @@ class SessionManager:
         """What the seed `name` returned for this conversation, if it's in place."""
         return seeds.base(self.paths(conversation_id), name)
 
+    def seeded_folders(self, conversation_id: str) -> list[str]:
+        """The /work folders DataLab copied in for this conversation (seeds in place)."""
+        done = seeds.records(self.paths(conversation_id))
+        return [s.into for s in self._seeds if (done.get(s.name) or {}).get("status") == "done"]
+
     def register_mounts(self, provider: MountProvider, *, roots: Sequence[Path]) -> None:
         """Add `provider(conversation)`'s read-only mounts to each container
         the conversation starts from now on. Their sources must be inside
