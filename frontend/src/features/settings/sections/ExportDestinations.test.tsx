@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Destination, type FolderTest } from "@/api/client";
+import { ApiError } from "@/api/http";
 
 import { ExportDestinations } from "./ExportDestinations";
 
@@ -251,4 +252,98 @@ it("a test of a folder that's switched off says so", async () => {
   const outcome = await within(row).findByRole("status");
   expect(outcome.textContent).toContain("Saved locally ✓");
   expect(outcome.textContent).toContain("switched off as a destination");
+});
+
+const TESTED: FolderTest = {
+  ok: true,
+  status: "ready",
+  message: null,
+  note: null,
+  test_file: "datalab-test-20260928-101500-abc123.txt",
+  removed: true,
+  saved_to: "Saved to Lab Dropbox (on this computer)",
+  sync_note: "Dropbox will upload it when its app is running and signed in. DataLab can't confirm the upload.",
+  destination: folder(),
+};
+
+it("while the picker is open, says where to look for it", async () => {
+  vi.mocked(api.addDestination).mockReturnValue(new Promise(() => {}));
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Choose another folder…" }));
+  expect((await screen.findByRole("status")).textContent).toMatch(/A folder picker is open.*may be behind this window/);
+});
+
+it("confirms a folder right where it was chosen, lights it up in the list, and can test it", async () => {
+  vi.mocked(api.addDestination).mockResolvedValue(folder());
+  vi.mocked(api.testDestination).mockResolvedValue(TESTED);
+  show();
+  vi.mocked(api.destinations).mockResolvedValue([folder()]);
+  const button = await screen.findByRole("button", { name: /Choose in Dropbox \(UM\)/ });
+  button.focus();
+  fireEvent.click(button);
+  const added = await screen.findByRole("status", { name: "Folder added" });
+  expect(added.textContent).toContain("Added: Lab Dropbox — exports can go here.");
+  expect(within(added).getByText("~/Library/CloudStorage/Dropbox-UM/IHS").getAttribute("title")).toBe(
+    "/Users/me/Library/CloudStorage/Dropbox-UM/IHS",
+  );
+  expect(within(added).getByText(DROPBOX_NOTE)).toBeTruthy();
+  expect(added.textContent).toContain("It's now in the list above");
+  expect(added.textContent).not.toMatch(/isn't inside/);
+  // Its new row in the list lights up; focus stays by the confirmation.
+  const row = await screen.findByRole("listitem", { name: "Lab Dropbox" });
+  expect(row.id).toBe("export-folder-dest_1");
+  await waitFor(() => expect(row.classList.contains("dl-highlight") || row.classList.contains("dl-highlight-still")).toBe(true));
+  expect(document.activeElement?.tagName).not.toBe("H2");
+  // Testing it from the confirmation.
+  fireEvent.click(within(added).getByRole("button", { name: "Test it now" }));
+  await waitFor(() => expect(added.textContent).toContain("Saved locally ✓"));
+  expect(api.testDestination).toHaveBeenCalledWith("dest_1");
+  fireEvent.click(within(added).getByRole("button", { name: "Done" }));
+  expect(screen.queryByRole("status", { name: "Folder added" })).toBeNull();
+});
+
+it("a folder chosen outside the Dropbox the picker opened in is added, saying Dropbox won't upload it", async () => {
+  vi.mocked(api.addDestination).mockResolvedValue(
+    folder({ name: "Desktop", where: "~/Desktop", path: "/Users/me/Desktop", location: "this_computer", sync_provider: null, sync_provider_name: null, location_note: "On this computer." }), // prettier-ignore
+  );
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: /Choose in Dropbox \(UM\)/ }));
+  const added = await screen.findByRole("status", { name: "Folder added" });
+  expect(added.textContent).toContain("Added: Desktop — exports can go here.");
+  expect(added.textContent).toContain(
+    "This folder isn't inside Dropbox (UM), so the Dropbox app won't upload what's saved here.",
+  );
+  expect(added.textContent).toContain("~/Library/CloudStorage/Dropbox-UM");
+});
+
+it("a folder added that can't be saved to yet says so, and why", async () => {
+  vi.mocked(api.addDestination).mockResolvedValue(
+    folder({ status: "not_writable", available: false, status_message: "Your account can't save files in this folder." }),
+  );
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Choose another folder…" }));
+  const added = await screen.findByRole("status", { name: "Folder added" });
+  expect(added.textContent).toContain("Added: Lab Dropbox, but exports can't go here yet.");
+  expect(added.textContent).toContain("Your account can't save files in this folder.");
+  expect(added.textContent).not.toContain("exports can go here.");
+});
+
+it("a refused folder says why, next to the chooser", async () => {
+  vi.mocked(api.addDestination).mockRejectedValue(
+    new ApiError(422, "This is a system folder, which can't be an export folder."),
+  );
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Choose another folder…" }));
+  expect((await screen.findByRole("alert")).textContent).toBe(
+    "Not added: This is a system folder, which can't be an export folder.",
+  );
+  expect(screen.queryByRole("status", { name: "Folder added" })).toBeNull();
+});
+
+it("cancelling the picker isn't shown as a problem", async () => {
+  vi.mocked(api.addDestination).mockRejectedValue(new ApiError(400, "No folder was chosen."));
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Choose another folder…" }));
+  expect((await screen.findByRole("status")).textContent).toBe("No folder was chosen, so nothing was added.");
+  expect(screen.queryByRole("alert")).toBeNull();
 });
