@@ -83,12 +83,42 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
                 except SecretRefused as refused:
                     print(f"{refused} Nothing was saved.")
                     return 1
+    elif profile == "practice":
+        try:
+            if save_practice_password(settings, update=update):
+                print(
+                    "Saved the practice database's password to this computer's keychain "
+                    "(the synthetic database's fixed one, for fake data only)."
+                )
+        except KeyringError:
+            print("Couldn't save the practice database's password: the keychain refused.")
+            return 1
     elif profile == "real":
         print(
             "No database is configured yet. Ask the DataLab maintainer for the lab's "
             "settings file, then run: datalab setup --settings <file>"
         )
     return 0
+
+
+# The synthetic database's app-user password: fixed, public and dev-only
+# (synthetic/README.md). It unlocks fake data on this computer and nothing else.
+SYNTHETIC_ORACLE_PASSWORD = "datalab_ro"
+
+
+def save_practice_password(settings: Settings, *, update: bool = False) -> bool:
+    """Save the synthetic database's password for practice DataLab, unless one
+    is saved already (or `update`). Returns whether it saved it.
+
+    Only ever for the practice profile's own synthetic database: the real
+    profile's password always comes from the person.
+    """
+    if settings.profile != "practice" or settings.oracle is not PRACTICE_ORACLE:
+        return False
+    if not update and _saved(lambda: oracle_password(PRACTICE_ORACLE)):
+        return False
+    save_oracle_password(PRACTICE_ORACLE, SYNTHETIC_ORACLE_PASSWORD)
+    return True
 
 
 # ------------------------------------------------------------ connections
@@ -106,7 +136,8 @@ _MAX_SECRET = 4096
 
 def asks_for_oracle_password(settings: Settings) -> OracleSettings | None:
     """The database whose password DataLab asks for: the lab's, never the
-    practice one (its synthetic database's password is fixed)."""
+    practice one (its synthetic database's password is fixed, and setup saves
+    it: save_practice_password)."""
     oracle = settings.oracle
     if settings.profile == "practice" or oracle is None or oracle is PRACTICE_ORACLE:
         return None

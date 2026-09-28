@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import io
 import sys
 from pathlib import Path
@@ -162,6 +163,8 @@ def _serve(settings, *, open_browser: bool) -> int:
     # The data folder's lock, held until DataLab exits: nothing else may
     # change the database while an interrupted update is sorted out, or after.
     refuse_if_running(settings)
+    if settings.profile == "practice":
+        _save_practice_password(settings)
     import threading
     import webbrowser
 
@@ -231,6 +234,18 @@ def _serve(settings, *, open_browser: bool) -> int:
     app.state.shutdown = shutdown
     server.run()
     return 0
+
+
+def _save_practice_password(settings) -> None:
+    """A practice DataLab set up before `datalab setup` saved its synthetic
+    database's password (0.1.0) saves it now. Never for the real profile."""
+    from keyring.errors import KeyringError
+
+    from datalab.setup import save_practice_password
+
+    # If the keychain refuses, the Safety check and Settings say what's missing.
+    with contextlib.suppress(KeyringError):
+        save_practice_password(settings)
 
 
 def ignore_windows_connection_resets(loop: asyncio.AbstractEventLoop) -> None:
