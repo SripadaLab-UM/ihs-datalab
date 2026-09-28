@@ -83,7 +83,9 @@ def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> i
     oracle = asks_for_oracle_password(settings)
     if oracle is not None:
         if update or not _saved(lambda: oracle_password(oracle)):
-            password = ask_secret(f"Database password for {oracle.user}")
+            password = ask_secret(
+                f"Database password for {oracle.user}", keep_spaces=True, what="password"
+            )
             if password:
                 try:
                     store_oracle_password(oracle, password)

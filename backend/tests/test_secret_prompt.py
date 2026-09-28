@@ -234,3 +234,69 @@ def test_ctrl_c_during_setup_cancels_cleanly(tmp_path, monkeypatch, memory_keych
     assert setup.setup("practice", None, update=True) == 130
     assert "Cancelled. Nothing more was saved." in capsys.readouterr().out
     assert memory_keychain.writes == 0
+
+
+def test_a_password_keeps_its_spaces_but_not_its_line_breaks(capsys):
+    password = " zq xv "
+    assert confirm(Entry(password + "\n"), keep_spaces=True, what="password") == password
+    out = capsys.readouterr().out
+    assert f"Received {len(password)} characters." in out
+    assert "Removed a line break from the end." in out
+    assert "Your password starts and ends with a space; it was kept as typed." in out
+    assert "zq" not in out and "xv" not in out
+
+    assert confirm(Entry("pw "), keep_spaces=True, what="password") == "pw "
+    out = capsys.readouterr().out
+    assert "Your password ends with a space; it was kept as typed." in out
+    assert "Removed" not in out
+    assert confirm(Entry("\r\npw"), keep_spaces=True, what="password") == "pw"
+    assert "space" not in capsys.readouterr().out
+    # The U-M GPT key still loses spaces at its ends.
+    assert confirm(Entry(" key ")) == "key"
+    assert "kept as typed" not in capsys.readouterr().out
+
+
+def test_setup_keeps_the_database_passwords_spaces(tmp_path, monkeypatch, memory_keychain):
+    from datalab import setup
+
+    monkeypatch.delenv("DATALAB_ORACLE_PASSWORD", raising=False)
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path / "real"))
+    lab = tmp_path / "lab.toml"
+    lab.write_text('[oracle]\nhost = "h"\nservice = "s"\nuser = "U"\nallowed_schemas = ["X"]\n')
+    answers = iter([f" {SECRET} ", " pass word "])
+    monkeypatch.setattr(secret_prompt.getpass, "getpass", lambda prompt: next(answers))
+    assert setup.setup("real", lab, update=True) == 0
+    assert SECRET in memory_keychain.saved.values()
+    assert memory_keychain.saved[("datalab-oracle", "U")] == " pass word "
+
+
+class FakeConsole:
+    """msvcrt.getwch and kbhit: keys as bursts, like FakeTerminal."""
+
+    def __init__(self, *bursts: str):
+        self.term = FakeTerminal(*bursts)
+
+    def keys(self) -> secret_prompt.WindowsKeys:
+        return secret_prompt.WindowsKeys(self.term.read_char, self.term.pending)
+
+    def run(self) -> Entry:
+        keys = self.keys()
+        return read_masked(keys.read_char, self.term.write, keys.waiting)
+
+
+def test_windows_special_keys_are_ignored():
+    # Left arrow, Delete, Ctrl-Right ("\xe0" prefix), F1 ("\x00" prefix).
+    console = FakeConsole("a", "\xe0K", "\xe0S", "\xe0t", "\x00;", "b", "\r")
+    assert console.run() == Entry("ab")
+    assert console.term.screen == "**\n"
+    # "\x00" is always a prefix, whatever follows.
+    assert FakeConsole("\x00x", "c", "\r").run().value == "c"
+
+
+def test_windows_keeps_a_typed_a_grave():
+    # On its own, and followed at once by a character that isn't a scan code.
+    assert FakeConsole("\xe0", "b", "\r").run().value == "àb"
+    assert FakeConsole("\xe0b\xe0", "\r").run().value == "àbà"
+    console = FakeConsole("x\xe0\r")  # a paste ending in "à" and a line break
+    assert console.run() == Entry("xà")
+    assert console.term.screen == "**\n"

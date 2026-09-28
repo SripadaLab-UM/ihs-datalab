@@ -111,9 +111,10 @@ def _skip_escape(read_char: Callable[[], str], pending: Callable[[], bool]) -> N
             return
 
 
-def ask_secret(label: str) -> str:
-    """Ask for a key or password; return it with spaces and line breaks at
-    its ends removed, or "" when nothing was entered.
+def ask_secret(label: str, *, keep_spaces: bool = False, what: str = "entry") -> str:
+    """Ask for a key or password; return it with line breaks at its ends
+    removed (and spaces too, unless `keep_spaces`), or "" when nothing was
+    entered.
 
     Says how many characters arrived, never what they were. Refuses a paste
     of more than one line and asks again. Ctrl-C raises KeyboardInterrupt.
@@ -126,25 +127,40 @@ def ask_secret(label: str) -> str:
                 "Copy just the one line and paste it again."
             )
             continue
-        return confirm(entry)
+        return confirm(entry, keep_spaces=keep_spaces, what=what)
     print("Nothing was saved.")
     return ""
 
 
-def confirm(entry: Entry) -> str:
-    """Report what arrived, without revealing any of it; return the value to save."""
-    value = entry.value.strip()
-    if not value:
+_BREAKS = "\r\n"
+
+
+def confirm(entry: Entry, *, keep_spaces: bool = False, what: str = "entry") -> str:
+    """Report what arrived, without revealing any of it; return the value to save.
+
+    Line breaks at the ends (which pastes often add) are always removed.
+    Spaces at the ends are too, unless `keep_spaces`: a database password
+    may really start or end with one, so it's kept, and the person told.
+    """
+    raw = entry.value
+    removable = _BREAKS if keep_spaces else None  # None: all whitespace
+    value = raw.strip(removable)
+    if not value.strip():
         print("Nothing was entered, so nothing was saved.")
         return ""
-    raw = entry.value
-    start = raw[: len(raw) - len(raw.lstrip())]
-    end = raw[len(raw.rstrip()) :] + "\n" * entry.extra_breaks
+    start = raw[: len(raw) - len(raw.lstrip(removable))]
+    end = raw[len(raw.rstrip(removable)) :] + "\n" * entry.extra_breaks
     plural = "" if len(value) == 1 else "s"
     print(f"✓ Received {len(value)} character{plural}.")
     for removed, where in ((start, "start"), (end, "end")):
         if removed:
             print(f"  Removed {_whitespace(removed)} from the {where}.")
+    if keep_spaces:
+        sides = [
+            side for side, char in (("starts", value[0]), ("ends", value[-1])) if char.isspace()
+        ]
+        if sides:
+            print(f"  Your {what} {' and '.join(sides)} with a space; it was kept as typed.")
     return value
 
 
@@ -207,26 +223,59 @@ def _read_posix() -> Entry:
         termios.tcsetattr(fd, termios.TCSANOW, saved)
 
 
+# The second character of a special key after "\xe0": arrows, Home/End,
+# PgUp/PgDn, Insert/Delete, F11/F12, and their Shift, Ctrl and Alt variants.
+_WINDOWS_SCAN_CODES = frozenset(
+    "HPKMGOIQRSstuvw" + "".join(map(chr, (*range(0x84, 0x95), *range(0x97, 0xA4))))
+)
+
+
+class WindowsKeys:
+    """Characters from msvcrt.getwch, with special keys taken out.
+
+    getwch gives a special key (an arrow, Home, F1) as two characters: "\x00"
+    or "\xe0", then a scan code. "\x00" is always a special key, but "\xe0"
+    is also a typed "à", so it only counts as one when a scan code follows
+    at once; otherwise it's "à" and what follows is read as usual.
+    """
+
+    def __init__(self, getwch: Callable[[], str], kbhit: Callable[[], bool]):
+        self._getwch = getwch
+        self._kbhit = kbhit
+        self._held: list[str] = []
+
+    def _next(self) -> str:
+        return self._held.pop(0) if self._held else self._getwch()
+
+    def waiting(self) -> bool:
+        return bool(self._held) or self._kbhit()
+
+    def read_char(self) -> str:
+        while True:
+            char = self._next()
+            if char == "\x00":
+                self._next()  # the scan code
+                continue
+            if char == "\xe0" and self.waiting():
+                code = self._next()
+                if code in _WINDOWS_SCAN_CODES:
+                    continue
+                self._held.append(code)
+            return char
+
+
 def _read_windows() -> Entry:
     assert sys.platform == "win32"
     import msvcrt
 
+    keys = WindowsKeys(msvcrt.getwch, msvcrt.kbhit)
+
     def pending() -> bool:
         deadline = time.monotonic() + _PENDING_WAIT
-        while not msvcrt.kbhit():
+        while not keys.waiting():
             if time.monotonic() >= deadline:
                 return False
             time.sleep(0.005)
         return True
 
-    def read_char() -> str:
-        while True:
-            char = msvcrt.getwch()
-            # Arrow and function keys come as "\x00" or "\xe0" and a scan
-            # code; a typed "à" is "\xe0" on its own.
-            if char == "\x00" or (char == "\xe0" and msvcrt.kbhit()):
-                msvcrt.getwch()
-                continue
-            return char
-
-    return read_masked(read_char, _write, pending)
+    return read_masked(keys.read_char, _write, pending)
