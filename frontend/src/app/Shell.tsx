@@ -51,8 +51,8 @@ export function Shell() {
       {signedOut && (
         <div role="alert" className="bg-danger px-4 py-2 text-center text-sm font-medium text-white">
           DataLab doesn't recognise this window any more (it restarted, or the session was ended), so what's shown here
-          may be out of date. To get back in, quit DataLab (close its Terminal window or press Ctrl-C in it) and start it
-          again from its launcher: an old sign-in link won't work again.
+          may be out of date. To get back in, quit DataLab (close its window, Terminal on a Mac or PowerShell on
+          Windows, or press Ctrl-C in it) and start it again from its launcher: an old sign-in link won't work again.
         </div>
       )}
       <UpdatingBanner />
