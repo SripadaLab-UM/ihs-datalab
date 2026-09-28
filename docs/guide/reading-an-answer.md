@@ -13,18 +13,30 @@ keywords: answer, trace, numbers, matched, provenance, how was this made, review
 The answer sits under a single dark rule, labelled **Answer**. Once it's
 finished, the work behind it folds into one row, **How this answer was
 made**, which counts the steps, queries, lab guides read and files changed,
-and names any errors along the way. Open it to read the whole story again.
-**Made in this turn** lists the output files the turn wrote, to open
-straight away.
+and names any steps that failed along the way, with whether each was retried
+successfully. Open it to read the whole story again. **Made in this turn**
+lists the output files the turn wrote, to open straight away. Files the
+answer names show as buttons that say what they are (**Open report**,
+**Open table: flow (CSV)**); hover to see the full path. Query ids and SQL
+stay in the **Queries** tab.
 
 ## The trace
 
-Under the answer, a chip says how many of its numbers DataLab found in that
-turn's query results, command output, or data files in `outputs/`:
+Under the answer, **Checks on this answer** lists what was checked, and by
+whom. DataLab's own check comes first: how many of the answer's numbers it
+found in that turn's query results, command output, or data files in
+`outputs/`:
 
-- "all 12 numbers matched to this turn's outputs", or
-- "2 of 12 numbers not matched to this turn's outputs", followed by those
-  numbers in amber.
+- "Numbers checked against this turn's query results and outputs: all 12
+  matched", or
+- "… 10 of 12 matched (2 not found, listed below: check them)", followed by
+  those numbers in amber.
+
+Then the rigor review's own view of the numbers, when it ran, and how many
+steps failed along the way: "all were retried successfully", or which remain
+unresolved. The rigor review is the agent checking its own work, so it can
+disagree with DataLab's check; when they seem to, a line says why. Go by
+DataLab's check.
 
 A match means the number appears in something the turn produced. It doesn't
 show that it's the right statistic from the right analysis. An unmatched
