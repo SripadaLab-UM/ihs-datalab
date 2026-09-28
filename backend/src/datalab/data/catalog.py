@@ -9,17 +9,27 @@ older CSV metadata export.
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import oracledb
 import yaml
 
+from datalab import safeyaml
+
+log = logging.getLogger(__name__)
+
 # Unquoted Oracle identifiers: nothing a path could trip over (no dots,
 # slashes, spaces or Windows device names' punctuation).
 _PLAIN_NAME = re.compile(r"[A-Za-z0-9_$#]+")
+# A table's file: what knowledge/check.py allows in generated/schema, and no more.
+MAX_TABLE_BYTES = 1024 * 1024
+_TABLE_FIELDS = {"schema", "name", "type", "comment", "columns", "primary_key"}
+_COLUMN_FIELDS = {"name", "type", "nullable", "comment"}
 
 
 @dataclass
@@ -54,14 +64,26 @@ class SearchHit:
 class Catalog:
     def __init__(self, tables: list[TableInfo]) -> None:
         self._tables = {(t.schema, t.name): t for t in tables}
+        # Why it has no tables and how to fix that, when whatever loads it
+        # knows (catalog_source.py); no paths, since the agent reads it too.
+        self.missing: str | None = None
 
     def __len__(self) -> int:
         return len(self._tables)
 
     def replace(self, other: Catalog) -> None:
         """Take `other`'s tables, in place: everything holding this catalog
-        sees them at once (DataLab building its own, autocatalog.py)."""
+        sees them at once (DataLab building its own, autocatalog.py, or
+        reading the knowledge base's again after a sync, catalog_source.py)."""
         self._tables = dict(other._tables)
+
+    def missing_message(self) -> str:
+        """What the SQL check and the agent's catalog tools say while it has
+        no tables: no query can be checked, so none runs."""
+        return (
+            "DataLab has no catalog of the cohorts' tables yet, so it can't check queries "
+            "and none can run. " + (self.missing or "Settings → About this DataLab says why.")
+        )
 
     @property
     def schemas(self) -> list[str]:
@@ -109,12 +131,51 @@ class Catalog:
 
     @classmethod
     def load(cls, directory: Path) -> Catalog:
-        tables = []
-        for path in sorted(directory.glob("*/*.yml")):
-            raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-            raw["columns"] = [Column(**c) for c in raw.get("columns", [])]
-            tables.append(TableInfo(**raw))
-        return cls(tables)
+        return cls.read(directory)[0]
+
+    @classmethod
+    def read(cls, directory: Path) -> tuple[Catalog, list[str]]:
+        """The catalog in a folder, and the files left out (named, with why).
+
+        Only `<SCHEMA>/<TABLE>.yml` files that are plain files, not links,
+        in plain folders: nothing outside the folder is read.
+        """
+        files: dict[str, bytes] = {}
+        skipped: list[str] = []
+        if directory.is_dir() and not directory.is_symlink():
+            for folder in sorted(directory.iterdir()):
+                if not folder.is_dir() or folder.is_symlink():
+                    continue
+                for path in sorted(folder.glob("*.yml")):
+                    name = f"{folder.name}/{path.name}"
+                    if path.is_symlink() or not path.is_file():
+                        skipped.append(f"{name}: not a plain file")
+                    elif path.stat().st_size > MAX_TABLE_BYTES:
+                        skipped.append(f"{name}: larger than 1 MB")
+                    else:
+                        files[name] = path.read_bytes()
+        catalog, unread = cls.from_files(files)
+        return catalog, skipped + unread
+
+    @classmethod
+    def from_files(cls, files: Mapping[str, bytes]) -> tuple[Catalog, list[str]]:
+        """The catalog in `SCHEMA/TABLE.yml -> content` (a folder's, or the
+        knowledge base's generated/schema), and the files left out, with why.
+
+        The files may come from the lab's repository: they're data, checked
+        as knowledge/check.py checks them (catalog fields only, `schema` and
+        `name` matching the folder and file names), read with safeyaml.
+        """
+        tables: list[TableInfo] = []
+        skipped: list[str] = []
+        for name, content in sorted(files.items()):
+            try:
+                tables.append(_table_from_file(name, content))
+            except ValueError as error:
+                skipped.append(f"{name}: {error}")
+        if skipped:
+            log.warning("Left %d catalog files out, such as %s", len(skipped), skipped[0])
+        return cls(tables), skipped
 
     def save(self, directory: Path) -> None:
         """One YAML file per table. Refuses (ValueError, before writing
@@ -260,6 +321,58 @@ class Catalog:
             if key in tables:
                 tables[key].primary_key = names
         return cls(list(tables.values()))
+
+
+def _table_from_file(name: str, content: bytes) -> TableInfo:
+    folder, _, file = name.partition("/")
+    table = file.removesuffix(".yml")
+    if not (_PLAIN_NAME.fullmatch(folder) and _PLAIN_NAME.fullmatch(table)) or file == table:
+        raise ValueError("not a <SCHEMA>/<TABLE>.yml name")
+    if len(content) > MAX_TABLE_BYTES:
+        raise ValueError("larger than 1 MB")
+    try:
+        raw = safeyaml.load(content.decode("utf-8"), max_bytes=MAX_TABLE_BYTES)
+    except (UnicodeDecodeError, yaml.YAMLError, safeyaml.YamlRefused):
+        raise ValueError("not readable YAML") from None
+    if not isinstance(raw, dict):
+        raise ValueError("not a catalog table")
+    if set(raw) - _TABLE_FIELDS:
+        raise ValueError("fields other than a catalog table's")
+    if raw.get("schema") != folder or raw.get("name") != table:
+        raise ValueError("`schema` and `name` don't match its folder and file name")
+    if raw.get("type") not in ("TABLE", "VIEW"):
+        raise ValueError("`type` isn't TABLE or VIEW")
+    columns = []
+    for column in _list(raw.get("columns")):
+        if not isinstance(column, dict) or set(column) - _COLUMN_FIELDS:
+            raise ValueError("a column with fields other than name, type, nullable, comment")
+        column_name, column_type = column.get("name"), column.get("type")
+        nullable = column.get("nullable", True)
+        if not isinstance(column_name, str) or not column_name or not isinstance(column_type, str):
+            raise ValueError("a column without a name or type")
+        if not isinstance(nullable, bool):
+            raise ValueError("a column's `nullable` isn't true or false")
+        columns.append(Column(column_name, column_type, nullable, _text(column.get("comment"))))
+    key = _list(raw.get("primary_key"))
+    if not all(isinstance(k, str) for k in key):
+        raise ValueError("`primary_key` isn't a list of column names")
+    return TableInfo(folder, table, raw["type"], _text(raw.get("comment")), columns, key)
+
+
+def _list(value: object) -> list:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError("a list that isn't one")
+    return value
+
+
+def _text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict | list):
+        raise ValueError("a comment that isn't text")
+    return str(value)
 
 
 def _type_label(

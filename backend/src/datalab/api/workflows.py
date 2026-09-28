@@ -758,13 +758,16 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                 queries = queries_from_log(records, body.query_ids)
             else:
                 queries = [DraftQuery(q.sql, q.binds) for q in body.queries]
+            if services.catalog is not None and not len(services.catalog):
+                # Never drafted unchecked: say what's missing instead.
+                raise DraftRefused(services.catalog.missing_message())
             made = draft_workflow(
                 queries,
                 name=body.name,
                 description=body.description,
                 destination=body.destination or None,
                 allowed_schemas=runner.allowed_schemas,
-                columns=services.catalog.column_index() if services.catalog else None,
+                columns=services.catalog.column_index() if services.catalog is not None else None,
             )
         except DraftRefused as error:
             raise HTTPException(422, str(error)) from error

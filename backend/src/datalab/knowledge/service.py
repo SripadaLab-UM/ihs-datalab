@@ -24,6 +24,7 @@ import logging
 import os
 import threading
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -207,8 +208,11 @@ class Knowledge:
         *,
         auth: GitHubAuth | None = None,
         remote: str | None = None,
+        on_sync: Callable[[], object] | None = None,
     ) -> None:
         repos = settings.repos
+        # After a sync: the catalog is read from the clone again (app.py).
+        self._on_sync = on_sync
         self.repo = repos.knowledge
         self._contact = repos.access_contact
         if settings.profile == "practice":
@@ -319,6 +323,7 @@ class Knowledge:
             self._problem = None
             self.store.record_sync(REPO, head=head)
             self._prune_quietly()
+            self._synced()
         return self.status()
 
     # Reading the clone (the Knowledge tab) ------------------------------------
@@ -462,6 +467,14 @@ class Knowledge:
             )
         return "sync failed", failure
 
+    def _synced(self) -> None:
+        if self._on_sync is None:
+            return
+        try:
+            self._on_sync()
+        except Exception:  # the sync itself worked
+            log.exception("couldn't read the catalog again after the sync")
+
     def _fresh_token(self) -> None:
         if self.auth is None:
             raise SignInNeeded("Sign in to GitHub first.")
@@ -476,6 +489,8 @@ class Knowledge:
                     self.store.record_sync(REPO, head=self.clone.sync(timeout=_SEED_SYNC_SECONDS))
                 except (GitError, SignInNeeded, GitHubUnavailable) as error:
                     log.warning("couldn't sync the knowledge base before copying it: %s", error)
+                else:
+                    self._synced()
             head = self.clone.remote_head()
             if head is None:
                 (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
