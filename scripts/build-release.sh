@@ -23,9 +23,5 @@ fi
 wheel="$(cd "$root/backend/dist" && ls datalab-*-py3-none-any.whl)"
 digest="$(shasum -a 256 "$root/backend/dist/$wheel" 2>/dev/null || sha256sum "$root/backend/dist/$wheel")"
 printf './%s --hash=sha256:%s\n' "$wheel" "${digest%% *}" >> "$root/backend/dist/requirements.txt"
-# The same versions without hashes, for the Windows installer until it moves to
-# requirements.txt (it waits on the single-elevation installer, PR #11).
-(cd "$root/backend" && uv export --no-dev --no-hashes --no-emit-project \
-  --format requirements-txt -q -o dist/constraints.txt)
 rm -rf "$root/backend/src/datalab/web_dist" "$root/backend/src/datalab/release.json"
 ls "$root"/backend/dist/*.whl

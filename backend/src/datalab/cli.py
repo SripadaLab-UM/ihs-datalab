@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -285,10 +286,53 @@ def _pull_images(settings) -> int:
         print(f"Using the local agent image {settings.agent_image} (not downloaded).")
     for image in images:
         print(f"Downloading {image.split('@')[0]} …", flush=True)
-        if subprocess.run(["docker", "pull", "-q", image]).returncode != 0:
-            print(f"Couldn't download {image}. Is Docker Desktop running?")
+        pulled = subprocess.run(
+            ["docker", "pull", "-q", image],
+            stderr=subprocess.PIPE,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if pulled.returncode != 0:
+            error = pulled.stderr.strip()
+            print(error)
+            print(f"Couldn't download {image}.")
+            print(_pull_failure_hint(error))
             return 1
     return 0
+
+
+def _pull_failure_hint(error: str) -> str:
+    """What to do about a failed `docker pull`, in words for someone non-technical."""
+    lowered = error.lower()
+    # Docker's own engine first: its pipe (Windows) or socket (Mac, Linux) is
+    # named in the message. Otherwise "access is denied" on the Windows pipe
+    # (not in docker-users) or "permission denied ... daemon socket" would look
+    # like the registry refusing the image.
+    local_engine = re.search(
+        r"//\./pipe/|%2fpipe%2f|docker\.sock|daemon socket|docker daemon", lowered
+    )
+    if local_engine and ("access is denied" in lowered or "permission denied" in lowered):
+        return (
+            "This account isn't allowed to use Docker yet. On Windows, it has to be in the "
+            "'docker-users' group, which only takes effect after a restart (or signing out and "
+            "in again). Restart, then try again; if it still happens, ask IT to add your "
+            "account to 'docker-users' on this computer."
+        )
+    if (
+        local_engine
+        or "cannot connect" in lowered
+        or ("daemon" in lowered and "running" in lowered)
+    ):
+        return (
+            "Docker Desktop doesn't seem to be running. Start it, wait until it says "
+            "'Engine running', then try again."
+        )
+    if "unauthorized" in lowered or "denied" in lowered:
+        return (
+            "The registry wouldn't let this computer download it. That's not something you "
+            "did: the DataLab maintainer needs to make the image available. Send them this message."
+        )
+    return "Check the internet connection (and the VPN, if you're on one), then try again."
 
 
 def _backup(settings) -> int:

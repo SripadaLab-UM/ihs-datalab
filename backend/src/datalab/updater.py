@@ -118,8 +118,10 @@ def clean_environment() -> dict[str, str]:
     in UTF-8 mode: on Windows its files and pipes would otherwise use the
     locale's encoding (cp1252). DataLab says encoding="utf-8" everywhere
     anyway; this is a second line of defence for anything that doesn't. The
-    other ways DataLab starts set it too: the launcher shims (installer/), for
-    `datalab serve`, and `-X utf8` on git's credential helper (repos/git.py).
+    other ways DataLab starts set it too: the launchers' commands the
+    installers write (`bin\\datalab.cmd` on Windows, `bin/datalab` on Mac)
+    set PYTHONUTF8=1 for everything they run, `datalab serve` included, and
+    git's credential helper runs with `-X utf8` (repos/git.py).
     A Python process can't switch UTF-8 mode on for itself once running.
     """
     env = {
@@ -888,6 +890,12 @@ def _known_migrations() -> set[str]:
 
 
 def _find_uv(platform: str) -> str | None:
+    """uv, to install a new version: on Windows, the pinned one the installer
+    puts in DataLab's own folder (install.ps1), first; else one on PATH."""
+    if platform == "win32":
+        pinned = default_data_dir("real").parent / "uv" / "uv.exe"
+        if pinned.is_file():
+            return str(pinned)
     found = shutil.which("uv")
     if found:
         return found

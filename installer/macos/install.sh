@@ -95,7 +95,8 @@ uv --version
 step "3/7 DataLab"
 # The package's file name carries its version: datalab-<version>-py3-none-any.whl
 WHEEL="$(basename "${PACKAGE%%\?*}")"
-VERSION="$(printf '%s' "$WHEEL" | sed -n 's/^datalab-\([0-9][A-Za-z0-9.+!]*\)-py3-none-any\.whl$/\1/p')"
+VERSION="$(printf '%s' "$WHEEL" | sed -n -e 's/^datalab-\([0-9][A-Za-z0-9.+!]*[A-Za-z0-9]\)-py3-none-any\.whl$/\1/p' \
+  -e 's/^datalab-\([0-9]\)-py3-none-any\.whl$/\1/p')"
 if [ -z "$VERSION" ]; then
   echo "The package must be a datalab-<version>-py3-none-any.whl file."
   exit 2
@@ -161,6 +162,8 @@ cat > "$ROOT/bin/datalab" <<'SHIM'
 #!/bin/sh
 # Runs the DataLab version the launcher opens (named in ../current), or the
 # one before (../previous) if that one can't run.
+# UTF-8 for Python's own text files and console, whatever the locale.
+export PYTHONUTF8=1
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(head -n 1 "$root/current" 2>/dev/null || true)"
 if [ -z "$version" ] || [ ! -x "$root/versions/$version/bin/datalab" ]; then

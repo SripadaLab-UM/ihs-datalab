@@ -454,23 +454,192 @@ deleted from the Workspace.
 
 The uninstaller removes the app, the launcher, the images, and the keychain
 entries. It asks separately, showing sizes, whether to delete the data folder.
-It never touches export destinations.
+It never touches export destinations. On Windows it also removes what the
+installer left: the after-restart logon task or Startup shortcut, its
+progress files, and the elevated part's result folder in `%ProgramData%`. It
+leaves Docker Desktop, WSL and `docker-users` membership as they are (see
+Windows specifics).
 
 ## Windows specifics
 
 - Docker Desktop needs WSL2. That means one administrator step and usually a
   restart; the installer resumes where it left off. On Michigan Medicine
-  managed machines this may need temporary elevation, the normal JIT process.
+  managed machines this may need temporary elevation, the normal JIT process,
+  so the installer asks people to request it before they continue.
+  - Built (`install.ps1`): the installer asks Windows for permission once, up
+    front, and only if something is missing. That one step turns on the WSL
+    features, installs WSL and Docker Desktop (pinned versions, each checked
+    by SHA-256 and by its publisher's signature), and adds the person to
+    `docker-users` by SID (a name lookup needs the domain controller, which
+    isn't reachable off the VPN). Then it offers the restart and opens again
+    after sign-in, from a logon task for that person; nothing after this
+    needs an administrator.
+  - The elevated part runs nothing the person's account could change, as far
+    as the installer can arrange it:
+    - It's started with `-EncodedCommand`, with its values (paths, SID)
+      inside as Base64 text, so no quoting is involved. The command reads a
+      copy of the installer's text once, checks its SHA-256 against the text
+      the person's window is running, and runs it from memory.
+    - Before that, it sets `PSModulePath` to Windows' own module folders
+      (`$PSHOME\Modules` and `Program Files\WindowsPowerShell\Modules`),
+      turns module autoloading off, and loads the modules it uses (including
+      `Dism` and `Microsoft.PowerShell.LocalAccounts`) by full path from
+      `$PSHOME`. The person's own module folders and `PSModulePath` aren't
+      used. `powershell.exe` and `msiexec.exe` are started by full path from
+      the Windows system folder, never looked up by name.
+    - ProgramData's location comes from Windows (`CommonApplicationData`),
+      not `%ProgramData%`, which a person can set for their own account. The
+      elevated part accepts only a folder named exactly
+      `DataLab-setup-<32 hex digits>` there. It checks that ProgramData
+      isn't a link, is owned by SYSTEM, TrustedInstaller or Administrators,
+      and doesn't let any other account delete, replace or re-permission
+      what's in it; otherwise it stops and says to ask IT.
+    - That folder is new, and only SYSTEM and Administrators can use it
+      (created with those permissions, inheritance off, checked before use).
+      Both downloads go there and are checked for their SHA-256 and their
+      Authenticode signature, whose certificate must name the exact
+      organisation (`Microsoft Corporation` for WSL, `Docker Inc` for Docker
+      Desktop). They run from there, with `TEMP` pointed inside the folder
+      too. At the end it deletes the downloads and lets the person read the
+      result and log and remove the folder.
+    - Removing that folder afterwards: anyone can create folders in
+      ProgramData, so the installer never removes anything there by name or
+      pattern. Before starting the elevated part, it records the exact
+      folder in `%LOCALAPPDATA%\DataLab\installer-admin-folder.txt`, which
+      other accounts can't write. It removes only recorded folders, after
+      reading the result or on a later run, and only if the folder has
+      exactly the owner and permissions the elevated part sets: SYSTEM or
+      Administrators as owner, inheritance off, no Deny rules, and no rules
+      but SYSTEM and Administrators (full control), OWNER RIGHTS (read
+      permissions) and the person (list, read attributes, read permissions,
+      delete, on the folder only). It checks again that the folder isn't a
+      link right before removing it, and never follows a link inside it.
+      A folder that doesn't pass is left alone, with a note to ask IT.
+      `uninstall.ps1` does the same.
+    - The installer stops at once if PowerShell runs in Constrained Language
+      Mode (AppLocker or WDAC), or if it's the 32-bit PowerShell on 64-bit
+      Windows.
+    - **For IT:** endpoint protection (Defender attack surface reduction
+      rules, CrowdStrike and the like) may block or flag an elevated
+      `powershell.exe -EncodedCommand`, which is how the elevated part
+      starts. If it's blocked, the elevated window doesn't open or closes at
+      once, and the installer says the administrator part closed before it
+      finished. Allow it for this install, or run the installer for the
+      person.
+  - A Docker Desktop that was already installed, probably without
+    `--always-run-service`, gets its service (`com.docker.service`) set to
+    start automatically, in the same elevated step. A service IT has
+    disabled is left alone.
+  - If Windows restarts and the person still can't use Docker (for example,
+    a group policy removes them from `docker-users` at each sign-in), the
+    installer doesn't ask for another restart: it stops, names the likely
+    cause, says to ask IT, and offers to run the elevated part again (never
+    with `-Yes`, so it can't restart at every sign-in). The same goes for
+    anything else the elevated part fixed that is missing again after a
+    restart (for example, a policy that sets Docker's service back to
+    manual): the installer stops and names it, rather than running the
+    elevated part and restarting again.
+  - Only one installer runs at a time (a named mutex), and each run removes
+    the after-restart task and shortcut before anything else; only a run
+    that asks for a restart sets them up again.
+  - What stays behind, and isn't undone by uninstalling DataLab:
+    - `--always-run-service` leaves Docker's service running as SYSTEM all
+      the time, starting with Windows. `uninstall.ps1` doesn't touch Docker
+      Desktop, WSL, or that service; uninstall Docker Desktop to remove them.
+    - Docker Desktop's installer adds the account that runs it to
+      `docker-users`. When IT elevates with their own administrator account
+      (not temporary rights for the person's own account), that IT account
+      is added to `docker-users` on the machine, besides the person.
+    - Membership of `docker-users` is what lets an account control Docker
+      Desktop's service, which runs as SYSTEM. So IT should treat
+      `docker-users` as a privileged group: add only the people who use
+      DataLab on that computer, and review who is in it.
+  - Before starting Docker Desktop, it moves aside socket files an earlier
+    Docker left behind, and stops a leftover Docker VM: either stops Docker
+    Desktop from starting.
+  - uv cuts a path at its first space, and downloads on these machines
+    usually sit under `OneDrive - Michigan Medicine`, so the installer hands
+    uv copies of the package and `requirements.txt` under plain names, from
+    their own folder.
+  - The person's part installs like the Mac installer (see "Where the app
+    lives"): each version in `%LOCALAPPDATA%\DataLab\app\versions\<version>`,
+    with `uv pip install --no-config --require-hashes --only-binary :all:
+    --default-index https://pypi.org/simple -r requirements.txt`, no `UV_*`,
+    `PIP_*` or `PYTHONPATH` from the environment, and the package checked
+    against its line in `requirements.txt` first (the log says "Checked:
+    SHA-256 of ..."). The Start menu entry ("DataLab", or "DataLab
+    (practice)" with `-Practice`) runs `bin\datalab.cmd`, which opens the
+    version `current` names. A copy an older installer made with
+    `uv tool install` is removed once the new one is in place.
+  - Without `-Package`, the installer uses the one
+    `datalab-<version>-py3-none-any.whl` in its own folder, so the command in
+    the README works as written from the folder the release's files were
+    downloaded to.
+  - Before installing (step 4) it checks that DataLab isn't running: a
+    DataLab process (from the installed versions or an older installer's
+    copy) or something listening on 8765 or 8766. If one is, it asks the
+    person to close it and waits; with `-Yes` it stops and says so. It never
+    stops DataLab itself. (Re-running an older installer while DataLab ran
+    failed with "Access is denied" removing uv's copy.)
+    - **For IT:** under `-Yes`, *anything* listening on 127.0.0.1 or any
+      address at port 8765 or 8766 stops the install, with a message saying
+      which, even if it isn't DataLab. Free the port or run it interactively.
+  - uv comes from its own release, pinned: step 3 downloads
+    `uv-x86_64-pc-windows-msvc.zip` for the version in `install.ps1`
+    (`$UvVersion`) from `github.com/astral-sh/uv/releases`, checks it
+    against the pinned SHA-256 (`$UvZipSha256`), unpacks it as the person
+    into `%LOCALAPPDATA%\DataLab\uv`, and checks that `uv.exe` is
+    Authenticode-signed by `$UvPublisher` ("OpenAI OpCo, LLC" for uv
+    0.12.19). Steps 4 onward use that `uv.exe` by full path, never one on
+    `PATH` (DataLab's updater uses it too). No script is piped from the
+    web. **To move to a newer uv**, change `$UvVersion` and `$UvZipUrl`
+    together, set `$UvZipSha256` from that release's
+    `uv-x86_64-pc-windows-msvc.zip.sha256` file (it should match GitHub's
+    digest for the zip), and check the signer's organisation hasn't changed
+    (CI's windows-installer job downloads the pinned zip and checks all
+    three).
+  - `bin\datalab.cmd` (and the Mac `bin/datalab`) set `PYTHONUTF8=1`, so
+    DataLab's Python reads and writes UTF-8 whatever the code page: a
+    Windows smoke test hit cp1252 errors without it.
+  - After the keys, it offers the GitHub sign-in and syncs the lab repos
+    (step 7), as the person, never elevated; skipped with `-Practice`,
+    `-NoGitHub` or `-Yes`. `-Practice` and `-NoGitHub` are kept across the
+    restart.
+  - Each download the administrator part checks is logged as
+    "Checked: SHA-256 and signature (<organisation>)", with the organisation
+    read from the signing certificate, for audits.
+  - The administrator window turns QuickEdit off for itself (through the
+    console API, defined in memory, not `Add-Type`): a click in it otherwise
+    selects text and pauses it until Esc. The person's console settings and
+    the registry aren't changed.
+  - The `docker-users` checks look first (the group, then its members,
+    quietly), so the expected cases (no group yet, already a member) don't
+    show up in logs as errors.
+  - `uninstall.ps1` removes every installed version and both Start menu
+    entries: only `versions`, `bin`, `current` and `previous` in the app
+    folder (the folder itself only if nothing else is left in it), the
+    installer's staging folder and DataLab's own uv. It ends by saying what
+    it leaves installed (Docker Desktop, WSL and its Windows features, uv's
+    downloads, `docker-users` membership) and how to remove each.
 - Credentials go in Windows Credential Manager, and paths use
   `%LOCALAPPDATA%`.
 - **Updating on Windows is UNTESTED on a real machine.** It follows the
   same steps as on Mac, with the Windows paths (`Scripts\datalab.exe`,
   `bin\datalab.cmd`), the helper started detached, the new version opened in
   a new PowerShell window, and a process check through the Windows API; unit
-  tests cover the paths and commands it builds. The side-by-side install and
-  the GitHub step in `install.ps1` are untested there too.
+  tests cover the paths and commands it builds.
 - Windows must be tested on a real managed machine before it's promised to
-  colleagues.
+  colleagues. The installer's first version was re-tested on one: a Michigan
+  Medicine Windows 11 Enterprise (26100) laptop with CrowdStrike, Defender
+  and CyberArk EPM, PowerShell in FullLanguage mode, no AppLocker, and a
+  user profile owned by SYSTEM.
+- **Testing notes.** Start the installer from a normal PowerShell window, or
+  through Task Scheduler. Not from an app packaged as MSIX (the Claude
+  desktop app is one): Windows redirects the AppData writes of anything such
+  an app starts into the app's own package folder, so the installer's state,
+  DataLab's versions and the Start menu entry would land where a normal run
+  never finds them. On the re-test machine the installer was started as a
+  one-off scheduled task for the person's account.
 
 ## Connectivity
 
@@ -493,9 +662,7 @@ It never touches export destinations.
     file and its signature, `SHA256SUMS.sig`, made in the protected
     "release" environment (see "Release signing"). The update check offers
     only releases with all of these (see "Which releases are offered"); a
-    pre-release is tagged `v0.1.0-alpha.3` and marked so. `constraints.txt`
-    (the same versions without hashes) is still published for the Windows
-    installer until it moves to `requirements.txt`.
+    pre-release is tagged `v0.1.0-alpha.3` and marked so.
 - Not automated yet: signing the Windows scripts and anything macOS runs
   directly (they need the lab's signing identities), and the Windows test on a
   real managed machine. `release.yml` marks each as a TODO.

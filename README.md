@@ -11,7 +11,7 @@ Intern Health Study data.
 You need **Docker Desktop**, installed and started once. From a release
 (Releases on GitHub), download into one folder:
 - the `datalab-…whl` package;
-- `constraints.txt`;
+- `requirements.txt` (every dependency the package needs, pinned by hash);
 - the installer for your computer;
 - the lab settings file, which you get from the DataLab maintainer. It isn't
   published.
@@ -25,8 +25,14 @@ sh install-macos.sh --package datalab-0.1.0-py3-none-any.whl --settings lab-sett
 **Windows.** In PowerShell, in that folder:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File install-windows.ps1 -Package datalab-0.1.0-py3-none-any.whl -Settings lab-settings.toml
+powershell -NoProfile -ExecutionPolicy Bypass -File install-windows.ps1 -Settings lab-settings.toml
 ```
+
+It installs the `datalab-…whl` package in the same folder. Keep only one
+there, or name it with `-Package <file>`. If Windows needs an administrator
+for WSL or Docker Desktop, the installer says so first, asks once, and then
+carries on by itself after the restart. Add `-Practice` for the practice
+DataLab (synthetic data only).
 
 The installer asks for your U-M GPT key and the database password, and saves
 them in your computer's keychain. Then open **DataLab** from Applications
