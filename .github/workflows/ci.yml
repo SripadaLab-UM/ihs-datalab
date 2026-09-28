@@ -37,8 +37,9 @@ jobs:
         run: uv run ruff check ../scripts/parity && uv run ruff format --check ../scripts/parity && uv run pytest -q ../scripts/parity
 
   backend-windows:
-    # The Windows-only failures: text in the locale's encoding (cp1252), and
-    # asyncio's Proactor loop. Just those tests, to keep it quick.
+    # The Windows-only failures: text in the locale's encoding (cp1252),
+    # asyncio's Proactor loop, and export folders written by path (junctions).
+    # Just those tests, to keep it quick.
     runs-on: windows-latest
     defaults:
       run:
@@ -51,6 +52,10 @@ jobs:
       - run: uv sync --locked
       - name: Text encoding and shutdown tests
         run: uv run pytest -q tests/test_text_encoding.py tests/test_shutdown_noise.py
+      # Export folders by path (Windows has no dir_fd): the swap and race
+      # tests, and junctions (mklink /J, _winapi.CreateJunction), never followed.
+      - name: Export folder tests
+        run: uv run pytest -q tests/test_export_folders.py
 
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with

@@ -309,7 +309,7 @@ def check_folder(path: Path, *, protected: list[Path]) -> FolderCheck:
         return FolderCheck("missing", _missing_reason(path))
     except OSError:
         return FolderCheck("missing", "DataLab can't see this folder right now.")
-    if stat.S_ISLNK(info.st_mode) or os.path.realpath(path) != str(path):
+    if exports.is_link(path, info) or os.path.realpath(path) != str(path):
         # Saved folders are always real paths: a link here was put in since.
         return FolderCheck(
             "refused",

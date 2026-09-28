@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,31 @@ from datalab.sessions import picker
 from datalab.sessions.inputs import NotAttachable
 from datalab.workflows.runner import delivery_message
 from tests.conftest import FakeDatabase
+
+# Mac and Linux paths and permissions (/Volumes, chmod, display paths): not Windows.
+posix_only = pytest.mark.skipif(sys.platform == "win32", reason="POSIX paths and permissions")
+
+
+@pytest.fixture(params=[True, False], ids=["dir_fd", "by-path"])
+def by_fd(request, monkeypatch):
+    """Both ways of writing inside a checked folder: relative to the open
+    folder (Mac, Linux), and by path with the folder re-checked before each
+    step (Windows, which has no dir_fd)."""
+    if request.param and not exports._BY_FD:
+        pytest.skip("this system can't write relative to an open folder")
+    monkeypatch.setattr(exports, "_BY_FD", request.param)
+    return request.param
+
+
+def link_folder(link: Path, target: Path) -> None:
+    link.symlink_to(target, target_is_directory=True)
+
+
+def remove_link(link: Path) -> None:
+    try:
+        link.unlink()
+    except (IsADirectoryError, PermissionError):
+        link.rmdir()  # a directory link on Windows
 
 
 @pytest.fixture
@@ -45,6 +71,7 @@ def cloud(home: Path, name: str) -> Path:
 # Finding sync folders --------------------------------------------------------
 
 
+@posix_only
 def test_sync_folders_are_found_by_name_on_a_mac(home, monkeypatch):
     dropbox = cloud(home, "Dropbox-UniversityofMichigan")
     (dropbox / "study.csv").write_text("never listed")
@@ -117,6 +144,7 @@ def test_no_sync_apps_means_no_places(home):
     assert sync_roots(home, "darwin") == []
 
 
+@posix_only
 def test_what_kind_of_folder_it_is(home, tmp_path):
     inside = cloud(home, "Dropbox-Lab") / "IHS" / "exports"
     inside.mkdir(parents=True)
@@ -148,6 +176,7 @@ def test_a_ready_folder(home):
     assert check_folder(folder, protected=[]).status == "ready"
 
 
+@posix_only
 def test_a_missing_folder_says_why_in_plain_words(home):
     gone = check_folder(home / "Library" / "CloudStorage" / "Dropbox" / "IHS", protected=[])
     assert gone.status == "missing"
@@ -158,7 +187,9 @@ def test_a_missing_folder_says_why_in_plain_words(home):
     assert moved.status == "missing" and "moved, renamed or deleted" in (moved.message or "")
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root can write anywhere")
+@pytest.mark.skipif(
+    sys.platform == "win32" or os.geteuid() == 0, reason="POSIX permissions; root writes anywhere"
+)
 def test_a_folder_that_cant_be_written(home):
     folder = home / "Documents" / "locked"
     folder.mkdir(parents=True)
@@ -197,6 +228,7 @@ def test_online_only_folders(home, monkeypatch):
     assert export_folders.write_test_file(folder, protected=[]).ok
 
 
+@posix_only
 def test_datalab_and_system_folders_are_refused(home, tmp_path, monkeypatch):
     data = tmp_path / "datalab-data"
     (data / "exports").mkdir(parents=True)
@@ -213,6 +245,7 @@ def test_datalab_and_system_folders_are_refused(home, tmp_path, monkeypatch):
     assert check_folder(file, protected=[]).status in ("not_a_folder", "refused")
 
 
+@posix_only
 def test_links_that_leave_the_sync_folder_are_refused(home, tmp_path):
     dropbox = cloud(home, "Dropbox")
     outside = tmp_path / "outside"
@@ -335,6 +368,7 @@ def no_sync_words(response) -> None:
     assert "synced" not in text and "uploaded" not in text
 
 
+@posix_only
 def test_adding_naming_testing_and_removing_a_dropbox_folder(
     real_settings, catalog, home, monkeypatch
 ):
@@ -444,6 +478,7 @@ def test_adding_naming_testing_and_removing_a_dropbox_folder(
         assert client.post(f"/api/export-destinations/{did}/test").status_code == 404
 
 
+@posix_only
 def test_unavailable_folders_are_listed_with_why(real_settings, catalog, home, monkeypatch):
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
@@ -461,6 +496,7 @@ def test_unavailable_folders_are_listed_with_why(real_settings, catalog, home, m
         )
 
 
+@posix_only
 def test_datalab_folders_and_escaping_links_cant_be_added(
     real_settings, catalog, home, monkeypatch, tmp_path
 ):
@@ -482,6 +518,7 @@ def test_datalab_folders_and_escaping_links_cant_be_added(
         )
 
 
+@posix_only
 def test_practice_keeps_to_its_own_folder(settings, catalog, home, monkeypatch):
     cloud(home, "Dropbox")
 
@@ -543,11 +580,11 @@ def swap_for_link(folder: Path, elsewhere: Path) -> Path:
     """Move `folder` aside and put a link to `elsewhere` in its place."""
     aside = folder.with_name(folder.name + " (moved)")
     folder.rename(aside)
-    folder.symlink_to(elsewhere)
+    link_folder(folder, elsewhere)
     return aside
 
 
-def test_an_export_to_a_folder_swapped_after_its_check_is_refused(home, tmp_path):
+def test_an_export_to_a_folder_swapped_after_its_check_is_refused(by_fd, home, tmp_path):
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
     fake_data = tmp_path / "fake-datalab-data"
@@ -558,14 +595,14 @@ def test_an_export_to_a_folder_swapped_after_its_check_is_refused(home, tmp_path
     with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
         export_folders.open_target(target)
     # Swapped for another real folder: refused too.
-    folder.unlink()
+    remove_link(folder)
     folder.mkdir()
     with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
         export_folders.open_target(target)
     assert list(fake_data.iterdir()) == []
 
 
-def test_a_swap_during_an_export_doesnt_redirect_it(home, tmp_path):
+def test_a_swap_during_an_export_doesnt_redirect_it(by_fd, home, tmp_path):
     """Once open, everything goes into the folder that was checked, wherever it moves."""
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
@@ -575,6 +612,12 @@ def test_a_swap_during_an_export_doesnt_redirect_it(home, tmp_path):
     target = Target("dest_1", "Lab", folder, "dropbox", checked.identity)
     with export_folders.open_target(target) as opened:
         aside = swap_for_link(folder, fake_data)
+        if not by_fd:
+            # By path, the folder is checked again before each step: refused.
+            with pytest.raises(exports.ExportError, match="changed after DataLab checked it"):
+                exports.export(opened, title="t", sources=[], about={})
+            assert list(fake_data.iterdir()) == []
+            return
         result = exports.export(
             opened, title="t", sources=[], extra_files={"a/b.txt": b"synthetic"}, about={}
         )
@@ -584,7 +627,7 @@ def test_a_swap_during_an_export_doesnt_redirect_it(home, tmp_path):
     assert (made / exports.MANIFEST).is_file() and result.manifest_sha256
 
 
-def test_the_test_write_never_follows_a_swapped_folder(home, tmp_path, monkeypatch):
+def test_the_test_write_never_follows_a_swapped_folder(by_fd, home, tmp_path, monkeypatch):
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
     fake_data = tmp_path / "fake-datalab-data"
@@ -602,7 +645,7 @@ def test_the_test_write_never_follows_a_swapped_folder(home, tmp_path, monkeypat
     assert list(fake_data.iterdir()) == []
 
 
-def test_the_test_leaves_a_file_that_isnt_its_own(home, monkeypatch):
+def test_the_test_leaves_a_file_that_isnt_its_own(by_fd, home, monkeypatch):
     """Removed only if it's still the file it wrote."""
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
@@ -620,14 +663,49 @@ def test_the_test_leaves_a_file_that_isnt_its_own(home, monkeypatch):
     assert left.read_text() == "the person's own file"
 
 
-def test_a_delivery_subfolder_that_is_a_link_is_refused(home, tmp_path):
+def test_a_delivery_subfolder_that_is_a_link_is_refused(by_fd, home, tmp_path):
     folder = cloud(home, "Dropbox") / "IHS"
     folder.mkdir()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
-    (folder / "weekly").symlink_to(elsewhere)
+    link_folder(folder / "weekly", elsewhere)
     with exports.Folder.at(folder) as root, pytest.raises(exports.ExportError):
         root.child("weekly")
+    assert list(elsewhere.iterdir()) == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows'")
+@pytest.mark.parametrize("made_by", ["_winapi", "mklink"])
+def test_a_junction_is_never_followed(home, tmp_path, made_by):
+    """lstat reports a junction as a plain folder: it's refused all the same."""
+    import subprocess
+
+    folder = home / "Dropbox" / "IHS"
+    folder.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    junction = folder / "weekly"
+    if made_by == "_winapi":
+        import _winapi  # type: ignore[import-not-found]
+
+        _winapi.CreateJunction(str(elsewhere), str(junction))
+    else:
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(elsewhere)], check=True)
+    assert exports.is_link(junction, os.lstat(junction))
+    with exports.Folder.at(folder) as root, pytest.raises(exports.ExportError):
+        root.child("weekly")
+    with pytest.raises(exports.ExportError):
+        exports.Folder.at(junction)
+    assert check_folder(junction, protected=[]).status == "refused"
+    # A delivery's subfolder that's a junction: nothing is written through it.
+    target = Target("d", "Lab", folder, "dropbox", check_folder(folder, protected=[]).identity)
+    with (
+        export_folders.open_target(target) as root,
+        pytest.raises(exports.ExportError),
+        root.child("weekly") as sub,
+    ):
+        exports.export(sub, title="t", sources=[], about={})
+    assert list(elsewhere.iterdir()) == []
 
 
 def test_datalab_data_folder_spelt_decomposed_is_still_refused(home, tmp_path):
@@ -648,7 +726,7 @@ def test_the_same_folder_by_another_name_is_refused(home, tmp_path):
     other = tmp_path / "elsewhere"
     other.mkdir()
     link = other / "looks-harmless"
-    link.symlink_to(data)
+    link_folder(link, data)
     with pytest.raises(NotAttachable):
         check_new_folder(link / "exports", protected=[data])
 
@@ -664,3 +742,23 @@ def test_usable_means_switched_on_and_ready(settings, home):
     inside = settings.data_dir / "exports"
     inside.mkdir(parents=True)
     assert not export_folders.usable(settings, dataclasses.replace(on, path=str(inside)))
+
+
+def test_junction_like_folders_are_links_everywhere(home, monkeypatch):
+    """What Windows reports for a junction (a reparse tag, isjunction) counts as
+    a link in the by-path code, checked here on any system."""
+    monkeypatch.setattr(exports, "_BY_FD", False)
+    folder = home / "Dropbox" / "IHS"
+    (folder / "weekly").mkdir(parents=True)
+
+    class Tagged:
+        st_mode = stat.S_IFDIR
+        st_reparse_tag = 0xA0000003  # IO_REPARSE_TAG_MOUNT_POINT: a junction
+
+    assert exports.is_link(folder, Tagged())  # type: ignore[arg-type]
+    monkeypatch.setattr(os.path, "isjunction", lambda p: Path(p).name == "weekly", raising=False)
+    assert exports.is_link(folder / "weekly", os.lstat(folder / "weekly"))
+    with exports.Folder.at(folder) as root, pytest.raises(exports.ExportError):
+        root.child("weekly")
+    with pytest.raises(exports.ExportError):
+        exports.Folder.at(folder / "weekly")

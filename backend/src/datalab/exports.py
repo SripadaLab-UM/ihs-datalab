@@ -120,6 +120,15 @@ FOLDER_CHANGED = (
 )
 
 
+def is_link(path: Path, info: os.stat_result) -> bool:
+    """A link of any kind: a symlink, or on Windows a junction or other reparse
+    point (lstat reports a junction as a plain folder)."""
+    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_reparse_tag", 0):
+        return True
+    isjunction = getattr(os.path, "isjunction", None)  # Python 3.12+
+    return bool(isjunction and isjunction(path))
+
+
 def identity(info: os.stat_result) -> Identity:
     """Which folder this is on disk, whatever it's called."""
     return (info.st_dev, info.st_ino)
@@ -148,7 +157,7 @@ class Folder:
                 info = os.fstat(fd)
             else:
                 info = os.lstat(path)
-                if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                if is_link(path, info) or not stat.S_ISDIR(info.st_mode):
                     raise NotADirectoryError(str(path))
         except FileNotFoundError as error:
             raise ExportError(
@@ -179,7 +188,7 @@ class Folder:
         if self._fd is not None:
             return name, {"dir_fd": self._fd}
         info = os.lstat(self.path)
-        if stat.S_ISLNK(info.st_mode) or identity(info) != self.identity:
+        if is_link(self.path, info) or identity(info) != self.identity:
             raise ExportError(FOLDER_CHANGED)
         return self.path / name, {}
 
@@ -487,7 +496,8 @@ def mark_downloaded(path: Path) -> None:
         flag = f"0083;{int(datetime.now().timestamp()):x};DataLab;"
         with contextlib.suppress(OSError):
             subprocess.run(
-                ["xattr", "-w", "com.apple.quarantine", flag, str(path)],
+                # -s: the file itself, never what a link there points to.
+                ["xattr", "-s", "-w", "com.apple.quarantine", flag, str(path)],
                 check=False,
                 capture_output=True,
             )

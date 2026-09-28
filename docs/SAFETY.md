@@ -417,7 +417,12 @@ access. It never gains it.
     is a link is refused. (Windows, which lacks `dir_fd`, re-checks the
     folder's identity before each step.) DataLab's own data folder is
     recognised by what's on disk as well as by name, so another spelling
-    (case, composed or decomposed accents, a link) doesn't get past.
+    (case, composed or decomposed accents, a link) doesn't get past. If a
+    checked folder is moved away (with its parent, say) while an export is
+    being written, the rest of the export still goes into that same folder,
+    the one the person chose, wherever it now is. On Windows, a junction or
+    other reparse point counts as a link and is refused, though `lstat`
+    reports it as a plain folder.
   - **Exported files can't act on the computer by themselves.** The agent's
     files go under `files/`, apart from DataLab's report and manifest. Types
     that run code or open something when double-clicked (`.bat`, `.lnk`,
