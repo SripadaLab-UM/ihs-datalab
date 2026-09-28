@@ -297,6 +297,14 @@ it("Safety: counts the problems, and the report keeps its words", async () => {
   expect(within(nav()).getByRole("img", { name: "2 problems" })).toBeTruthy();
 });
 
+it("Safety: a report that didn't pass with nothing counted says so, not 0 problems", async () => {
+  vi.mocked(api.lastSafetyReport).mockResolvedValue(report([check("a", "pass")], false));
+  show("/settings/safety");
+  const summary = await screen.findByRole("status", { name: "Safety check summary" });
+  await waitFor(() => expect(summary.textContent).toContain("Didn't pass"));
+  expect(summary.textContent).not.toContain("0 problems");
+});
+
 it("Safety: a check that couldn't be verified is said so", async () => {
   vi.mocked(api.lastSafetyReport).mockResolvedValue(report([check("a", "pass"), check("b", "skip")], true));
   show("/settings/safety");
