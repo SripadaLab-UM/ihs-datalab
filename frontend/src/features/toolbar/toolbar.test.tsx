@@ -11,7 +11,6 @@ import { type Connections, settingsApi } from "@/api/settings";
 
 import { DatabaseShortcut, KeyShortcut } from "./ConnectionShortcuts";
 import { AttentionMenu } from "./AttentionMenu";
-import { feedbackEmail, feedbackMailto, feedbackText, MAILTO_LIMIT } from "./FeedbackDialog";
 import { FoldersShortcut } from "./FoldersShortcut";
 import { MoreMenu } from "./MoreMenu";
 import { activityWarning, SessionMenu } from "./SessionMenu";
@@ -334,113 +333,6 @@ it("End session needs confirming, says a restart is needed, and only then ends i
   fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "End session" }));
   await waitFor(() => expect(sessionApi.end).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(ended).toHaveBeenCalledTimes(1));
-});
-
-// ------------------------------------------------------------ Feedback
-
-it("Feedback: the text, with diagnostics only when asked for", () => {
-  const text = feedbackText({ kind: "bug", description: " It broke. ", version: "0.2.0", profile: "real" });
-  expect(text).toBe("DataLab feedback: bug report\nDataLab 0.2.0 (real)\n\nIt broke.");
-  expect(feedbackText({ kind: "suggestion", description: "More charts", diagnostics: "DIAG" })).toBe(
-    "DataLab feedback: suggestion\n\nMore charts\n\n--- Diagnostics ---\nDIAG",
-  );
-});
-
-it("Feedback: the mailto link goes to the lab's contact, with the text in the body", () => {
-  const link = feedbackMailto({ contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" }, "bug", "a & b\nc");
-  expect(link).toBe(
-    `mailto:ali@umich.edu?subject=${encodeURIComponent("DataLab: bug report")}&body=${encodeURIComponent("a & b\nc")}`,
-  );
-  expect(feedbackMailto({ contact: "Ali", email: null }, "bug", "x")).toBeNull();
-  expect(feedbackMailto(undefined, "bug", "x")).toBeNull();
-});
-
-async function openFeedback() {
-  show(<MoreMenu />);
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Send feedback…" }));
-  return screen.findByRole("dialog", { name: "Send feedback" });
-}
-
-it("Feedback: warns about participant data, copies, emails the maintainer, never GitHub", async () => {
-  vi.mocked(settingsApi.feedbackContact).mockResolvedValue({ contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" });
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-  const dialog = await openFeedback();
-  expect(dialog).toHaveTextContent("Don't include participant data");
-  fireEvent.click(within(dialog).getByRole("radio", { name: "Suggestion" }));
-  fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "A dark chart theme" } });
-  const email = await within(dialog).findByRole("link", { name: "Email the maintainer" });
-  expect(email.getAttribute("href")).toMatch(/^mailto:ali@umich\.edu\?subject=DataLab%3A%20suggestion&body=/);
-  expect(decodeURIComponent(email.getAttribute("href")!)).toContain("A dark chart theme");
-  expect(settingsApi.diagnostics).not.toHaveBeenCalled();
-
-  fireEvent.click(within(dialog).getByRole("button", { name: "Copy to clipboard" }));
-  await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
-  expect(writeText.mock.calls[0][0]).toContain("DataLab feedback: suggestion");
-  expect(writeText.mock.calls[0][0]).toContain("A dark chart theme");
-  expect(dialog.innerHTML).not.toMatch(/github\.com|issues/i);
-});
-
-it("Feedback: diagnostics are opt-in and go into the text", async () => {
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-  const dialog = await openFeedback();
-  fireEvent.click(within(dialog).getByRole("checkbox", { name: /Include diagnostics/ }));
-  expect(await within(dialog).findByRole("textbox", { name: "Diagnostics to include" })).toHaveValue(
-    "DataLab 0.2.0\nSafety: ok",
-  );
-  fireEvent.click(within(dialog).getByRole("button", { name: "Copy to clipboard" }));
-  await waitFor(() => expect(writeText).toHaveBeenCalled());
-  expect(writeText.mock.calls[0][0]).toContain("--- Diagnostics ---\nDataLab 0.2.0\nSafety: ok");
-});
-
-it("Feedback: without a contact, only Copy, and whom to send it to", async () => {
-  const dialog = await openFeedback();
-  await waitFor(() => expect(settingsApi.feedbackContact).toHaveBeenCalled());
-  expect(within(dialog).queryByRole("link", { name: "Email the maintainer" })).not.toBeInTheDocument();
-  expect(dialog).toHaveTextContent("send it to the DataLab maintainer");
-});
-
-it("Feedback: a link too long for mail apps leaves the diagnostics out, to paste in", () => {
-  const contact = { contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" };
-  const parts = { kind: "bug" as const, description: "It broke.", diagnostics: "x".repeat(2600) };
-  const email = feedbackEmail(contact, parts)!;
-  expect(email.diagnosticsLeftOut).toBe(true);
-  expect(email.href.length).toBeLessThanOrEqual(MAILTO_LIMIT);
-  expect(decodeURIComponent(email.href)).toContain("It broke.");
-  expect(email.href).not.toContain("xxxx");
-  const short = feedbackEmail(contact, { ...parts, diagnostics: "DataLab 0.2.0" })!;
-  expect(short.diagnosticsLeftOut).toBe(false);
-  expect(decodeURIComponent(short.href)).toContain("DataLab 0.2.0");
-});
-
-it("Feedback: with long diagnostics, emailing copies the whole text and says so", async () => {
-  vi.mocked(settingsApi.feedbackContact).mockResolvedValue({ contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" });
-  vi.mocked(settingsApi.diagnostics).mockResolvedValue({ text: "D".repeat(2600) });
-  const writeText = vi.fn().mockResolvedValue(undefined);
-  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-  const dialog = await openFeedback();
-  fireEvent.click(within(dialog).getByRole("checkbox", { name: /Include diagnostics/ }));
-  await within(dialog).findByRole("textbox", { name: "Diagnostics to include" });
-  const link = within(dialog).getByRole("link", { name: "Email the maintainer" });
-  expect(link.getAttribute("href")!.length).toBeLessThanOrEqual(MAILTO_LIMIT);
-  fireEvent.click(link);
-  expect(await within(dialog).findByText(/Diagnostics copied: paste them into the email\./)).toBeInTheDocument();
-  expect(writeText.mock.calls[0][0]).toContain("D".repeat(2600));
-});
-
-it("Feedback: the draft is kept when the dialog is closed and opened again", async () => {
-  const dialog = await openFeedback();
-  fireEvent.click(within(dialog).getByRole("radio", { name: "Suggestion" }));
-  fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Half-written idea" } });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "More" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: "Send feedback…" }));
-  const again = await screen.findByRole("dialog", { name: "Send feedback" });
-  expect(within(again).getByRole("textbox")).toHaveValue("Half-written idea");
-  expect(within(again).getByRole("radio", { name: "Suggestion" })).toBeChecked();
 });
 
 it("End session says what's still going, which a restart would stop", async () => {

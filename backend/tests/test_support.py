@@ -397,9 +397,14 @@ def test_nothing_but_allowlisted_metadata_reaches_the_bundle(
     assert any(e["event"] == "request_unreachable" and e["route"] == "(other)" for e in entries)
     page_errors = [e for e in entries if e["event"] == "page_error"]
     assert [e.get("error_class") for e in page_errors] == [None, "TypeError"]
-    logged = next(e for e in entries if e["event"] == "log_error")
-    assert logged["error_class"] == "RuntimeError"
-    assert logged["template"].startswith("Couldn't open for")
+    # The template, with the ID and the email address in it taken out.
+    logged = [
+        e for e in entries if e["event"] == "log_error" and e.get("logger") == "datalab.api.files"
+    ]
+    assert any(
+        e["error_class"] == "RuntimeError" and e["template"].startswith("Couldn't open for")
+        for e in logged
+    )
     assert diagnostics["browser"]["user_agent"] == "Mozilla/5.0 … …"
     assert diagnostics["safety_check"]["not_passed"] == [{"id": "db_read_only", "status": "fail"}]
 

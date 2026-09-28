@@ -64,7 +64,7 @@ class SupportServices:
 # ------------------------------------------------------------------ in and out
 
 
-class ClientEntryIn(BaseModel):
+class SupportClientEntryIn(BaseModel):
     """A failed request or an error in the page, as the browser recorded it:
     the method, the path (only its route's shape is kept) and the status, or
     an error's class. Never a message or a response."""
@@ -77,12 +77,12 @@ class ClientEntryIn(BaseModel):
     error: str | None = Field(default=None, max_length=100)
 
 
-class AttachmentIn(BaseModel):
+class SupportAttachmentIn(BaseModel):
     name: str = Field(max_length=300)
     data_base64: str = Field(max_length=_B64_MAX)
 
 
-class DraftIn(BaseModel):
+class SupportDraftIn(BaseModel):
     kind: Literal["bug", "suggestion"]
     happened: str = Field(max_length=support.TEXT_MAX)
     expected: str = Field(default="", max_length=support.TEXT_MAX)
@@ -90,45 +90,45 @@ class DraftIn(BaseModel):
     # The page's path (location.pathname): only the tab and a conversation's ID are kept.
     route: str | None = Field(default=None, max_length=2000)
     user_agent: str | None = Field(default=None, max_length=1000)
-    client_trail: list[ClientEntryIn] = Field(default_factory=list, max_length=200)
-    attachments: list[AttachmentIn] = Field(
+    client_trail: list[SupportClientEntryIn] = Field(default_factory=list, max_length=200)
+    attachments: list[SupportAttachmentIn] = Field(
         default_factory=list, max_length=support.MAX_ATTACHMENTS
     )
 
 
-class BundleFileOut(BaseModel):
+class SupportBundleFileOut(BaseModel):
     path: str
     bytes: int
     sha256: str
 
 
-class ContentsOut(BaseModel):
+class SupportContentsOut(BaseModel):
     """Exactly what's in the bundle, to read before saving or sharing."""
 
-    files: list[BundleFileOut]  # every file in the ZIP, manifest last
+    files: list[SupportBundleFileOut]  # every file in the ZIP, manifest last
     summary: str  # summary.md
     diagnostics: str  # diagnostics.json, as it is in the ZIP
     manifest: str  # manifest.json, as it is in the ZIP
 
 
-class PreviewOut(BaseModel):
+class SupportPreviewOut(BaseModel):
     draft_id: str  # save this very draft with POST /api/support/reports
     report_id: str  # DL-20260928-7F3K
     created_at: str
     zip_name: str
     zip_bytes: int
     zip_sha256: str
-    contents: ContentsOut
+    contents: SupportContentsOut
     # Worth checking before saving: lines that look like they hold an ID, a
     # date or an email address, and the files chosen.
     warnings: list[str]
 
 
-class SaveIn(BaseModel):
+class SupportSaveIn(BaseModel):
     draft_id: str = Field(max_length=64)
 
 
-class FolderCopyOut(BaseModel):
+class SupportFolderCopyOut(BaseModel):
     name: str  # the folder's friendly name
     file: str  # the full path of the saved ZIP
     where: str  # the same, with the home folder as ~
@@ -139,7 +139,7 @@ class FolderCopyOut(BaseModel):
     practice: bool
 
 
-class GitHubSendOut(BaseModel):
+class SupportGitHubSendOut(BaseModel):
     # pending: not sent yet, `reason` says why, and Retry (or the next start)
     # tries again. confirmed: GitHub has it (commit_sha). refused: won't be
     # sent as things are (a public repo, a different file at the path).
@@ -154,7 +154,7 @@ class GitHubSendOut(BaseModel):
     path: str | None = None
 
 
-class EmailOut(BaseModel):
+class SupportEmailOut(BaseModel):
     """ "Email this file to …": a mailto: link can't attach the file, so it says to."""
 
     contact: str | None  # "Ali <ali@umich.edu>", as the lab settings say
@@ -169,7 +169,7 @@ State = Literal[
 ]
 
 
-class ReportOut(BaseModel):
+class SupportReportOut(BaseModel):
     report_id: str
     kind: Literal["bug", "suggestion"]
     created_at: str
@@ -178,17 +178,17 @@ class ReportOut(BaseModel):
     zip_name: str
     zip_bytes: int
     zip_sha256: str
-    attachments: list[BundleFileOut]
+    attachments: list[SupportBundleFileOut]
     # Where it stands, oldest first. "confirmed_delivery" only ever comes
     # from the support repository's commit, never from a folder copy.
     states: list[State]
-    folders: list[FolderCopyOut]
-    github: GitHubSendOut | None
-    email: EmailOut
+    folders: list[SupportFolderCopyOut]
+    github: SupportGitHubSendOut | None
+    email: SupportEmailOut
 
 
-class ReportDetailOut(ReportOut):
-    contents: ContentsOut
+class SupportReportDetailOut(SupportReportOut):
+    contents: SupportContentsOut
 
 
 class SupportRepoOut(BaseModel):
@@ -211,11 +211,11 @@ class SupportStatusOut(BaseModel):
     github: SupportRepoOut
 
 
-class SaveToFolderIn(BaseModel):
+class SupportSaveToFolderIn(BaseModel):
     destination_id: str = Field(max_length=100)
 
 
-class SendIn(BaseModel):
+class SupportSendIn(BaseModel):
     # The person saw where it goes ("SripadaLab-UM/ihs-support (private)") and pressed Send.
     confirmed: bool = False
 
@@ -280,8 +280,8 @@ def build_support_router(services: SupportServices) -> APIRouter:
         except LookupError as error:
             raise HTTPException(404, "No such report.") from error
 
-    def report_out(report: dict[str, Any], status: dict[str, Any]) -> ReportOut:
-        return ReportOut(**_report_fields(report, status, settings))
+    def report_out(report: dict[str, Any], status: dict[str, Any]) -> SupportReportOut:
+        return SupportReportOut(**_report_fields(report, status, settings))
 
     @router.get("/status")
     def status_route() -> SupportStatusOut:
@@ -299,7 +299,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
         return await asyncio.to_thread(repo_state, check)
 
     @router.post("/preview")
-    async def preview_route(body: DraftIn, request: Request) -> PreviewOut:
+    async def preview_route(body: SupportDraftIn, request: Request) -> SupportPreviewOut:
         if not body.happened.strip():
             raise HTTPException(
                 422, "Say what happened." if body.kind == "bug" else "Say what would help."
@@ -359,7 +359,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
             while len(drafts) >= _DRAFTS_KEPT:
                 drafts.pop(next(iter(drafts)))
             drafts[draft_id] = (now, built.report, {a.name: a.data for a in attachments})
-        return PreviewOut(
+        return SupportPreviewOut(
             draft_id=draft_id,
             report_id=report_id,
             created_at=created_at,
@@ -371,7 +371,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
         )
 
     @router.post("/reports", status_code=201)
-    async def save_route(body: SaveIn) -> ReportDetailOut:
+    async def save_route(body: SupportSaveIn) -> SupportReportDetailOut:
         """Save the previewed draft, as it was shown, under the data folder."""
         with drafts_lock:
             draft = drafts.pop(body.draft_id, None)
@@ -387,15 +387,15 @@ def build_support_router(services: SupportServices) -> APIRouter:
             raise HTTPException(422, f"The report wasn't saved: {error}") from error
         return await asyncio.to_thread(detail, report["report_id"])
 
-    def detail(report_id: str) -> ReportDetailOut:
+    def detail(report_id: str) -> SupportReportDetailOut:
         report, status = find(report_id)
         built = support.preview(report, store.attachments(report))
-        return ReportDetailOut(
+        return SupportReportDetailOut(
             **_report_fields(report, status, settings), contents=_contents(built.files)
         )
 
     @router.get("/reports")
-    def list_route() -> list[ReportOut]:
+    def list_route() -> list[SupportReportOut]:
         found = []
         for report_id in store.ids():
             try:
@@ -405,7 +405,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
         return found
 
     @router.get("/reports/{report_id}")
-    async def get_route(report_id: str) -> ReportDetailOut:
+    async def get_route(report_id: str) -> SupportReportDetailOut:
         return await asyncio.to_thread(detail, report_id)
 
     @router.get("/reports/{report_id}/bundle")
@@ -437,7 +437,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
             raise HTTPException(404, "No such report.") from error
 
     @router.post("/reports/{report_id}/save-to-folder")
-    async def save_to_folder_route(report_id: str, body: SaveToFolderIn) -> ReportOut:
+    async def save_to_folder_route(report_id: str, body: SupportSaveToFolderIn) -> SupportReportOut:
         """Copy the ZIP to an export folder (practice: its own) as <report-id>.zip.
         Trying again never makes a second copy."""
         find(report_id)
@@ -462,7 +462,7 @@ def build_support_router(services: SupportServices) -> APIRouter:
         return report_out(store.report(report_id), status)
 
     @router.post("/reports/{report_id}/send")
-    async def send_route(report_id: str, body: SendIn) -> ReportOut:
+    async def send_route(report_id: str, body: SupportSendIn) -> SupportReportOut:
         """Send the report to the lab's private support repository (Retry too).
         Once GitHub has it, sending again changes nothing."""
         report, status = find(report_id)
@@ -538,17 +538,17 @@ def _api_words(app: Any) -> frozenset[str]:
     return cached
 
 
-def _contents(files: list[tuple[str, bytes]]) -> ContentsOut:
+def _contents(files: list[tuple[str, bytes]]) -> SupportContentsOut:
     texts = dict(files)
-    return ContentsOut(
-        files=[BundleFileOut(path=p, bytes=len(d), sha256=_sha256(d)) for p, d in files],
+    return SupportContentsOut(
+        files=[SupportBundleFileOut(path=p, bytes=len(d), sha256=_sha256(d)) for p, d in files],
         summary=texts[support.SUMMARY].decode(),
         diagnostics=texts[support.DIAGNOSTICS].decode(),
         manifest=texts[support.MANIFEST].decode(),
     )
 
 
-def _warnings(body: DraftIn, attachments: int) -> list[str]:
+def _warnings(body: SupportDraftIn, attachments: int) -> list[str]:
     found = []
     fields = [("What happened" if body.kind == "bug" else "What would help", body.happened)]
     if body.kind == "bug":
@@ -576,7 +576,7 @@ def _report_fields(
 ) -> dict[str, Any]:
     report_id = report["report_id"]
     folders = [
-        FolderCopyOut(
+        SupportFolderCopyOut(
             name=f["name"],
             file=f["file"],
             where=export_folders.display_path(Path(f["file"])),
@@ -599,14 +599,14 @@ def _report_fields(
         "zip_bytes": status["zip_bytes"],
         "zip_sha256": status["zip_sha256"],
         "attachments": [
-            BundleFileOut(
+            SupportBundleFileOut(
                 path=f"{support.ATTACHMENTS}/{a['name']}", bytes=a["bytes"], sha256=a["sha256"]
             )
             for a in report["attachments"]
         ],
         "states": support.states(status),
         "folders": folders,
-        "github": GitHubSendOut(**_known(github, GitHubSendOut)) if github else None,
+        "github": SupportGitHubSendOut(**_known(github, SupportGitHubSendOut)) if github else None,
         "email": email_for(report, folders[-1] if folders else None, settings.repos.access_contact),
     }
 
@@ -616,8 +616,8 @@ def _known(raw: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:
 
 
 def email_for(
-    report: dict[str, Any], folder: FolderCopyOut | None, contact: str | None
-) -> EmailOut:
+    report: dict[str, Any], folder: SupportFolderCopyOut | None, contact: str | None
+) -> SupportEmailOut:
     """The email to the maintainer: the report ID, the file to attach, and the
     summary (what the person wrote). Never the diagnostics: they're in the file."""
     who = feedback_contact(contact)
@@ -651,4 +651,6 @@ def email_for(
                 + "\n\n(The summary is cut short here: all of it is in the attached file.)\n"
             )
             mailto = link(body)
-    return EmailOut(contact=who.contact, to=who.email, subject=subject, body=body, mailto=mailto)
+    return SupportEmailOut(
+        contact=who.contact, to=who.email, subject=subject, body=body, mailto=mailto
+    )
