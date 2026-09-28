@@ -147,3 +147,15 @@ def test_uv_copies_files_and_the_earlier_start_menu_entry_goes():
     assert "--default-index https://pypi.org/simple --link-mode copy" in INSTALL
     # 0.1.0's "DataLab" entry opened the removed uv tool copy: removed only if so.
     assert '-like "*\\.local\\bin\\datalab*"' in INSTALL
+
+
+def test_virtualization_is_checked_before_any_administrator_step():
+    check = INSTALL.index("if (-not (Test-VirtualizationOn))")
+    # Before step 1 asks for administrator permission, downloads or restarts.
+    assert check < INSTALL.index('Say "This needs administrator permission, just this once."')
+    assert check < INSTALL.index('Step "Step 2 of 8')
+    # A running hypervisor (e.g. Credential Guard) counts as on; unknown doesn't refuse.
+    body = INSTALL[INSTALL.index("function Test-VirtualizationOn") :]
+    body = body[: body.index("\n}\n")]
+    assert "HypervisorPresent" in body and "VirtualizationFirmwareEnabled" in body
+    assert "return $true" in body.split("catch")[1]

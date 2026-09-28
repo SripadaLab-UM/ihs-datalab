@@ -134,6 +134,19 @@ function Say($text) { Write-Host "   $text" }
 function Good($text) { Write-Host "   OK: $text" -ForegroundColor Green }
 function Note($text) { Write-Host "   $text" -ForegroundColor Yellow }
 
+# Whether hardware virtualization is on (Step 1). $true when Windows can't say.
+function Test-VirtualizationOn {
+    try {
+        $system = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+        if ($system.HypervisorPresent) { return $true }
+        $processor = Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        return [bool]$processor.VirtualizationFirmwareEnabled
+    } catch {
+        Say "(Couldn't check whether virtualization is on; carrying on.)"
+        return $true
+    }
+}
+
 function Stop-Install($text) {
     Write-Host ""
     Write-Host "   $text" -ForegroundColor Red
@@ -1032,6 +1045,19 @@ function Stop-StillNoDocker {
 Step "Step 1 of 8: Getting Windows ready (WSL and Docker Desktop)"
 Say "DataLab runs its analysis in Docker, a sealed-off space on your computer."
 Say "Docker needs a Windows feature called WSL."
+# WSL 2 needs hardware virtualization, which only the computer's firmware can
+# turn on (administrator rights can't). Found out here, before any
+# administrator step, download or restart, not after them. With a hypervisor
+# already running (e.g. Credential Guard), the processor reports firmware
+# virtualization as off, so a running hypervisor counts as on. If Windows
+# can't say, carry on: an unknown isn't a refusal.
+if (-not (Test-VirtualizationOn)) {
+    Stop-Install ("This computer has virtualization turned off in its firmware (the settings " +
+        "below Windows). DataLab needs it, and Windows settings or administrator rights can't " +
+        "change it. Ask IT (the service desk) to turn on 'Intel Virtualization Technology " +
+        "(VT-x)' or 'AMD-V / SVM' in this computer's firmware, then run the installer again. " +
+        "Nothing was changed on this computer.")
+}
 $missing = @()
 if (-not (Test-Path $WslExe)) { $missing += "Turn on WSL and install it (WSL $WslVersion, from Microsoft)" }
 if (-not (Test-Path $DockerDesktop)) { $missing += "Install Docker Desktop $DockerVersion (from Docker)" }
