@@ -1850,6 +1850,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Activity */
+        get: operations["session_activity_api_session_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/end": {
         parameters: {
             query?: never;
@@ -3980,6 +3997,13 @@ export interface components {
             folder: string | null;
             /** Message */
             message: string;
+        };
+        /** SessionActivityOut */
+        SessionActivityOut: {
+            /** Agent Turn */
+            agent_turn: boolean;
+            /** Workflow Run */
+            workflow_run: boolean;
         };
         /** SetDestinationKey */
         SetDestinationKey: {
@@ -7733,6 +7757,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CatalogStatusOut"];
+                };
+            };
+        };
+    };
+    session_activity_api_session_activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionActivityOut"];
                 };
             };
         };

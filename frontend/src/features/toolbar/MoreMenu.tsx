@@ -1,6 +1,6 @@
 // "More" (⋯): the less-used shortcuts. Appearance and Feedback always; on a
 // narrow window also Export folders and GitHub, which have their own buttons
-// from xl up (see Toolbar).
+// from 2xl up (see Toolbar).
 import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useState } from "react";
@@ -13,7 +13,7 @@ import { GitHubMark } from "@/features/settings/GitHubEntry";
 import { settingsLink } from "@/features/settings/highlight";
 import { type Theme, useTheme } from "@/lib/theme";
 
-import { FeedbackDialog } from "./FeedbackDialog";
+import { EMPTY_DRAFT, FeedbackDialog, type FeedbackDraft } from "./FeedbackDialog";
 import { FoldersPanel } from "./FoldersShortcut";
 import { ITEM, Shortcut } from "./Popover";
 
@@ -23,8 +23,8 @@ const THEMES: { value: Theme; label: string }[] = [
   { value: "system", label: "System" },
 ];
 
-/** Where the narrow window's extra items show: below xl, where their own buttons are hidden. */
-export const NARROW_ONLY = "xl:hidden";
+/** Where the narrow window's extra items show: below 2xl, where their own buttons are hidden. */
+export const NARROW_ONLY = "2xl:hidden";
 
 function useGitHub() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
@@ -40,6 +40,8 @@ export function MoreMenu() {
   const { theme, setTheme } = useTheme();
   const github = useGitHub();
   const [dialog, setDialog] = useState<"feedback" | "folders" | null>(null);
+  // Kept while the page is open: closing Feedback and coming back finds it as it was.
+  const [draft, setDraft] = useState<FeedbackDraft>(EMPTY_DRAFT);
   return (
     <>
       <Shortcut kind="menu" icon="more" label="More" title="More: appearance, and report a bug or suggest an improvement" width="w-60">
@@ -120,7 +122,7 @@ export function MoreMenu() {
           </>
         )}
       </Shortcut>
-      {dialog === "feedback" && <FeedbackDialog onClose={() => setDialog(null)} />}
+      {dialog === "feedback" && <FeedbackDialog draft={draft} onDraft={setDraft} onClose={() => setDialog(null)} />}
       {dialog === "folders" && (
         <Modal title="Export folders" onClose={() => setDialog(null)}>
           <FoldersPanel onNavigate={() => setDialog(null)} />

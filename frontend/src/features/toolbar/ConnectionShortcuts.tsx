@@ -14,12 +14,12 @@ export const CONNECTIONS = ["settings-connections"];
 /** The last Test connection's result in this window, shared by both shortcuts. */
 export const CONNECTION_TEST = ["connection-test"];
 
-function useConnections() {
+export function useConnections() {
   return useQuery({ queryKey: CONNECTIONS, queryFn: settingsApi.connections });
 }
 
 /** Test connection (one test checks both), and its last result. It never runs on its own. */
-function useConnectionTest() {
+export function useConnectionTest() {
   const client = useQueryClient();
   const test = useQuery({
     queryKey: CONNECTION_TEST,
@@ -101,7 +101,7 @@ export function DatabaseShortcut() {
           {shown && (
             <p className="mt-2 text-[12.5px] text-muted">
               {practice ? (
-                "Practice: synthetic database (fixed)"
+                "Fixed on the practice DataLab: the synthetic database"
               ) : shown.oracle.configured ? (
                 <>
                   <span className="font-mono text-[11.5px] break-all">{shown.oracle.dsn}</span>
@@ -165,7 +165,7 @@ export function KeyShortcut() {
           <div className={ACTIONS}>
             {!missing && shown && (
               <Button onClick={test.run} disabled={test.running}>
-                {test.running ? "Testing…" : "Test connection"}
+                {test.running ? "Testing…" : "Test both connections"}
               </Button>
             )}
             <Link {...settingsLink("connections", "connection-umgpt")} onClick={() => close(false)} className={LINK}>

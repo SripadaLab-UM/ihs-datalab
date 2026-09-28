@@ -57,21 +57,21 @@ it("has a short Settings label for narrow windows, and the full one for wide", (
   const tab = screen.getByRole("link", { name: /Settings/ });
   const [short, full] = [...tab.querySelectorAll("span")];
   expect(short).toHaveTextContent(/^Settings$/);
-  expect(short).toHaveClass("xl:hidden");
+  expect(short).toHaveClass("2xl:hidden");
   expect(full).toHaveTextContent("Settings & Safety");
-  expect(full).toHaveClass("hidden", "xl:inline");
+  expect(full).toHaveClass("hidden", "2xl:inline");
 });
 
-it("says practice at every width (the badge, or the brand from lg to xl), and synthetic data when there's room", async () => {
+it("says practice at every width (the badge, or the brand from lg to 2xl), and synthetic data when there's room", async () => {
   app("/workspace");
   const badge = await screen.findByTitle(/The practice profile/);
   expect(badge).toHaveTextContent("practice · synthetic data");
   expect(badge.querySelector("span")).toHaveClass("hidden", "xl:inline");
-  // Where the badge steps aside (lg to xl), the brand says practice.
+  // Where the badge steps aside (lg to 2xl), the brand says practice.
   expect(within(screen.getByTestId("brand")).getByText("practice")).toHaveClass("lg:inline");
 });
 
-it("has the shortcuts at the right: Database and the key always, GitHub and folders from xl up", async () => {
+it("has the shortcuts at the right: Database and the key always, GitHub and folders from 2xl up", async () => {
   app("/workspace");
   const header = screen.getByRole("banner");
   const shortcuts = within(header).getByRole("group", { name: "Connections and folders" });
@@ -79,7 +79,7 @@ it("has the shortcuts at the right: Database and the key always, GitHub and fold
   expect(within(shortcuts).getByRole("button", { name: /^U-M GPT key/ })).toBeVisible();
   // Below xl, More holds them instead, so the tabs never overflow.
   const folders = within(shortcuts).getByRole("button", { name: /^Export folders/ });
-  expect(folders.closest(".xl\\:flex")).toHaveClass("hidden", "xl:flex");
+  expect(folders.closest(".\\32xl\\:flex")).toHaveClass("hidden", "2xl:flex");
   expect(within(header).getByRole("button", { name: "More" })).toHaveAttribute("aria-haspopup", "menu");
 });
 
@@ -98,6 +98,6 @@ it("keeps End session in its own menu at the far end, set apart from More", () =
 it("makes room for the shortcuts on narrower windows: tighter gaps, the badge only where the brand doesn't say practice", async () => {
   app("/workspace");
   const badge = await screen.findByTitle(/The practice profile/);
-  expect(badge).toHaveClass("lg:hidden", "xl:inline");
-  expect(badge.closest(".ml-auto")).toHaveClass("gap-2", "xl:gap-2.5");
+  expect(badge).toHaveClass("lg:hidden", "2xl:inline");
+  expect(badge.closest(".ml-auto")).toHaveClass("gap-2", "2xl:gap-3");
 });

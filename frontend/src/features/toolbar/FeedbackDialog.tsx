@@ -47,17 +47,55 @@ export function feedbackSubject(kind: FeedbackKind): string {
   return kind === "bug" ? "DataLab: bug report" : "DataLab: suggestion";
 }
 
-/** The mailto: link, with the text in the body; null without an address to send to. */
+/** Some mail apps cut mailto: links at about 2,000 characters. */
+export const MAILTO_LIMIT = 1800;
+
+/** The mailto: link, with the text in the body; null without an address to send to. The
+ * address is as the backend found it (a plain address, checked there), so it goes in as is. */
 export function feedbackMailto(contact: FeedbackContact | undefined, kind: FeedbackKind, text: string): string | null {
   if (!contact?.email) return null;
-  return `mailto:${encodeURIComponent(contact.email)}?subject=${encodeURIComponent(feedbackSubject(kind))}&body=${encodeURIComponent(text)}`;
+  return `mailto:${contact.email}?subject=${encodeURIComponent(feedbackSubject(kind))}&body=${encodeURIComponent(text)}`;
 }
 
-export function FeedbackDialog({ onClose }: { onClose: () => void }) {
-  const [kind, setKind] = useState<FeedbackKind>("bug");
-  const [description, setDescription] = useState("");
-  const [withDiagnostics, setWithDiagnostics] = useState(false);
-  const [copied, setCopied] = useState<"copied" | "refused" | null>(null);
+/**
+ * The email for this feedback. When the link with the diagnostics would be too
+ * long for some mail apps, the body leaves them out: the whole text is copied
+ * to the clipboard as the email opens, to paste in.
+ */
+export function feedbackEmail(
+  contact: FeedbackContact | undefined,
+  parts: Parameters<typeof feedbackText>[0],
+): { href: string; diagnosticsLeftOut: boolean } | null {
+  const full = feedbackMailto(contact, parts.kind, feedbackText(parts));
+  if (!full) return null;
+  if (full.length <= MAILTO_LIMIT || !parts.diagnostics) return { href: full, diagnosticsLeftOut: false };
+  const short = feedbackText({ ...parts, diagnostics: null }) + "\n\n(Diagnostics: pasted below.)";
+  return { href: feedbackMailto(contact, parts.kind, short)!, diagnosticsLeftOut: true };
+}
+
+export interface FeedbackDraft {
+  kind: FeedbackKind;
+  description: string;
+  withDiagnostics: boolean;
+}
+
+export const EMPTY_DRAFT: FeedbackDraft = { kind: "bug", description: "", withDiagnostics: false };
+
+/** The dialog. Its draft lives with whoever opens it, so closing and reopening keeps it. */
+export function FeedbackDialog({
+  onClose,
+  draft,
+  onDraft,
+}: {
+  onClose: () => void;
+  draft: FeedbackDraft;
+  onDraft: (draft: FeedbackDraft) => void;
+}) {
+  const { kind, description, withDiagnostics } = draft;
+  const setKind = (next: FeedbackKind) => onDraft({ ...draft, kind: next });
+  const setDescription = (next: string) => onDraft({ ...draft, description: next });
+  const setWithDiagnostics = (next: boolean) => onDraft({ ...draft, withDiagnostics: next });
+  const [copied, setCopied] = useState<"copied" | "refused" | "diagnostics" | null>(null);
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const contact = useQuery({ queryKey: ["feedback-contact"], queryFn: settingsApi.feedbackContact });
   const diagnostics = useQuery({
@@ -68,14 +106,10 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
   });
   const report = withDiagnostics ? (diagnostics.data?.text ?? null) : null;
   const waiting = withDiagnostics && !diagnostics.data && !diagnostics.isError;
-  const text = feedbackText({
-    kind,
-    description,
-    version: health.data?.version,
-    profile: health.data?.profile,
-    diagnostics: report,
-  });
-  const mailto = feedbackMailto(contact.data, kind, text);
+  const parts = { kind, description, version: health.data?.version, profile: health.data?.profile, diagnostics: report };
+  const text = feedbackText(parts);
+  const email = feedbackEmail(contact.data, parts);
+  const mailto = email?.href ?? null;
   const who = contact.data?.contact;
 
   const copy = async () => {
@@ -161,10 +195,20 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
           <a
             href={waiting ? undefined : mailto}
             aria-disabled={waiting || undefined}
+            onClick={() => {
+              if (!email?.diagnosticsLeftOut) return;
+              // Too long for the link: the whole text goes to the clipboard, to paste in.
+              void writeClipboard(Promise.resolve(text)).then((ok) => setCopied(ok ? "diagnostics" : "refused"));
+            }}
             className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-[3px] border border-line px-3 py-1.5 font-sans text-[13.5px] font-medium text-ink transition-colors hover:border-ink"
           >
             Email the maintainer
           </a>
+        )}
+        {copied === "diagnostics" && (
+          <span role="status" className="flex items-center gap-1 text-sm text-data">
+            <Icon name="check" size={13} /> Diagnostics copied: paste them into the email.
+          </span>
         )}
         {copied === "copied" && (
           <span role="status" className="flex items-center gap-1 text-sm text-data">
@@ -189,7 +233,9 @@ export function FeedbackDialog({ onClose }: { onClose: () => void }) {
         </>
       )}
       <p className="mt-3 text-xs text-muted">
-        {mailto
+        {email?.diagnosticsLeftOut
+          ? `The email opens in your mail app, to ${who}. The diagnostics are too long for it: they're copied as it opens, for you to paste in.`
+          : mailto
           ? `The email opens in your mail app, to ${who}, for you to read and send. If it's cut short, copy the text instead and paste it into the email.`
           : who
             ? `Copy it and send it to ${who}.`

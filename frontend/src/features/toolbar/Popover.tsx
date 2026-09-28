@@ -41,10 +41,12 @@ export interface ShortcutProps {
   /** The tooltip: the state, and what a click does. */
   title: string;
   icon: AnyIcon;
-  /** Short words beside the icon when something needs attention ("Key missing"). */
+  /** Short words beside the icon when something needs attention ("Key missing"), from 2xl up. */
   attention?: string;
-  /** Always-visible words beside the icon (no attention colour). */
+  /** Always-visible words beside the icon. */
   text?: string;
+  /** The attention colour, for a button whose text is always a warning. */
+  tone?: "attn";
   kind?: "dialog" | "menu";
   /** The panel's width class. */
   width?: string;
@@ -59,6 +61,7 @@ export function Shortcut({
   icon,
   attention,
   text,
+  tone,
   kind = "dialog",
   width = "w-80",
   className,
@@ -135,7 +138,16 @@ export function Shortcut({
   };
 
   return (
-    <div ref={wrap} className={clsx("relative flex shrink-0 self-stretch", className)} onKeyDown={onKeyDown}>
+    <div
+      ref={wrap}
+      className={clsx("relative flex shrink-0 self-stretch", className)}
+      onKeyDown={onKeyDown}
+      // Focus moving out (Tab past the end, a click elsewhere) closes it.
+      onBlur={(event) => {
+        const next = event.relatedTarget as Node | null;
+        if (open && next && !wrap.current?.contains(next)) setOpen(false);
+      }}
+    >
       <button
         ref={button}
         type="button"
@@ -148,12 +160,13 @@ export function Shortcut({
         onKeyDown={onButtonKey}
         className={clsx(
           TRIGGER,
-          attention ? "text-attn hover:text-ink" : "text-muted hover:text-ink",
+          attention || tone === "attn" ? "text-attn hover:text-ink" : "text-muted hover:text-ink",
           open && "text-ink",
         )}
       >
         <Icon name={icon} size={15} className="shrink-0" />
-        {attention ? <span>{attention}</span> : text && <span>{text}</span>}
+        {/* The words from 2xl up; below, the header's attention menu says them (AttentionMenu). */}
+        {attention ? <span className="hidden 2xl:inline">{attention}</span> : text && <span>{text}</span>}
       </button>
       {open && (
         <div

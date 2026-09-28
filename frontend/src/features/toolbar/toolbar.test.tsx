@@ -10,14 +10,16 @@ import { sessionApi } from "@/api/session";
 import { type Connections, settingsApi } from "@/api/settings";
 
 import { DatabaseShortcut, KeyShortcut } from "./ConnectionShortcuts";
-import { feedbackMailto, feedbackText } from "./FeedbackDialog";
+import { AttentionMenu } from "./AttentionMenu";
+import { feedbackEmail, feedbackMailto, feedbackText, MAILTO_LIMIT } from "./FeedbackDialog";
 import { FoldersShortcut } from "./FoldersShortcut";
 import { MoreMenu } from "./MoreMenu";
-import { SessionMenu } from "./SessionMenu";
+import { activityWarning, SessionMenu } from "./SessionMenu";
 
 vi.mock("@/api/client", () => ({ api: { health: vi.fn(), destinations: vi.fn() } }));
 vi.mock("@/api/github", () => ({ githubApi: { status: vi.fn() } }));
-vi.mock("@/api/session", () => ({ sessionApi: { end: vi.fn() } }));
+vi.mock("@/api/session", () => ({ sessionApi: { end: vi.fn(), activity: vi.fn() } }));
+vi.mock("@/features/settings/updateCheck", () => ({ useUpdateCheck: vi.fn(() => ({ data: undefined })) }));
 vi.mock("@/api/settings", () => ({
   settingsApi: {
     connections: vi.fn(),
@@ -83,6 +85,7 @@ beforeEach(() => {
   vi.mocked(settingsApi.feedbackContact).mockReset().mockResolvedValue({ contact: null, email: null });
   vi.mocked(settingsApi.diagnostics).mockReset().mockResolvedValue({ text: "DataLab 0.2.0\nSafety: ok" });
   vi.mocked(sessionApi.end).mockReset().mockResolvedValue(undefined);
+  vi.mocked(sessionApi.activity).mockReset().mockResolvedValue({ agent_turn: false, workflow_run: false });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -140,7 +143,7 @@ it("database: on practice, the synthetic database, fixed", async () => {
   show(<DatabaseShortcut />);
   const button = await screen.findByRole("button", { name: "Database: synthetic, not tested yet" });
   fireEvent.click(button);
-  expect(screen.getByText("Practice: synthetic database (fixed)")).toBeInTheDocument();
+  expect(screen.getByText("Fixed on the practice DataLab: the synthetic database")).toBeInTheDocument();
 });
 
 // ------------------------------------------------------------ U-M GPT key
@@ -176,7 +179,7 @@ it("key: Test connection shows the model's result", async () => {
   });
   show(<KeyShortcut />);
   fireEvent.click(await screen.findByRole("button", { name: "U-M GPT key: saved in keychain" }));
-  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  fireEvent.click(screen.getByRole("button", { name: "Test both connections" }));
   expect(await screen.findByText("U-M GPT refused the key.")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "U-M GPT key: test failed" })).toHaveTextContent("Key: not working");
 });
@@ -287,7 +290,7 @@ it("More: Appearance is a Light / Dark / System choice that applies at once", ()
   expect(document.documentElement.dataset.theme).toBeUndefined();
 });
 
-it("More: on a narrow window it holds Export folders and GitHub, hidden from xl up", async () => {
+it("More: on a narrow window it holds Export folders and GitHub, hidden from 2xl up", async () => {
   vi.mocked(githubApi.status).mockResolvedValue({
     available: true,
     signed_in: true,
@@ -298,12 +301,12 @@ it("More: on a narrow window it holds Export folders and GitHub, hidden from xl 
   show(<MoreMenu />);
   fireEvent.click(screen.getByRole("button", { name: "More" }));
   const folders = screen.getByRole("menuitem", { name: "Export folders…" });
-  expect(folders.parentElement).toHaveClass("xl:hidden");
+  expect(folders.parentElement).toHaveClass("2xl:hidden");
   const github = await screen.findByRole("menuitem", { name: /GitHub: yfang/ });
   expect(github).toHaveAttribute("href", "/settings/connections#connection-github");
-  expect(github.parentElement).toHaveClass("xl:hidden");
+  expect(github.parentElement).toHaveClass("2xl:hidden");
   // Feedback and Appearance show at every width.
-  expect(screen.getByRole("menuitem", { name: "Send feedback…" }).closest(".xl\\:hidden")).toBeNull();
+  expect(screen.getByRole("menuitem", { name: "Send feedback…" }).closest(".\\32xl\\:hidden")).toBeNull();
   // End session isn't here: it has its own menu.
   expect(screen.queryByText(/End session/)).not.toBeInTheDocument();
   fireEvent.click(folders);
@@ -319,7 +322,7 @@ it("End session needs confirming, says a restart is needed, and only then ends i
   fireEvent.click(screen.getByRole("menuitem", { name: "End session…" }));
   const dialog = screen.getByRole("dialog", { name: "End this session?" });
   expect(dialog).toHaveTextContent("You'll need a new sign-in link from the launcher.");
-  expect(dialog).toHaveTextContent("quit DataLab and start it again from its launcher");
+  expect(dialog).toHaveTextContent("quit DataLab (close its Terminal window or press Ctrl-C in it) and start it again");
   expect(sessionApi.end).not.toHaveBeenCalled();
   // Cancel is the safe default, and does nothing.
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
@@ -346,7 +349,7 @@ it("Feedback: the text, with diagnostics only when asked for", () => {
 it("Feedback: the mailto link goes to the lab's contact, with the text in the body", () => {
   const link = feedbackMailto({ contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" }, "bug", "a & b\nc");
   expect(link).toBe(
-    `mailto:ali%40umich.edu?subject=${encodeURIComponent("DataLab: bug report")}&body=${encodeURIComponent("a & b\nc")}`,
+    `mailto:ali@umich.edu?subject=${encodeURIComponent("DataLab: bug report")}&body=${encodeURIComponent("a & b\nc")}`,
   );
   expect(feedbackMailto({ contact: "Ali", email: null }, "bug", "x")).toBeNull();
   expect(feedbackMailto(undefined, "bug", "x")).toBeNull();
@@ -368,7 +371,7 @@ it("Feedback: warns about participant data, copies, emails the maintainer, never
   fireEvent.click(within(dialog).getByRole("radio", { name: "Suggestion" }));
   fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "A dark chart theme" } });
   const email = await within(dialog).findByRole("link", { name: "Email the maintainer" });
-  expect(email.getAttribute("href")).toMatch(/^mailto:ali%40umich\.edu\?subject=DataLab%3A%20suggestion&body=/);
+  expect(email.getAttribute("href")).toMatch(/^mailto:ali@umich\.edu\?subject=DataLab%3A%20suggestion&body=/);
   expect(decodeURIComponent(email.getAttribute("href")!)).toContain("A dark chart theme");
   expect(settingsApi.diagnostics).not.toHaveBeenCalled();
 
@@ -397,4 +400,116 @@ it("Feedback: without a contact, only Copy, and whom to send it to", async () =>
   await waitFor(() => expect(settingsApi.feedbackContact).toHaveBeenCalled());
   expect(within(dialog).queryByRole("link", { name: "Email the maintainer" })).not.toBeInTheDocument();
   expect(dialog).toHaveTextContent("send it to the DataLab maintainer");
+});
+
+it("Feedback: a link too long for mail apps leaves the diagnostics out, to paste in", () => {
+  const contact = { contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" };
+  const parts = { kind: "bug" as const, description: "It broke.", diagnostics: "x".repeat(2600) };
+  const email = feedbackEmail(contact, parts)!;
+  expect(email.diagnosticsLeftOut).toBe(true);
+  expect(email.href.length).toBeLessThanOrEqual(MAILTO_LIMIT);
+  expect(decodeURIComponent(email.href)).toContain("It broke.");
+  expect(email.href).not.toContain("xxxx");
+  const short = feedbackEmail(contact, { ...parts, diagnostics: "DataLab 0.2.0" })!;
+  expect(short.diagnosticsLeftOut).toBe(false);
+  expect(decodeURIComponent(short.href)).toContain("DataLab 0.2.0");
+});
+
+it("Feedback: with long diagnostics, emailing copies the whole text and says so", async () => {
+  vi.mocked(settingsApi.feedbackContact).mockResolvedValue({ contact: "Ali <ali@umich.edu>", email: "ali@umich.edu" });
+  vi.mocked(settingsApi.diagnostics).mockResolvedValue({ text: "D".repeat(2600) });
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  const dialog = await openFeedback();
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: /Include diagnostics/ }));
+  await within(dialog).findByRole("textbox", { name: "Diagnostics to include" });
+  const link = within(dialog).getByRole("link", { name: "Email the maintainer" });
+  expect(link.getAttribute("href")!.length).toBeLessThanOrEqual(MAILTO_LIMIT);
+  fireEvent.click(link);
+  expect(await within(dialog).findByText(/Diagnostics copied: paste them into the email\./)).toBeInTheDocument();
+  expect(writeText.mock.calls[0][0]).toContain("D".repeat(2600));
+});
+
+it("Feedback: the draft is kept when the dialog is closed and opened again", async () => {
+  const dialog = await openFeedback();
+  fireEvent.click(within(dialog).getByRole("radio", { name: "Suggestion" }));
+  fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Half-written idea" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "More" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Send feedback…" }));
+  const again = await screen.findByRole("dialog", { name: "Send feedback" });
+  expect(within(again).getByRole("textbox")).toHaveValue("Half-written idea");
+  expect(within(again).getByRole("radio", { name: "Suggestion" })).toBeChecked();
+});
+
+it("End session says what's still going, which a restart would stop", async () => {
+  expect(activityWarning({ agent_turn: false, workflow_run: false })).toBeNull();
+  expect(activityWarning({ agent_turn: true, workflow_run: false })).toBe(
+    "An agent turn is still going; it carries on, but restarting DataLab to get back in will stop it.",
+  );
+  expect(activityWarning({ agent_turn: false, workflow_run: true })).toBe(
+    "A workflow run is still going; it carries on, but restarting DataLab to get back in will stop it.",
+  );
+  vi.mocked(sessionApi.activity).mockResolvedValue({ agent_turn: false, workflow_run: true });
+  show(<SessionMenu onEnded={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Session" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "End session…" }));
+  const dialog = screen.getByRole("dialog", { name: "End this session?" });
+  expect(await within(dialog).findByText(/A workflow run is still going/)).toBeInTheDocument();
+});
+
+it("a popover closes when focus moves out of it", async () => {
+  show(
+    <>
+      <DatabaseShortcut />
+      <button>Elsewhere</button>
+    </>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Database/ }));
+  const panel = screen.getByRole("dialog");
+  fireEvent.blur(panel.querySelector("button, a")!, { relatedTarget: screen.getByRole("button", { name: "Elsewhere" }) });
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+// ------------------------------------------------------------ attention, below 2xl
+
+it("attention: nothing to say, no button", async () => {
+  show(<AttentionMenu />);
+  await waitFor(() => expect(settingsApi.connections).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: /attention/i })).not.toBeInTheDocument();
+});
+
+it("attention: one thing is said on the button itself", async () => {
+  vi.mocked(settingsApi.connections).mockResolvedValue(connections({ key: "missing" }));
+  show(<AttentionMenu />);
+  const button = await screen.findByRole("button", { name: "Needs attention: Key missing" });
+  expect(button).toHaveTextContent("Key missing");
+  expect(button.parentElement).toHaveClass("2xl:hidden");
+});
+
+it("attention: several fold into one 'N need attention' menu listing each in words", async () => {
+  vi.mocked(settingsApi.connections).mockResolvedValue(connections({ key: "missing", password: "missing" }));
+  vi.mocked(api.destinations).mockResolvedValue([folder({ available: false, status: "missing" })] as never);
+  vi.mocked(githubApi.status).mockResolvedValue({ available: true, signed_in: false, account: null, message: null, repos: [] } as never);
+  show(<AttentionMenu />);
+  const button = await screen.findByRole("button", { name: /^Needs attention/ });
+  await waitFor(() => expect(button).toHaveTextContent("4 need attention"));
+  fireEvent.click(button);
+  const items = within(screen.getByRole("menu")).getAllByRole("menuitem");
+  expect(items.map((i) => i.querySelector("span span")?.textContent)).toEqual([
+    "DB: no password",
+    "Key missing",
+    "GitHub: sign in",
+    "Folder unavailable",
+  ]);
+  fireEvent.click(items[1]);
+  expect(screen.getByTestId("at")).toHaveTextContent('/settings/connections#connection-umgpt {"highlight":"connection-umgpt"}');
+});
+
+it("each shortcut says its own words only from 2xl up (the attention menu says them below)", async () => {
+  vi.mocked(settingsApi.connections).mockResolvedValue(connections({ key: "missing" }));
+  show(<KeyShortcut />);
+  const words = await screen.findByText("Key missing");
+  expect(words).toHaveClass("hidden", "2xl:inline");
 });

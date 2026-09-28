@@ -3,10 +3,12 @@
 // browser's sign-in (the cookie the one-time link set) in every window.
 // DataLab keeps running; signing in again takes the new link it makes when it
 // next starts, from the launcher.
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { sessionApi } from "@/api/session";
+import { api } from "@/api/client";
+import { type SessionActivity, sessionApi } from "@/api/session";
+import { usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { Button, Icon, Modal } from "@/components/ui";
 
@@ -58,13 +60,21 @@ export function EndSessionDialog({ onClose, onEnded }: { onClose: () => void; on
       onEnded();
     },
   });
+  const activity = useQuery({ queryKey: ["session-activity"], queryFn: sessionApi.activity, staleTime: 0 });
+  const stillGoing = activityWarning(activity.data);
   return (
     <Modal title="End this session?" onClose={onClose}>
       <p className="text-sm">You'll need a new sign-in link from the launcher.</p>
       <p className="mt-2 text-sm font-medium">
-        DataLab only makes a sign-in link when it starts, so to get back in you'll have to quit DataLab and start it
-        again from its launcher.
+        DataLab only makes a sign-in link when it starts, so to get back in you'll have to quit DataLab (close its
+        Terminal window or press Ctrl-C in it) and start it again from its launcher. The old link won't work again.
       </p>
+      {stillGoing && (
+        <p role="status" className="mt-2 flex items-start gap-2 text-sm font-medium text-attn">
+          <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+          <span>{stillGoing}</span>
+        </p>
+      )}
       <p className="mt-2 text-sm text-muted">
         Every DataLab window in this browser is signed out. Until you quit it, DataLab keeps running, and anything
         already under way carries on.
@@ -82,14 +92,33 @@ export function EndSessionDialog({ onClose, onEnded }: { onClose: () => void; on
   );
 }
 
-/** Where End session leaves the window. */
+/** What's still going, which a restart to get back in would stop; null when nothing is. */
+export function activityWarning(activity: SessionActivity | undefined): string | null {
+  if (!activity) return null;
+  const going =
+    activity.agent_turn && activity.workflow_run
+      ? "An agent turn and a workflow run are"
+      : activity.agent_turn
+        ? "An agent turn is"
+        : activity.workflow_run
+          ? "A workflow run is"
+          : null;
+  if (!going) return null;
+  const them = activity.agent_turn && activity.workflow_run ? "them" : "it";
+  return `${going} still going; ${them === "it" ? "it carries" : "they carry"} on, but restarting DataLab to get back in will stop ${them}.`;
+}
+
+/** Where End session leaves the window: no API calls but /api/health, which needs no sign-in. */
 export function SessionEnded() {
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, retry: false });
+  usePracticeTab(health.data?.profile === "practice");
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="font-serif text-[28px] text-ink">Session ended</p>
       <p className="max-w-[32rem] text-sm text-muted">
-        DataLab no longer knows this browser. To sign in again, quit DataLab and start it again from its launcher: it
-        makes a new sign-in link each time it starts.
+        DataLab no longer knows this browser. To sign in again, quit DataLab (close its Terminal window or press Ctrl-C
+        in it) and start it again from its launcher: it makes a new sign-in link each time it starts. The old link
+        won't work again.
       </p>
     </div>
   );

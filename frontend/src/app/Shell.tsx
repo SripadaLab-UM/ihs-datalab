@@ -9,6 +9,7 @@ import { clearAllDrafts } from "@/components/chat/plan";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
 import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
+import { AttentionMenu } from "@/features/toolbar/AttentionMenu";
 import { MoreMenu } from "@/features/toolbar/MoreMenu";
 import { SessionMenu } from "@/features/toolbar/SessionMenu";
 import { Shortcuts } from "@/features/toolbar/Toolbar";
@@ -49,8 +50,9 @@ export function Shell() {
     <div className="flex h-full flex-col">
       {signedOut && (
         <div role="alert" className="bg-danger px-4 py-2 text-center text-sm font-medium text-white">
-          DataLab doesn't recognise this window any more (it may have restarted). What's shown here may be out of date:
-          open DataLab again with the link it printed when it started.
+          DataLab doesn't recognise this window any more (it restarted, or the session was ended), so what's shown here
+          may be out of date. To get back in, quit DataLab (close its Terminal window or press Ctrl-C in it) and start it
+          again from its launcher: an old sign-in link won't work again.
         </div>
       )}
       <UpdatingBanner />
@@ -70,8 +72,8 @@ export function Shell() {
             >
               {tab.short ? (
                 <>
-                  <span className="xl:hidden">{tab.short}</span>
-                  <span className="hidden xl:inline">{tab.label}</span>
+                  <span className="2xl:hidden">{tab.short}</span>
+                  <span className="hidden 2xl:inline">{tab.label}</span>
                 </>
               ) : (
                 tab.label
@@ -82,14 +84,18 @@ export function Shell() {
         {/* The pill, the shortcuts, the practice badge, Help and More sit together
             at the right, closer to each other than to the tabs; End session is
             in its own menu at the far end, set apart. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch xl:gap-2.5">
-          <UpdatePill />
+        <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch 2xl:gap-3">
+          {/* Below 2xl "Update available" is one of the attention items instead. */}
+          <span className="hidden 2xl:contents">
+            <UpdatePill />
+          </span>
+          <AttentionMenu />
           <Shortcuts />
-          {/* From lg to xl the brand beside the tabs says "practice" itself, so the
+          {/* From lg to 2xl the brand beside the tabs says "practice" itself, so the
               badge makes room there for the shortcuts. */}
           {practice && (
             <span
-              className="shrink-0 self-center lg:hidden xl:inline rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
+              className="shrink-0 self-center lg:hidden 2xl:inline rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
               title="The practice profile: synthetic data only, never the real study database"
             >
               practice<span className="hidden xl:inline"> · synthetic data</span>
