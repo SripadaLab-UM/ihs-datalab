@@ -102,7 +102,9 @@ def test_the_fix_adds_one_right_for_the_virtual_machines_and_nothing_else():
 
 def test_the_administrator_prompt_runs_only_the_fixed_text():
     command = windows_vm.elevated_command()
-    assert command[0].lower().endswith(r"system32\windowspowershell\v1.0\powershell.exe")
+    # Joined with the running system's separator: "\\" on Windows, "/" on CI's Linux.
+    program = command[0].lower().replace("/", "\\")
+    assert program.endswith(r"system32\windowspowershell\v1.0\powershell.exe")
     starter = command[-1]
     assert "-Verb RunAs" in starter and "exit $p.ExitCode" in starter
     encoded = re.search(r"-EncodedCommand ([A-Za-z0-9+/=]+)", starter).group(1)
