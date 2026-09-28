@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -1138,7 +1139,7 @@ def test_a_symlinked_app_in_the_disk_image_is_refused(mac, tmp_path):
 
 
 def test_docker_linked_from_path_to_an_app_elsewhere_is_used(mac, tmp_path):
-    elsewhere = tmp_path / "Utilities"
+    elsewhere = mac["apps"] / "Utilities"
     elsewhere.mkdir()
     renamed = fake_docker_app(elsewhere).rename(elsewhere / "Docker 4.84.app")
     (mac["tools"] / "docker").symlink_to(renamed / "Contents" / "Resources" / "bin" / "docker")
@@ -1150,8 +1151,8 @@ def test_docker_linked_from_path_to_an_app_elsewhere_is_used(mac, tmp_path):
 
 
 def test_a_docker_app_spotlight_knows_is_used(mac, tmp_path):
-    elsewhere = tmp_path / "Other Apps"
-    elsewhere.mkdir()
+    elsewhere = mac["home"] / "Applications" / "Other Apps"
+    elsewhere.mkdir(parents=True)
     app = fake_docker_app(elsewhere)
     trash = mac["home"] / ".Trash"
     trash.mkdir()
@@ -1202,3 +1203,65 @@ def test_its_checks_use_dockers_code_requirement_and_notarization():
     assert 'certificate leaf[subject.OU] = \\"$DOCKER_TEAM_ID\\"' in text
     assert 'grep -qxF "source=Notarized Developer ID"' in text
     assert "--speed-limit 10240 --speed-time 120" in text and "--tlsv1.2" in text
+
+
+def staging_copy(mac) -> Path:
+    """Docker's own half-done install or uninstall, with its programs running."""
+    staging = mac["home"] / "Library" / "Application Support" / "com.docker.install"
+    (staging / "in_progress").mkdir(parents=True)
+    return fake_docker_app(staging / "in_progress")
+
+
+def test_a_half_done_docker_install_isnt_taken_for_one(mac):
+    app = staging_copy(mac)
+    done = docker_install(mac, DATALAB_TEST_MDFIND=str(app), DATALAB_TEST_ALIVE=str(app))
+    refused(done, mac, "Download and install Docker Desktop? [y/N]")
+    assert lines(mac["open"]) == []
+    again = docker_install(mac, "--install-docker", DATALAB_TEST_MDFIND=str(app))
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert lines(mac["open"]) == [f"open {mac['apps'] / 'Docker.app'}"]
+
+
+def test_a_docker_command_linked_into_a_half_done_install_isnt_followed(mac):
+    app = staging_copy(mac)
+    (mac["tools"] / "docker").symlink_to(app / "Contents" / "Resources" / "bin" / "docker")
+    done = docker_install(mac)
+    refused(done, mac, "isn't answering", "Download and install Docker Desktop? [y/N]")
+    assert lines(mac["open"]) == []
+
+
+def test_spotlight_finding_only_leftovers_means_an_install_is_offered(mac, tmp_path):
+    places = [
+        mac["home"] / ".Trash",
+        mac["home"] / "Library" / "Caches" / "x",
+        tmp_path / "Volumes-like" / "Docker",  # not in an Applications folder
+        mac["home"] / "Downloads",
+    ]
+    found = []
+    for place in places:
+        place.mkdir(parents=True)
+        found.append(str(fake_docker_app(place)))
+    done = docker_install(mac, DATALAB_TEST_MDFIND="\n".join(found))
+    refused(done, mac, "Download and install Docker Desktop? [y/N]")
+    assert lines(mac["open"]) == []
+
+
+def test_leftover_docker_programs_are_mentioned_when_it_doesnt_start(mac):
+    fake_docker_app(mac["apps"])
+    done = docker_install(mac, DATALAB_TEST_OPEN_STARTS="0", DATALAB_DOCKER_WAIT_SECONDS="60")
+    assert "programs\n    from it may still be running" in done.stdout
+    assert "restart the Mac" in done.stdout
+
+
+def test_no_variable_runs_into_a_non_ascii_character():
+    # In a UTF-8 locale, sh reads "$place…" as a variable named place plus
+    # the first byte of "…", which set -u stops on. ${place}… is safe.
+    for script in (INSTALLER, UNINSTALLER):
+        text = script.read_bytes()
+        assert not re.search(rb"\$[A-Za-z_][A-Za-z0-9_]*[\x80-\xff]", text), script.name
+
+
+def test_a_fresh_install_works_in_a_utf8_locale(mac):
+    done = docker_install(mac, "--install-docker", LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Copying Docker Desktop to" in done.stdout and "unbound variable" not in done.stderr

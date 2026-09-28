@@ -166,24 +166,41 @@ real_path() {
   dir="$(cd "$(dirname "$p")" 2>/dev/null && pwd -P)" || return 1
   printf '%s/%s\n' "$dir" "$(basename "$p")"
 }
-# A Docker Desktop somewhere else: the app the docker command on PATH really
-# is (a link to a renamed Docker.app, or one in a subfolder), or failing that
-# one Spotlight knows (not in the Trash or on a disk image).
+# Whether $1 is an app installed in an Applications folder (/Applications,
+# ~/Applications, or a folder inside either). Anything else isn't taken for
+# an installed Docker Desktop: Docker's own half-done install or uninstall
+# (~/Library/Application Support/com.docker.install/in_progress/Docker.app),
+# the Trash, a disk image, a cache.
+in_applications_folder() {
+  case "$1" in
+    */com.docker.install/*|*/.Trash/*|*/Library/*|*/Caches/*|/Volumes/*|"$DOCKER_CACHE"/*) return 1 ;;
+    "$SYSTEM_APPS"/*|"$USER_APPS"/*|/Applications/*) return 0 ;;
+  esac
+  return 1
+}
+# A Docker Desktop elsewhere in an Applications folder: the app the docker
+# command on PATH really is (a link to a renamed Docker.app, or one in a
+# subfolder), or failing that one Spotlight knows.
 find_docker_app_elsewhere() {
   if [ -n "$DOCKER" ]; then
     real="$(real_path "$DOCKER" || true)"
     case "$real" in
       */Contents/Resources/bin/docker)
         bundle="${real%/Contents/Resources/bin/docker}"
-        if is_docker_bundle "$bundle"; then DOCKER_APP="$bundle"; return 0; fi ;;
+        if in_applications_folder "$bundle" && is_docker_bundle "$bundle"; then
+          DOCKER_APP="$bundle"; return 0
+        fi ;;
     esac
   fi
   command -v mdfind >/dev/null 2>&1 || return 1
   found="$(mdfind "kMDItemCFBundleIdentifier == '$DOCKER_BUNDLE_ID'" 2>/dev/null || true)"
   while IFS= read -r bundle; do
     case "$bundle" in
-      */.Trash/*|/Volumes/*|"$DOCKER_CACHE"/*|*/Docker.app/*) continue ;;
-      *.app) if is_docker_bundle "$bundle"; then DOCKER_APP="$bundle"; return 0; fi ;;
+      */Docker.app/*) continue ;;
+      *.app)
+        if in_applications_folder "$bundle" && is_docker_bundle "$bundle"; then
+          DOCKER_APP="$bundle"; return 0
+        fi ;;
     esac
   done <<FOUND
 $found
@@ -248,6 +265,12 @@ ask_yes() {
   answer=""
   if [ -r /dev/tty ]; then read -r answer < /dev/tty 2>/dev/null || answer=""; fi
   case "$answer" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+}
+# For a Docker Desktop that doesn't come up: leftovers of an earlier install.
+leftovers() {
+  echo "  - If Docker Desktop was uninstalled or installed only partway before, programs"
+  echo "    from it may still be running: quit them (Activity Monitor, search for docker,"
+  echo "    Quit), or simply restart the Mac."
 }
 rerun() {
   echo "Then run this installer again, the same way: it carries on from where it stopped,"
@@ -421,7 +444,7 @@ install_docker_desktop() {
   DOCKER_PARTIAL="$place/.Docker.app.datalab-partial"
   remove_partial_copy
   copy_errors="$DOCKER_CACHE/copy-errors"
-  echo "Copying Docker Desktop to $place…"
+  echo "Copying Docker Desktop to ${place}…"
   copied=0
   ditto "$source_app" "$DOCKER_PARTIAL" 2>"$copy_errors" || copied=$?
   if [ "$copied" -ne 0 ] || [ -L "$DOCKER_PARTIAL" ] || [ ! -d "$DOCKER_PARTIAL" ]; then
@@ -523,6 +546,7 @@ start_docker() {
       echo "  - If its window is asking something (its agreement, your password), answer it."
       echo "  - If it shows an error, choose Restart in its whale menu at the top of the screen."
       echo "  - Wait until the whale menu says Docker Desktop is running."
+      leftovers
       rerun
       exit 1
     fi
@@ -535,6 +559,7 @@ start_docker() {
       echo "Docker Desktop closed before it was ready. If you declined its agreement, that's"
       echo "why: Docker Desktop doesn't run without it. When you're ready, open Docker from"
       echo "Applications, accept its agreement and finish its setup."
+      leftovers
       rerun
       exit 1
     fi

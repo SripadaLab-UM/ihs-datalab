@@ -531,8 +531,13 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   missing `/usr/local/bin/docker` link doesn't matter. A `docker` on PATH
   that links to a Docker.app somewhere else (renamed, or in a subfolder) is
   followed to that app, and failing that, Spotlight (`mdfind` for bundle id
-  `com.docker.docker`, not in the Trash or on a disk image) is asked before
-  offering to install one, so a second copy isn't installed beside it. The
+  `com.docker.docker`) is asked before offering to install one, so a second
+  copy isn't installed beside it. Either way only an app in an Applications
+  folder (`/Applications`, `~/Applications` or a folder inside them) counts:
+  not Docker's own staging copy from a half-done install or uninstall
+  (`~/Library/Application Support/com.docker.install/in_progress/`), the
+  Trash, a disk image or a cache. When Docker doesn't come up, the message
+  also mentions quitting leftover Docker programs or restarting the Mac. The
   command found is used by its full path, and its folder goes last on PATH
   (so it hides nothing already there) for the rest of the install (it also holds Docker's credential helpers, which `docker
   pull` uses). DataLab does the same (adding it last) each time it starts
