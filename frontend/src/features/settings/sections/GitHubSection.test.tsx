@@ -9,7 +9,7 @@ import { pipelinesApi, type PipelinesStatus } from "@/api/pipelines";
 
 import { GitHubSection } from "./GitHubSection";
 
-vi.mock("@/api/client", () => ({ api: { health: vi.fn() } }));
+vi.mock("@/api/client", () => ({ api: { health: vi.fn(), catalogStatus: vi.fn() } }));
 vi.mock("@/api/github", () => ({
   githubApi: {
     status: vi.fn(), signIn: vi.fn(), startSignIn: vi.fn(), pollSignIn: vi.fn(), cancelSignIn: vi.fn(), signOut: vi.fn(),
@@ -62,6 +62,19 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+it.each([
+  ["knowledge", true],
+  ["setting", false],
+] as const)("with no catalog from %s, says the knowledge base's sync brings it: %s", async (source, says) => {
+  vi.mocked(api.health).mockResolvedValue({ profile: "real", version: "0.1.0", status: "ok", database_configured: true, catalog_tables: 0, catalog_state: "empty" });
+  vi.mocked(api.catalogStatus).mockResolvedValue({ state: "empty", tables: 0, detail: "x", source });
+  show();
+  await screen.findByText(/Signed in|Sign in with GitHub/);
+  await waitFor(() => expect(api.catalogStatus).toHaveBeenCalled());
+  await new Promise((r) => setTimeout(r, 0));
+  expect(Boolean(screen.queryByText(/It comes from the knowledge base: sign in and sync it/))).toBe(says);
+});
 
 it("practice never signs in to GitHub", async () => {
   vi.mocked(api.health).mockResolvedValue({ profile: "practice", version: "0.1.0", status: "ok", database_configured: true, catalog_tables: 1 });

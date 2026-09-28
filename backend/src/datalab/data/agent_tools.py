@@ -95,7 +95,7 @@ def build_agent_tools(
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
         _session(ctx, tokens, "search_catalog")
-        await service.ensure_catalog()
+        await _require_catalog(service)
         hits = catalog.search(query, limit=max(1, min(limit, 50)), schemas=cohorts)
         return _json(
             [
@@ -119,7 +119,7 @@ def build_agent_tools(
         table: schema-qualified name, e.g. "IHS_2025.VFITBITDAILYDATA".
         """
         _session(ctx, tokens, "describe_table")
-        await service.ensure_catalog()
+        await _require_catalog(service)
         info = catalog.get(table)
         if info is None:
             raise ToolError(f"{table} isn't in the catalog. Use search_catalog to find tables.")
@@ -134,7 +134,7 @@ def build_agent_tools(
         first_table, second_table: schema-qualified names, e.g. "IHS_2025.VFITBITSLEEP".
         """
         _session(ctx, tokens, "join_paths")
-        await service.ensure_catalog()
+        await _require_catalog(service)
         result = join_keys(catalog, first_table, second_table)
         if "error" in result:
             raise ToolError(result["error"])
@@ -149,7 +149,7 @@ def build_agent_tools(
         cohorts: optional schema names to search, e.g. ["IHS_2025"].
         """
         _session(ctx, tokens, "find_concept")
-        await service.ensure_catalog()
+        await _require_catalog(service)
         return _json(concept_candidates(catalog, concept[:200], cohorts))
 
     @server.tool(annotations=_READ_ONLY)
@@ -571,6 +571,13 @@ def _describe(info: TableInfo, catalog: Catalog) -> dict[str, Any]:
             for c in info.columns
         ],
     }
+
+
+async def _require_catalog(service: DataService) -> None:
+    """With no catalog, the catalog tools say what's missing and how to fix
+    it, rather than finding nothing (and the agent blaming something else)."""
+    if not await service.ensure_catalog():
+        raise ToolError(service.catalog_missing())
 
 
 def _json(value: Any) -> str:

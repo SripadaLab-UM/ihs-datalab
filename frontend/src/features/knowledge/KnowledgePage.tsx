@@ -12,6 +12,7 @@ import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
 import { LoadFailed, LoadingRows } from "@/components/ui/Loading";
 import { CHAT_DOCK, chatClass, messageBox, navClass, useKeptOnceOpen, usePanels } from "@/components/layout/panels";
 import { useOverlay } from "@/components/ui/overlay";
+import { refreshCatalog } from "@/features/sql/catalogRefresh";
 import { useTabState } from "@/features/sql/hooks";
 
 import { FrontMatter } from "./FrontMatter";
@@ -103,6 +104,8 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
     onSuccess: (next) => {
       queryClient.setQueryData(["knowledge-status"], next);
       for (const key of ["kb-pages", "kb-page", "kb-history"]) queryClient.invalidateQueries({ queryKey: [key] });
+      // The table catalog comes from the knowledge base.
+      refreshCatalog(queryClient);
     },
   });
   const open = (to: string) => {

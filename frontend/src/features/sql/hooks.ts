@@ -8,8 +8,12 @@ import type { EditorDiagnostic } from "@/components/editor/CodeEditor";
 const CHECK_DELAY_MS = 350;
 
 /** The SQL check's verdict on `sql`, asked a moment after typing stops. Only a
- *  verdict on the text as it is now is kept, so marks never land on old text. */
-export function useSqlCheck(sql: string): { check: SqlCheck | null; diagnostics: EditorDiagnostic[] } {
+ *  verdict on the text as it is now is kept, so marks never land on old text.
+ *  Asked again when `catalog` (the catalog's state) changes: it checks every column. */
+export function useSqlCheck(
+  sql: string,
+  catalog?: string,
+): { check: SqlCheck | null; diagnostics: EditorDiagnostic[] } {
   const [verdict, setVerdict] = useState<{ sql: string; check: SqlCheck } | null>(null);
   useEffect(() => {
     if (!sql.trim()) return;
@@ -24,7 +28,7 @@ export function useSqlCheck(sql: string): { check: SqlCheck | null; diagnostics:
       clearTimeout(timer);
       controller.abort();
     };
-  }, [sql]);
+  }, [sql, catalog]);
   const check = sql.trim() && verdict?.sql === sql ? verdict.check : null;
   // A new list only when the verdict changes (the editor re-places marks on each new list).
   const diagnostics = useMemo<EditorDiagnostic[]>(

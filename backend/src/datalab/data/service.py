@@ -21,6 +21,7 @@ from datalab.config import QueryLimits
 from datalab.data.access_log import AccessLog, Origin, check_owner
 from datalab.data.autocatalog import CatalogAutoBuild
 from datalab.data.catalog import Catalog
+from datalab.data.catalog_source import CatalogSource
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
 from datalab.data.sqlcheck import SqlRejected, TableRef, check_sql
 
@@ -64,25 +65,36 @@ class DataService:
         catalog: Catalog,
         *,
         catalog_build: CatalogAutoBuild | None = None,
+        catalog_source: CatalogSource | None = None,
     ) -> None:
         self._database = database
         # Every column a query names is checked against the catalog: with an
-        # empty one, no query runs. DataLab's own is built on first use.
+        # empty one, no query runs. DataLab's own is built on first use; the
+        # knowledge base's is read again once it's there (catalog_source.py).
         self._catalog = catalog
         self._catalog_build = catalog_build
+        self._catalog_source = catalog_source
         self._log = access_log
         self._limits = limits
         self._allowed_schemas = allowed_schemas
         self._slots = asyncio.Semaphore(limits.max_concurrent_queries)
 
     async def ensure_catalog(self) -> bool:
-        """Build DataLab's own catalog if it's empty and it's time to try
-        (autocatalog.py, rate-limited). False only while DataLab's own catalog
-        couldn't be built yet. Never raises."""
-        build = self._catalog_build
-        if build is None or len(self._catalog):
+        """Whether there's a catalog to check queries against. If it's empty,
+        build DataLab's own (autocatalog.py) or read it again from where it
+        comes from (catalog_source.py), when it's time to try (both
+        rate-limited). While it's False, `catalog_missing` says why. Never raises."""
+        if len(self._catalog):
             return True
-        return await asyncio.to_thread(build.ensure)
+        if self._catalog_build is not None:
+            return await asyncio.to_thread(self._catalog_build.ensure)
+        if self._catalog_source is not None:
+            return await asyncio.to_thread(self._catalog_source.ensure)
+        return False
+
+    def catalog_missing(self) -> str:
+        """What's missing and how to fix it, while there's no catalog."""
+        return self._catalog.missing_message()
 
     async def run_query(
         self,
@@ -111,10 +123,7 @@ class DataService:
         query_id = _new_query_id()
         binds = dict(binds or {})
         if not await self.ensure_catalog():
-            reason = (
-                "DataLab has no catalog of the cohorts' tables yet, so it can't check "
-                "queries. Settings → About this DataLab says why."
-            )
+            reason = self.catalog_missing()
             self._log.rejected(
                 query_id=query_id, session_id=session_id, sql=sql, reason=reason, origin=origin
             )

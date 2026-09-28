@@ -41,7 +41,7 @@ from datalab.workflows.stages import (
     stages_of,
 )
 from tests.test_workflow_runner import WEEKLY
-from tests.workflow_fakes import FakeSandbox, Harness, weekly_summary
+from tests.workflow_fakes import FakeSandbox, Harness, catalog, weekly_summary
 
 # What the Workflow authoring agent is asked to write for the user's example:
 # Fitbit-style daily rows for a date range, a column dropped, one row per
@@ -221,7 +221,9 @@ def _client(tmp_path: Path, profile: str = "practice"):
     )
     # The default folders, as an installed DataLab has them (no [workflows] folder).
     settings = replace(h.settings, workflows=WorkflowSettings())
-    services = WorkflowServices(settings, h.connection, h.data, h.access_log, sandbox=h.sandbox)
+    services = WorkflowServices(
+        settings, h.connection, h.data, h.access_log, catalog(), sandbox=h.sandbox
+    )
     app = FastAPI()
     app.include_router(build_workflows_router(services))
     return TestClient(app), h, settings

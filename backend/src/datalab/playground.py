@@ -161,6 +161,9 @@ class Playground:
 
     def check(self, sql: str) -> CheckReport:
         """The SQL check's verdict, for the editor. Nothing is run or logged."""
+        if not len(self._catalog):
+            # No column can be checked, so none would resolve: say why instead.
+            return CheckReport([Diagnostic(self._catalog.missing_message(), "error")], [], [], [])
         try:
             checked = check_sql(
                 sql, allowed_schemas=self._allowed_schemas, columns=self._catalog.column_index()

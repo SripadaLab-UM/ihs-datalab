@@ -24,6 +24,7 @@ import logging
 import os
 import threading
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,7 +47,7 @@ from datalab.knowledge.proposals import (
     fingerprint,
     unified_diff,
 )
-from datalab.repos.git import Clone, GitError, Identity, TreeEntry
+from datalab.repos.git import Clone, GitError, Identity, TreeEntry, clone_path
 from datalab.repos.github import (
     Account,
     GitHubAuth,
@@ -207,8 +208,11 @@ class Knowledge:
         *,
         auth: GitHubAuth | None = None,
         remote: str | None = None,
+        on_sync: Callable[[], object] | None = None,
     ) -> None:
         repos = settings.repos
+        # After a sync: the catalog is read from the clone again (app.py).
+        self._on_sync = on_sync
         self.repo = repos.knowledge
         self._contact = repos.access_contact
         if settings.profile == "practice":
@@ -222,9 +226,8 @@ class Knowledge:
         else:
             self.unavailable = None
         self.auth = auth or (GitHubAuth(repos.client_id) if repos.client_id else None)
-        name = (repos.knowledge or "/ihs-knowledge").split("/")[1]
         self.clone = Clone(
-            settings.data_dir / "repos" / name,
+            clone_path(settings.data_dir, repos.knowledge or "/ihs-knowledge"),
             remote or f"https://github.com/{repos.knowledge}.git",
             before_network=self._fresh_token,
             # Only tests give another remote (a local bare repo).
@@ -319,6 +322,7 @@ class Knowledge:
             self._problem = None
             self.store.record_sync(REPO, head=head)
             self._prune_quietly()
+            self._synced()
         return self.status()
 
     # Reading the clone (the Knowledge tab) ------------------------------------
@@ -462,6 +466,14 @@ class Knowledge:
             )
         return "sync failed", failure
 
+    def _synced(self) -> None:
+        if self._on_sync is None:
+            return
+        try:
+            self._on_sync()
+        except Exception:  # the sync itself worked
+            log.exception("couldn't read the catalog again after the sync")
+
     def _fresh_token(self) -> None:
         if self.auth is None:
             raise SignInNeeded("Sign in to GitHub first.")
@@ -470,17 +482,23 @@ class Knowledge:
     # The copy in each conversation ------------------------------------------
 
     def _seed(self, conversation: Conversation, staging: Path) -> str | None:
+        synced = False
         with self.clone.lock:
             if self.clone.exists() and self._stale() and self.auth and self.auth.signed_in():
                 try:
                     self.store.record_sync(REPO, head=self.clone.sync(timeout=_SEED_SYNC_SECONDS))
                 except (GitError, SignInNeeded, GitHubUnavailable) as error:
                     log.warning("couldn't sync the knowledge base before copying it: %s", error)
+                else:
+                    synced = True
             head = self.clone.remote_head()
             if head is None:
                 (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
-                return None
-            self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
+            else:
+                self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
+        # After the clone's lock is let go (the catalog takes it again to read).
+        if synced:
+            self._synced()
         return head
 
     def _stale(self) -> bool:

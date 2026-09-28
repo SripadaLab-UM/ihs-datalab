@@ -40,6 +40,7 @@ from pathlib import Path
 
 from datalab import __version__, db, setup, updates
 from datalab.config import Settings
+from datalab.data.catalog_source import knowledge_clone
 from datalab.db.backups import applied_migrations
 
 _KEEP = 40
@@ -139,10 +140,13 @@ def build(
     section("This DataLab")
     fact("Profile", settings.profile)
     fact("Data folder", home_as_tilde(settings.data_dir))
-    fact(
-        "Catalog folder",
-        home_as_tilde(settings.catalog_dir) if settings.catalog_dir else "DataLab's own",
-    )
+    if settings.catalog_dir:
+        catalog = home_as_tilde(settings.catalog_dir)
+    elif knowledge_clone(settings) is not None:
+        catalog = "the knowledge base's generated/schema, else DataLab's own"
+    else:
+        catalog = "DataLab's own"
+    fact("Catalog folder", catalog)
     if settings.workflows.folder:
         fact("Workflows folder", home_as_tilde(Path(settings.workflows.folder)))
     with contextlib.suppress(OSError):

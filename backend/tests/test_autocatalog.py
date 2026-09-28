@@ -200,7 +200,12 @@ def test_a_first_start_builds_the_catalog_and_the_next_one_loads_it(
     settings = Settings(profile="practice", data_dir=tmp_path / "data", oracle=PRACTICE_ORACLE)
     with _started(settings) as client:
         status = _wait(client, lambda s: s["state"] == "ready")
-        assert status == {"state": "ready", "tables": len(sample_catalog()), "detail": None}
+        assert status == {
+            "state": "ready",
+            "tables": len(sample_catalog()),
+            "detail": None,
+            "source": "data folder",
+        }
         health = client.get("/api/health").json()
         assert health["catalog_tables"] == len(sample_catalog())
         assert health["catalog_state"] == "ready"
@@ -298,7 +303,9 @@ async def test_the_agents_catalog_tools_build_it_first(tmp_path: Path) -> None:
     source = Path(agent_tools.__file__).read_text(encoding="utf-8")
     for tool in ("search_catalog", "describe_table", "join_paths", "find_concept"):
         body = source.split(f"async def {tool}(", 1)[1].split("@server.tool", 1)[0]
-        assert "await service.ensure_catalog()" in body, tool
+        assert "await _require_catalog(service)" in body, tool
+    helper = source.split("async def _require_catalog(", 1)[1].split("\ndef ", 1)[0]
+    assert "await service.ensure_catalog()" in helper
 
 
 async def test_a_query_waits_for_the_catalog_and_says_why_there_is_none(tmp_path: Path) -> None:

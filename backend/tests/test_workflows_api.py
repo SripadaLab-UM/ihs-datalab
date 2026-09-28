@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from datalab.api.workflows import WorkflowServices, build_workflows_router
 from tests.test_workflow_runner import WEEKLY
-from tests.workflow_fakes import FakeSandbox, Harness, weekly_summary
+from tests.workflow_fakes import FakeSandbox, Harness, catalog, weekly_summary
 
 
 @pytest.fixture
@@ -19,7 +19,9 @@ def api(tmp_path):
     h.write("weekly_steps.yaml", WEEKLY)
     h.write("broken.yaml", WEEKLY.replace("files: [summary]", "files: [nothing]"))
     app = FastAPI()
-    services = WorkflowServices(h.settings, h.connection, h.data, h.access_log, sandbox=h.sandbox)
+    services = WorkflowServices(
+        h.settings, h.connection, h.data, h.access_log, catalog(), sandbox=h.sandbox
+    )
     app.include_router(build_workflows_router(services))
     with TestClient(app) as client:
         yield client, h

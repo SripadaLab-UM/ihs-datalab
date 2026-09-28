@@ -34,7 +34,11 @@ export function useAttention(): AttentionItem[] {
   const { unavailable } = useFolders();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const real = health.data !== undefined && health.data.profile !== "practice";
-  const github = useQuery({ queryKey: ["github-status"], queryFn: githubApi.status, enabled: real }).data;
+  const githubQuery = useQuery({ queryKey: ["github-status"], queryFn: githubApi.status, enabled: real });
+  const github = githubQuery.data;
+  const noCatalog = real && health.data?.catalog_state === "empty";
+  // Where it comes from says what to do: the knowledge base syncs; a folder in settings is the maintainer's.
+  const catalog = useQuery({ queryKey: ["catalog-status", "attention"], queryFn: api.catalogStatus, enabled: noCatalog });
   const update = useUpdateCheck().data;
   const items: AttentionItem[] = [];
   const db = databaseStanding(connections, test?.database, health.data?.practice_database);
@@ -44,6 +48,15 @@ export function useAttention(): AttentionItem[] {
   const key = keyStanding(connections, test?.model);
   if (key.attention) {
     items.push({ id: "key", text: key.attention, hint: "U-M GPT key: open connection settings", section: "connections", anchor: "connection-umgpt" });
+  }
+  // Once where it comes from is known, so the hint doesn't change under the pointer.
+  if (noCatalog && !githubQuery.isPending && !catalog.isPending) {
+    // Every query names columns the check looks up in it: none runs without one.
+    items.push(
+      github?.available && catalog.data?.source === "knowledge"
+        ? { id: "catalog", text: "No table catalog", hint: "No query can run: sign in to GitHub and sync the knowledge base", section: "connections", anchor: "connection-github" }
+        : { id: "catalog", text: "No table catalog", hint: "No query can run: see why, and ask the DataLab maintainer", section: "about" },
+    );
   }
   if (real && github?.available && !github.signed_in) {
     items.push({ id: "github", text: "GitHub: sign in", hint: "The lab's knowledge base and pipelines can't sync", section: "connections", anchor: "connection-github" });

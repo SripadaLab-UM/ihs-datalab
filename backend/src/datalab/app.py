@@ -39,6 +39,7 @@ from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
 from datalab.data.catalog import Catalog
+from datalab.data.catalog_source import CatalogSource, Origin
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.data.sql_drafts import SqlDrafts
@@ -107,8 +108,13 @@ def create_app(
     connection = db.connect(settings.database_file)
     access_log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
     loads_catalog = catalog is None
+    # Read from where it comes from (catalog_source.py): the settings' folder,
+    # the knowledge base's clone, or DataLab's own; again after each sync.
+    catalog_source: CatalogSource | None = None
     if catalog is None:
-        catalog = Catalog.load(catalog_folder(settings))
+        catalog = Catalog([])
+        catalog_source = CatalogSource(settings, catalog)
+        catalog_source.load()
     allowed = settings.oracle.allowed_schemas if settings.oracle else frozenset()
     # Connects on first use (and again after a new password is saved).
     lazy: _LazyOracle | None = None
@@ -123,7 +129,13 @@ def create_app(
         else None
     )
     data = DataService(
-        database, access_log, settings.limits, allowed, catalog, catalog_build=catalog_build
+        database,
+        access_log,
+        settings.limits,
+        allowed,
+        catalog,
+        catalog_build=catalog_build,
+        catalog_source=catalog_source,
     )
     if practice_database is not None:
         # Practice only (cli._serve): once its database is up, connect again
@@ -330,6 +342,8 @@ def create_app(
                 sessions,
                 auth=github,
                 suggestions=kb_suggestions,
+                # The catalog comes from the knowledge base: read again after a sync.
+                on_sync=catalog_source.refresh if catalog_source is not None else None,
             )
         )
     )
@@ -413,7 +427,8 @@ def create_app(
         return CatalogStatusOut(
             state=catalog_state(catalog, catalog_build),
             tables=len(catalog),
-            detail=catalog_problem(settings, catalog, catalog_build),
+            detail=catalog_problem(settings, catalog, catalog_build, catalog_source),
+            source=catalog_source.expected if catalog_source is not None else None,
         )
 
     def activity() -> SessionActivityOut:
@@ -432,8 +447,9 @@ def create_app(
 
 
 def catalog_folder(settings: Settings) -> Path:
-    """The lab's catalog folder (the knowledge base's generated/schema), or
-    else DataLab's own in the data folder."""
+    """The catalog folder settings name, or else DataLab's own in the data
+    folder (what practice DataLab builds; the real profile reads the
+    knowledge base's first: catalog_source.py)."""
     return settings.catalog_dir or settings.data_dir / "catalog"
 
 
@@ -456,8 +472,12 @@ def catalog_auto_build(
 class CatalogStatusOut(BaseModel):
     state: CatalogState
     tables: int
-    # Why it's empty and what happens next; None once it has tables.
+    # Why it's empty and what happens next; once it has tables, None, or why
+    # the last read again didn't replace them.
     detail: str | None
+    # Where it comes from here: the settings' catalog_dir, the knowledge
+    # base's clone, or DataLab's own folder (catalog_source.py).
+    source: Origin | None = None
 
 
 def catalog_state(catalog: Catalog, build: CatalogAutoBuild | None) -> CatalogState:
@@ -467,11 +487,15 @@ def catalog_state(catalog: Catalog, build: CatalogAutoBuild | None) -> CatalogSt
 
 
 def catalog_problem(
-    settings: Settings, catalog: Catalog, build: CatalogAutoBuild | None
+    settings: Settings,
+    catalog: Catalog,
+    build: CatalogAutoBuild | None,
+    source: CatalogSource | None = None,
 ) -> str | None:
     """Why the catalog is empty, and what happens next, for Settings (signed in)."""
     if len(catalog):
-        return None
+        # Why a read after a sync didn't replace it (too large, unreadable), if it didn't.
+        return source.detail if source is not None else None
     if build is not None:
         if build.stopped:
             return (
@@ -485,6 +509,8 @@ def catalog_problem(
                 f"it tries again at the next query, at most every 30 s. Last try: {build.problem}"
             )
         return "DataLab builds it (metadata only) the first time it connects to the database."
+    if source is not None and source.detail:
+        return source.detail
     if settings.oracle is None:
         return "No database is set up yet."
     if settings.catalog_dir is not None:

@@ -73,6 +73,8 @@ class KnowledgeServices:
     remote: str | None = None
     # Suggested Knowledge updates, shared with the agent tools (app.py).
     suggestions: KbSuggestions | None = None
+    # After each sync that brought GitHub's main: the catalog is read again (app.py).
+    on_sync: Callable[[], object] | None = None
 
 
 class AccountOut(BaseModel):
@@ -373,6 +375,7 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         services.sessions,
         auth=services.auth,
         remote=services.remote,
+        on_sync=services.on_sync,
     )
 
     async def run[T](work: Callable[[], T]) -> T:

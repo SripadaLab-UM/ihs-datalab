@@ -139,6 +139,8 @@ class SqlDrafts:
             )
         if (not_text := lone_surrogate(sql)) is not None:
             raise DraftInvalid(f"The SQL check refused this query: {not_text.message}")
+        if not len(self._catalog):
+            raise DraftInvalid(self._catalog.missing_message())
         try:
             checked = check_sql(
                 sql, allowed_schemas=self._allowed_schemas(), columns=self._catalog.column_index()

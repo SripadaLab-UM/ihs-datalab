@@ -46,7 +46,7 @@ export function SqlPage() {
   const previewRows = status.data?.preview_rows ?? 200;
 
   const [sql, setSql] = useTabState("datalab:sql:draft", "");
-  const { check, diagnostics } = useSqlCheck(sql);
+  const { check, diagnostics } = useSqlCheck(sql, health.data?.catalog_state);
   const bindNames = useBindNames(sql, check);
   const [binds, setBinds] = useTabJson<DraftBinds>("datalab:sql:binds", {});
   const runner = useRun();
