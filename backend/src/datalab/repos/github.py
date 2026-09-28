@@ -496,12 +496,13 @@ _API_HOST = "api.github.com"
 
 def api_url(path: str) -> httpx.URL:
     """GitHub's API URL for `path`, which must be a plain absolute path on
-    api.github.com: no `//`, `@`, backslash, `..`, `?` or `#`.
+    api.github.com, in plain ASCII: no `//`, `@`, backslash, `..`, `?`, `#`
+    or `%` (nothing percent-encoded or full-width to slip past these).
     ValueError otherwise."""
     if (
         not path.startswith("/")
-        or any(bad in path for bad in ("//", "@", "\\", "..", "?", "#"))
-        or any(ord(ch) < 0x21 or ord(ch) == 0x7F for ch in path)
+        or any(bad in path for bad in ("//", "@", "\\", "..", "?", "#", "%"))
+        or any(ord(ch) < 0x21 or ord(ch) >= 0x7F for ch in path)
     ):
         raise ValueError("Not a GitHub API path.")
     url = httpx.URL(API).join(path)

@@ -277,6 +277,8 @@ def _rename_noreplace(source: Any, target: Any, fd: int | None) -> bool:
         call = getattr(ctypes.CDLL(None, use_errno=True), symbol)
     except (OSError, AttributeError):
         return False
+    call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    call.restype = ctypes.c_int
     folder = here if fd is None else fd
     if call(folder, os.fsencode(source), folder, os.fsencode(target), flags) == 0:
         return True

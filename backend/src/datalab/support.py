@@ -544,29 +544,44 @@ class NewAttachment:
 # Bidirectional-text controls and zero-width characters: they can make a
 # name read differently from what it is.
 _INVISIBLE = re.compile("[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
-_EXTENSION = re.compile(r"[a-z0-9]{1,10}")
+# The types an attachment keeps its extension for. Anything else is .txt
+# (text) or .bin, so no extension can carry a number such as an MRN, and a
+# web page (which could run scripts when opened) is kept as text.
+KEPT_EXTENSIONS = frozenset(
+    {"png", "jpg", "jpeg", "gif", "webp", "pdf", "txt", "csv", "log", "json", "md", "zip"}
+)
 
 
-def safe_extension(name: str) -> str:
-    """The file's type from its name, if it's a short plain one ("png"), else "".
+def safe_extension(name: str, data: bytes = b"") -> str:
+    """The attachment's extension: its own if it's one of KEPT_EXTENSIONS,
+    else "txt" for text (UTF-8, no NUL) or "bin".
 
     The name itself never goes into a report: it could hold an ID, a date
-    or an email address, and DataLab can't tell. Only the extension is kept,
+    or an email address, and DataLab can't tell. The extension is read
     normalised (NFC), without invisible characters, in lower case.
     """
     name = _INVISIBLE.sub("", unicodedata.normalize("NFC", name)).strip().rstrip(" .")
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
     _, dot, suffix = base.rpartition(".")
     suffix = suffix.lower()
-    return suffix if dot and _EXTENSION.fullmatch(suffix) else ""
+    if dot and suffix in KEPT_EXTENSIONS:
+        return suffix
+    return "txt" if _is_text(data) else "bin"
 
 
-def attachment_name(number: int, original: str) -> str:
-    """attachment-<n>.<ext>: never the person's own file name. A type that
-    would run when opened gets `.txt` added (exports.inert_name)."""
-    extension = safe_extension(original)
-    name = f"attachment-{number}.{extension}" if extension else f"attachment-{number}"
-    return exports.inert_name(name)
+def _is_text(data: bytes) -> bool:
+    if b"\0" in data:
+        return False
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return True
+
+
+def attachment_name(number: int, original: str, data: bytes = b"") -> str:
+    """attachment-<n>.<ext>: never the person's own file name."""
+    return f"attachment-{number}.{safe_extension(original, data)}"
 
 
 def check_attachments(attachments: list[NewAttachment]) -> list[NewAttachment]:
@@ -582,7 +597,11 @@ def check_attachments(attachments: list[NewAttachment]) -> list[NewAttachment]:
                 f"File {number} is larger than {MAX_ATTACHMENT_BYTES // 1024**2} MB."
             )
         total += len(attachment.data)
-        named.append(NewAttachment(attachment_name(number, attachment.name), attachment.data))
+        named.append(
+            NewAttachment(
+                attachment_name(number, attachment.name, attachment.data), attachment.data
+            )
+        )
     if total > MAX_ATTACHMENTS_BYTES:
         raise SupportError(
             f"The attachments come to more than {MAX_ATTACHMENTS_BYTES // 1024**2} MB together."

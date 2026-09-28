@@ -32,8 +32,11 @@ DL-20260928-7F3K.zip
   diagnostics.json    what DataLab collected (below), structured
   attachments/…       the files the person chose, if any, as attachment-1.png,
                       attachment-2.pdf…: never their own names, which could
-                      hold an ID or an email address (only a short plain
-                      extension is kept; a type that runs gets .txt added)
+                      hold an ID or an email address. Only a common type
+                      keeps its extension (png, jpg, jpeg, gif, webp, pdf,
+                      txt, csv, log, json, md, zip); anything else, a web
+                      page or a number such as an MRN included, becomes
+                      .txt for text or .bin
   manifest.json       each other file's path, size and sha256; the report ID,
                       when it was made, the type, DataLab's version and the
                       schema version
@@ -125,7 +128,8 @@ reports/<YYYY>/<MM>/<report-id>.md     the summary, to read on GitHub
 ```
 
 Only `https://api.github.com` is ever sent the token: the request refuses any
-path that could lead elsewhere, and redirects aren't followed. Each file gets
+path that could lead elsewhere (plain ASCII only, nothing percent-encoded),
+and redirects aren't followed. Each file gets
 the commit message "Report <ID> (bug)" or "(suggestion)".
 
 - The destination is shown first ("SripadaLab-UM/ihs-support (private)").

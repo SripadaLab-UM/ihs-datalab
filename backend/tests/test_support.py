@@ -211,10 +211,10 @@ def test_attachments_are_limited_and_named_safely(settings, catalog):
         ).json()
         paths = [f["path"] for f in shown["contents"]["files"]]
         assert paths[2:7] == [
-            "attachments/attachment-1.sh.txt",
+            "attachments/attachment-1.txt",  # a script, as text
             "attachments/attachment-2.png",
             "attachments/attachment-3.png",
-            "attachments/attachment-4",
+            "attachments/attachment-4.bin",  # no extension, not text
             "attachments/attachment-5.png",
         ]
         assert shown["warnings"][-1].startswith(
@@ -966,6 +966,11 @@ def test_the_routes_need_the_sign_in_and_json_from_datalabs_own_page(settings, c
         "https://evil.example/x",
         "",
         "/repos/a b",
+        "/repos/%2e%2e/x",
+        "/repos/a%2fb",
+        "/repos/\uff0e\uff0e/x",  # full-width dots
+        "/repos/\u2025/x",
+        "/repos/caf\u00e9",
     ],
 )
 def test_the_github_token_only_ever_goes_to_api_github_com(path):
@@ -1173,3 +1178,53 @@ def test_a_link_into_place_never_replaces_a_file(tmp_path):
         assert sorted(folder.names()) == ["free", "part", "taken"]
     assert (tmp_path / "taken").read_text() == "old"
     assert (tmp_path / "free").read_text() == "new"
+
+
+@pytest.mark.parametrize(
+    ("name", "data", "expected"),
+    [
+        ("scan.12345678", PNG, "attachment-1.bin"),  # a number, maybe an MRN: never kept
+        ("notes.00123", b"plain text", "attachment-1.txt"),
+        ("page.html", b"<script>x</script>", "attachment-1.txt"),
+        ("run.exe", b"MZ\x00\x00", "attachment-1.bin"),
+        ("Photo.JPEG", PNG, "attachment-1.jpeg"),
+        ("export.CSV", b"a,b\n1,2\n", "attachment-1.csv"),
+        ("trace.log", b"x", "attachment-1.log"),
+        ("readme", b"words", "attachment-1.txt"),
+        ("P-00123.pdf", b"%PDF-1.7", "attachment-1.pdf"),
+    ],
+)
+def test_only_common_types_keep_their_extension(name, data, expected):
+    assert support.attachment_name(1, name, data) == expected
+
+
+def test_the_rename_that_never_replaces_declares_its_arguments(monkeypatch):
+    import ctypes
+
+    from datalab import exports
+
+    class Call:
+        argtypes = None
+        restype = None
+        args: tuple = ()
+
+        def __call__(self, *args):
+            # ctypes checks and converts the arguments by argtypes: they must be set first.
+            assert self.argtypes is not None and self.restype is ctypes.c_int
+            self.args = args
+            return 0
+
+    call = Call()
+
+    class Library:
+        def __getattr__(self, name):
+            assert name in ("renameatx_np", "renameat2")
+            return call
+
+    monkeypatch.setattr(ctypes, "CDLL", lambda *a, **k: Library())
+    monkeypatch.setattr(exports.sys, "platform", "darwin")
+    assert exports._rename_noreplace("a", "b", 7) is True
+    assert call.argtypes == [
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint
+    ]  # fmt: skip
+    assert call.args == (7, b"a", 7, b"b", 0x4)
