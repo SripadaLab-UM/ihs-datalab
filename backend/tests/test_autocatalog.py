@@ -200,7 +200,12 @@ def test_a_first_start_builds_the_catalog_and_the_next_one_loads_it(
     settings = Settings(profile="practice", data_dir=tmp_path / "data", oracle=PRACTICE_ORACLE)
     with _started(settings) as client:
         status = _wait(client, lambda s: s["state"] == "ready")
-        assert status == {"state": "ready", "tables": len(sample_catalog()), "detail": None}
+        assert status == {
+            "state": "ready",
+            "tables": len(sample_catalog()),
+            "detail": None,
+            "source": "data folder",
+        }
         health = client.get("/api/health").json()
         assert health["catalog_tables"] == len(sample_catalog())
         assert health["catalog_state"] == "ready"
