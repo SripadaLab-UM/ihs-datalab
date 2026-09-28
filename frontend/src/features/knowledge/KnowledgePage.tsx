@@ -216,8 +216,8 @@ function SignInFirst() {
   return (
     <>
       Sign in to GitHub first:{" "}
-      <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
-        Settings → GitHub
+      <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+        Settings → Connections → GitHub
       </Link>
       .
     </>
@@ -245,7 +245,7 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
       {status.repo === "signed out" ? (
         <p className="text-muted">
           {repo.text}{" "}
-          <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+          <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
             Sign in
           </Link>
         </p>

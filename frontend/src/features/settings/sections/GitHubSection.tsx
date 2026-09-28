@@ -8,7 +8,8 @@ import { pipelinesApi } from "@/api/pipelines";
 import { Button, Chip, Icon } from "@/components/ui";
 import { ago, devicePage, repoState, type RepoStatusLike } from "@/features/knowledge/repoState";
 
-import { Section } from "./Section";
+import { GITHUB_ANCHOR } from "../sectionIds";
+import { FixedOnPractice, Part } from "./Section";
 
 const SIGN_IN = ["github-sign-in"];
 const GITHUB = ["github-status"];
@@ -46,7 +47,11 @@ export function GitHubSection() {
   } else {
     return <SignInOrOut github={status.data} />;
   }
-  return <Section title="GitHub">{body}</Section>;
+  return (
+    <Part id={GITHUB_ANCHOR} title="GitHub" state={practice && <FixedOnPractice>Not used on the practice DataLab</FixedOnPractice>}>
+      {body}
+    </Part>
+  );
 }
 
 function SignInOrOut({ github }: { github: GitHubStatus }) {
@@ -76,9 +81,18 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
   const start = useMutation({ mutationFn: githubApi.startSignIn, onSuccess: settle });
   const cancel = useMutation({ mutationFn: githubApi.cancelSignIn, onSuccess: settle });
   const signOut = useMutation({ mutationFn: githubApi.signOut, onSuccess: settle });
+  // Another account: forget this sign-in, then start a new one straight away.
+  const switchAccount = useMutation({
+    mutationFn: async () => {
+      settle(await githubApi.signOut());
+      return githubApi.startSignIn();
+    },
+    onSuccess: settle,
+  });
   const flow = signIn.data;
   usePolling(flow, settle);
-  const error = start.error ?? cancel.error ?? signOut.error ?? syncKnowledge.error ?? syncPipelines.error;
+  const error =
+    start.error ?? cancel.error ?? signOut.error ?? switchAccount.error ?? syncKnowledge.error ?? syncPipelines.error;
   const rows: RepoRowProps[] = [];
   if (areas.has("knowledge"))
     rows.push({ what: "the knowledge base", status: knowledge.data, onSync: () => syncKnowledge.mutate(), syncing: syncKnowledge.isPending });
@@ -94,7 +108,14 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
     body = <Waiting flow={flow} onCancel={() => cancel.mutate()} cancelling={cancel.isPending} />;
   } else if (github.signed_in) {
     body = (
-      <SignedIn github={github} rows={rows} onSignOut={() => signOut.mutate()} signingOut={signOut.isPending} note={flow?.message} />
+      <SignedIn
+        github={github}
+        rows={rows}
+        onSignOut={() => signOut.mutate()}
+        onSwitch={() => switchAccount.mutate()}
+        busy={signOut.isPending || switchAccount.isPending}
+        note={flow?.message}
+      />
     );
   } else {
     // Why not, if there's a reason: the code expired, GitHub said no, or the sign-in ran out.
@@ -121,12 +142,20 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
     );
   }
 
+  const state =
+    flow?.state === "waiting" ? (
+      <Chip tone="you">Waiting for the code</Chip>
+    ) : github.signed_in ? (
+      <Chip tone="good">Signed in</Chip>
+    ) : (
+      <Chip tone="attn">Not signed in</Chip>
+    );
   return (
-    <Section title="GitHub">
+    <Part id={GITHUB_ANCHOR} title="GitHub" state={state}>
       <p className="mt-1 text-sm text-muted">For the lab's {what}: reading it, and sharing the changes you save.</p>
       {body}
       {error && <p className="mt-2 text-sm text-danger">{error.message}</p>}
-    </Section>
+    </Part>
   );
 }
 
@@ -209,13 +238,15 @@ function SignedIn({
   github,
   rows,
   onSignOut,
-  signingOut,
+  onSwitch,
+  busy,
   note,
 }: {
   github: GitHubStatus;
   rows: RepoRowProps[];
   onSignOut: () => void;
-  signingOut: boolean;
+  onSwitch: () => void;
+  busy: boolean;
   note?: string | null;
 }) {
   return (
@@ -228,17 +259,22 @@ function SignedIn({
           Signed in as <span className="font-medium">{github.account?.name || github.account?.login}</span>
           {github.account?.name && <span className="font-mono text-[12.5px] text-muted"> @{github.account.login}</span>}
         </p>
-        <Button onClick={onSignOut} disabled={signingOut}>
+        <Button onClick={onSwitch} disabled={busy}>
+          Switch account…
+        </Button>
+        <Button onClick={onSignOut} disabled={busy}>
           Sign out
         </Button>
       </div>
       {note && <p className="text-sm text-attn">{note}</p>}
+      {rows.length > 0 && <h4 className="dl-label mt-1">Access to the lab's repos</h4>}
       {rows.map((row) => (
         <RepoRow key={row.what} {...row} />
       ))}
       <p className="text-xs text-muted">
         Signing out forgets the sign-in on this computer. To revoke DataLab's access altogether, use GitHub's Settings →
-        Applications.
+        Applications. Switch account signs out, then asks GitHub for a new code: enter it while github.com is signed in
+        to the other account.
       </p>
     </div>
   );

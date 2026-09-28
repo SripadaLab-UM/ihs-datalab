@@ -47,6 +47,7 @@ export function DiagnosticsSection() {
   const shown = state.step === "copied" || state.step === "select" ? state.text : null;
   return (
     <Section
+      id="diagnostics"
       title="Diagnostics"
       actions={
         <Button onClick={copy} disabled={state.step === "gathering"}>
