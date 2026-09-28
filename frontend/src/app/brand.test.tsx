@@ -55,7 +55,7 @@ it("swaps a hashed icon for practice's hashed one, whatever hash the page had", 
   expect(practiceIcon(icon("/favicon-practice-32.png"))).toBe(icon("/favicon-practice-32.png"));
 });
 
-it("draws the Block M and the spark on its tile, and the IHS mark beside it, from branding/build.py", () => {
+it("draws the Block M and a big spark on its tile, and plain IHS beside it, from branding/build.py", () => {
   const { rerender } = render(<Brand practice={false} />);
   const [m, ihs] = [...screen.getByTestId("brand").querySelectorAll("svg")];
   // The Block M as traced, Maize on Blue, where the "d." mark was (22 px).
@@ -68,8 +68,18 @@ it("draws the Block M and the spark on its tile, and the IHS mark beside it, fro
   expect(spark).toHaveAttribute("d", TILE.spark?.d);
   expect(spark).toHaveAttribute("fill", COLOURS.maize);
   expect(spark).toHaveAttribute("stroke", COLOURS.blue);
-  // A drawing of its own, beside the name on the widest windows (so the tabs fit at 1024).
+  // Bigger than it was, for 22 px: tip to tip about a third of the tile, and still on it.
+  const nums = [...(TILE.spark?.d ?? "").matchAll(/-?[\d.]+/g)].map(Number);
+  const xs = nums.filter((_, i) => i % 2 === 0);
+  const halo = TILE.spark?.halo ?? 0;
+  expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(30);
+  expect(Math.max(...nums) + halo).toBeLessThanOrEqual(64);
+  expect(Math.min(...nums) - halo).toBeGreaterThanOrEqual(0);
+  // "IHS", a drawing of its own beside the name on the widest windows (so the tabs
+  // fit at 1024): the letters alone, since the tile has the spark.
+  expect(ihs).toHaveAttribute("data-mark", "letters");
   expect(ihs.querySelectorAll("path")).toHaveLength(IHS_MARK.paths.length);
+  expect(IHS_MARK.paths).toHaveLength(6); // I, H (three bars), S (two arcs)
   expect(ihs.parentElement).toHaveClass("hidden", "xl:inline-flex");
   // Practice: inverted, Blue on Maize.
   rerender(<Brand practice />);
