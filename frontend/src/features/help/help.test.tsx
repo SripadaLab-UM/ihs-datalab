@@ -7,7 +7,7 @@ import { api } from "@/api/client";
 import { Shell } from "@/app/Shell";
 
 import { HelpPage } from "./HelpPage";
-import { resetTourMemory } from "./Tour";
+import { resetTourMemory, tourSettings } from "./Tour";
 
 vi.mock("@/api/client", () => ({
   SIGNED_OUT: "datalab:signed-out",
@@ -38,6 +38,8 @@ function app(at: string) {
 }
 
 beforeEach(() => {
+  // The tour is switched off in the app; these tests exercise it switched on.
+  tourSettings.enabled = true;
   localStorage.clear();
   resetTourMemory();
   vi.mocked(api.health).mockResolvedValue({ profile: "practice" } as never);
@@ -202,4 +204,29 @@ it("doesn't take focus when it's back after Help", async () => {
   // Still open where it was, and it closes as before.
   fireEvent.click(within(tour).getByRole("button", { name: "Skip the tour" }));
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+
+it("is off in the app: it doesn't start, and Help doesn't offer it", async () => {
+  tourSettings.enabled = false;
+  try {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/help"]}>
+          <Routes>
+            <Route element={<Shell />}>
+              <Route path="/help" element={<HelpPage />} />
+              <Route path="/help/:slug" element={<HelpPage />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("heading").length).toBeGreaterThan(0));
+    expect(screen.queryByRole("button", { name: "Take the tour" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: /tour/i })).toBeNull();
+  } finally {
+    tourSettings.enabled = true;
+  }
 });

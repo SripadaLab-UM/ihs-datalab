@@ -6,7 +6,7 @@ import { Button, Icon } from "@/components/ui";
 import { type GuidePage, helpPath, pageBySlug, PAGES, searchGuide } from "@/lib/guide";
 
 import { GuideMarkdown } from "./GuideMarkdown";
-import { useTour } from "./Tour";
+import { tourSettings, useTour } from "./Tour";
 
 // The contents, grouped by each page's `order` in its front matter.
 const GROUPS: { title: string; from: number; to: number }[] = [
@@ -83,19 +83,21 @@ export function HelpPage() {
             </div>
           </div>
           {results ? <Results results={results} /> : <Contents current={page} />}
-          <div className="border-t border-line pt-4">
-            <Button
-              onClick={() => {
-                tour.start();
-                navigate("/workspace");
-              }}
-            >
-              Take the tour
-            </Button>
-            <p className="mt-2 font-sans text-[12px] leading-relaxed text-muted">
-              Five steps through a first conversation. Best on the practice DataLab.
-            </p>
-          </div>
+          {tourSettings.enabled && (
+            <div className="border-t border-line pt-4">
+              <Button
+                onClick={() => {
+                  tour.start();
+                  navigate("/workspace");
+                }}
+              >
+                Take the tour
+              </Button>
+              <p className="mt-2 font-sans text-[12px] leading-relaxed text-muted">
+                Five steps through a first conversation. Best on the practice DataLab.
+              </p>
+            </div>
+          )}
         </nav>
 
         <main ref={article} className="min-w-0 max-w-[46rem]">

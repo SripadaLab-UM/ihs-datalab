@@ -70,6 +70,13 @@ interface TourControl {
   start: () => void;
 }
 
+/**
+ * The tour is switched off for now: it was too sparse to help. With this
+ * false it never starts by itself and Help doesn't offer it. Set it back to
+ * true to bring it back; nothing else needs to change.
+ */
+export const tourSettings = { enabled: false };
+
 const TourContext = createContext<TourControl>({ open: false, start: () => undefined });
 
 export function useTour(): TourControl {
@@ -104,7 +111,7 @@ export function TourProvider({ children }: { children: ReactNode }) {
     setOpen(true);
   }, []);
   useEffect(() => {
-    if (practice && pathname.startsWith("/workspace") && !tourSeen()) begin(false);
+    if (tourSettings.enabled && practice && pathname.startsWith("/workspace") && !tourSeen()) begin(false);
   }, [practice, pathname, begin]);
   const start = useCallback(() => begin(true), [begin]);
   const close = useCallback((stepId: string) => {

@@ -15,7 +15,7 @@ folder, so nothing is shared between them.
 The [practice](glossary.md#practice) DataLab uses a made-up (synthetic)
 database with the same shape as the IHS data: a few cohorts, the device
 tables, realistic quirks, and invented participants. Use it to learn
-DataLab, take the tour, try a question before asking it for real, or give a
+DataLab, try a question before asking it for real, or give a
 demo.
 
 You're in the practice DataLab when **practice · synthetic data** shows at

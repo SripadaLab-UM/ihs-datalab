@@ -7,8 +7,8 @@ keywords: tour, walkthrough, onboarding, introduction, first run, replay
 
 # The tour
 
-The tour starts the first time you open the practice DataLab. Skip it at any
-point; **Take the tour** in Help starts it again.
+The tour is switched off for now, while it's reworked: it doesn't start by
+itself and Help doesn't offer it. These are its steps.
 
 ## Ask a question
 

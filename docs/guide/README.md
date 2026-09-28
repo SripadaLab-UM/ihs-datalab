@@ -13,8 +13,7 @@ of its own. It can read the study database but never change it. You see each
 step it takes and everything it reads from the database, and results leave
 DataLab only when you export them.
 
-This guide is the same text as DataLab's own Help, its tooltips and the
-first-run tour. It's written for researchers who are new to DataLab.
+This guide is the same text as DataLab's own Help and its tooltips. It's written for researchers who are new to DataLab.
 
 ## If you're new
 
@@ -50,7 +49,7 @@ first-run tour. It's written for researchers who are new to DataLab.
 
 - [What DataLab will and won't do](safety.md)
 - [Glossary](glossary.md): what DataLab's own words mean.
-- [The tour](tour.md): the five steps of the first-run tour.
+- [The tour](tour.md): the steps of a first-run tour, switched off for now.
 
 ## More detail
 
