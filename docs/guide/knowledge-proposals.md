@@ -64,12 +64,17 @@ research sessions until a person has reviewed it.
 ## The Knowledge tab
 
 The **Knowledge** tab shows the pages and lab skills as they are on GitHub,
-by folder, with their facts (status, evidence, cohorts), and the recent
+in folding sections (a data source's table pages sit under it), with their facts (status, evidence, cohorts), and the recent
 changes. Its chat, in Knowledge writing mode, can help write or tidy a page
 or skill; its edits become proposals like any other. It's a data session
 that can read the catalog (tables and columns) but can't run queries, and
 nothing can be attached to it. The page open in the tab can go with your
 message.
+
+The sections start folded; opening a page unfolds what holds it, and
+DataLab remembers what you fold and unfold. Search looks inside folded
+sections too. With the keyboard, the arrow keys move through the list,
+Right and Left unfold and fold, and Enter opens a page.
 
 The practice DataLab doesn't get a copy of the knowledge base and never
 signs in to GitHub, so nothing from practice can reach it.

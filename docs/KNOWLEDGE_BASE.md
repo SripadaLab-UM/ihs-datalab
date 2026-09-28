@@ -238,8 +238,12 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   another window; an edit still open in its editor holds the button until
   it's kept or cancelled. A conflict counts as resolved only by text written
   against GitHub's version it conflicted with. A save cut off by DataLab
-  stopping ends as failed when it starts again, to be tried again. The Knowledge tab lists pages and skills by
-  folder, renders them with their front matter as facts, shows recent
+  stopping ends as failed when it starts again, to be tried again. The Knowledge tab lists pages and skills as
+  a tree of sections derived from the layout (Study documentation, Data
+  sources with each source's linked table pages beneath it, Analysis
+  methods, Quality checks, Workflows and pipelines, and Other for anything
+  unmapped), set in one config, `SECTIONS` in
+  `frontend/src/features/knowledge/tree.ts`. It renders them with their front matter as facts, shows recent
   changes, and docks a chat in Knowledge writing mode: a data session with
   the catalog tools that table and query pages cite, but no queries.
 

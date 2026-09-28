@@ -233,7 +233,11 @@ export function KnowledgeTree({
                   {n.label}
                 </span>
                 {hasChildren && <span className="shrink-0 font-sans text-[11.5px] text-faint tabular">· {n.count}</span>}
-                {status && <Chip tone={statusTone(status)}>{status}</Chip>}
+                {status && (
+                  <span className="shrink-0">
+                    <Chip tone={statusTone(status)}>{status}</Chip>
+                  </span>
+                )}
               </span>
               {summary && !context && <span className="truncate font-sans text-[11.5px] leading-snug text-muted">{summary}</span>}
             </span>
