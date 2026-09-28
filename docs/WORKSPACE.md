@@ -23,6 +23,15 @@ conversation.
 | **Data engineering** | 🔒 Data | Yu and others maintaining the lab's R pipelines (`ihsDataR`) | Work in a copy of the package, follow its conventions, run its tests, and hand back a reviewable change. |
 | **Research** | 🌐 Research | Literature, methods, packages, ideas | Cite sources. Produce notes and code that can be brought into a data session. |
 
+Analysis, Data extraction and Data engineering also have `suggest_kb_update`:
+a durable, evidence-backed finding (confirmed by a query in the
+conversation) becomes a **Suggested Knowledge update** card under the
+answer, which the person accepts as a draft edit, edits first, or dismisses.
+At most one or two an answer; it never writes the knowledge base. The person
+can make one themselves with **Propose a Knowledge update** over the
+conversation. See [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), "Suggested
+Knowledge updates".
+
 Two more modes open only from the tab that docks them, not from **New**
 (built):
 

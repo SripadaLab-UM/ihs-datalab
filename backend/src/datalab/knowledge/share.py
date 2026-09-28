@@ -16,6 +16,10 @@
 5. Check that commit again, since others' changes are now in it.
 6. Push exactly that commit, never forcing. If `main` moved on meanwhile,
    go back to 3 (a few times at most).
+
+A person's own edit of a page (edits.py) is `strict`: at 3, if GitHub's
+version of its file isn't the one the edit started from, it stops with a
+conflict rather than rebasing, so the person sees both versions first.
 """
 
 from __future__ import annotations
