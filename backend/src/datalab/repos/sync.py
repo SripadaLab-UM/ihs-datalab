@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from datalab.repos.git import Clone, GitError
+from datalab.repos.git import Clone, GitError, clone_path
 from datalab.repos.github import GitHubAuth, GitHubUnavailable, SignInNeeded, access_message
 
 log = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class RepoSync:
         self.state = state
         self._contact = contact
         self.clone = Clone(
-            data_dir / "repos" / repo.split("/")[1],
+            clone_path(data_dir, repo),
             remote or f"https://github.com/{repo}.git",
             before_network=auth.token_for_git,
             allow_local=remote is not None,

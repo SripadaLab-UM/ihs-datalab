@@ -27,7 +27,7 @@ from fastapi.testclient import TestClient
 from datalab.api.workflows import WorkflowServices, build_workflows_router
 from datalab.config import RepoSettings, WorkflowSettings
 from tests.test_workflow_stages import DAILY
-from tests.workflow_fakes import Harness
+from tests.workflow_fakes import Harness, catalog
 
 REPO = "SripadaLab-UM/ihs-pipelines"
 
@@ -79,7 +79,9 @@ def real_client(tmp_path: Path) -> tuple[TestClient, Harness]:
     app = FastAPI()
     app.include_router(
         build_workflows_router(
-            WorkflowServices(settings, h.connection, h.data, h.access_log, sandbox=h.sandbox)
+            WorkflowServices(
+                settings, h.connection, h.data, h.access_log, catalog(), sandbox=h.sandbox
+            )
         )
     )
     return TestClient(app), h

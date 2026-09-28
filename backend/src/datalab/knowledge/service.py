@@ -47,7 +47,7 @@ from datalab.knowledge.proposals import (
     fingerprint,
     unified_diff,
 )
-from datalab.repos.git import Clone, GitError, Identity, TreeEntry
+from datalab.repos.git import Clone, GitError, Identity, TreeEntry, clone_path
 from datalab.repos.github import (
     Account,
     GitHubAuth,
@@ -226,9 +226,8 @@ class Knowledge:
         else:
             self.unavailable = None
         self.auth = auth or (GitHubAuth(repos.client_id) if repos.client_id else None)
-        name = (repos.knowledge or "/ihs-knowledge").split("/")[1]
         self.clone = Clone(
-            settings.data_dir / "repos" / name,
+            clone_path(settings.data_dir, repos.knowledge or "/ihs-knowledge"),
             remote or f"https://github.com/{repos.knowledge}.git",
             before_network=self._fresh_token,
             # Only tests give another remote (a local bare repo).
@@ -483,6 +482,7 @@ class Knowledge:
     # The copy in each conversation ------------------------------------------
 
     def _seed(self, conversation: Conversation, staging: Path) -> str | None:
+        synced = False
         with self.clone.lock:
             if self.clone.exists() and self._stale() and self.auth and self.auth.signed_in():
                 try:
@@ -490,12 +490,15 @@ class Knowledge:
                 except (GitError, SignInNeeded, GitHubUnavailable) as error:
                     log.warning("couldn't sync the knowledge base before copying it: %s", error)
                 else:
-                    self._synced()
+                    synced = True
             head = self.clone.remote_head()
             if head is None:
                 (staging / "README.md").write_text(UNAVAILABLE_NOTE, encoding="utf-8")
-                return None
-            self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
+            else:
+                self.clone.copy_tree(head, staging, skip=lambda path: not copied(path))
+        # After the clone's lock is let go (the catalog takes it again to read).
+        if synced:
+            self._synced()
         return head
 
     def _stale(self) -> bool:

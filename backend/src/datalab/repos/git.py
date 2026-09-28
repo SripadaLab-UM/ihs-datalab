@@ -201,6 +201,11 @@ def name_problem(path: str) -> str | None:
     return None
 
 
+def clone_path(data_dir: Path, repo: str) -> Path:
+    """Where a lab repo (`owner/name`) is cloned: `<data_dir>/repos/<name>`."""
+    return data_dir / "repos" / repo.split("/")[1]
+
+
 def safe_path(path: str) -> bool:
     """A relative path git and every disk can take as it is (see name_problem)."""
     return name_problem(path) is None
@@ -352,8 +357,9 @@ class Clone:
 
     # Reading ----------------------------------------------------------------
 
-    def ls_tree(self, commit: str) -> dict[str, TreeEntry]:
-        out = self.git("ls-tree", "-r", "-z", "-l", "--full-tree", commit).stdout
+    def ls_tree(self, commit: str, *paths: str) -> dict[str, TreeEntry]:
+        """The commit's entries, all of them or only those under `paths`."""
+        out = self.git("ls-tree", "-r", "-z", "-l", "--full-tree", commit, "--", *paths).stdout
         entries: dict[str, TreeEntry] = {}
         for record in out.split(b"\0"):
             if not record:

@@ -7,6 +7,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import os
+import threading
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -209,7 +210,7 @@ def test_a_folder_never_follows_links_out_of_it(tmp_path: Path) -> None:
     os.symlink(outside / "IHS_2024" / "VFITBITDAILYDATA.yml", folder / "IHS_2025" / "X.yml")
     catalog, skipped = Catalog.read(folder)
     assert catalog.schemas == ["IHS_2025"] and catalog.names("IHS_2025") == ["VFITBITDAILYDATA"]
-    assert skipped == ["IHS_2025/X.yml: not a plain file"]
+    assert skipped == ["IHS_2024/: a link, not a folder", "IHS_2025/X.yml: not a plain file"]
 
 
 def test_a_catalog_datalab_saved_reads_back_the_same(tmp_path: Path) -> None:
@@ -436,3 +437,237 @@ def test_a_beta5_install_finds_the_catalog_after_the_update(
         assert check(client)["ok"] is True
     assert (data / "settings.toml").read_text(encoding="utf-8") == toml
     datalock.release_all()
+
+
+# Review fixes: locks, names, limits --------------------------------------------------
+
+
+def run_both(*work, timeout: float = 5.0) -> None:
+    """Run each in its own thread; fail (not hang) if any is still going after `timeout`."""
+    threads = [threading.Thread(target=w, daemon=True) for w in work]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout)
+    assert not any(t.is_alive() for t in threads), "deadlocked"
+
+
+def test_a_seed_sync_holding_the_clone_and_a_query_dont_deadlock(tmp_path: Path) -> None:
+    """The reviewer's case (a): an empty catalog, a conversation's seed sync
+    holding the clone's lock (and reading the catalog again under it, as it
+    once did), and a query's ensure() at the same time."""
+    settings, now = real(tmp_path), [0.0]
+    remote = Remote(tmp_path, kb_files())
+    catalog = Catalog([])
+    source = CatalogSource(settings, catalog, clock=lambda: now[0])
+    source.load()
+    now[0] += RETRY_SECONDS
+    clone = synced_clone(settings, remote)
+    answers = []
+
+    def seed() -> None:
+        with clone.lock:
+            time.sleep(0.3)  # the seed's fetch
+            source.refresh()
+
+    def query() -> None:
+        time.sleep(0.1)
+        answers.append(source.ensure())  # doesn't wait for the sync: no catalog yet
+
+    run_both(seed, query)
+    assert answers == [False] and len(catalog)
+
+
+def test_an_in_app_sync_overlapping_a_seed_doesnt_deadlock(tmp_path: Path) -> None:
+    """Case (b): Sync pressed while a seed sync brings a new commit."""
+    settings = real(tmp_path)
+    remote = Remote(tmp_path, kb_files())
+    clone = synced_clone(settings, remote)
+    catalog = Catalog([])
+    source = CatalogSource(settings, catalog)
+    source.load()
+    remote.write({"generated/schema/IHS_2025/VW_DAILY_MOOD.yml": schema_file(
+        TableInfo("IHS_2025", "VW_DAILY_MOOD", "VIEW", "", [Column("MOOD", "NUMBER")])
+    )}, "Add mood")  # fmt: skip
+
+    def seed() -> None:
+        with clone.lock:
+            clone.sync()
+            time.sleep(0.2)
+            source.refresh()
+
+    def manual() -> None:
+        time.sleep(0.05)
+        source.refresh()
+        source.ensure()
+
+    run_both(seed, manual, manual)
+    assert catalog.names("IHS_2025") == ["VFITBITDAILYDATA", "VW_DAILY_MOOD"]
+
+
+def test_the_seed_reads_the_catalog_again_after_letting_go_of_the_clone(tmp_path: Path) -> None:
+    from datalab.knowledge.service import Knowledge
+    from datalab.sessions.manager import SessionManager
+    from datalab.sessions.store import ConversationStore
+    from datalab.sessions.tokens import SessionTokens
+
+    settings = real(tmp_path)
+    remote = Remote(tmp_path, kb_files())
+    sign_in()
+    connection = db.connect(settings.database_file)
+    store = ConversationStore(connection)
+    manager = SessionManager(settings, store, SessionTokens())
+    held_elsewhere = []
+
+    def on_sync() -> None:
+        # Another thread can take the clone's lock now: it isn't held.
+        got = []
+
+        def take() -> None:
+            if knowledge.clone.lock.acquire(timeout=2):
+                got.append(True)
+                knowledge.clone.lock.release()
+
+        other = threading.Thread(target=take)
+        other.start()
+        other.join()
+        held_elsewhere.append(got)
+
+    knowledge = Knowledge(settings, connection, store, manager, remote=remote.url, on_sync=on_sync)
+    knowledge.clone.sync()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    made = store.create(kind="data", mode="analysis", title="t", model="m")
+    assert knowledge._seed(made, staging) == remote.head()  # stale: syncs first
+    assert held_elsewhere == [[True]]
+    connection.close()
+
+
+def test_column_names_that_arent_oracle_names_are_left_out(tmp_path: Path) -> None:
+    def table(name: str, *columns: str) -> bytes:
+        typed = [Column(c, "NUMBER") for c in columns]
+        return schema_file(TableInfo("IHS_2025", name, "VIEW", "", typed))
+
+    long = "A" * 129
+    files = {
+        # Real shapes: $ and #, a quoted lowercase or spaced name, 128 bytes.
+        "IHS_2025/GOOD.yml": table("GOOD", "STEPS$", "N#1", "Black tea", "steps", "B" * 128),
+        "IHS_2025/QUOTE.yml": table("QUOTE", 'A"B'),
+        "IHS_2025/CONTROL.yml": table("CONTROL", "A\nB"),
+        "IHS_2025/LONG.yml": table("LONG", long),
+        "IHS_2025/KEY.yml": schema_file(
+            TableInfo("IHS_2025", "KEY", "VIEW", "", [Column("A", "NUMBER")], ["A\x00"])
+        ),
+        # Built-ins: the column is left out, the table kept.
+        "IHS_2025/BUILTIN.yml": table("BUILTIN", "STEPS", "USER", "UID", "ORA_INVOKING_USER"),
+    }
+    catalog, skipped = Catalog.from_files({k: v for k, v in files.items()})
+    assert catalog.names("IHS_2025") == ["BUILTIN", "GOOD"]
+    good = {"STEPS$", "N#1", "Black tea", "steps", "B" * 128}
+    assert set(catalog.column_index()["IHS_2025"]["GOOD"]) == good
+    assert list(catalog.column_index()["IHS_2025"]["BUILTIN"]) == ["STEPS"]
+    assert sorted(s.split(":")[0] for s in skipped) == sorted(
+        ["IHS_2025/QUOTE.yml", "IHS_2025/CONTROL.yml", "IHS_2025/LONG.yml", "IHS_2025/KEY.yml"]
+        + ["IHS_2025/BUILTIN.yml"] * 3
+    )
+
+
+def test_names_from_the_repo_are_logged_safely(caplog: pytest.LogCaptureFixture) -> None:
+    catalog, skipped = Catalog.from_files({"IHS_2025/X\x1b[31m.yml": b"x"})
+    assert not len(catalog)
+    [line] = skipped
+    assert "\x1b" not in line and "\\x1b" in line
+    assert "\x1b" not in caplog.text
+
+
+def test_only_generated_schema_is_listed_and_its_size_is_capped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datalab.data import catalog_source
+
+    settings = real(tmp_path)
+    remote = Remote(tmp_path, kb_files())
+    clone = synced_clone(settings, remote)
+    listed = []
+    real_ls_tree = Clone.ls_tree
+
+    def ls_tree(self, commit, *paths):
+        listed.append(paths)
+        return real_ls_tree(self, commit, *paths)
+
+    monkeypatch.setattr(Clone, "ls_tree", ls_tree)
+    catalog = Catalog([])
+    source = CatalogSource(settings, catalog)
+    assert source.load() is True and listed == [("generated/schema/",)]
+
+    # Grown past the limit: not read, and the catalog read before is kept.
+    remote.write({"generated/schema/IHS_2025/VW_DAILY_MOOD.yml": schema_file(
+        TableInfo("IHS_2025", "VW_DAILY_MOOD", "VIEW", "", [Column("MOOD", "NUMBER")])
+    )}, "Add mood")  # fmt: skip
+    clone.sync()
+    monkeypatch.setattr(catalog_source, "MAX_FILES", 1)
+    assert source.refresh() is True
+    assert catalog.names("IHS_2025") == ["VFITBITDAILYDATA"]
+    assert "too large" in (source.detail or "")
+    assert app_module.catalog_problem(settings, catalog, None, source) == source.detail
+    monkeypatch.setattr(catalog_source, "MAX_FILES", 20_000)
+    monkeypatch.setattr(catalog_source, "MAX_BYTES", 10)
+    fresh = Catalog([])
+    too_big = CatalogSource(settings, fresh)
+    assert too_big.load() is False
+    assert "larger than DataLab reads" in fresh.missing_message()
+
+
+def test_a_submodule_in_generated_schema_is_left_out(tmp_path: Path) -> None:
+    remote = Remote(tmp_path, kb_files())
+    head = remote.head()
+    git("update-index", "--add", "--cacheinfo", f"160000,{head},generated/schema/IHS_2025/SUB.yml",
+        cwd=remote.other)  # fmt: skip
+    git("commit", "-q", "-m", "A submodule", cwd=remote.other)
+    git("push", "-q", "origin", "HEAD:main", cwd=remote.other)
+    settings = real(tmp_path)
+    synced_clone(settings, remote)
+    catalog = Catalog([])
+    source = CatalogSource(settings, catalog)
+    assert source.load() is True and catalog.names("IHS_2025") == ["VFITBITDAILYDATA"]
+    assert source.skipped == ["IHS_2025/SUB.yml: not a plain file"]
+
+
+def test_a_catalog_dir_that_is_a_link_is_followed_once(tmp_path: Path) -> None:
+    Catalog([fitbit()]).save(tmp_path / "real-folder")
+    os.symlink(tmp_path / "real-folder", tmp_path / "linked")
+    os.symlink(tmp_path / "real-folder" / "IHS_2025", tmp_path / "real-folder" / "IHS_2024")
+    catalog = Catalog([])
+    source = CatalogSource(real(tmp_path, catalog_dir=tmp_path / "linked"), catalog)
+    assert source.load() is True and catalog.schemas == ["IHS_2025"]
+    # A linked schema folder inside it isn't followed, and says so.
+    assert source.skipped == ["IHS_2024/: a link, not a folder"]
+
+
+def test_the_status_says_where_the_catalog_comes_from(tmp_path: Path, lab: Remote) -> None:
+    with started(real(tmp_path)) as client:
+        assert client.get("/api/catalog/status").json()["source"] == "knowledge"
+    datalock.release_all()
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with started(real(tmp_path, catalog_dir=empty)) as client:
+        status = client.get("/api/catalog/status").json()
+        assert status["source"] == "setting" and "folder in DataLab's settings" in status["detail"]
+        [error] = check(client)["errors"]
+        assert "Ask the DataLab maintainer" in error["message"]
+        assert "sign in" not in error["message"].lower()
+    datalock.release_all()
+    with started(real(tmp_path, repos=RepoSettings())) as client:
+        assert client.get("/api/catalog/status").json()["source"] == "data folder"
+
+
+def test_without_git_it_says_so(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import shutil as shutil_module
+
+    settings = real(tmp_path)
+    synced_clone(settings, Remote(tmp_path, kb_files()))
+    monkeypatch.setenv("PATH", str(tmp_path / "no-git-here"))
+    assert shutil_module.which("git") is None
+    catalog = Catalog([])
+    assert CatalogSource(settings, catalog).load() is False
+    assert "Git isn't installed" in catalog.missing_message()

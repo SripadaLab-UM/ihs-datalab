@@ -30,6 +30,18 @@ _PLAIN_NAME = re.compile(r"[A-Za-z0-9_$#]+")
 MAX_TABLE_BYTES = 1024 * 1024
 _TABLE_FIELDS = {"schema", "name", "type", "comment", "columns", "primary_key"}
 _COLUMN_FIELDS = {"name", "type", "nullable", "comment"}
+# Oracle's longest identifier, in bytes.
+MAX_NAME_BYTES = 128
+# Oracle built-ins that run with no arguments and no brackets. A bare name
+# the catalog calls a column passes the SQL check, so a column with one of
+# these names (upper case, as a bare name would be read) is left out: a query
+# naming it is refused rather than possibly run as the built-in.
+BUILT_IN_NAMES = frozenset(
+    """
+    USER UID SYSDATE SYSTIMESTAMP CURRENT_DATE CURRENT_TIMESTAMP LOCALTIMESTAMP
+    DBTIMEZONE SESSIONTIMEZONE ORA_INVOKING_USER ORA_INVOKING_USERID
+    """.split()  # noqa: SIM905 (a word list reads better)
+)
 
 
 @dataclass
@@ -144,10 +156,13 @@ class Catalog:
         skipped: list[str] = []
         if directory.is_dir() and not directory.is_symlink():
             for folder in sorted(directory.iterdir()):
-                if not folder.is_dir() or folder.is_symlink():
+                if folder.is_symlink():
+                    skipped.append(f"{shown_name(folder.name)}/: a link, not a folder")
+                    continue
+                if not folder.is_dir():
                     continue
                 for path in sorted(folder.glob("*.yml")):
-                    name = f"{folder.name}/{path.name}"
+                    name = shown_name(f"{folder.name}/{path.name}")
                     if path.is_symlink() or not path.is_file():
                         skipped.append(f"{name}: not a plain file")
                     elif path.stat().st_size > MAX_TABLE_BYTES:
@@ -170,9 +185,12 @@ class Catalog:
         skipped: list[str] = []
         for name, content in sorted(files.items()):
             try:
-                tables.append(_table_from_file(name, content))
+                table, left_out = _table_from_file(name, content)
             except ValueError as error:
-                skipped.append(f"{name}: {error}")
+                skipped.append(f"{shown_name(name)}: {error}")
+                continue
+            tables.append(table)
+            skipped += [f"{shown_name(name)}: {why}" for why in left_out]
         if skipped:
             log.warning("Left %d catalog files out, such as %s", len(skipped), skipped[0])
         return cls(tables), skipped
@@ -323,10 +341,34 @@ class Catalog:
         return cls(list(tables.values()))
 
 
-def _table_from_file(name: str, content: bytes) -> TableInfo:
+def shown_name(name: str) -> str:
+    """A file or column name from the lab's repo, safe to log or show: as it
+    is if it's plain text, else as a Python string literal."""
+    if name.isprintable() and len(name) <= 200:
+        return name
+    return repr(name[:200])
+
+
+def _column_name_problem(name: object) -> str | None:
+    """Why this can't be a column's name in the catalog, or None. Quoted
+    names such as "Black tea" are fine; Oracle's own limits aren't."""
+    if not isinstance(name, str) or not name:
+        return "a column without a name"
+    if len(name.encode("utf-8", "surrogatepass")) > MAX_NAME_BYTES:
+        return "a column name longer than Oracle allows"
+    if '"' in name or not name.isprintable():
+        return "a column name with quotes or control characters"
+    return None
+
+
+def _table_from_file(name: str, content: bytes) -> tuple[TableInfo, list[str]]:
+    """One table, and the columns left out of it, with why."""
     folder, _, file = name.partition("/")
     table = file.removesuffix(".yml")
-    if not (_PLAIN_NAME.fullmatch(folder) and _PLAIN_NAME.fullmatch(table)) or file == table:
+    plain = all(
+        _PLAIN_NAME.fullmatch(n) and len(n.encode()) <= MAX_NAME_BYTES for n in (folder, table)
+    )
+    if not plain or file == table:
         raise ValueError("not a <SCHEMA>/<TABLE>.yml name")
     if len(content) > MAX_TABLE_BYTES:
         raise ValueError("larger than 1 MB")
@@ -343,20 +385,34 @@ def _table_from_file(name: str, content: bytes) -> TableInfo:
     if raw.get("type") not in ("TABLE", "VIEW"):
         raise ValueError("`type` isn't TABLE or VIEW")
     columns = []
+    left_out = []
     for column in _list(raw.get("columns")):
         if not isinstance(column, dict) or set(column) - _COLUMN_FIELDS:
             raise ValueError("a column with fields other than name, type, nullable, comment")
         column_name, column_type = column.get("name"), column.get("type")
         nullable = column.get("nullable", True)
-        if not isinstance(column_name, str) or not column_name or not isinstance(column_type, str):
-            raise ValueError("a column without a name or type")
+        if (problem := _column_name_problem(column_name)) is not None:
+            raise ValueError(problem)
+        assert isinstance(column_name, str)
+        if not isinstance(column_type, str):
+            raise ValueError("a column without a type")
         if not isinstance(nullable, bool):
             raise ValueError("a column's `nullable` isn't true or false")
+        if column_name in BUILT_IN_NAMES:
+            left_out.append(f"column {column_name} left out: the name of an Oracle built-in")
+            log.warning(
+                "Left column %s of %s.%s out of the catalog: it's the name of an Oracle built-in.",
+                column_name,
+                folder,
+                table,
+            )
+            continue
         columns.append(Column(column_name, column_type, nullable, _text(column.get("comment"))))
     key = _list(raw.get("primary_key"))
-    if not all(isinstance(k, str) for k in key):
+    if not all(isinstance(k, str) and _column_name_problem(k) is None for k in key):
         raise ValueError("`primary_key` isn't a list of column names")
-    return TableInfo(folder, table, raw["type"], _text(raw.get("comment")), columns, key)
+    table_info = TableInfo(folder, table, raw["type"], _text(raw.get("comment")), columns, key)
+    return table_info, left_out
 
 
 def _list(value: object) -> list:

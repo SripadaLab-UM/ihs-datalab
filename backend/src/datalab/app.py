@@ -39,7 +39,7 @@ from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
 from datalab.data.catalog import Catalog
-from datalab.data.catalog_source import CatalogSource
+from datalab.data.catalog_source import CatalogSource, Origin
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.data.sql_drafts import SqlDrafts
@@ -412,6 +412,7 @@ def create_app(
             state=catalog_state(catalog, catalog_build),
             tables=len(catalog),
             detail=catalog_problem(settings, catalog, catalog_build, catalog_source),
+            source=catalog_source.expected if catalog_source is not None else None,
         )
 
     def activity() -> SessionActivityOut:
@@ -455,8 +456,12 @@ def catalog_auto_build(
 class CatalogStatusOut(BaseModel):
     state: CatalogState
     tables: int
-    # Why it's empty and what happens next; None once it has tables.
+    # Why it's empty and what happens next; once it has tables, None, or why
+    # the last read again didn't replace them.
     detail: str | None
+    # Where it comes from here: the settings' catalog_dir, the knowledge
+    # base's clone, or DataLab's own folder (catalog_source.py).
+    source: Origin | None = None
 
 
 def catalog_state(catalog: Catalog, build: CatalogAutoBuild | None) -> CatalogState:
@@ -473,7 +478,8 @@ def catalog_problem(
 ) -> str | None:
     """Why the catalog is empty, and what happens next, for Settings (signed in)."""
     if len(catalog):
-        return None
+        # Why a read after a sync didn't replace it (too large, unreadable), if it didn't.
+        return source.detail if source is not None else None
     if build is not None:
         if build.stopped:
             return (

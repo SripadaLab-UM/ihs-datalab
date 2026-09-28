@@ -94,10 +94,11 @@ class WorkflowServices:
     database: sqlite3.Connection  # for run records (migration 0008)
     data: DataService  # SQL steps
     access_log: AccessLog  # a run's queries: `for_origin("run", run_id)`
+    # A draft's SQL is checked against the catalog, as the Playground's is:
+    # always (with none, drafting is refused, never unchecked).
+    catalog: Catalog
     # Where container steps run: Docker, unless a test gives another.
     sandbox: Sandbox | None = None
-    # A draft's SQL is checked against the catalog, as the Playground's is.
-    catalog: Catalog | None = None
     # Save & share, when the files are the synced pipelines clone.
     pipelines: Pipelines | None = None
 
@@ -758,7 +759,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                 queries = queries_from_log(records, body.query_ids)
             else:
                 queries = [DraftQuery(q.sql, q.binds) for q in body.queries]
-            if services.catalog is not None and not len(services.catalog):
+            if not len(services.catalog):
                 # Never drafted unchecked: say what's missing instead.
                 raise DraftRefused(services.catalog.missing_message())
             made = draft_workflow(
@@ -767,7 +768,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                 description=body.description,
                 destination=body.destination or None,
                 allowed_schemas=runner.allowed_schemas,
-                columns=services.catalog.column_index() if services.catalog is not None else None,
+                columns=services.catalog.column_index(),
             )
         except DraftRefused as error:
             raise HTTPException(422, str(error)) from error
