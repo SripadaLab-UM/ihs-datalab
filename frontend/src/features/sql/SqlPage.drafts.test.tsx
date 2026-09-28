@@ -36,10 +36,11 @@ vi.mock("@/api/client", () => ({
 vi.mock("@/api/workflows", () => ({ workflowsApi: { destinations: vi.fn(async () => []), draft: vi.fn() } }));
 const chatProps = vi.fn();
 vi.mock("@/components/chat/DockedChat", () => ({
-  DockedChat: (props: { onSending?: () => void }) => {
+  DockedChat: (props: { onSending?: () => void; headerActions?: React.ReactNode }) => {
     chatProps(props);
     return (
       <div>
+        {props.headerActions}
         <textarea aria-label="Your question or instruction" />
         <div data-question-seq="1">the turn</div>
       </div>
@@ -178,8 +179,9 @@ it("revises the agent's own untouched draft on a follow-up, but never edits made
   ];
   vi.mocked(sqlApi.proposals).mockResolvedValue([march, april]);
   // Untouched since it was put there, and as it was when the follow-up was sent: revised in place.
-  const origin = { proposal: march, insertedSql: STEPS };
-  show({ draft: STEPS, seen: 9, extra: { origin, snapshot: STEPS } });
+  const binds = { start_date: "2025-03-01", end_date: "2025-04-01" };
+  const origin = { proposal: march, insertedSql: STEPS, insertedBinds: binds };
+  show({ draft: STEPS, seen: 9, extra: { origin, binds, snapshot: { sql: STEPS, binds } } });
   expect(await screen.findByRole("textbox", { name: /:start_date/ })).toHaveValue("2025-04-01");
   expect(screen.queryByRole("status", { name: "The agent proposed a query" })).not.toBeInTheDocument();
 });
@@ -265,7 +267,7 @@ it("words the chat for describing data, and opens it from beside the editor, sna
   expect(props).toMatchObject({ mode: "sql", placeholder: "Describe the data you want", sendLabel: "Generate SQL" });
   await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Your question or instruction" })));
   props.onSending();
-  expect(JSON.parse(sessionStorage.getItem("datalab:sql:snapshot")!)).toBe(MINE);
+  expect(JSON.parse(sessionStorage.getItem("datalab:sql:snapshot")!)).toEqual({ sql: MINE, binds: {} });
 });
 
 it("starts with every cohort folded, and still opens one by hand and searches", async () => {
@@ -285,12 +287,52 @@ it("starts with every cohort folded, and still opens one by hand and searches", 
 });
 
 it("decides fill or offer as documented", () => {
-  expect(onArrival("  ", "A", "B")).toBe("fill");
-  expect(onArrival("A", "A", "A")).toBe("fill");
-  expect(onArrival("A2", "A", "A")).toBe("offer");
-  expect(onArrival("A", "A", "A0")).toBe("offer");
-  expect(onArrival("mine", null, null)).toBe("offer");
+  const d = (sql: string, x = "1") => ({ sql, binds: { x } });
+  const inserted = (sql: string, x = "1") => ({ proposal: proposal(), insertedSql: sql, insertedBinds: { x } });
+  expect(onArrival(d("  "), inserted("A"), d("B"))).toBe("fill");
+  expect(onArrival(d("A"), inserted("A"), d("A"))).toBe("fill");
+  expect(onArrival(d("A2"), inserted("A"), d("A"))).toBe("offer");
+  expect(onArrival(d("A"), inserted("A"), d("A0"))).toBe("offer");
+  expect(onArrival(d("mine"), null, null)).toBe("offer");
+  // A bind value edited, before the message or while the agent worked.
+  expect(onArrival(d("A", "2"), inserted("A"), d("A", "2"))).toBe("offer");
+  expect(onArrival(d("A", "2"), inserted("A"), d("A"))).toBe("offer");
+  // An origin kept from before bind values were compared: offered.
+  expect(onArrival(d("A"), { proposal: proposal(), insertedSql: "A" }, null)).toBe("offer");
   const done = proposal({ seq: 5 });
   expect(nextProposal([done, proposal({ seq: 7 })], 0).proposal?.seq).toBe(7);
   expect(nextProposal([done], 5)).toEqual({ proposal: null, seq: 5 });
+});
+
+it("offers a follow-up's proposal when a bind value was edited, and sends the bind values with the SQL", async () => {
+  const march = proposal();
+  const april = proposal({ proposal_id: "sp_2", turn: 2, seq: 20, title: "April 1–15" });
+  vi.mocked(sqlApi.proposals).mockResolvedValue([march, april]);
+  const inserted = { start_date: "2025-03-01", end_date: "2025-04-01" };
+  const edited = { ...inserted, end_date: "2025-03-15" };
+  sessionStorage.setItem("datalab:sql:chat-open", "open");
+  show({
+    draft: STEPS,
+    seen: 9,
+    extra: { origin: { proposal: march, insertedSql: STEPS, insertedBinds: inserted }, binds: edited, snapshot: { sql: STEPS, binds: edited } },
+  });
+  expect(await screen.findByRole("status", { name: "The agent proposed a query" })).toBeInTheDocument();
+  expect(await screen.findByRole("textbox", { name: /:end_date/ })).toHaveValue("2025-03-15");
+  await waitFor(() => {
+    const context = (chatProps.mock.lastCall![0] as { context: { text: string } }).context.text;
+    expect(context).toContain(STEPS);
+    expect(context).toContain("-- :end_date = 2025-03-15");
+    expect(context).toContain("-- :start_date = 2025-03-01");
+  });
+});
+
+it("forgets the waiting proposal when another chat is opened", async () => {
+  vi.mocked(sqlApi.proposals).mockResolvedValue([proposal()]);
+  sessionStorage.setItem("datalab:sql:chat-open", "open");
+  show({ draft: MINE });
+  expect(await screen.findByRole("status", { name: "The agent proposed a query" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+  await waitFor(() => expect(screen.queryByRole("status", { name: "The agent proposed a query" })).not.toBeInTheDocument());
+  expect(sessionStorage.getItem("datalab:sql:proposal")).toBeNull();
+  expect(await editorText()).toBe(MINE);
 });

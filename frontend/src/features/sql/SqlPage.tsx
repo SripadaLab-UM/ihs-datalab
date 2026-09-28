@@ -13,8 +13,10 @@ import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
 import {
+  bindLines,
   bindsOf,
   type DraftBinds,
+  type EditorDraft,
   type Handled,
   type KeptDraft,
   nextProposal,
@@ -68,8 +70,15 @@ export function SqlPage() {
   const [origin, setOrigin] = useTabJson<Origin | null>("datalab:sql:origin", null);
   const [pending, setPending] = useTabJson<SqlProposal | null>("datalab:sql:proposal", null);
   const [kept, setKept] = useTabJson<KeptDraft | null>("datalab:sql:kept", null);
-  const [snapshot, setSnapshot] = useTabJson<string | null>("datalab:sql:snapshot", null);
+  const [snapshot, setSnapshot] = useTabJson<EditorDraft | null>("datalab:sql:snapshot", null);
   const [handled, setHandled] = useTabJson<Handled | null>("datalab:sql:handled", null);
+  // Another chat (New chat, or one opened at its turn): the last one's waiting proposal goes.
+  const shownChat = useRef(chatId);
+  useEffect(() => {
+    if (shownChat.current === chatId) return;
+    shownChat.current = chatId;
+    setPending(null);
+  }, [chatId, setPending]);
   const [showOrigin, setShowOrigin] = useState(false);
   const current = useRef({ sql, binds, origin, snapshot });
   current.current = { sql, binds, origin, snapshot };
@@ -91,7 +100,7 @@ export function SqlPage() {
     (proposal: SqlProposal) => {
       setSql(proposal.sql);
       setBinds(bindsOf(proposal));
-      setOrigin({ proposal, insertedSql: proposal.sql });
+      setOrigin({ proposal, insertedSql: proposal.sql, insertedBinds: bindsOf(proposal) });
       setPending(null);
     },
     [setSql, setBinds, setOrigin, setPending],
@@ -107,11 +116,13 @@ export function SqlPage() {
     const next = nextProposal(proposals.data, handled.seq);
     if (next.seq === handled.seq) return;
     setHandled({ chat: chatId, seq: next.seq });
-    const { sql: now, origin: shown, snapshot: sent } = current.current;
+    const { sql: now, binds: typed, origin: shown, snapshot: sent } = current.current;
     setSnapshot(null);
     // A stopped or failed turn: nothing touches the editor.
     if (!next.proposal) return;
-    if (onArrival(now, shown?.insertedSql ?? null, sent) === "fill") fill(next.proposal);
+    // A snapshot from before bind values were kept with it (plain text): the SQL alone.
+    const before = typeof sent === "string" ? { sql: sent, binds: typed } : sent;
+    if (onArrival({ sql: now, binds: typed }, shown, before) === "fill") fill(next.proposal);
     else setPending(next.proposal);
   }, [chatId, proposals.data, handled, setHandled, setSnapshot, setPending, fill]);
 
@@ -194,7 +205,15 @@ export function SqlPage() {
     setDrawer(false);
   };
 
-  const context = useMemo<ChatContext>(() => ({ label: "The query in the SQL editor", text: sql, language: "sql" }), [sql]);
+  // The editor's SQL and, under it, the bind values typed for it, so a follow-up builds on both.
+  const context = useMemo<ChatContext>(
+    () => ({
+      label: "The query in the SQL editor",
+      text: sql.trim() ? sql.replace(/\n+$/, "") + bindLines(bindNames, binds) : sql,
+      language: "sql",
+    }),
+    [sql, bindNames, binds],
+  );
 
   const sidePanel = (
     <div className="flex h-full min-h-0 flex-col">
@@ -418,7 +437,7 @@ export function SqlPage() {
               placeholder="Describe the data you want"
               sendLabel="Generate SQL"
               // The editor as it is now: a proposal never replaces edits made while the agent works.
-              onSending={() => setSnapshot(current.current.sql)}
+              onSending={() => setSnapshot({ sql: current.current.sql, binds: current.current.binds })}
             />
           </aside>
         </>

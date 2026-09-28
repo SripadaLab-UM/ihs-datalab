@@ -265,3 +265,94 @@ def test_turn_status_and_continue(settings, catalog):
     assert drafts.proposals(conversation)[-1].proposal["binds"] == [
         {"name": "n", "value": 1000, "type": "number"}
     ]
+
+
+def drafts_app(settings, catalog):
+    app = create_app(settings, catalog=catalog, manage_containers=False, protect_api=False)
+    services, drafts = app.state.services, app.state.sql_drafts
+    drafts.turn_running = lambda conversation_id: True
+    conversation = services.conversations.create(kind="data", mode="sql", title="SQL", model="m").id
+    return app, services, drafts, conversation
+
+
+def march(drafts, conversation: str, title: str = "t") -> dict:
+    return drafts.propose(
+        conversation,
+        sql=STEPS,
+        title=title,
+        binds=[ProposedBind(b["name"], b["value"], "date") for b in MARCH],
+    )
+
+
+def test_the_rigor_review_is_not_the_turn(settings, catalog):
+    """The review's own turn_finished doesn't change the turn's status, what it
+    reads isn't the turn's, and it can't propose a query."""
+    _, services, drafts, conversation = drafts_app(settings, catalog)
+    ask(services, conversation, "steps in March")
+    march(drafts, conversation, "the turn's")
+    services.conversations.append(conversation, "turn_finished", {"status": "completed"})
+    services.conversations.append(conversation, "review_started", {})
+    services.conversations.append(
+        conversation,
+        "tool_call",
+        {"server": "ihs-data", "tool": "describe_table", "arguments": {"table": "IHS_2025.X"}},
+    )
+    with pytest.raises(DraftInvalid, match="during the review"):
+        march(drafts, conversation, "the review's")
+    # Recorded anyway (as if it got past the check): still not the turn's.
+    services.conversations.append(conversation, EVENT, {"title": "the review's"})
+    services.conversations.append(conversation, "turn_finished", {"status": "failed"})
+    services.conversations.append(conversation, "review_finished", {"status": "failed"})
+    services.conversations.append(conversation, "turn_done", {})
+    [shown] = drafts.proposals(conversation)
+    assert (shown.proposal["title"], shown.status, shown.done) == ("the turn's", "completed", True)
+    assert shown.tables_described == []
+    # A new question can propose again.
+    ask(services, conversation, "and April")
+    assert march(drafts, conversation, "next")["turn"] == 2
+
+
+def test_proposals_per_turn_are_capped(settings, catalog):
+    from datalab.data.sql_drafts import MAX_PER_TURN
+
+    _, services, drafts, conversation = drafts_app(settings, catalog)
+    ask(services, conversation, "steps")
+    for _ in range(MAX_PER_TURN):
+        march(drafts, conversation)
+    with pytest.raises(DraftInvalid, match="already proposed"):
+        march(drafts, conversation)
+    ask(services, conversation, "again")
+    march(drafts, conversation)
+
+
+def test_bind_values_are_kept_as_given(settings, catalog):
+    _, services, drafts, conversation = drafts_app(settings, catalog)
+    ask(services, conversation, "steps")
+    sql = "SELECT TRACKERSTEPS FROM IHS_2025.VFITBITDAILYDATA WHERE STUDY_PARTICIPANT_ID = :p"
+    proposal = drafts.propose(
+        conversation, sql=sql, title="t", binds=[ProposedBind("p", "  SYN  25\x07-1 \n", "text")]
+    )
+    assert proposal["binds"][0]["value"] == "SYN  25-1"
+    number = "SELECT TRACKERSTEPS FROM IHS_2025.VFITBITDAILYDATA WHERE TRACKERSTEPS > :n"
+    for value in ("1e999", float("inf"), float("nan"), "nan"):
+        with pytest.raises(DraftInvalid, match="number"):
+            drafts.propose(
+                conversation, sql=number, title="t", binds=[ProposedBind("n", value, "number")]
+            )
+
+
+def test_proposals_are_only_for_sql_playground_chats(server):
+    base_url, services, _, _, conversation = server
+    other = services.conversations.create(kind="data", mode="extraction", title="E", model="m").id
+    for missing in ("c_nope", "pg_0123456789ab", "run_x", other):
+        response = httpx.get(f"{base_url}/api/sql/proposals/{missing}")
+        assert response.status_code == 404, missing
+    assert httpx.get(f"{base_url}/api/sql/proposals/{conversation}").json() == []
+
+
+def test_a_token_without_a_tool_list_has_no_tab_tools(tmp_path):
+    access = SessionAccess(session_id="s", kind="data", results_dir=tmp_path)
+    assert access.allows("query") and not access.allows("propose_sql")
+    assert SessionAccess("s", "data", tmp_path, tools=MODES["sql"].allowed_tools).allows(
+        "propose_sql"
+    )

@@ -17,6 +17,7 @@ the queries it ran while exploring never do.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import re
 import secrets
 from collections.abc import Callable, Iterable
@@ -29,6 +30,8 @@ from datalab.data.sqlcheck import SqlRejected, check_sql
 from datalab.textcheck import lone_surrogate
 
 EVENT = "sql_proposed"
+# The SQL Playground chat's mode (sessions/modes.py).
+SQL_MODE = "sql"
 BindType = Literal["text", "number", "date"]
 BIND_TYPES: tuple[BindType, ...] = ("text", "number", "date")
 
@@ -38,6 +41,19 @@ MAX_ITEM = 400
 MAX_TABLES = 40
 MAX_BINDS = 50
 MAX_BIND_VALUE = 1_000
+# Proposals one turn may make: a follow-up is a new turn.
+MAX_PER_TURN = 20
+# What proposals() reads of a conversation's record (never the answer's deltas).
+_READ = (
+    "user_message",
+    EVENT,
+    "tool_call",
+    "command_started",
+    "turn_finished",
+    "turn_done",
+    "review_started",
+    "review_finished",
+)
 # The question as shown beside the editor; the whole message is in the chat.
 MAX_REQUEST = 4_000
 
@@ -108,6 +124,19 @@ class SqlDrafts:
         """Check a proposal and record it in the running turn, or DraftInvalid. Nothing runs."""
         if not self.turn_running(conversation_id):
             raise DraftInvalid("A query can only be proposed during a turn.")
+        asked = self._store.last(conversation_id, "user_message")
+        review = self._store.last(conversation_id, "review_started")
+        if asked is None:
+            raise DraftInvalid("A query can only be proposed in answer to a question.")
+        if review is not None and review.seq > asked.seq:
+            # The rigor review reads the turn's work; it doesn't add to it.
+            raise DraftInvalid("A query can't be proposed during the review of a turn.")
+        made = self._store.events_of_types_after(conversation_id, asked.seq, (EVENT,))
+        if len(made) >= MAX_PER_TURN:
+            raise DraftInvalid(
+                f"This turn has already proposed {MAX_PER_TURN} queries. Stop, and say what's "
+                "left to decide."
+            )
         if (not_text := lone_surrogate(sql)) is not None:
             raise DraftInvalid(f"The SQL check refused this query: {not_text.message}")
         try:
@@ -136,6 +165,11 @@ class SqlDrafts:
         self._store.append(conversation_id, EVENT, proposal)
         return proposal
 
+    def is_sql_conversation(self, conversation_id: str) -> bool:
+        """Whether this is a SQL Playground chat (the only kind that proposes queries)."""
+        conversation = self._store.get(conversation_id)
+        return conversation is not None and conversation.mode == SQL_MODE
+
     def proposals(self, conversation_id: str) -> list[TurnProposal]:
         """Each turn's latest proposal, oldest turn first, from the conversation's record."""
         found: dict[int, TurnProposal] = {}
@@ -147,8 +181,17 @@ class SqlDrafts:
         status: dict[int, str] = {}
         done: set[int] = set()
         starts: list[str] = []
-        for event in self._store.all_events_after(conversation_id, 0):
+        # A rigor review's events (its own turn_finished too) aren't the turn's.
+        reviewing = False
+        for event in self._store.events_of_types_after(conversation_id, 0, _READ):
+            if event.type == "review_started":
+                reviewing = True
+                continue
+            if event.type == "review_finished":
+                reviewing = False
+                continue
             if event.type == "user_message":
+                reviewing = False
                 turn += 1
                 starts.append(event.created_at)
                 text = str(event.data.get("text", ""))
@@ -156,7 +199,7 @@ class SqlDrafts:
                 if not event.data.get("continues"):
                     request = _request(text)
                     request_seq = event.seq
-            elif turn == 0:
+            elif turn == 0 or reviewing:
                 continue
             elif event.type == EVENT:
                 found[turn] = TurnProposal(
@@ -244,7 +287,7 @@ def _bind(name: str, bind: ProposedBind) -> dict[str, Any]:
     if isinstance(value, bool):
         raise DraftInvalid(f":{name}: give a number or text, not true or false.")
     if isinstance(value, str):
-        value = _line(value, f":{name}", MAX_BIND_VALUE)
+        value = _value(value, f":{name}")
     if bind.type == "date":
         if not isinstance(value, str) or not _is_date(value):
             raise DraftInvalid(
@@ -259,6 +302,8 @@ def _bind(name: str, bind: ProposedBind) -> dict[str, Any]:
                 raise DraftInvalid(f":{name} is a number, but {value!r} isn't one.") from None
         if value is not None and not isinstance(value, int | float):
             raise DraftInvalid(f":{name} is a number, but its value isn't one.")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise DraftInvalid(f":{name} is a number, but it isn't a finite one.")
     elif value is not None and not isinstance(value, str):
         value = str(value)
     return {"name": name, "value": value, "type": bind.type}
@@ -272,6 +317,16 @@ def _is_date(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _value(text: str, what: str) -> str:
+    """A text bind's value: control characters out and the ends trimmed, the rest as given."""
+    if (not_text := lone_surrogate(text)) is not None:
+        raise DraftInvalid(f"{what}: {not_text.message}")
+    text = _CONTROL.sub("", text).strip()
+    if len(text) > MAX_BIND_VALUE:
+        raise DraftInvalid(f"{what} is longer than {MAX_BIND_VALUE} characters.")
+    return text
 
 
 def _line(value: Any, what: str, limit: int, required: bool = False) -> str:

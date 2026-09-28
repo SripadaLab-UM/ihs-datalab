@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datalab.sessions.tokens import TAB_TOOLS as _TAB_TOOLS
 from datalab.sessions.tokens import SessionKind
 
 
@@ -65,9 +66,9 @@ DATA_TOOLS = (
 )
 # The catalog tools: metadata only, never rows.
 CATALOG_TOOLS = frozenset({"search_catalog", "describe_table", "join_paths", "find_concept"})
-# Tools only the mode that names them gets: propose_sql fills the SQL
-# Playground's editor, so only its chat has it.
-TAB_TOOLS = frozenset({"propose_sql"})
+# Tools only the mode that names them gets (sessions/tokens.py): propose_sql
+# fills the SQL Playground's editor, so only its chat has it.
+TAB_TOOLS = _TAB_TOOLS
 
 
 ANALYSIS = """\
@@ -199,6 +200,8 @@ themselves: you never run the final extraction.
 - Before writing SQL, find tables with search_catalog and check every column
   you rely on with describe_table. Use the knowledge base for what the lab's
   terms mean (enrolled, a cohort, a device), and say which pages you used.
+  A catalog match is metadata, not proof that a column is populated: check
+  with a small count first.
 - You may run small discovery and profiling queries with `query` (a count,
   a date range, which values a column takes) to check an assumption. Keep
   them small, and never run the whole extraction or paste rows into the chat.

@@ -419,9 +419,10 @@ def build_sql_router(services: SqlServices) -> APIRouter:
     @router.get("/proposals/{conversation_id}")
     def proposals(conversation_id: str) -> list[SqlProposalOut]:
         """Each turn's latest proposed query, oldest first. Nothing is run."""
-        if services.drafts is None:
-            return []
-        return [_proposal(conversation_id, p) for p in services.drafts.proposals(conversation_id)]
+        drafts = services.drafts
+        if drafts is None or not drafts.is_sql_conversation(conversation_id):
+            raise HTTPException(404, "No such SQL Playground chat.")
+        return [_proposal(conversation_id, p) for p in drafts.proposals(conversation_id)]
 
     return router
 

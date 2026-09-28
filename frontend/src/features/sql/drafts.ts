@@ -7,10 +7,18 @@ import type { SqlProposal } from "@/api/sql";
 /** The bind values as the editor holds them: text, as typed. */
 export type DraftBinds = Record<string, string>;
 
-/** The proposal in the editor, and the SQL as it was put there (to tell whether it's been edited since). */
+/** The proposal in the editor, and the SQL and bind values as they were put there (to tell whether they've been edited since). */
 export interface Origin {
   proposal: SqlProposal;
   insertedSql: string;
+  /** Missing in an origin kept from before bind values were compared: counted as edited. */
+  insertedBinds?: DraftBinds;
+}
+
+/** What the editor holds: its SQL and the bind values typed for it. */
+export interface EditorDraft {
+  sql: string;
+  binds: DraftBinds;
 }
 
 /** A draft kept aside by "Use this query", to go back to. */
@@ -28,16 +36,31 @@ export interface Handled {
 
 /**
  * What a new proposal does to the editor. It fills an empty editor, and one
- * that still holds the agent's last proposal untouched (a follow-up's revised
- * draft). Anything else is the person's work: the proposal is only offered.
- * `snapshot` is the editor as it was when the message was sent: if it has
- * changed since (edits made while the agent worked), it's never replaced.
+ * that still holds the agent's last proposal untouched, SQL and bind values
+ * both (a follow-up's revised draft). Anything else is the person's work: the
+ * proposal is only offered. `snapshot` is the editor as it was when the
+ * message was sent: if it has changed since (edits made while the agent
+ * worked), it's never replaced.
  */
-export function onArrival(editorSql: string, lastInserted: string | null, snapshot: string | null): "fill" | "offer" {
-  if (!editorSql.trim()) return "fill";
-  if (snapshot !== null && editorSql !== snapshot) return "offer";
-  if (lastInserted !== null && editorSql === lastInserted) return "fill";
+export function onArrival(editor: EditorDraft, origin: Origin | null, snapshot: EditorDraft | null): "fill" | "offer" {
+  if (!editor.sql.trim()) return "fill";
+  if (snapshot !== null && !sameDraft(editor, snapshot)) return "offer";
+  if (origin?.insertedBinds && sameDraft(editor, { sql: origin.insertedSql, binds: origin.insertedBinds })) return "fill";
   return "offer";
+}
+
+/** The same SQL and the same bind values (a value left empty counts as not given). */
+export function sameDraft(a: EditorDraft, b: EditorDraft): boolean {
+  if (a.sql !== b.sql) return false;
+  const names = new Set([...Object.keys(a.binds), ...Object.keys(b.binds)]);
+  return [...names].every((name) => (a.binds[name] ?? "") === (b.binds[name] ?? ""));
+}
+
+/** The bind values the SQL uses, as lines the agent reads with the editor's SQL. */
+export function bindLines(names: string[], binds: DraftBinds): string {
+  if (!names.length) return "";
+  const lines = names.map((name) => `-- :${name} = ${(binds[name] ?? "").replace(/[\r\n]+/g, " ") || "(empty)"}`);
+  return ["", "-- Bind values in the editor:", ...lines].join("\n");
 }
 
 /**
