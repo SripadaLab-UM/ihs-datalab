@@ -5,8 +5,9 @@ import { Link } from "react-router";
 import type { DestinationChoice, ProcessItem, StageEdits, Stages } from "@/api/workflows";
 import { Button, Chip, Icon } from "@/components/ui";
 
-/** An edit to the draft, made by the backend from the workflow model (never by editing the YAML here). */
-export type Edit = (edits: StageEdits, mapDestination?: string | null) => void;
+/** An edit to the draft, made by the backend from the workflow model (never by editing the YAML here).
+ *  `chosen` is the export folder the Deliver card picked, whose key is mapped only when the draft is saved. */
+export type Edit = (edits: StageEdits, chosen?: DestinationChoice) => void;
 
 const FIELD =
   "w-full rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13px] text-ink outline-none focus:border-ink disabled:opacity-60";
@@ -365,40 +366,44 @@ function DeliverStage({
   onEdit: Edit;
 }) {
   const deliver = stages.deliver;
-  if (destinations.length === 0) {
-    return (
-      <p role="status" className="flex items-baseline gap-1.5 font-sans text-[13px] text-attn">
-        <Icon name="folder" size={13} className="shrink-0 translate-y-[2px]" />
-        <span>
-          No export folders are set up yet. Add one in{" "}
-          <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
-            Settings → Export folders
-          </Link>
-          , then choose it here. Until then the outputs stay in the run's folder on this computer.
-        </span>
-      </p>
-    );
-  }
+  const first = destinations[0];
   if (!deliver) {
-    const first = destinations[0];
     const last = stages.outputs[stages.outputs.length - 1];
     return (
       <div className="flex flex-col gap-2 font-sans text-[13px] text-muted">
         <p>Nothing is delivered: the outputs stay in the run's folder on this computer.</p>
-        {last && (
-          <Button
-            className="self-start px-2.5 py-1 text-[12.5px]"
-            disabled={busy}
-            onClick={() =>
-              onEdit(
-                { deliver: { destination: first.key, folder: stages.name, files: [last.ref] } },
-                first.mapped ? null : first.destination_id,
-              )
-            }
-          >
-            Deliver {last.file} to {first.name}
-          </Button>
+        {!first ? (
+          <NoFolders />
+        ) : (
+          last && (
+            <Button
+              className="self-start px-2.5 py-1 text-[12.5px]"
+              disabled={busy}
+              onClick={() => onEdit({ deliver: { destination: first.key, folder: stages.name, files: [last.ref] } }, first)}
+            >
+              Deliver {last.file} to {first.name}
+            </Button>
+          )
         )}
+      </div>
+    );
+  }
+  if (!first) {
+    return (
+      <div className="flex flex-col gap-2 font-sans text-[13px] text-muted">
+        <p>
+          It delivers to <span className={clsx(MONO, "text-ink")}>{deliver.destination}</span>, which has no export
+          folder on this computer.
+        </p>
+        <NoFolders />
+        <Button
+          variant="ghost"
+          className="self-start px-1.5 py-0.5 text-[12px]"
+          disabled={busy}
+          onClick={() => onEdit({ no_deliver: true })}
+        >
+          Don't deliver: keep the outputs in the run's folder
+        </Button>
       </div>
     );
   }
@@ -414,7 +419,7 @@ function DeliverStage({
           disabled={busy || practice}
           onChange={(e) => {
             const chosen = destinations.find((d) => d.key === e.target.value);
-            if (chosen) onEdit({ deliver: { destination: chosen.key } }, chosen.mapped ? null : chosen.destination_id);
+            if (chosen) onEdit({ deliver: { destination: chosen.key } }, chosen);
           }}
         >
           {!current && <option value="">{deliver.destination} (not set on this computer)</option>}
@@ -472,6 +477,22 @@ function DeliverStage({
         Don't deliver: keep the outputs in the run's folder
       </Button>
     </div>
+  );
+}
+
+/** No export folder to choose: where to add one. */
+function NoFolders() {
+  return (
+    <p role="status" className="flex items-baseline gap-1.5 font-sans text-[13px] text-attn">
+      <Icon name="folder" size={13} className="shrink-0 translate-y-[2px]" />
+      <span>
+        No export folders are set up yet. Add an export folder in{" "}
+        <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+          Settings → Export folders
+        </Link>
+        , then choose it here. Until then the outputs stay in the run's folder on this computer.
+      </span>
+    </p>
   );
 }
 

@@ -14,11 +14,13 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from datalab.api.workflows import WorkflowServices, build_workflows_router
 from datalab.config import WorkflowSettings
+from datalab.exports import DestinationStore
 from datalab.sessions.modes import MODES, WORKFLOW_AUTHORING
 from datalab.workflows.model import load_workflow
 from datalab.workflows.source import BUILTIN_DIR
@@ -371,3 +373,159 @@ def test_the_agent_is_shown_the_drop_columns_template_exactly():
     script = textwrap.dedent(block.split("    r: |\n", 1)[1].split("    inputs:", 1)[0])
     assert script == drop_columns_script("raw", ["BODYBMI", "BODYFAT"])
     assert MODES["workflows"].question == "What should this workflow do?"
+
+
+def test_oracle_column_names_with_dollar_and_hash_are_dropped_as_written():
+    script = drop_columns_script("raw", ["PAY$RATE", "ROW#", "PLAIN"])
+    assert 'drop <- c("PAY$RATE", "ROW#", "PLAIN")\n' in script
+    assert dropped_columns(script, {"raw": "extract"}) == ["PAY$RATE", "ROW#", "PLAIN"]
+    # In a file, and read back from it.
+    text = apply_edits(
+        DAILY, StageEdits(add_drop_columns=[NewDropColumns(input="extract", columns=["A$B", "C#"])])
+    )
+    assert stages_of(check(text)).process[0].drop_columns == ["A$B", "C#"]
+    with pytest.raises(StagesRefused):
+        drop_columns_script("raw", ['A\\"B'])
+
+
+def test_the_yaml_never_has_anchors_or_aliases():
+    """The same object twice (a shared list) is written out twice, never as
+    an alias, which the file check would refuse."""
+    from datalab.workflows.stages import _Dumper
+
+    shared = ["STUDY_PARTICIPANT_ID", "RECORD_DATE"]
+    written = yaml.dump({"a": shared, "b": shared}, Dumper=_Dumper, sort_keys=False)
+    assert "&" not in written and "*" not in written
+    text = apply_edits(
+        DAILY,
+        StageEdits(
+            add_checks=[NewCheck(file="extract", required_columns=shared, unique_by=shared)]
+        ),
+    )
+    assert "&id" not in text and check(text).steps[1].qc.unique_by == tuple(shared)  # type: ignore[union-attr]
+
+
+# ------------------------------------------------------------------ export folders (real profile)
+
+REAL_DAILY = DAILY + (
+    "  without_small_cells:\n"
+    "    extract: Row-level daily rows as asked for, with no counts of people.\n"
+)
+
+
+@pytest.fixture
+def real(tmp_path):
+    client, h, settings = _client(tmp_path, profile="real")
+    store = DestinationStore(h.connection)
+    with client:
+        yield client, h, settings, store
+
+
+def _folder(tmp_path: Path, store: DestinationStore, name: str, *, exists: bool = True):
+    path = tmp_path / name.replace(" ", "_")
+    if exists:
+        path.mkdir()
+    return store.add(name, path)
+
+
+def test_the_review_never_maps_a_folder_and_offers_only_folders_that_are_there(real, tmp_path):
+    client, _, settings, store = real
+    lab = _folder(tmp_path, store, "IHS 2025 exports")
+    _folder(tmp_path, store, "Gone", exists=False)
+    # A lab workflow already names ihs-2025-exports.
+    folder = settings.data_dir / "workflows-local"
+    (folder / "lab.yaml").write_text(
+        REAL_DAILY.replace("practice-exports", "ihs-2025-exports").replace("daily_clean", "lab")
+    )
+    edits = {"deliver": {"destination": "whatever"}}
+    shown = client.post("/api/workflows/stages", json={"text": REAL_DAILY, "edits": edits}).json()
+    # The folder named like the lab's key is offered under another key, never the lab's.
+    [choice] = shown["destinations"]
+    assert choice["destination_id"] == lab.id and choice["mapped"] is False
+    assert choice["key"] == "ihs-2025-exports-2" and choice["used_by"] == []
+    # Nothing was mapped by reviewing, even with a folder chosen.
+    assert all(d.key is None for d in store.list())
+
+
+def test_a_new_folder_is_mapped_when_the_workflow_is_saved(real, tmp_path):
+    client, _, _, store = real
+    picked = _folder(tmp_path, store, "My exports")
+    text = REAL_DAILY.replace("practice-exports", "my-exports")
+    saved = client.post(
+        "/api/workflows/saves",
+        json={"text": text, "source": "authoring", "map_destination": picked.id},
+    )
+    assert saved.status_code == 201, saved.text
+    assert store.by_key("my-exports") is not None and store.by_key("my-exports").id == picked.id  # type: ignore[union-attr]
+
+
+def test_a_key_other_workflows_use_is_mapped_only_after_a_confirm_naming_them(real, tmp_path):
+    client, _, settings, store = real
+    picked = _folder(tmp_path, store, "New folder")
+    folder = settings.data_dir / "workflows-local"
+    (folder / "lab.yaml").write_text(
+        REAL_DAILY.replace("practice-exports", "ihs-2025-exports").replace("daily_clean", "lab")
+    )
+    text = REAL_DAILY.replace("practice-exports", "ihs-2025-exports")
+    body = {"text": text, "source": "authoring", "map_destination": picked.id}
+    refused = client.post("/api/workflows/saves", json=body)
+    assert refused.status_code == 409 and refused.json()["detail"]["used_by"] == ["lab.yaml"]
+    # Nothing saved, nothing mapped.
+    assert not (folder / "daily_clean.yaml").exists() and store.by_key("ihs-2025-exports") is None
+    confirmed = client.post(
+        "/api/workflows/saves", json={**body, "confirm_key_used_by": ["lab.yaml"]}
+    )
+    assert confirmed.status_code == 201, confirmed.text
+    assert store.by_key("ihs-2025-exports").id == picked.id  # type: ignore[union-attr]
+    # A folder that's gone, or a key that means another folder already, isn't mapped.
+    gone = _folder(tmp_path, store, "Gone", exists=False)
+    again = {"text": text.replace("daily_clean", "other"), "map_destination": gone.id}
+    assert client.post("/api/workflows/saves", json=again).status_code == 409
+    other = _folder(tmp_path, store, "Other")
+    taken = {"text": text.replace("daily_clean", "third"), "map_destination": other.id}
+    assert client.post("/api/workflows/saves", json=taken).status_code == 409
+
+
+# ------------------------------------------------------------------ test runs are cleaned up
+
+
+def test_a_drafts_test_runs_keep_the_newest_three_and_go_when_its_saved(practice):
+    client, _, settings = practice
+    ids = []
+    for _ in range(5):
+        started = client.post("/api/workflows/test-runs", json={"text": DAILY})
+        assert started.status_code == 201, started.text
+        ids.append(started.json()["id"])
+        finished(client, ids[-1])
+    listed = [r["id"] for r in client.get("/api/workflows/runs").json()]
+    assert sorted(listed) == sorted(ids[2:])  # the newest three
+    for gone in ids[:2]:
+        assert client.get(f"/api/workflows/runs/{gone}").status_code == 404
+        assert not (settings.data_dir / "runs" / gone).exists()
+    assert (settings.data_dir / "runs" / ids[-1]).is_dir()
+    # Saved: all of them go.
+    assert client.post("/api/workflows/saves", json={"text": DAILY}).status_code == 201
+    assert [
+        r
+        for r in client.get("/api/workflows/runs").json()
+        if r["workflow_path"].startswith("draft:")
+    ] == []
+    assert not any((settings.data_dir / "runs" / i).exists() for i in ids)
+
+
+def test_a_discarded_drafts_test_runs_are_removed(practice):
+    client, _, settings = practice
+    run_id = client.post("/api/workflows/test-runs", json={"text": DAILY}).json()["id"]
+    finished(client, run_id)
+    other = client.post(
+        "/api/workflows/test-runs", json={"text": DAILY.replace("daily_clean", "other")}
+    )
+    finished(client, other.json()["id"])
+    assert (
+        client.delete("/api/workflows/test-runs", params={"name": "daily_clean"}).status_code == 204
+    )
+    assert client.get(f"/api/workflows/runs/{run_id}").status_code == 404
+    assert not (settings.data_dir / "runs" / run_id).exists()
+    # Only that draft's.
+    assert client.get(f"/api/workflows/runs/{other.json()['id']}").status_code == 200
+    assert client.delete("/api/workflows/test-runs", params={"name": "../x"}).status_code == 422

@@ -50,7 +50,10 @@ from datalab.workflows.model import (
 
 # The first line of a script DataLab wrote to drop columns: how it's recognised.
 DROP_MARK = "# DataLab: drop columns"
-_COLUMN = re.compile(r"[A-Za-z][A-Za-z0-9_.]{0,127}")
+# A column name as Oracle allows it unquoted ($ and # too), or as R's read.csv
+# may give it (dots). None needs escaping inside an R "..." string: only a
+# backslash or a quote would, and neither is allowed.
+_COLUMN = re.compile(r"[A-Za-z][A-Za-z0-9_.$#]{0,127}")
 _ID = re.compile(r"[a-z][a-z0-9_]{0,47}")
 MAX_COLUMNS = 500
 
@@ -636,6 +639,10 @@ def workflow_yaml(workflow: Workflow) -> str:
 
 
 class _Dumper(yaml.SafeDumper):
+    def ignore_aliases(self, data: Any) -> bool:
+        # Never anchors and aliases: the file check refuses them (safeyaml.py).
+        return True
+
     def increase_indent(self, flow: bool = False, indentless: bool = False) -> None:
         # Lists indented under their key (`steps:` then `  - id:`).
         super().increase_indent(flow, False)

@@ -1297,7 +1297,11 @@ export interface paths {
          * @description Run a draft on practice data, without saving it and without delivering.
          */
         post: operations["test_run_api_workflows_test_runs_post"];
-        delete?: never;
+        /**
+         * Forget Test Runs
+         * @description Remove a draft's test runs (it was discarded): their folders and records.
+         */
+        delete: operations["forget_test_runs_api_workflows_test_runs_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2190,6 +2194,11 @@ export interface components {
             destination_id: string | null;
             /** Mapped */
             mapped: boolean;
+            /**
+             * Used By
+             * @default []
+             */
+            used_by: string[];
         };
         /** DestinationKeyOut */
         DestinationKeyOut: {
@@ -3668,6 +3677,10 @@ export interface components {
             source: "playground" | "conversation" | "authoring";
             /** Conversation Id */
             conversation_id?: string | null;
+            /** Map Destination */
+            map_destination?: string | null;
+            /** Confirm Key Used By */
+            confirm_key_used_by?: string[];
         };
         /** SaveResultOut */
         SaveResultOut: {
@@ -3834,8 +3847,6 @@ export interface components {
             /** Text */
             text: string;
             edits?: components["schemas"]["StageEdits"] | null;
-            /** Map Destination */
-            map_destination?: string | null;
         };
         /**
          * StagesOut
@@ -6534,6 +6545,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["WorkflowRunOut"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_test_runs_api_workflows_test_runs_delete: {
+        parameters: {
+            query: {
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

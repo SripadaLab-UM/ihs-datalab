@@ -113,6 +113,8 @@ MAX_MESSAGES = 50
 WRAPPER_NAME = "run_step.R"
 # A test run's `workflow_path`: a draft, not a file in the folder (see start_test).
 DRAFT_PREFIX = "draft:"
+# How many test runs of one draft are kept (the newest).
+KEEP_TEST_RUNS = 3
 
 
 class RunRefused(RuntimeError):
@@ -383,10 +385,28 @@ class WorkflowRunner:
             plan.no_delivery = (
                 "A test run doesn't deliver. Save the workflow, then run it to deliver."
             )
-            return self._launch(plan)
+            launched = self._launch(plan)
         except BaseException:
             await asyncio.to_thread(shutil.rmtree, self.runs_dir / run_id, True)
             raise
+        await self.forget_tests(workflow.name, keep=KEEP_TEST_RUNS)
+        return launched
+
+    async def forget_tests(self, name: str, *, keep: int = 0) -> list[str]:
+        """Remove a draft's test runs, but the newest `keep`: their folders and
+        records (it was saved or discarded, or has had newer ones). A run still
+        going is left until it finishes. Gives the ids removed."""
+        runs = self.store.list_runs(f"{DRAFT_PREFIX}{name}", limit=1000)
+        removed = []
+        for run in runs[keep:]:
+            if run["status"] in ("queued", "running") or self.running(run["id"]):
+                continue
+            await asyncio.to_thread(shutil.rmtree, self.runs_dir / run["id"], True)
+            self.store.delete_run(run["id"])
+            removed.append(run["id"])
+        if removed:
+            self._notify()
+        return removed
 
     async def run_again(self, run_id: str) -> str:
         """The current workflow file afresh: new extracts, the original parameters and seed."""

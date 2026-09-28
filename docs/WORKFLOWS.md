@@ -507,17 +507,26 @@ as every draft is (the file check and Save & share's data check).
   the template is written again when the list changes. The agent is given
   the template word for word. Values are read as text, so the kept columns
   come out as extracted (quoted, as R writes text).
-- **Deliver** chooses among the export folders set in Settings. With none,
-  it says so and links to Settings → Export folders. In the real profile,
-  choosing a folder with no key gives it one from its name, if neither is
-  mapped yet. A written file is "saved locally", never "synced".
+- **Deliver** chooses among the export folders set in Settings that are on
+  this computer (`destination_choices`, the one place that decides). With
+  none, it says so and links to Settings → Export folders. In the real
+  profile a folder with no key is offered under a key made from its name,
+  never one a folder or a workflow file already uses. Reviewing maps
+  nothing: the key is mapped to the folder only when the workflow is saved
+  (`SaveIn.map_destination`; for Save & share, once it has saved), and a key
+  other workflow files already name is mapped only after the person
+  confirms those files by name. A written file is "saved locally", never
+  "synced".
 - **Advanced: YAML** shows the file in the editor; edits there are checked
   the same way, and the stages follow.
 
 **Test run** (practice only; 403 in the real profile, which has no
 synthetic database): the draft's text runs through the usual runner, pinned
 and recorded as any run, as `draft:<name>`. It never delivers, Run again
-can't find it, and its Replay can't deliver.
+can't find it, and its Replay can't deliver. The newest 3 test runs of a
+draft are kept; all of them, folders and records, go when it's saved or
+discarded (`DELETE /api/workflows/test-runs?name=`). The audit log keeps
+their queries.
 
 **Saving** is the Save as workflow route (`POST /saves`, `source:
 authoring`): in practice, the local practice folder
@@ -533,7 +542,9 @@ ships the lab's 8 routines (Yu's) as read-only examples, listed as
 `ihs-pipelines` at `315ac98`, byte for byte; the other 6 workflows there
 call private `ihsDataR` pipelines and aren't copied. Practice delivers any
 destination key (`ihs-2025-exports`) to its own practice exports folder. The
-real DataLab reads the lab's own copies from its synced clone instead.
+real DataLab reads the lab's own copies from its synced clone instead. A
+practice DataLab with `[workflows] folder` set in settings.toml reads only
+that folder, and shows no built-in workflows.
 
 To refresh them: in a clone of `ihs-pipelines`, copy the 8
 `workflows/<name>.yaml` files at the new commit over the ones in

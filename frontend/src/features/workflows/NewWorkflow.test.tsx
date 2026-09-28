@@ -21,6 +21,7 @@ vi.mock("@/api/workflows", () => ({
     destinations: vi.fn(async () => []),
     stages: vi.fn(),
     testRun: vi.fn(),
+    forgetTests: vi.fn(async () => undefined),
     save: vi.fn(),
     saveStatus: vi.fn(),
   },
@@ -79,7 +80,7 @@ const result = (extra: Partial<StagesResult> = {}): StagesResult => ({
   problems: [],
   findings: [],
   target: LOCAL,
-  destinations: [{ key: "practice-exports", name: "Practice exports", path: "/p/practice-exports", available: true, destination_id: null, mapped: true }],
+  destinations: [{ key: "practice-exports", name: "Practice exports", path: "/p/practice-exports", available: true, destination_id: null, mapped: true, used_by: [] }],
   ...extra,
 });
 
@@ -181,7 +182,6 @@ it("shows the assistant's draft as three editable stages, and edits go to the ba
     expect(workflowsApi.stages).toHaveBeenLastCalledWith({
       text: DRAFT,
       edits: { steps: { drop_body: { drop_columns: ["BODYBMI", "BODYFAT", "WATER"] } } },
-      map_destination: null,
     }),
   );
   // The duplicate participant-days check, and a parameter's default.
@@ -252,10 +252,66 @@ it("test-runs the draft on practice data, then saves it locally", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() =>
-    expect(workflowsApi.save).toHaveBeenCalledWith({ text: DRAFT, confirmed: [], source: "authoring", conversation_id: "conv_1" }),
+    expect(workflowsApi.save).toHaveBeenCalledWith({
+      text: DRAFT, confirmed: [], source: "authoring", conversation_id: "conv_1", map_destination: null, confirm_key_used_by: [],
+    }),
   );
   expect(await screen.findByText(/Saved in Practice DataLab's workflows, on this computer/)).toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Open it to run/ })).toHaveAttribute("href", "/workflows/file?path=fitbit_daily_clean.yaml");
+});
+
+it("offers to add a folder, without failing, when a draft delivers nowhere and there are no export folders", async () => {
+  sessionStorage.setItem("datalab:workflows:draft", DRAFT);
+  vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/r", profile: "real", target: LOCAL });
+  vi.mocked(workflowsApi.stages).mockResolvedValue(result({ stages: stages({ deliver: null }), destinations: [] }));
+  show("/workflows/new");
+  const note = await screen.findByText(/Add an export folder in/);
+  expect(within(note).getByRole("link", { name: "Settings → Export folders" })).toHaveAttribute("href", "/settings");
+  expect(screen.getByText(/Nothing is delivered/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Deliver / })).not.toBeInTheDocument();
+});
+
+it("maps a new folder's key only at Save, asking first when other workflows use that key", async () => {
+  sessionStorage.setItem("datalab:workflows:draft", DRAFT);
+  vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/r", profile: "real", target: LOCAL });
+  const folders = [
+    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [] },
+    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: ["workflows/other.yaml"] },
+  ]; // prettier-ignore
+  vi.mocked(workflowsApi.stages).mockResolvedValue(result({ destinations: folders }));
+  show("/workflows/new");
+  const select = await screen.findByRole("combobox", { name: "Export folder" });
+  vi.mocked(workflowsApi.stages).mockResolvedValue(
+    result({ destinations: folders, stages: stages({ deliver: { destination: "lab-exports", folder: "x", files: ["drop_body"], without_small_cells: {} } }) }),
+  );
+  fireEvent.change(select, { target: { value: "lab-exports" } });
+  // The review maps nothing: the edit carries no folder.
+  await waitFor(() =>
+    expect(workflowsApi.stages).toHaveBeenLastCalledWith({ text: DRAFT, edits: { deliver: { destination: "lab-exports" } } }),
+  );
+  await screen.findByText(/Passes DataLab's workflow check/);
+  vi.mocked(workflowsApi.save).mockResolvedValue({ id: null, state: "saved", shared: false, path: "x.yaml", message: "Saved.", findings: [] } as never);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(confirm.mock.calls[0][0]).toMatch(/workflows\/other\.yaml also deliver to "lab-exports"/);
+  expect(workflowsApi.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(workflowsApi.save).toHaveBeenCalledWith(
+      expect.objectContaining({ map_destination: "dest_b", confirm_key_used_by: ["workflows/other.yaml"] }),
+    ),
+  );
+  confirm.mockRestore();
+});
+
+it("removes a discarded draft's test runs", async () => {
+  sessionStorage.setItem("datalab:workflows:draft", DRAFT);
+  show("/workflows/new");
+  await screen.findByText(/Passes DataLab's workflow check/);
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+  await waitFor(() => expect(workflowsApi.forgetTests).toHaveBeenCalledWith("fitbit_daily_clean"));
+  confirm.mockRestore();
 });
 
 it("asks Workflow authoring's own question in an empty chat", async () => {

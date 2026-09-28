@@ -37,7 +37,7 @@ export type StageEdits = Partial<
   add_drop_columns?: (Partial<Schemas["NewDropColumns"]> & { input: string; columns: string[] })[];
   deliver?: Partial<Schemas["DeliverEdit"]>;
 };
-export type StagesIn = { text: string; edits?: StageEdits; map_destination?: string | null };
+export type StagesIn = { text: string; edits?: StageEdits };
 export type ProcessItem = Schemas["ProcessItem"];
 export type DestinationChoice = Schemas["DestinationChoice"];
 
@@ -81,6 +81,8 @@ export const workflowsApi = {
    *  workflow model), checked as every draft is. Nothing is saved. A 422 says why an edit can't be made. */
   stages: (body: StagesIn) => request<StagesResult>("/api/workflows/stages", post(body)),
   /** Run a draft on practice data, unsaved and never delivered (Practice DataLab only: 403 elsewhere). */
+  /** Remove a draft's test runs (it was discarded): their folders and records. */
+  forgetTests: (name: string) => request<void>(`/api/workflows/test-runs?name=${id(name)}`, { method: "DELETE" }),
   testRun: (text: string, params: Record<string, ParamValue> = {}) =>
     request<WorkflowRun>("/api/workflows/test-runs", post({ text, params })),
   /** The destination keys workflow files name, and the folder each maps to on this computer. */

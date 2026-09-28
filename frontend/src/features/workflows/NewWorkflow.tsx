@@ -6,6 +6,7 @@ import { api } from "@/api/client";
 import { ApiError } from "@/api/http";
 import { pipelinesApi } from "@/api/pipelines";
 import {
+  type DestinationChoice,
   type StageEdits,
   type StagesResult,
   type WorkflowSave,
@@ -86,8 +87,10 @@ export function NewWorkflow({
     }
   }, [newer, text, setText, setLoadedFrom]);
 
-  const discard = () => {
+  const discard = (name?: string) => {
     if (text && !window.confirm("Discard this draft? Nothing has been saved.")) return;
+    // Its test runs go too (their folders and records).
+    if (name && practice) void workflowsApi.forgetTests(name).catch(() => undefined);
     setText("");
     setLoadedFrom(found?.from ?? "");
     setPasting(false);
@@ -299,13 +302,14 @@ function DraftReview({
   practice: boolean;
   conversationId: string;
   startInYaml: boolean;
-  onDiscard: () => void;
+  onDiscard: (name?: string) => void;
   onStartAnother: () => void;
 }) {
   const [yaml, setYaml] = useState(startInYaml);
   const [checked, setChecked] = useState<StagesResult | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
   const [saved, setSaved] = useState<WorkflowSave | null>(null);
+  const [chosen, setChosen] = useState<DestinationChoice | null>(null);
 
   // The text as the backend last checked it; checked again after each pause in typing (the YAML view).
   useEffect(() => {
@@ -324,8 +328,7 @@ function DraftReview({
   }, [text, checked?.text]);
 
   const edit = useMutation({
-    mutationFn: ({ edits, map }: { edits: StageEdits; map?: string | null }) =>
-      workflowsApi.stages({ text, edits, map_destination: map ?? null }),
+    mutationFn: ({ edits }: { edits: StageEdits }) => workflowsApi.stages({ text, edits }),
     onMutate: () => setEditError(null),
     onSuccess: (result) => {
       setChecked(result);
@@ -371,7 +374,11 @@ function DraftReview({
             destinations={current.destinations}
             practice={practice}
             busy={busy}
-            onEdit={(edits, map) => edit.mutate({ edits, map })}
+            onEdit={(edits, picked) => {
+              // A folder without a key here yet is mapped only when the workflow is saved.
+              if (picked) setChosen(picked.mapped ? null : picked);
+              edit.mutate({ edits });
+            }}
           />
         </div>
       ) : (
@@ -442,7 +449,8 @@ function DraftReview({
         conversationId={conversationId}
         onSaved={setSaved}
         saved={saved}
-        onDiscard={onDiscard}
+        mapTo={chosen && current?.stages?.deliver?.destination === chosen.key ? chosen : null}
+        onDiscard={() => onDiscard(current?.stages?.name)}
       />
     </div>
   );
@@ -563,6 +571,7 @@ function SaveDraft({
   conversationId,
   saved,
   onSaved,
+  mapTo,
   onDiscard,
 }: {
   text: string;
@@ -570,6 +579,8 @@ function SaveDraft({
   conversationId: string;
   saved: WorkflowSave | null;
   onSaved: (save: WorkflowSave) => void;
+  /** The export folder chosen for the file's key, to map once it's saved. */
+  mapTo: DestinationChoice | null;
   onDiscard: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -582,6 +593,8 @@ function SaveDraft({
         confirmed: [...confirmed],
         source: "authoring",
         conversation_id: conversationId || null,
+        map_destination: mapTo?.destination_id ?? null,
+        confirm_key_used_by: mapTo?.used_by ?? [],
       }),
     onMutate: () => {
       savedText.current = text;
@@ -636,7 +649,21 @@ function SaveDraft({
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" disabled={!canSave} onClick={() => save.mutate()}>
+        <Button
+          variant="primary"
+          disabled={!canSave}
+          onClick={() => {
+            // A key other workflows use would send their files to this folder too: asked first.
+            if (
+              mapTo?.used_by.length &&
+              !window.confirm(
+                `${mapTo.used_by.join(", ")} also deliver to "${mapTo.key}". Save, and deliver those to ${mapTo.name} too?`,
+              )
+            )
+              return;
+            save.mutate();
+          }}
+        >
           {saving ? "Saving…" : target.kind === "share" ? "Save & share" : "Save"}
         </Button>
         <Button variant="ghost" disabled={saving} onClick={onDiscard}>
