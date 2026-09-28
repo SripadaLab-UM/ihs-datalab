@@ -65,7 +65,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from datalab import __version__, datalock, updates
+from datalab import __version__, datalock, launcher_icons, updates
 from datalab.config import Settings, default_data_dir
 from datalab.releases import (
     CheckProblem,
@@ -203,6 +203,16 @@ class Layout:
     def python(self, version: str) -> Path:
         folder = self.folder(version)
         return folder / "Scripts" / "python.exe" if self.windows else folder / "bin" / "python"
+
+    def branding(self, version: str) -> Path | None:
+        """An installed version's icons (its package's datalab/branding)."""
+        folder = self.folder(version)
+        pattern = (
+            "Lib/site-packages/datalab/branding"
+            if self.windows
+            else "lib/python*/site-packages/datalab/branding"
+        )
+        return next((p for p in sorted(folder.glob(pattern)) if p.is_dir()), None)
 
     def complete(self, version: str) -> bool:
         return (self.folder(version) / _COMPLETE).is_file()
@@ -484,6 +494,7 @@ class Updater:
         other_data_dirs: Callable[[], list[Path]] | None = None,
         settle: Callable[[float], Awaitable[None]] = asyncio.sleep,
         stop_timeout: float = STOP_SECONDS,
+        refresh_icons: Callable[[Path | None], object] | None = None,
     ) -> None:
         self.settings = settings
         self.checker = checker
@@ -502,6 +513,7 @@ class Updater:
         self._other_data_dirs = other_data_dirs or self._default_other_data_dirs
         self._settle = settle
         self._stop_timeout = stop_timeout
+        self._refresh_icons = refresh_icons or self._default_refresh_icons
         self._progress = Progress()
         self._task: asyncio.Task[None] | None = None
 
@@ -726,6 +738,15 @@ class Updater:
         removed = self.layout.prune({version, self.current})
         if removed:
             log.info("removed older DataLab versions: %s", ", ".join(removed))
+        # The launcher's icon, from the new version's package (the installer
+        # made it once; nothing else would change it).
+        try:
+            self._refresh_icons(self.layout.branding(version))
+        except Exception:
+            log.exception("couldn't refresh the launcher's icon")
+
+    def _default_refresh_icons(self, branding: Path | None) -> object:
+        return launcher_icons.refresh(branding, root=self.layout.root, platform=self._platform)
 
     def restart(self, version: str) -> None:
         """Step 5: hand over to the helper, then quit."""

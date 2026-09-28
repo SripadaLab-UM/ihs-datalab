@@ -12,6 +12,8 @@ def make(settings, catalog, tmp_path):
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text("<html>DataLab</html>")
     (dist / "assets" / "app.js").write_text("console.log(1)")
+    (dist / "favicon.svg").write_text("<svg/>")
+    (dist / "apple-touch-icon-practice.png").write_bytes(b"png")
     (tmp_path / "secret.txt").write_text("not for the browser")
     browser = BrowserSession(settings.port)
     app = create_app(
@@ -94,6 +96,19 @@ def test_web_ui_serves_files_and_falls_back_to_index(settings, catalog, tmp_path
         # Outside the built folder: never served.
         assert "not for the browser" not in client.get("/../secret.txt").text
         assert "not for the browser" not in client.get("/assets/%2e%2e/%2e%2e/secret.txt").text
+
+
+def test_the_tabs_icons_always_revalidate(settings, catalog, tmp_path):
+    # They keep their names from version to version (the page adds ?v=<hash>),
+    # so a browser checks them again rather than keep an old icon.
+    app, _ = make(settings, catalog, tmp_path)
+    with TestClient(app) as client:
+        icon = client.get("/favicon.svg?v=0123abcd")
+        assert icon.text == "<svg/>" and icon.headers["cache-control"] == "no-cache"
+        touch = client.get("/apple-touch-icon-practice.png")
+        assert touch.headers["cache-control"] == "no-cache"
+        # The hashed assets can be cached as the browser likes.
+        assert "cache-control" not in client.get("/assets/app.js").headers
 
 
 def test_end_session_signs_every_window_out_until_a_new_sign_in(settings, catalog, tmp_path):

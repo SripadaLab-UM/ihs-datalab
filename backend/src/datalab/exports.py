@@ -219,6 +219,24 @@ class Folder:
         where, kw = self._where(name)
         os.unlink(where, **kw)
 
+    def replace(self, name: str, target: str) -> None:
+        """Rename `name` to `target` inside this folder, replacing `target`."""
+        where, _ = self._where(name)
+        to, _ = self._where(target)  # (checks the folder again, without dir_fd)
+        if self._fd is not None:
+            os.rename(where, to, src_dir_fd=self._fd, dst_dir_fd=self._fd)
+        else:
+            os.replace(where, to)
+
+    def stat(self) -> os.stat_result:
+        """This folder's own stat (never a link's)."""
+        if self._fd is not None:
+            return os.fstat(self._fd)
+        info = os.lstat(self.path)
+        if is_link(self.path, info) or identity(info) != self.identity:
+            raise ExportError(FOLDER_CHANGED)
+        return info
+
     def rmtree(self, name: str) -> None:
         where, kw = self._where(name)
         shutil.rmtree(where, ignore_errors=True, **kw)

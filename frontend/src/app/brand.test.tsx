@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it } from "vitest";
 
-import { Brand, usePracticeTab } from "./brand";
+import { Brand, practiceIcon, usePracticeTab } from "./brand";
 import { BLOCK_M, COLOURS, IHS_MARK, TILE } from "./brandArt";
 
 function Tab({ practice }: { practice: boolean }) {
@@ -9,11 +9,16 @@ function Tab({ practice }: { practice: boolean }) {
   return <Brand practice={practice} />;
 }
 
+// The hashed URLs, as index.html names them (brandIcons.ts).
+const icon = (path: string) => __BRAND_ICONS__[path];
+const REAL = ["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"].map(icon);
+const PRACTICE = ["/favicon-practice-32.png", "/favicon-practice.svg", "/apple-touch-icon-practice.png"].map(icon);
+
 beforeEach(() => {
   document.head.innerHTML = `
-    <link rel="icon" type="image/png" href="/favicon-32.png" data-brand />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" data-brand />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" data-brand />`;
+    <link rel="icon" type="image/png" href="${icon("/favicon-32.png")}" data-brand />
+    <link rel="icon" type="image/svg+xml" href="${icon("/favicon.svg")}" data-brand />
+    <link rel="apple-touch-icon" href="${icon("/apple-touch-icon.png")}" data-brand />`;
   document.title = "DataLab";
 });
 
@@ -28,17 +33,26 @@ it("shows the name, and leaves the real DataLab's tab as it is", () => {
   expect(screen.getByTestId("brand")).toHaveTextContent(/^DataLab$/);
   // Only the mark on narrow windows, so the tabs fit.
   expect(screen.getByText("DataLab")).toHaveClass("hidden", "lg:inline");
-  expect(hrefs()).toEqual(["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"]);
+  expect(hrefs()).toEqual(REAL);
   expect(document.title).toBe("DataLab");
 });
 
 it("marks practice in the header, the tab's icon and its title", () => {
   const { unmount } = render(<Tab practice />);
   expect(screen.getByTestId("brand")).toHaveTextContent("DataLabpractice");
-  expect(hrefs()).toEqual(["/favicon-practice-32.png", "/favicon-practice.svg", "/apple-touch-icon-practice.png"]);
+  // Practice's own icons, by their own hashes, so an old one is never kept either.
+  expect(hrefs()).toEqual(PRACTICE);
+  for (const href of hrefs()) expect(href).toMatch(/-practice[.-][a-z0-9.]+\?v=[0-9a-f]{8}$/);
   expect(document.title).toBe("DataLab (practice)");
   unmount();
-  expect(hrefs()).toEqual(["/favicon-32.png", "/favicon.svg", "/apple-touch-icon.png"]);
+  expect(hrefs()).toEqual(REAL);
+});
+
+it("swaps a hashed icon for practice's hashed one, whatever hash the page had", () => {
+  expect(practiceIcon("/favicon.svg?v=00000000")).toBe(__BRAND_ICONS__["/favicon-practice.svg"]);
+  expect(practiceIcon("/apple-touch-icon.png")).toBe(__BRAND_ICONS__["/apple-touch-icon-practice.png"]);
+  // Already practice's: unchanged.
+  expect(practiceIcon(icon("/favicon-practice-32.png"))).toBe(icon("/favicon-practice-32.png"));
 });
 
 it("draws the Block M and the spark on its tile, and the IHS mark beside it, from branding/build.py", () => {

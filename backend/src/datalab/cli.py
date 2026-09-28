@@ -199,6 +199,7 @@ def _serve(settings, *, open_browser: bool) -> int:
         return 1
     # The new version is up, with its migrations applied: the update is done.
     updates.finish(settings.data_dir, __version__)
+    _refresh_launcher_icons()
     url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
     print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
     if open_browser:
@@ -234,6 +235,23 @@ def _serve(settings, *, open_browser: bool) -> int:
     app.state.shutdown = shutdown
     server.run()
     return 0
+
+
+def _refresh_launcher_icons() -> None:
+    """An installed DataLab keeps its launcher's icon its own package's (an
+    update from a version before this one never changed it). A copy not run
+    from the installer's layout (a checkout, tests) leaves launchers alone."""
+    import logging
+
+    from datalab import launcher_icons
+    from datalab.updater import Layout, default_root
+
+    try:
+        layout = Layout(default_root())
+        if layout.running_version() is not None:
+            launcher_icons.refresh(launcher_icons.package_branding(), root=layout.root)
+    except Exception:  # never a reason not to start
+        logging.getLogger(__name__).exception("couldn't refresh the launcher's icon")
 
 
 def _save_practice_password(settings) -> None:

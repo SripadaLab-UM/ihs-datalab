@@ -86,6 +86,14 @@ export function Brand({ practice }: { practice: boolean }) {
   );
 }
 
+/** The practice profile's version of a tab icon's URL, named by its content's
+ * hash as index.html names the real one's (brandIcons.ts), so a browser never
+ * keeps an old icon after an update. */
+export function practiceIcon(href: string): string {
+  const path = href.split("?")[0].replace(/^\/(favicon|apple-touch-icon)(?!-practice)/, "/$1-practice");
+  return __BRAND_ICONS__[path] ?? path;
+}
+
 /** On practice, the tab's icon and title say so too, so a practice tab
  * never looks like the real DataLab's. */
 export function usePracticeTab(practice: boolean) {
@@ -93,10 +101,7 @@ export function usePracticeTab(practice: boolean) {
     if (!practice) return;
     const links = [...document.querySelectorAll<HTMLLinkElement>("link[data-brand]")];
     const before = links.map((link) => link.getAttribute("href"));
-    for (const link of links) {
-      const href = link.getAttribute("href") ?? "";
-      link.setAttribute("href", href.replace(/^\/(favicon|apple-touch-icon)/, "/$1-practice"));
-    }
+    for (const link of links) link.setAttribute("href", practiceIcon(link.getAttribute("href") ?? ""));
     const title = document.title;
     document.title = "DataLab (practice)";
     return () => {

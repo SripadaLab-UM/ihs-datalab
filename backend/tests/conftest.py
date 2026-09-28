@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 import uvicorn
 
-from datalab import app, credentials, datalock
+from datalab import app, credentials, datalock, launcher_icons
 from datalab.config import OracleSettings, QueryLimits, Settings
 from datalab.data.catalog import Catalog, Column, TableInfo
 from datalab.data.oracle import ExtractResult, QueryCancelled
@@ -34,6 +34,13 @@ def no_real_model_key(monkeypatch: pytest.MonkeyPatch) -> None:
             None if service == credentials.MODEL_KEY_SERVICE else real(service, account)
         ),
     )
+
+
+@pytest.fixture(autouse=True)
+def no_real_launchers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may change the apps in this computer's Applications folders:
+    a test of the launcher's icon names its own folders."""
+    monkeypatch.setattr(launcher_icons, "default_app_folders", lambda: [])
 
 
 # The real check, for the test that it's there.

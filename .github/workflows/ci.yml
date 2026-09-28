@@ -56,6 +56,9 @@ jobs:
       # tests, and junctions (mklink /J, _winapi.CreateJunction), never followed.
       - name: Export folder tests
         run: uv run pytest -q tests/test_export_folders.py
+      # The launcher's icons in <app>\icons: never through a link or junction.
+      - name: Launcher icon tests
+        run: uv run pytest -q tests/test_launcher_icons.py
 
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with

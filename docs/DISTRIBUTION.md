@@ -83,7 +83,14 @@ It comes from the install page in the app repo. The installer then:
    Both run the launcher's command (`bin/datalab`, `bin\datalab.cmd`), never
    a version's own folder, so they keep working after an update. The icon is
    copied out of the package into the app bundle (Mac) or `<app>\icons`
-   (Windows), so removing an old version doesn't take it away.
+   (Windows), so removing an old version doesn't take it away. After an
+   update, and each time an installed DataLab starts, it copies its own
+   package's icons over the launcher's where they differ
+   (`launcher_icons.py`): on a Mac only a bundle of DataLab's own (its
+   bundle id, launching this `bin/datalab`, not a link) and only if it's
+   writable without an administrator, then `lsregister -f` so Finder and the
+   Dock notice; on Windows only the `.ico` files already in `<app>\icons`.
+   It never stops an update or a start.
    The first launch opens **Connections**, which
    asks for the U-M GPT key and Oracle password and saves them to the
    keychain. It then opens **Safety check** so the user can see everything
@@ -713,6 +720,10 @@ spark is edged in the tile's colour, so it reads where it crosses the M.
 Regenerate with `uv run --no-project --with pillow python branding/build.py`
 (on a Mac it uses `iconutil` for the `.icns`), and commit what it writes. On
 practice the app also swaps the tab's icon and title for practice's.
+Browsers keep a favicon by its URL, so the build names each tab icon with its
+content's hash (`/favicon.svg?v=<sha8>`, `frontend/brandIcons.ts`), in
+`index.html` and in the practice swap, and DataLab serves them with
+`Cache-Control: no-cache`: a new icon shows after an update.
 
 ## Connectivity
 
