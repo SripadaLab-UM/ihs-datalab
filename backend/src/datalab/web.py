@@ -219,6 +219,10 @@ def add_session_routes(
         return response
 
 
+# The tab's icons (frontend/public): kept at fixed names, so never cached for long.
+_ICON_NAMES = ("favicon", "apple-touch-icon")
+
+
 def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> None:
     @app.get("/sign-in", include_in_schema=False)
     def sign_in(token: str) -> RedirectResponse:
@@ -241,6 +245,10 @@ def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> No
         if path and candidate.is_file() and dist.resolve() in candidate.parents:
             if candidate == index.resolve():
                 return FileResponse(index, headers={"Cache-Control": "no-cache"})
+            if candidate.parent == dist.resolve() and candidate.name.startswith(_ICON_NAMES):
+                # The page names the icons with their content's hash (?v=), and
+                # they revalidate too, so a new icon shows after an update.
+                return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
             return FileResponse(candidate)
         # The page always revalidates, so an update is picked up on the next
         # load; the files it names are content-hashed and can be cached.

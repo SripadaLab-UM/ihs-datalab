@@ -5,6 +5,8 @@ import react from "@vitejs/plugin-react";
 import { searchForWorkspaceRoot } from "vite";
 import { defineConfig } from "vitest/config";
 
+import { brandIcons } from "./brandIcons";
+
 // This file's folder (frontend/), wherever Vite is started from.
 const here = fileURLToPath(new URL(".", import.meta.url));
 
@@ -13,7 +15,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const backend = process.env.DATALAB_URL ?? "http://127.0.0.1:8766";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), brandIcons()],
   resolve: { alias: { "@": "/src" } },
   server: {
     host: "127.0.0.1",
