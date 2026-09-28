@@ -124,7 +124,8 @@ def test_workflow_authorings_example_passes_the_real_profiles_check():
     """The file shape in the instructions, its two elisions filled in, is a
     file DataLab would run: they can't drift apart."""
     text = MODES["workflows"].instructions
-    example = text.split("```yaml\n")[1].split("```")[0]
+    blocks = [b.split("```")[0] for b in text.split("```yaml\n")[1:]]
+    example = next(b for b in blocks if b.startswith("name:"))
     example = example.replace("SELECT ... FROM", "SELECT STUDY_PARTICIPANT_ID, RECORD_DATE FROM")
     example = example.replace("      ...\n", "      out <- x\n")
     workflow = load_workflow(example, allowed_schemas=None, require_small_cells=True)

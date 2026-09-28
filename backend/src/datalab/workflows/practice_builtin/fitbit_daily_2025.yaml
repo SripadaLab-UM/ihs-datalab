@@ -1,0 +1,48 @@
+schema_version: 1
+name: fitbit_daily_2025
+description: >-
+  2025-cohort Fitbit daily export (ported from ODBC_connect_IHS2024-25.R): pull
+  VFITBITDAILYDATA over the cohort window, drop body-composition / weight /
+  water columns, QC row count, and deliver the CSV to the IHS 2025 exports
+  folder.
+parameters:
+  start_date: { type: date, default: 2025-04-01, description: Start date }
+  end_date: { type: date, default: 2026-01-01, description: End date }
+reads:
+  - IHS_2025.VFITBITDAILYDATA
+
+steps:
+  - id: extract
+    sql: |
+      SELECT * FROM IHS_2025.VFITBITDAILYDATA
+      WHERE RECORD_DATE >= TO_DATE(:start_date, 'YYYY-MM-DD')
+        AND RECORD_DATE < TO_DATE(:end_date, 'YYYY-MM-DD')
+    output: fitbit_daily_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      drop_cols <- c(
+        "BODYBMI","BODYFAT","BODYFATLOG","BODYFATLOGSOURCE","BODYWEIGHT",
+        "BODYWEIGHTLOGBODYWEIGHT","BODYWEIGHTLOGBMI","BODYWEIGHTLOGFAT",
+        "BODYWEIGHTLOGSOURCE","WATER"
+      )
+      x <- x[, !(names(x) %in% drop_cols), drop = FALSE]
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: fitbit_daily_2025_blq1q2.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: fitbit_daily_2025_blq1q2
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of Fitbit daily records for the lab's data manager, by
+      design: one row per participant-day, with no counts of people to
+      suppress. It goes only to the lab's own export folder.

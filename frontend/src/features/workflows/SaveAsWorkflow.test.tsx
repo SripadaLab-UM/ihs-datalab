@@ -45,7 +45,7 @@ const draft = (extra: Partial<WorkflowDraft> = {}): WorkflowDraft => ({
 
 const saved = (extra: Partial<WorkflowSave> = {}): WorkflowSave => ({
   id: null, state: "saved", shared: false, path: "steps_by_device.yaml", message: "Saved on this computer.",
-  commit: null, findings: [], test: null, ...extra,
+  commit: null, findings: [], test: null, mapping: "none", mapping_message: null, ...extra,
 }); // prettier-ignore
 
 const record = (id: string, sql: string, status = "succeeded", at = "2026-09-27T10:00:00Z"): QueryRecord => ({

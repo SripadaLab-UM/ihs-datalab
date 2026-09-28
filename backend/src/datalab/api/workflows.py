@@ -30,12 +30,13 @@ import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import yaml
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from datalab import export_folders, safeyaml
 from datalab.api.pipelines import PipelineFindingOut
@@ -59,6 +60,7 @@ from datalab.workflows.drafts import (
 )
 from datalab.workflows.model import (
     MAX_FILE_BYTES,
+    WORKFLOW_NAME,
     Problem,
     Workflow,
     WorkflowInvalid,
@@ -71,6 +73,14 @@ from datalab.workflows.records import RunStore
 from datalab.workflows.runner import ReplayNotExact, RunRefused, WorkflowRunner
 from datalab.workflows.sandbox import DockerSandbox, Sandbox, StepLimits
 from datalab.workflows.source import SourceError, workflows_folder
+from datalab.workflows.stages import (
+    StageEdits,
+    Stages,
+    StagesRefused,
+    apply_edits,
+    read_model,
+    stages_of,
+)
 
 _KEY = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 
@@ -103,6 +113,9 @@ class WorkflowsStatus(BaseModel):
     folder: str
     # Why the files come from that folder, when it isn't the expected one.
     message: str | None = None
+    profile: Literal["real", "practice"] = "real"
+    # Where New workflow saves go, said before anything is saved.
+    target: SaveTargetOut | None = None
 
 
 class ProblemOut(BaseModel):
@@ -168,6 +181,8 @@ class WorkflowOut(BaseModel):
     commit: str | None
     # The newest run of this file, in the list only.
     last_run: WorkflowRunOut | None = None
+    # One of practice DataLab's built-in workflows: read-only, never saved over.
+    builtin: bool = False
 
 
 class WorkflowTextOut(BaseModel):
@@ -231,18 +246,6 @@ class StepOut(BaseModel):
     message: str | None
 
 
-_DELIVERY_WORDING = ("destination_name", "sync_provider", "saved_to", "sync_note")
-
-
-def _optional_in_schema(names: tuple[str, ...]):
-    def edit(schema: dict[str, Any]) -> None:
-        required = schema.get("required")
-        if isinstance(required, list):
-            schema["required"] = [n for n in required if n not in names]
-
-    return edit
-
-
 class DeliveryOut(BaseModel):
     """One delivery. Show `saved_to`, then `sync_note` when there is one:
     DataLab saved the files on this computer; it can't know whether a sync
@@ -262,11 +265,6 @@ class DeliveryOut(BaseModel):
     sync_provider: str | None
     saved_to: str  # "Saved to Lab Dropbox (on this computer)"
     sync_note: str | None  # "Dropbox will upload them when its app is running and signed in. …"
-
-    # Always sent. Marked optional in the API types for now, so the Workflows
-    # page (built on another branch) can adopt them without its fixtures
-    # breaking first. Make them required once it does.
-    model_config = ConfigDict(json_schema_extra=_optional_in_schema(_DELIVERY_WORDING))
 
 
 class RunDetailOut(WorkflowRunOut):
@@ -363,8 +361,58 @@ class SaveIn(BaseModel):
     # Ids of the check's findings the person has confirmed aren't participant data.
     confirmed: list[str] = Field(default_factory=list, max_length=200)
     # Where the draft came from, for the commit message when it's shared.
-    source: Literal["playground", "conversation"] = "playground"
+    source: Literal["playground", "conversation", "authoring"] = "playground"
     conversation_id: str | None = Field(default=None, max_length=100)
+    # New workflow (real DataLab): the export folder the Deliver card chose for
+    # the file's destination key, which has no folder here yet. It's mapped
+    # once the file is saved, never before.
+    map_destination: str | None = Field(default=None, max_length=100)
+    # Other workflow files already name that key: the person confirmed these,
+    # which the new folder would then serve too.
+    confirm_key_used_by: list[str] = Field(default_factory=list, max_length=200)
+
+
+class DestinationChoice(BaseModel):
+    """An export folder the Deliver card can choose, as the destination key a file names."""
+
+    key: str
+    name: str
+    path: str
+    available: bool
+    destination_id: str | None
+    # Whether the key already means this folder here. A new one is mapped when
+    # the workflow is saved (SaveIn.map_destination), never while it's a draft.
+    mapped: bool
+    # The workflow files that already name this key.
+    used_by: list[str] = []
+    # dropbox, onedrive, box, google_drive, icloud, or None: a plain folder.
+    sync_provider: str | None = None
+    # "Inside your Dropbox folder: Dropbox will upload it when …" (Settings' words).
+    location_note: str = ""
+
+
+class StagesIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+    edits: StageEdits | None = None
+
+
+class StagesOut(BaseModel):
+    """A draft as Extract → Process & QC → Deliver, checked."""
+
+    text: str
+    # None when the model can't read the file: fix it in the YAML view.
+    stages: Stages | None
+    valid: bool
+    problems: list[ProblemOut]
+    findings: list[PipelineFindingOut]
+    target: SaveTargetOut
+    destinations: list[DestinationChoice]
+
+
+class TestRunIn(BaseModel):
+    text: str = Field(max_length=MAX_FILE_BYTES)
+    params: dict[str, Scalar] = Field(default_factory=dict)
+    seed: int | None = Field(default=None, ge=0, lt=2**31)
 
 
 # already_there: the same file was saved by someone else meanwhile; nothing new was shared.
@@ -382,6 +430,24 @@ class WorkflowSaveOut(BaseModel):
     commit: str | None = None  # what was pushed, once shared
     findings: list[PipelineFindingOut] = []
     test: str | None = None  # the package's test run behind the outcome
+    # The export folder chosen for the file's destination key (SaveIn.map_destination):
+    # none asked, mapped, skipped (and why, in mapping_message), or pending until a
+    # Save & share has saved.
+    mapping: Literal["none", "mapped", "skipped", "pending"] = "none"
+    mapping_message: str | None = None
+
+
+@dataclass(frozen=True)
+class _Mapping:
+    """A destination key to map to a folder once a workflow file is saved."""
+
+    destination_id: str
+    key: str
+    folder_name: str
+    # The other workflow files the person confirmed name the key too.
+    confirmed: tuple[str, ...]
+    # The saved file, as the Workflows tab lists it (it names the key itself).
+    saved_path: str
 
 
 # ------------------------------------------------------------------ router
@@ -443,13 +509,20 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
 
     @router.get("/status")
     def status() -> WorkflowsStatus:
-        return WorkflowsStatus(available=True, folder=str(folder.root), message=folder.note)
+        return WorkflowsStatus(
+            available=True,
+            folder=str(folder.root),
+            message=folder.note,
+            profile=settings.profile,
+            target=save_target(),
+        )
 
     @router.get("")
     def list_workflows() -> list[WorkflowOut]:
         out = []
         for path in folder.paths():
             described = describe(path)
+            described.builtin = folder.is_builtin(path)
             last = runner.store.list_runs(path, limit=1)
             if last:
                 described.last_run = WorkflowRunOut.model_validate(_run_fields(last[0]))
@@ -729,6 +802,8 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         target = save_target()
         if target.kind == "unavailable":
             raise HTTPException(409, target.message)
+        # Checked before anything is saved; mapped only once it has been.
+        mapping = mapping_for(body, workflow)
         if target.kind == "local":
             # The same data check as Save & share's, confirmed the same way.
             report = data_check({_repo_path(workflow.name): body.text.encode("utf-8")})
@@ -751,15 +826,28 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
                 raise HTTPException(409, f"{error} Choose another name.") from error
             except (SourceError, OSError) as error:
                 raise HTTPException(422, f"It couldn't be saved: {error}") from error
-            return WorkflowSaveOut(
-                id=None,
-                state="saved",
-                shared=False,
-                path=path,
-                message=f"Saved on this computer, in {folder.workflows_dir}. It isn't shared.",
+            outcome = apply_mapping(mapping, path) if mapping else None
+            # Saved: the draft's test runs have done their job.
+            await runner.forget_tests(workflow.name)
+            return _with_mapping(
+                WorkflowSaveOut(
+                    id=None,
+                    state="saved",
+                    shared=False,
+                    path=path,
+                    message=f"Saved on this computer, in {folder.workflows_dir}. It isn't shared.",
+                ),
+                mapping,
+                outcome,
             )
         assert services.pipelines is not None
         trailers: tuple[tuple[str, str], ...] = (("DataLab-Workflow-From", "SQL Playground"),)
+        if body.source == "authoring":
+            trailers = (("DataLab-Workflow-From", "New workflow (Workflow authoring)"),)
+            if body.conversation_id:
+                with contextlib.suppress(ValueError):
+                    check_owner("conversation", body.conversation_id)
+                    trailers += (("DataLab-Conversation", body.conversation_id),)
         if body.source == "conversation":
             trailers = (("DataLab-Workflow-From", "a conversation's queries"),)
             if body.conversation_id:
@@ -779,7 +867,214 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             raise HTTPException(403, str(error)) from error
         except (GitHubUnavailable, GitError) as error:
             raise HTTPException(502, str(error)) from error
-        return _save_out(job)
+        if mapping is not None:
+            pending_maps[job.id] = mapping
+        await runner.forget_tests(workflow.name)
+        return _saved(job)
+
+    def _saved(job: Any) -> WorkflowSaveOut:
+        """A Save & share's state, mapping its destination key once it has saved
+        (when its status is next asked for). The outcome is kept for later asks."""
+        out = _save_out(job)
+        job_id = out.id or ""
+        if job_id in pending_maps:
+            mapping = pending_maps[job_id]
+            if out.state in ("saved", "already_there"):
+                del pending_maps[job_id]
+                outcomes[job_id] = (mapping, apply_mapping(mapping, mapping.saved_path))
+            elif out.state == "saving":
+                out.mapping = "pending"
+                out.mapping_message = (
+                    f"{mapping.folder_name} is used for {mapping.key!r} once it's saved."
+                )
+            else:
+                del pending_maps[job_id]
+                outcomes[job_id] = (mapping, "the workflow wasn't saved")
+        if job_id in outcomes:
+            mapping, outcome = outcomes[job_id]
+            out = _with_mapping(out, mapping, outcome)
+        return out
+
+    def keys_in_use() -> dict[str, list[str]]:
+        """Destination key to the workflow files that name it."""
+        used: dict[str, list[str]] = {}
+        for path in folder.paths():
+            with contextlib.suppress(WorkflowInvalid, SourceError):
+                workflow = runner.check_text(folder.read(path).text)
+                if workflow.deliver is not None:
+                    used.setdefault(workflow.deliver.destination, []).append(path)
+        return used
+
+    def destination_choices(current: str | None) -> list[DestinationChoice]:
+        """The export folders New workflow's Deliver card offers: those Settings
+        offers too (export_folders.usable: switched on, and ready now)."""
+        if practice:
+            where = settings.data_dir / "practice-exports"
+            return [
+                DestinationChoice(
+                    key=current or "practice-exports",
+                    name="Practice exports",
+                    path=str(where),
+                    available=True,
+                    destination_id=None,
+                    mapped=True,
+                    location_note=(
+                        "Practice DataLab's own folder, on this computer. Nothing here is real."
+                    ),
+                )
+            ]
+        listed = destinations.list()
+        used = keys_in_use()
+        # A suggested key is never one a folder or a workflow file already has.
+        taken = {d.key for d in listed if d.key} | set(used)
+        out = []
+        for d in listed:
+            if not export_folders.usable(settings, d):
+                continue  # switched off, gone, or not writable: not offered
+            info = export_folders.describe(Path(d.path))
+            key = d.key
+            if key is None:
+                base = _slug(d.name) or "export-folder"
+                key, n = base, 2
+                while key in taken or not _KEY.fullmatch(key):
+                    key, n = f"{base[:60]}-{n}", n + 1
+                taken.add(key)
+            out.append(
+                DestinationChoice(
+                    key=key,
+                    name=d.name,
+                    path=d.path,
+                    available=True,
+                    destination_id=d.id,
+                    mapped=d.key is not None,
+                    used_by=used.get(key, []),
+                    sync_provider=info.sync_provider,
+                    location_note=info.note,
+                )
+            )
+        return out
+
+    def mapping_for(body: SaveIn, workflow: Workflow) -> _Mapping | None:
+        """The key and folder to map once `workflow` is saved, checked now (and again then).
+        Raises 409 when it can't be, or would quietly serve other workflows."""
+        if not body.map_destination or practice or workflow.deliver is None:
+            return None
+        key = workflow.deliver.destination
+        picked = destinations.get(body.map_destination)
+        if picked is None or not export_folders.usable(settings, picked):
+            raise HTTPException(409, "That export folder is switched off or can't be saved to now.")
+        if picked.key == key:
+            return None
+        if picked.key is not None:
+            raise HTTPException(
+                409,
+                f"That export folder is already used for {picked.key!r}. Choose it by that key.",
+            )
+        if destinations.by_key(key) is not None:
+            raise HTTPException(409, f"{key!r} already means another export folder here.")
+        others = sorted(keys_in_use().get(key, []))
+        if others and sorted(body.confirm_key_used_by) != others:
+            raise HTTPException(
+                409,
+                {
+                    "message": (
+                        f"Other workflows deliver to {key!r} too. Confirm that they should "
+                        "deliver to this folder as well."
+                    ),
+                    "used_by": others,
+                },
+            )
+        return _Mapping(
+            destination_id=picked.id,
+            key=key,
+            folder_name=picked.name,
+            confirmed=tuple(sorted(body.confirm_key_used_by)),
+            saved_path=_repo_path(workflow.name) if folder.shared else "",
+        )
+
+    # Save & share jobs whose destination key is mapped once they've saved, and
+    # what happened (for later asks). Held in memory: a DataLab restart before
+    # the status is asked for again loses it, and delivery then asks for a folder.
+    pending_maps: dict[str, _Mapping] = {}
+    outcomes: dict[str, tuple[_Mapping, str | None]] = {}
+
+    def apply_mapping(mapping: _Mapping, saved_path: str) -> str | None:
+        """Map the key now the file is saved: None if it was, else why not."""
+        picked = destinations.get(mapping.destination_id)
+        if picked is None or not export_folders.usable(settings, picked):
+            return f"{mapping.folder_name} is switched off or can't be saved to now"
+        # Checked again now: other files may have started naming the key meanwhile.
+        others = sorted(p for p in keys_in_use().get(mapping.key, []) if p != saved_path)
+        grown = [p for p in others if p not in mapping.confirmed]
+        if grown:
+            return f"other workflows now deliver to {mapping.key!r} too ({', '.join(grown)})"
+        if not destinations.set_key_if_free(mapping.destination_id, mapping.key):
+            return (
+                f"{mapping.key!r} or {mapping.folder_name} was mapped to something else meanwhile"
+            )
+        return None
+
+    @router.post("/stages")
+    def stages(body: StagesIn) -> StagesOut:
+        """A draft as its three stages, after the edits if any: the YAML is
+        written again from the workflow model (workflows/stages.py), then
+        checked as every draft is. Nothing is saved."""
+        text = body.text
+        if body.edits is not None:
+            try:
+                text = apply_edits(text, body.edits)
+            except StagesRefused as error:
+                raise HTTPException(422, str(error)) from error
+            except WorkflowInvalid as error:
+                raise _unprocessable(error) from error
+        view: Stages | None
+        try:
+            view = stages_of(read_model(text))
+        except WorkflowInvalid:
+            view = None
+        try:
+            runner.check_text(text)
+        except WorkflowInvalid as error:
+            problems = _problems_out(error.problems, text)
+        else:
+            problems = []
+        # Nothing is mapped here: a draft may be discarded (see SaveIn.map_destination).
+        chosen = view.deliver.destination if view and view.deliver else None
+        return StagesOut(
+            text=text,
+            stages=view,
+            valid=not problems,
+            problems=problems,
+            findings=_findings(text),
+            target=save_target(),
+            destinations=destination_choices(chosen),
+        )
+
+    @router.delete("/test-runs", status_code=204)
+    async def forget_test_runs(name: str) -> None:
+        """Remove a draft's test runs (it was discarded): their folders and records."""
+        if not WORKFLOW_NAME.fullmatch(name):
+            raise HTTPException(422, "That isn't a workflow name.")
+        await runner.forget_tests(name)
+
+    @router.post("/test-runs", status_code=201)
+    async def test_run(body: TestRunIn) -> WorkflowRunOut:
+        """Run a draft on practice data, without saving it and without delivering."""
+        if not practice:
+            raise HTTPException(
+                403,
+                "Test runs of a draft run on synthetic data, in Practice DataLab. Here, save "
+                "the workflow and check its first run before you rely on it.",
+            )
+        try:
+            run_id = await runner.start_test(body.text, body.params, seed=body.seed)
+        except SourceError as error:
+            raise HTTPException(422, str(error)) from error
+        except WorkflowInvalid as error:
+            raise _unprocessable(error) from error
+        except RunRefused as error:
+            raise HTTPException(409, str(error)) from error
+        return WorkflowRunOut.model_validate(_run_fields(run_or_404(run_id)))
 
     @router.get("/saves/{save_id}")
     def save_status(save_id: str) -> WorkflowSaveOut:
@@ -787,7 +1082,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         if services.pipelines is None:
             raise HTTPException(404, "No such save.")
         try:
-            return _save_out(services.pipelines.workflow_save(save_id))
+            return _saved(services.pipelines.workflow_save(save_id))
         except NotFound as error:
             raise HTTPException(404, str(error)) from error
 
@@ -807,6 +1102,11 @@ def _problems_out(problems: list[Problem], text: str | None = None) -> list[Prob
     return out
 
 
+def _slug(text: str) -> str:
+    """A destination key from a folder's name: lower case letters, digits and -."""
+    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:64]
+
+
 def _repo_path(name: str) -> str:
     """Where a new workflow file goes in the pipelines repo (and what the data check calls it)."""
     return f"workflows/{name}.yaml"
@@ -822,6 +1122,24 @@ def _findings(text: str) -> list[PipelineFindingOut]:
     path = _repo_path(name if isinstance(name, str) and _KEY.fullmatch(name) else "draft")
     report = data_check({path: text.encode("utf-8")})
     return [PipelineFindingOut(**f.to_dict()) for f in report.findings]
+
+
+def _with_mapping(
+    out: WorkflowSaveOut, mapping: _Mapping | None, outcome: str | None
+) -> WorkflowSaveOut:
+    """A save's reply, saying what happened to the folder chosen for its key."""
+    if mapping is None:
+        return out
+    if outcome is None:
+        out.mapping = "mapped"
+        out.mapping_message = f"{mapping.folder_name} is now used for {mapping.key!r}."
+    else:
+        out.mapping = "skipped"
+        out.mapping_message = (
+            f"Saved, but the folder wasn't mapped because {outcome}. Choose a folder for "
+            f"{mapping.key!r} in Settings → Export folders before it delivers."
+        )
+    return out
 
 
 def _save_out(job: Any) -> WorkflowSaveOut:
@@ -929,3 +1247,6 @@ def _run_fields(run: dict[str, Any]) -> dict[str, Any]:
             for s in out["steps"]
         ]
     return json.loads(json.dumps(out, default=str))
+
+
+WorkflowsStatus.model_rebuild()

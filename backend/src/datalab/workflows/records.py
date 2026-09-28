@@ -154,6 +154,15 @@ class RunStore:
                 )
         return [row[0] for row in rows]
 
+    def delete_run(self, run_id: str) -> None:
+        """Forget a run: its record, steps and deliveries (a draft's test run,
+        which never delivers). The audit log keeps its queries."""
+        with self._lock:
+            self._db.execute("UPDATE workflow_runs SET of_run = NULL WHERE of_run = ?", (run_id,))
+            self._db.execute("DELETE FROM workflow_run_deliveries WHERE run_id = ?", (run_id,))
+            self._db.execute("DELETE FROM workflow_run_steps WHERE run_id = ?", (run_id,))
+            self._db.execute("DELETE FROM workflow_runs WHERE id = ?", (run_id,))
+
     # ------------------------------------------------------------- reads
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:

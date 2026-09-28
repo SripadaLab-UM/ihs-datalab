@@ -122,6 +122,8 @@ class ModeOut(BaseModel):
     queries: bool = True
     # Whether files and folders can be attached.
     attachments: bool = True
+    # The empty conversation's heading.
+    question: str = "What would you like to find out?"
 
 
 class PlanSectionOut(BaseModel):
@@ -209,6 +211,7 @@ def build_conversations_router(
                 tab_only=m.tab_only,
                 queries=m.queries,
                 attachments=m.attachments,
+                question=m.question,
             )
             for m in MODES.values()
         ]

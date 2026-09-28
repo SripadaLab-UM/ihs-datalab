@@ -1,0 +1,81 @@
+schema_version: 1
+name: smoking_survey_responses_dropbox_testing
+description: >-
+  Extract participant-level tobacco survey responses with survey metadata and
+  normalized answer labels, QC the final CSV, and deliver it to the testing
+  subfolder of the IHS 2025 exports folder.
+parameters:
+  assessment_start_date: { type: date, default: 2025-01-01, description: Assessment start date }
+  assessment_end_date: { type: date, default: 2026-01-01, description: Assessment end date }
+reads:
+  - IHS_2025.SURVEYQUESTIONRESULTS
+  - IHS_2025.SURVEYRESULTS
+  - IHS_2025.STG_SURVEYDICTIONARY
+
+steps:
+  # The prototype read the dictionary's CLOBs with DBMS_LOB.SUBSTR(col, 1000, 1).
+  # DataLab refuses DBMS_ package calls, so this uses the built-in equivalent,
+  # TO_CHAR(SUBSTR(col, 1, 1000)): the first 1,000 characters, as text.
+  - id: extract_smoking_survey
+    sql: |
+      SELECT sr.PARTICIPANTIDENTIFIER, sr.SURVEYNAME, sr.SURVEYVERSION, qr.RESULTIDENTIFIER,
+        qr.ANSWERS, qr.STARTDATE AS QUESTION_STARTDATE, qr.ENDDATE AS QUESTION_ENDDATE,
+        sr.STARTDATE AS SURVEY_STARTDATE, sr.ENDDATE AS SURVEY_ENDDATE,
+        TO_CHAR(SUBSTR(d.QUESTIONTEXT, 1, 1000)) AS QUESTIONTEXT,
+        TO_CHAR(SUBSTR(d.ANSWERFORMAT, 1, 1000)) AS ANSWERFORMAT,
+        TO_CHAR(SUBSTR(d.ANSWERCHOICES, 1, 1000)) AS ANSWERCHOICES
+      FROM IHS_2025.SURVEYQUESTIONRESULTS qr
+      JOIN IHS_2025.SURVEYRESULTS sr ON sr.SURVEYRESULTKEY = qr.SURVEYRESULTKEY
+      JOIN IHS_2025.STG_SURVEYDICTIONARY d
+        ON d.SURVEYNAME = sr.SURVEYNAME
+        AND d.SURVEYVERSION = TO_CHAR(sr.SURVEYVERSION)
+        AND d.RESULTIDENTIFIER = qr.RESULTIDENTIFIER
+      WHERE sr.STARTDATE >= TO_DATE(:assessment_start_date, 'YYYY-MM-DD')
+        AND sr.STARTDATE < TO_DATE(:assessment_end_date, 'YYYY-MM-DD')
+        AND LOWER(TO_CHAR(SUBSTR(d.QUESTIONTEXT, 1, 1000)))
+          = LOWER('Tobacco products (cigarettes, chewing tobacco, cigars, etc.)')
+    output: smoking_survey_responses_raw.csv
+
+  - id: process_smoking_survey
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE, stringsAsFactors = FALSE)
+      answer_map <- c("0" = "Never", "1" = "Once or Twice", "2" = "Monthly", "3" = "Weekly", "4" = "Daily or Almost Daily")
+      x$ANSWER_CODE <- as.character(x$ANSWERS)
+      x$ANSWER_LABEL <- unname(answer_map[x$ANSWER_CODE])
+      missing_label <- is.na(x$ANSWER_LABEL)
+      x$ANSWER_LABEL[missing_label] <- x$ANSWER_CODE[missing_label]
+      x$ANSWERS <- NULL
+      keep_cols <- c("PARTICIPANTIDENTIFIER", "SURVEYNAME", "SURVEYVERSION", "RESULTIDENTIFIER", "ANSWER_CODE", "ANSWER_LABEL", "QUESTION_STARTDATE", "QUESTION_ENDDATE", "SURVEY_STARTDATE", "SURVEY_ENDDATE", "QUESTIONTEXT", "ANSWERFORMAT", "ANSWERCHOICES")
+      x <- x[, keep_cols, drop = FALSE]
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract_smoking_survey }
+    output: smoking_survey_responses.csv
+
+  - id: qc_smoking_survey
+    qc:
+      file: process_smoking_survey
+      min_rows: 1
+      required_columns:
+        - PARTICIPANTIDENTIFIER
+        - SURVEYNAME
+        - SURVEYVERSION
+        - RESULTIDENTIFIER
+        - ANSWER_CODE
+        - ANSWER_LABEL
+        - SURVEY_STARTDATE
+      no_missing:
+        - PARTICIPANTIDENTIFIER
+        - SURVEYNAME
+        - RESULTIDENTIFIER
+        - ANSWER_CODE
+        - SURVEY_STARTDATE
+
+deliver:
+  destination: ihs-2025-exports
+  folder: testing
+  files: [process_smoking_survey]
+  without_small_cells:
+    process_smoking_survey: >-
+      Row-level export of tobacco survey answers for the lab's data manager, by
+      design: one row per answer, with no counts of people to suppress. It goes
+      only to the testing subfolder of the lab's own export folder.

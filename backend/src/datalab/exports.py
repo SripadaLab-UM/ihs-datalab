@@ -263,6 +263,24 @@ class DestinationStore:
                 raise
         return cursor.rowcount > 0
 
+    def set_key_if_free(self, destination_id: str, key: str) -> bool:
+        """Map `key` to this destination only if neither is mapped yet, checked
+        and set in one transaction, so a mapping made meanwhile (in Settings)
+        is never taken over. Whether it was mapped."""
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                cursor = self._db.execute(
+                    "UPDATE export_destinations SET key = ? WHERE id = ? AND key IS NULL "
+                    "AND NOT EXISTS (SELECT 1 FROM export_destinations WHERE key = ?)",
+                    (key, destination_id, key),
+                )
+                self._db.execute("COMMIT")
+            except BaseException:
+                self._db.execute("ROLLBACK")
+                raise
+        return cursor.rowcount > 0
+
     def add(self, name: str, path: Path) -> Destination:
         destination = Destination(
             id=f"dest_{secrets.token_hex(6)}",

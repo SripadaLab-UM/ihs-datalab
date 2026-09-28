@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -13,6 +13,7 @@ import { useTabState } from "@/features/sql/hooks";
 
 import { Destinations } from "./Delivery";
 import { runKey } from "./hooks";
+import { NewWorkflow, StagesExplainer } from "./NewWorkflow";
 import { RunPage } from "./RunView";
 import { WorkflowList } from "./WorkflowList";
 import { WorkflowView } from "./WorkflowView";
@@ -40,6 +41,17 @@ export function WorkflowsPage() {
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
   const context = useFileContext();
+  const queryClient = useQueryClient();
+
+  /** New workflow: a Workflow authoring chat, started with the person's description, shown beside the draft. */
+  const startDrafting = async (description: string) => {
+    const conversation = await api.createConversation(CHAT_MODE);
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    await api.send(conversation.id, description);
+    setChatId(conversation.id);
+    setChatKey((k) => k + 1);
+    setChatOpen("open");
+  };
 
   const chatActions = (
     <>
@@ -85,23 +97,59 @@ export function WorkflowsPage() {
             index
             element={
               <div className="flex flex-col gap-8 px-6 pt-4 pb-10">
-                <header className="pr-32">
-                  <h1 className="font-serif text-[23px] leading-tight">Workflows</h1>
-                  <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">
-                    Recipes a person has approved: pull these data, run these steps, check these things, deliver here.
-                    DataLab runs them the same way every time, with no AI involved. Runs and their outputs stay on this
-                    computer.
-                  </p>
+                <header className="flex flex-wrap items-start gap-x-6 gap-y-3 pr-32">
+                  <div className="min-w-0 flex-1">
+                    <h1 className="font-serif text-[23px] leading-tight">Workflows</h1>
+                    <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">
+                      Recipes a person has approved: pull these data, run these steps, check these things, deliver
+                      here. DataLab runs them the same way every time, with no AI involved. Runs and their outputs stay
+                      on this computer.
+                    </p>
+                  </div>
+                  {workflows.data && workflows.data.length > 0 && (
+                    <Link
+                      to="/workflows/new"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-[3px] bg-accent px-3 py-1.5 font-sans text-[13.5px] font-medium text-accent-ink hover:opacity-85"
+                    >
+                      <Icon name="spark" size={13} /> New workflow
+                    </Link>
+                  )}
                 </header>
+                {practice && (
+                  <p role="note" className="max-w-[46rem] rounded-[3px] bg-sunken px-3 py-2 font-sans text-[13px] text-muted">
+                    <strong className="font-medium text-ink">Practice DataLab.</strong> The built-in workflows are the
+                    lab's routines, here as examples that run on synthetic data. What you make here is practice-only: it
+                    runs on synthetic data and is saved in a practice folder on this computer.
+                  </p>
+                )}
                 {workflows.isError ? (
                   <p className="font-sans text-[13px] text-danger">{workflows.error.message}</p>
                 ) : workflows.data ? (
-                  <WorkflowList workflows={workflows.data} folder={status.data?.folder} />
+                  workflows.data.length === 0 ? (
+                    <FirstWorkflow message={status.data?.message} />
+                  ) : (
+                    <WorkflowList workflows={workflows.data} />
+                  )
                 ) : (
-                  <p className="font-sans text-[13px] text-muted">Reading the workflows folder…</p>
+                  <p className="font-sans text-[13px] text-muted">Reading the workflows…</p>
                 )}
                 <Destinations practice={practice} />
               </div>
+            }
+          />
+          <Route
+            path="new"
+            element={
+              <NewWorkflow
+                status={status.data}
+                chatId={chatId}
+                onStart={startDrafting}
+                onShowChat={() => setChatOpen("open")}
+                onNewChat={() => {
+                  setChatId("");
+                  setChatKey((k) => k + 1);
+                }}
+              />
             }
           />
           <Route path="file" element={<FileRoute />} />
@@ -130,6 +178,34 @@ export function WorkflowsPage() {
         </>
       )}
     </div>
+  );
+}
+
+/** No workflows yet: making one is the page's main action. */
+function FirstWorkflow({ message }: { message?: string | null }) {
+  return (
+    <section
+      aria-labelledby="first-workflow"
+      className="mx-auto flex w-full max-w-[44rem] flex-col items-center gap-5 rounded-[4px] border border-line bg-surface px-6 py-10 text-center"
+    >
+      <h2 id="first-workflow" className="font-serif text-[28px] leading-tight">
+        Make your first workflow
+      </h2>
+      <p className="max-w-[34rem] font-sans text-[13.5px] text-muted">
+        Describe a task you do again and again. The assistant asks about the details and drafts it; you review each
+        stage, test it, and save it to run whenever you need it.
+      </p>
+      <Link
+        to="/workflows/new"
+        className="inline-flex items-center gap-1.5 rounded-[3px] bg-accent px-4 py-2 font-sans text-[14px] font-medium text-accent-ink hover:opacity-85"
+      >
+        <Icon name="spark" size={14} /> New workflow
+      </Link>
+      <div className="w-full border-t border-line pt-5 text-left">
+        <StagesExplainer />
+      </div>
+      {message && <p className="font-sans text-[12.5px] text-faint">{message}</p>}
+    </section>
   );
 }
 

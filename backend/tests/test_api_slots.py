@@ -18,12 +18,13 @@ def client(settings, catalog):
 
 def test_workflows_say_where_their_files_are(client, settings):
     client.get(client.app.state.browser.sign_in_path())  # type: ignore[attr-defined]
-    assert client.get("/api/workflows/status").json() == {
-        "available": True,
-        "folder": str(settings.data_dir / "workflows-local"),
-        "message": None,
-    }
-    assert client.get("/api/workflows").json() == []
+    status = client.get("/api/workflows/status").json()
+    local = str(settings.data_dir / "workflows-local")
+    assert (status["available"], status["folder"], status["message"]) == (True, local, None)
+    # Practice saves new workflows there, and lists its built-in ones beside them.
+    assert status["profile"] == "practice" and status["target"]["folder"] == local
+    listed = client.get("/api/workflows").json()
+    assert len(listed) == 8 and all(w["builtin"] and w["valid"] for w in listed)
 
 
 def test_knowledge_says_its_repo_isnt_configured(client):

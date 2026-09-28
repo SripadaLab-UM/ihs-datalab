@@ -338,8 +338,9 @@ the folder's name and sync app as they were then). To choose among folders,
 list `GET /api/export-destinations` and offer those with `available` true, by
 `name`; see `DestinationOut` in api/exports.py. In the backend, the one test
 for "offer this folder" is `export_folders.usable(settings, destination)`:
-switched on, and ready now. `available` and the destination keys'
-`available` both use it. Write through `export_folders.open_target()`, never
+switched on, and ready now. `available`, the destination keys'
+`available` and New workflow's Deliver card (`destinations`, each with
+Settings' `location_note`) all use it. Write through `export_folders.open_target()`, never
 by path.
 
 **Run again** runs the current file with the original parameters and seed,
@@ -484,6 +485,98 @@ goes through the same review and Save. It takes the SQL only: the
 workspace's R scripts read `/data/oracle` files and outputs by their own
 paths, not a workflow's `inputs`/`outputs`, so turning them into R steps
 needs the Workflow authoring agent (not built).
+
+## As built (New workflow)
+
+The Workflows tab's main action. The review is
+`frontend/src/features/workflows/NewWorkflow.tsx` and `StageCards.tsx`; the
+stages are `backend/src/datalab/workflows/stages.py`, with the routes
+`POST /api/workflows/stages` and `POST /api/workflows/test-runs`.
+
+**Starting.** With no workflows, the page's middle is a New workflow card
+that explains the three stages; otherwise New workflow is at the top of the
+list. It opens `/workflows/new`: "What should this workflow do?", with an
+example as the placeholder. Submitting starts a Workflow authoring chat with
+the description and opens it beside the page. The agent asks its clarifying
+questions there (dates, cohort, fields, checks, destination), then drafts
+the file: in practice, or with no pipelines repo, as
+`/work/outputs/<name>.yaml`; with the repo, in its copy, which becomes a
+Pipelines proposal. The page picks up the newest draft after each turn (a
+later one waits for "Use it" if the person has edited). "Write the YAML
+yourself" skips the agent.
+
+**Three stages.** The draft is shown as Extract (SQL steps, the tables they
+read, the parameters' defaults and descriptions), Process & QC (R and
+pipeline steps, then each built-in check's rules: minimum rows, required
+columns, no missing values, one row per key, small cells), and Deliver (an
+export folder, the subfolder, which files). Every edit goes to `/stages`,
+which reads the file into the workflow model, makes the edit, and writes the
+YAML again from the model; nothing edits the text. Comments and layout go;
+keys and values stay. Changing SQL recomputes `reads:`. The result is checked
+as every draft is (the file check and Save & share's data check).
+
+- **Removing columns** has its own field: an R step whose script is exactly
+  DataLab's drop-columns template (its first line is
+  `# DataLab: drop columns`) shows as the list of columns it removes, and
+  the template is written again when the list changes. The agent is given
+  the template word for word. Values are read as text, so the kept columns
+  come out as extracted (quoted, as R writes text).
+- **Deliver** chooses among the export folders set in Settings that are on
+  this computer (`destination_choices`, the one place that decides). With
+  none, it says so and links to Settings → Export folders. In the real
+  profile a folder with no key is offered under a key made from its name,
+  never one a folder or a workflow file already uses. Reviewing maps
+  nothing: the key is mapped to the folder only when the workflow is saved
+  (`SaveIn.map_destination`; for Save & share, once it has saved), and a key
+  other workflow files already name is mapped only after the person
+  confirms those files by name. The key is set only if neither it nor the
+  folder has been mapped meanwhile (one transaction), and only if no more
+  files name it than were confirmed; otherwise the file is saved and the
+  reply says why the folder wasn't mapped. A Save & share's mapping is
+  applied when its status is next checked, and is lost if DataLab restarts
+  before then: delivery then asks you to choose a folder. A written file is
+  "saved locally", never "synced".
+- **Advanced: YAML** shows the file in the editor; edits there are checked
+  the same way, and the stages follow.
+
+**Test run** (practice only; 403 in the real profile, which has no
+synthetic database): the draft's text runs through the usual runner, pinned
+and recorded as any run, as `draft:<name>`. It never delivers, Run again
+can't find it, and its Replay can't deliver. The newest 3 test runs of a
+draft are kept; all of them, folders and records, go when it's saved or
+discarded (`DELETE /api/workflows/test-runs?name=`). The audit log keeps
+their queries.
+
+**Saving** is the Save as workflow route (`POST /saves`, `source:
+authoring`): in practice, the local practice folder
+(`<data folder>/workflows-local/`, on this computer only); in the real
+profile with the pipelines repo, Save & share, as the person. The agent
+never saves. A saved workflow is in the list and runs again from its page
+with its parameters.
+
+**Practice's built-in workflows.** Practice never signs in to GitHub, so it
+ships the lab's 8 routines (Yu's) as read-only examples, listed as
+`builtin/<name>.yaml` beside its own workflows
+(`backend/src/datalab/workflows/practice_builtin/`). They're copies of
+`ihs-pipelines` at `315ac98`, byte for byte; the other 6 workflows there
+call private `ihsDataR` pipelines and aren't copied. Practice delivers any
+destination key (`ihs-2025-exports`) to its own practice exports folder. The
+real DataLab reads the lab's own copies from its synced clone instead. A
+practice DataLab with `[workflows] folder` set in settings.toml reads only
+that folder, and shows no built-in workflows.
+
+To refresh them: in a clone of `ihs-pipelines`, copy the 8
+`workflows/<name>.yaml` files at the new commit over the ones in
+`practice_builtin/` (no other files), put the commit in its README, and put
+each file's `git ls-tree <commit> workflows/` blob id in
+`tests/test_practice_builtin.py`. Check the new versions have no
+participant data, and run a practice test run of each.
+
+**Migrated workflows in the real profile** are covered by
+`tests/test_workflows_migrated.py`: a clone built by hand where the
+Pipelines tab keeps it lists every `workflows/*.yaml`. Set
+`DATALAB_TEST_PIPELINES_ARCHIVE` to a `git archive` of the lab's repo, made
+outside this one, to run it against the real files (never committed here).
 
 ## Open questions
 

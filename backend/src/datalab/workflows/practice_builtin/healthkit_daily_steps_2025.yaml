@@ -1,0 +1,44 @@
+schema_version: 1
+name: healthkit_daily_steps_2025
+description: >-
+  IHS 2025-cohort Apple Watch (HealthKit) daily steps from
+  IHS_2025.VHEALTHKITSTATISTICS_DAILYSTEPS before the window end.
+  HEALTHKITSTATISTICKEY is hex-encoded in SQL via RAWTOHEX, since a RAW
+  column doesn't survive as CSV text; delivered as a CSV to the IHS 2025
+  exports folder.
+parameters:
+  end_date: { type: date, default: 2026-01-01, description: End date }
+reads:
+  - IHS_2025.VHEALTHKITSTATISTICS_DAILYSTEPS
+
+steps:
+  # STARTDATE is ISO text (VARCHAR2) in this view: the bind compares as text.
+  - id: extract
+    sql: |
+      SELECT PARTICIPANTIDENTIFIER, STARTDATE, RECORD_DATE, VALUE, INSERTEDDATE,
+        RAWTOHEX(HEALTHKITSTATISTICKEY) AS HEALTHKITSTATISTICKEY
+      FROM IHS_2025.VHEALTHKITSTATISTICS_DAILYSTEPS
+      WHERE STARTDATE < :end_date
+    output: healthkit_daily_steps_2025_raw.csv
+
+  - id: process
+    r: |
+      x <- read.csv(inputs$raw, check.names = FALSE)
+      write.csv(x, outputs$final, row.names = FALSE)
+    inputs: { raw: extract }
+    output: healthkit_daily_steps_2025.csv
+
+  - id: qc_final
+    qc:
+      file: process
+      min_rows: 1
+
+deliver:
+  destination: ihs-2025-exports
+  folder: healthkit_daily_steps_2025
+  files: [process]
+  without_small_cells:
+    process: >-
+      Row-level export of Apple Watch daily step records for the lab's data
+      manager, by design: one row per record, with no counts of people to
+      suppress. It goes only to the lab's own export folder.
