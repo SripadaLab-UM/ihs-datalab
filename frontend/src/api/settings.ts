@@ -17,6 +17,7 @@ export type UpdateRelease = Schemas["ReleaseOut"];
 export type UpdateInstall = Schemas["UpdateInstallOut"];
 export type BackupInfo = Schemas["BackupInfoOut"];
 export type DestinationKey = Schemas["DestinationKeyOut"];
+export type FeedbackContact = Schemas["FeedbackContactOut"];
 
 export const settingsApi = {
   connections: () => request<Connections>("/api/settings/connections"),
@@ -48,6 +49,8 @@ export const settingsApi = {
       body: JSON.stringify({ version, confirmed: true }),
     }),
   diagnostics: () => request<{ text: string }>("/api/settings/diagnostics"),
+  /** Whom the toolbar's Feedback goes to: the lab's repos.access_contact, and the email address in it. */
+  feedbackContact: () => request<FeedbackContact>("/api/settings/feedback-contact"),
 
   /** The destination keys workflow files name, and the export folder each maps to here. */
   destinationKeys: () => request<DestinationKey[]>("/api/workflows/destinations"),

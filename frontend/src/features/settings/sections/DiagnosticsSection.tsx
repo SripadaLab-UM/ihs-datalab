@@ -87,7 +87,7 @@ export function DiagnosticsSection() {
 }
 
 /** Write text that's still on its way to the clipboard. Whether it worked. */
-async function writeClipboard(text: Promise<string>): Promise<boolean> {
+export async function writeClipboard(text: Promise<string>): Promise<boolean> {
   const clipboard = navigator.clipboard;
   if (!clipboard) return false;
   if (typeof ClipboardItem !== "undefined" && clipboard.write) {

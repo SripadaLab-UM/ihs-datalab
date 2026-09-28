@@ -8,8 +8,10 @@ import { Brand, usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
-import { GitHubEntry } from "@/features/settings/GitHubEntry";
 import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
+import { MoreMenu } from "@/features/toolbar/MoreMenu";
+import { SessionMenu } from "@/features/toolbar/SessionMenu";
+import { Shortcuts } from "@/features/toolbar/Toolbar";
 
 const TABS = [
   { to: "/workspace", label: "Workspace" },
@@ -77,11 +79,12 @@ export function Shell() {
             </NavLink>
           ))}
         </nav>
-        {/* The pill, GitHub, the practice badge and Help sit together at the right,
-            closer to each other than to the tabs. */}
+        {/* The pill, the shortcuts, the practice badge, Help and More sit together
+            at the right, closer to each other than to the tabs; End session is
+            in its own menu at the far end, set apart. */}
         <div className="ml-auto flex shrink-0 items-center gap-3 self-stretch">
           <UpdatePill />
-          <GitHubEntry />
+          <Shortcuts />
           {practice && (
             <span
               className="shrink-0 self-center rounded-[2px] border border-attn/50 px-2 py-1 font-serif text-[14px] leading-none text-attn italic"
@@ -91,6 +94,10 @@ export function Shell() {
             </span>
           )}
           <HelpLink />
+          <MoreMenu />
+          <div className="flex shrink-0 self-stretch border-l border-line pl-1.5">
+            <SessionMenu />
+          </div>
         </div>
       </header>
       <div className="min-h-0 flex-1">
