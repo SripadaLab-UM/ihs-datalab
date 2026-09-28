@@ -185,9 +185,11 @@ export function KnowledgeTree({
           aria-current={isSelected ? "page" : undefined}
           tabIndex={n.id === tabbable ? 0 : -1}
           onFocus={(e) => e.target === e.currentTarget && setFocusId(n.id)}
-          className="outline-none [&:focus-visible>div]:outline-[1.5px] [&:focus-visible>div]:outline-offset-[-1.5px] [&:focus-visible>div]:outline-ink [&:focus-visible>div]:outline-solid"
+          className="outline-none [&:focus-visible>div]:outline-2 [&:focus-visible>div]:outline-offset-2 [&:focus-visible>div]:outline-ink [&:focus-visible>div]:outline-solid"
         >
+          {/* The keyboard is handled on the treeitem above (role=tree's pattern). */}
           <div
+            data-tree-row
             onClick={() => {
               setFocusId(n.id);
               activate(n);
@@ -202,6 +204,7 @@ export function KnowledgeTree({
           >
             {hasChildren ? (
               <span
+                data-tree-row
                 aria-hidden
                 onClick={(e) => {
                   e.stopPropagation();
