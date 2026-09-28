@@ -364,8 +364,14 @@ def test_the_packages_tests_run_on_the_proposals_files_in_the_container(lab):
     assert ".github/workflows/ci.yml" not in seen
     log = lab.client.get(f"/api/pipelines/tests/{test['id']}/log").json()
     assert log["text"] == "== Testing ihsDataR ==\n"
-    # Its copy of the files is gone once it's done; the log stays.
-    assert not (lab.pipelines.tests.folder / test["id"]).exists()
+    # Its copy of the files is gone once it's done (just after the result is
+    # recorded, so give it a moment); the log stays.
+    copy = lab.pipelines.tests.folder / test["id"]
+    for _ in range(100):
+        if not copy.exists():
+            break
+        time.sleep(0.05)
+    assert not copy.exists()
 
 
 def test_failing_tests_say_which(lab):
