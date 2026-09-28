@@ -193,6 +193,10 @@ class KbEntryOut(BaseModel):
     summary: str
     status: str | None
     kind: str | None
+    # From the front matter: the pages it links to (`related`), and the cohort
+    # years it applies to, as text. Empty when it has none.
+    related: list[str]
+    cohorts: list[str]
 
 
 class KbPagesOut(BaseModel):

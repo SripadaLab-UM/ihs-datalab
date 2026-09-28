@@ -12,7 +12,8 @@ import { Button, Chip, EmptyNote, Icon, Tabs } from "@/components/ui";
 import { useMediaQuery, useOverlay } from "@/components/ui/overlay";
 import { useTabState } from "@/features/sql/hooks";
 
-import { findPage, groupPages, resolveLink, statusTone } from "./pages";
+import { KnowledgeTree } from "./KnowledgeTree";
+import { findPage, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
 import { settingsLink } from "@/features/settings/highlight";
 
@@ -140,7 +141,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
           drawer ? "absolute inset-y-0 left-0 z-30 w-[18rem] shadow-xl lg:static lg:w-auto lg:shadow-none" : "hidden lg:block",
         )}
       >
-        <PageList entries={entries} selected={found?.path ?? path} onOpen={open} loading={pages.isPending} />
+        <KnowledgeTree entries={entries} selected={found?.path ?? path} reveal={Boolean(selected)} onOpen={open} loading={pages.isPending} />
       </aside>
 
       <main className="flex min-h-0 min-w-0 flex-col">
@@ -254,71 +255,6 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
         status.repo !== "in sync" && <p className={repo.tone === "bad" ? "text-danger" : "text-muted"}>{repo.text}</p>
       )}
       {error && <p className="text-danger">{error}</p>}
-    </div>
-  );
-}
-
-function PageList({
-  entries,
-  selected,
-  onOpen,
-  loading,
-}: {
-  entries: KbEntry[];
-  selected: string;
-  onOpen: (path: string) => void;
-  loading: boolean;
-}) {
-  const [filter, setFilter] = useState("");
-  const groups = groupPages(entries, filter);
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="px-4 pt-4 pb-2">
-        <input
-          type="search"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Filter pages and skills"
-          aria-label="Filter pages and skills"
-          className="w-full rounded-[3px] border border-line bg-field px-2 py-1 font-sans text-[13px] outline-none focus:border-ink"
-        />
-      </div>
-      <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-        {loading && <p className="px-2 font-sans text-[13px] text-muted">Loading…</p>}
-        {!loading && groups.length === 0 && (
-          <p className="px-2 font-sans text-[13px] text-muted">{filter ? "Nothing matches." : "No pages yet."}</p>
-        )}
-        {groups.map((group) => (
-          <section key={group.key} className="mt-3">
-            <h2 className="dl-label px-2">{group.title}</h2>
-            <ul className="mt-1">
-              {group.entries.map((entry) => (
-                <li key={entry.path}>
-                  <button
-                    type="button"
-                    onClick={() => onOpen(entry.path)}
-                    aria-current={entry.path === selected ? "page" : undefined}
-                    title={entry.path}
-                    className={clsx(
-                      "flex w-full flex-col gap-0.5 rounded-[3px] px-2 py-1.5 text-left",
-                      entry.path === selected ? "bg-accent-soft" : "hover:bg-accent-soft/60",
-                      entry.place === "skill_file" && "pl-5",
-                    )}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className={clsx("min-w-0 truncate font-sans text-[13px] text-ink", entry.place === "skill_file" && "font-mono text-[12px]")}>
-                        {entry.place === "skill_file" ? entry.path.split("/").slice(2).join("/") : entry.title}
-                      </span>
-                      {entry.status && entry.status !== "reviewed" && <Chip tone={statusTone(entry.status)}>{entry.status}</Chip>}
-                    </span>
-                    {entry.summary && <span className="line-clamp-2 font-sans text-[12px] leading-snug text-muted">{entry.summary}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        ))}
-      </nav>
     </div>
   );
 }

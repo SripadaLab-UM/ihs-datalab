@@ -134,6 +134,28 @@ class PageEntry:
     summary: str
     status: str | None
     kind: str | None
+    # From the front matter, for grouping the list (a table under its source)
+    # and finding pages: the pages it links to, and the cohorts it applies to.
+    related: tuple[str, ...] = ()
+    cohorts: tuple[str, ...] = ()
+
+
+# The list carries at most this many links and cohorts a page, each this long:
+# enough to group and search by, never a page's worth of text.
+_MAX_LABELS = 50
+_MAX_LABEL = 200
+
+
+def _labels(value: Any) -> tuple[str, ...]:
+    """A front-matter list (or one value) as short text labels: `[2024, 2025]`
+    as ("2024", "2025"); anything that isn't text or a number is left out."""
+    items = value if isinstance(value, list) else [] if value is None else [value]
+    found = [
+        str(item)
+        for item in items
+        if isinstance(item, str | int) and not isinstance(item, bool) and str(item).strip()
+    ]
+    return tuple(item[:_MAX_LABEL] for item in found[:_MAX_LABELS])
 
 
 @dataclass(frozen=True)
@@ -311,6 +333,8 @@ class Knowledge:
                     summary=summary[:400] if isinstance(summary, str) else "",
                     status=status if status in kb.STATUSES else None,
                     kind=kind if isinstance(kind, str) else None,
+                    related=_labels(fields.get("related")),
+                    cohorts=_labels(fields.get("cohorts")),
                 )
             )
         return head, found

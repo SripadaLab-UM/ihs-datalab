@@ -905,10 +905,31 @@ def test_the_tab_lists_the_synced_pages_and_skills_only(lab):
         "page", "fitbit", "reviewed", "source",
     )  # fmt: skip
     assert fitbit["summary"].startswith("Fitbit trackers")
+    # Links and cohorts, as text, for grouping the list and finding pages.
+    assert (fitbit["related"], fitbit["cohorts"]) == (["qc/midnight-sleep"], ["2025"])
     skill = by_path["skills/steps-check/SKILL.md"]
     assert (skill["place"], skill["title"], skill["status"]) == ("skill", "steps-check", None)
     assert skill["summary"] == "Check daily steps against wear time."
+    assert (skill["related"], skill["cohorts"]) == ([], [])
     assert by_path["AGENTS.md"]["title"] == "AGENTS.md"
+
+
+def test_the_list_keeps_only_short_text_labels_from_the_front_matter(lab):
+    odd = (
+        "---\nid: odd\nkind: table\nstatus: draft\nsummary: Odd.\n"
+        "related: sources/fitbit\ncohorts: [2024, true, {a: 1}, '', " + "x" * 300 + "]\n---\n"
+    )
+    many = (
+        "---\nid: many\nkind: table\nstatus: draft\nrelated: ["
+        + ", ".join(f"qc/r{i}" for i in range(80))
+        + "]\n---\n"
+    )
+    lab.remote.write({"tables/odd.md": odd.encode(), "tables/many.md": many.encode()}, "Odd pages")
+    synced(lab)
+    by_path = {p["path"]: p for p in lab.client.get("/api/knowledge/pages").json()["pages"]}
+    assert by_path["tables/odd.md"]["related"] == ["sources/fitbit"]
+    assert by_path["tables/odd.md"]["cohorts"] == ["2024", "x" * 200]
+    assert len(by_path["tables/many.md"]["related"]) == 50
 
 
 def test_a_page_is_read_from_the_synced_commit_with_its_front_matter(lab):

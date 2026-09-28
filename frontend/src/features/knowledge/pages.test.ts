@@ -2,39 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import type { KbEntry, KnowledgeStatus } from "@/api/knowledge";
 
-import { findPage, groupPages, resolveLink, statusTone } from "./pages";
+import { findPage, resolveLink, statusTone } from "./pages";
 import { ago, devicePage, repoState } from "./repoState";
 
-const entry = (path: string, place: string, title = path.split("/").at(-1)!, summary = ""): KbEntry => ({
-  path, place, title, summary, size: 10, status: null, kind: null,
+const entry = (path: string, place: string): KbEntry => ({
+  path, place, title: path.split("/").at(-1)!, summary: "", size: 10, status: null, kind: null, related: [], cohorts: [],
 }); // prettier-ignore
-
-const ENTRIES = [
-  entry("AGENTS.md", "top"),
-  entry("index.md", "top"),
-  entry("sources/oura.md", "page", "oura", "Oura rings."),
-  entry("sources/fitbit.md", "page", "fitbit", "Fitbit trackers."),
-  entry("qc/midnight-sleep.md", "page", "midnight-sleep"),
-  entry("skills/steps-check/check.R", "skill_file"),
-  entry("skills/steps-check/SKILL.md", "skill", "steps-check"),
-  entry("generated/drift.md", "generated"),
-];
-
-describe("groupPages", () => {
-  it("groups by the layout's folders, in order, leaving out empty ones", () => {
-    const groups = groupPages(ENTRIES);
-    expect(groups.map((g) => g.title)).toEqual(["About", "Data sources", "QC rules", "Lab skills", "Generated"]);
-    expect(groups[1].entries.map((e) => e.title)).toEqual(["fitbit", "oura"]);
-    // A skill's SKILL.md comes first, then its files.
-    expect(groups[3].entries.map((e) => e.path)).toEqual(["skills/steps-check/SKILL.md", "skills/steps-check/check.R"]);
-  });
-
-  it("filters on path, title and summary, every word", () => {
-    expect(groupPages(ENTRIES, "trackers").flatMap((g) => g.entries.map((e) => e.path))).toEqual(["sources/fitbit.md"]);
-    expect(groupPages(ENTRIES, "sources fit").flatMap((g) => g.entries.map((e) => e.path))).toEqual(["sources/fitbit.md"]);
-    expect(groupPages(ENTRIES, "nothing like it")).toEqual([]);
-  });
-});
+const ENTRIES = [entry("index.md", "top"), entry("qc/midnight-sleep.md", "page")];
 
 describe("resolveLink", () => {
   it.each([
