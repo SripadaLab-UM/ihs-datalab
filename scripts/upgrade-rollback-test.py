@@ -59,12 +59,20 @@ def main() -> int:
 
 
 def previous_release() -> str:
-    found = git("describe", "--tags", "--abbrev=0", "--match", "v*", "HEAD^", check=False)
-    ref = found.strip() or PINNED
-    if migration_names(ref) == migration_names("HEAD"):
-        print(f"{ref} has the same migrations as this commit; upgrading from {PINNED} instead.")
-        ref = PINNED
-    return ref
+    """The newest release before this commit whose migrations differ from it."""
+    here = migration_names("HEAD")
+    found = git("describe", "--tags", "--abbrev=0", "--match", "v*", "HEAD^", check=False).strip()
+    if found and migration_names(found) != here:
+        return found
+    for tag in git("tag", "--list", "v*", "--merged", "HEAD", "--sort=-creatordate").split():
+        if migration_names(tag) != here:
+            if found:
+                print(
+                    f"{found} has the same migrations as this commit; upgrading from {tag} instead."
+                )
+            return tag
+    print(f"No release has different migrations; upgrading from {PINNED} instead.")
+    return PINNED
 
 
 def run(ref: str, scratch: Path) -> None:
@@ -98,7 +106,13 @@ def run(ref: str, scratch: Path) -> None:
     expect(backup["migrations"] == old_names, "the backup holds the database from before")
     expect(snapshot(data / "backups" / backup["folder"] / "datalab.sqlite") == before, "…exactly")
     expect(snapshot(database, like=before) == before, "every row survived the upgrade")
-    if "0011_export_folders.sql" in new_names and "0011_export_folders.sql" not in old_names:
+    # Only when the old database had export folders and deliveries to carry over.
+    if (
+        "0011_export_folders.sql" in new_names
+        and "0011_export_folders.sql" not in old_names
+        and {"export_destinations", "workflow_run_deliveries"} <= tables_in(data / "datalab.sqlite")
+        and "0010_pipelines.sql" in old_names
+    ):
         check_new_columns(database)
 
     step("A conversation and a query are recorded, then the previous release rolls back")
@@ -221,6 +235,16 @@ def fill(database: Path) -> None:
             (when,),
         )
     connection.close()
+
+
+def tables_in(database: Path) -> set[str]:
+    connection = sqlite3.connect(f"{database.as_uri()}?mode=ro", uri=True)
+    try:
+        return {
+            r[0] for r in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        }
+    finally:
+        connection.close()
 
 
 def check_new_columns(database: Path) -> None:
