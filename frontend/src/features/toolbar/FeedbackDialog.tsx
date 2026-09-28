@@ -389,12 +389,29 @@ function PreviewView({
   onSave: () => void;
 }) {
   const images = files.filter((f) => f.type.startsWith("image/"));
+  // In the order they were chosen: attachment-1, attachment-2…
+  const attached = preview.contents.files.filter((f) => f.path.startsWith("attachments/"));
   return (
     <>
       <p className="text-sm">
         This is everything in report <span className="font-mono">{preview.report_id}</span> ({preview.zip_name},{" "}
         {sizeText(preview.zip_bytes)}). Nothing has been saved or sent yet.
       </p>
+      <p className="mt-3 flex items-start gap-2 border-l-2 border-attn/60 pl-3 text-sm font-medium" role="note">
+        <Icon name="alert" size={14} className="mt-0.5 shrink-0 text-attn" />
+        Don't include participant data: DataLab can't tell a name from other words, so read what you wrote in
+        summary.md below before saving.
+      </p>
+      {files.length > 0 && (
+        <ul className="mt-3 text-sm" aria-label="Your files in the report">
+          {files.map((file, i) => (
+            <li key={`${file.name}-${i}`}>
+              <span className="font-mono text-[12.5px]">{attached[i]?.path}</span>
+              <span className="text-muted"> is your {file.name}: its own name isn't included.</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {preview.warnings.length > 0 && (
         <ul className="mt-3 space-y-1 border-l-2 border-attn/60 pl-3 text-sm text-attn" aria-label="Check before saving">
           {preview.warnings.map((warning) => (
@@ -629,7 +646,7 @@ function States({ report }: { report: SupportReport }) {
           <span>
             Delivered to {github.repo}: GitHub confirmed commit{" "}
             <span className="font-mono">{github.commit_sha?.slice(0, 10) ?? "(unknown)"}</span>.{" "}
-            {github.html_url && (
+            {github.html_url?.startsWith("https://github.com/") && (
               <a href={github.html_url} target="_blank" rel="noreferrer noopener" className="underline">
                 View it on GitHub
               </a>

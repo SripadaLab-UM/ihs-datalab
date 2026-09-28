@@ -388,10 +388,19 @@ class GitHubAuth:
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         """A request to GitHub's API (`path` such as /repos/owner/name/contents/…)
         as the signed-in person, with this sign-in's own client. The token is
-        only ever in the request's header, never logged or returned."""
+        only ever in the request's header, never logged or returned, and only
+        ever sent to https://api.github.com: a path that could lead anywhere
+        else is refused (ValueError), as are headers, auth or redirects of the
+        caller's own."""
+        url = api_url(path)
+        refused = {"headers", "auth", "follow_redirects"} & set(kwargs)
+        if refused:
+            raise ValueError(f"GitHubAuth.request doesn't take {', '.join(sorted(refused))}.")
         token = self.access_token()
         try:
-            return self._http.request(method, f"{API}{path}", headers=_api_headers(token), **kwargs)
+            return self._http.request(
+                method, url, headers=_api_headers(token), follow_redirects=False, **kwargs
+            )
         except httpx.HTTPError as error:
             raise GitHubUnavailable(
                 f"GitHub couldn't be reached ({type(error).__name__})."
@@ -480,6 +489,25 @@ class GitHubAuth:
         self._flow = None
         self._ended = result
         return result
+
+
+_API_HOST = "api.github.com"
+
+
+def api_url(path: str) -> httpx.URL:
+    """GitHub's API URL for `path`, which must be a plain absolute path on
+    api.github.com: no `//`, `@`, backslash, `..`, `?` or `#`.
+    ValueError otherwise."""
+    if (
+        not path.startswith("/")
+        or any(bad in path for bad in ("//", "@", "\\", "..", "?", "#"))
+        or any(ord(ch) < 0x21 or ord(ch) == 0x7F for ch in path)
+    ):
+        raise ValueError("Not a GitHub API path.")
+    url = httpx.URL(API).join(path)
+    if url.scheme != "https" or url.host != _API_HOST or url.port not in (None, 443):
+        raise ValueError("Not a GitHub API path.")
+    return url
 
 
 def _api_headers(token: str) -> dict[str, str]:

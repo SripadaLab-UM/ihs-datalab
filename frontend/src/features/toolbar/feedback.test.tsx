@@ -31,7 +31,7 @@ const CONTENTS = {
   files: [
     { path: "summary.md", bytes: 300, sha256: "a".repeat(64) },
     { path: "diagnostics.json", bytes: 900, sha256: "b".repeat(64) },
-    { path: "attachments/shot.png", bytes: 68, sha256: "c".repeat(64) },
+    { path: "attachments/attachment-1.png", bytes: 68, sha256: "c".repeat(64) },
     { path: "manifest.json", bytes: 400, sha256: "d".repeat(64) },
   ],
   summary: `# DataLab report ${ID}\n\n## What happened\n\nIt broke.`,
@@ -257,7 +257,12 @@ it("preview: sends the path without its query, the browser, the trail and the fi
   expect(preview).toHaveTextContent(`This is everything in report ${ID}`);
   expect(preview).toHaveTextContent("Nothing has been saved or sent yet.");
   const files = within(preview).getByRole("region", { name: "Files in the report" });
-  expect(files).toHaveTextContent("attachments/shot.png");
+  expect(files).toHaveTextContent("attachments/attachment-1.png");
+  expect(files).not.toHaveTextContent("shot.png");
+  expect(within(preview).getByRole("list", { name: "Your files in the report" })).toHaveTextContent(
+    "attachments/attachment-1.png is your shot.png: its own name isn't included.",
+  );
+  expect(within(preview).getAllByRole("note")[0]).toHaveTextContent("Don't include participant data");
   expect(files).toHaveTextContent("manifest.json");
   expect(within(preview).getByRole("region", { name: "summary.md" })).toHaveTextContent("## What happened");
   expect(within(preview).getByRole("region", { name: "diagnostics.json" })).toHaveTextContent('"report_id"');
@@ -358,6 +363,17 @@ it("a send that can't happen now is pending, with the reason and Retry", async (
     `https://github.com/${REPO_OK.repo}/blob/main/reports/2026/09/${ID}.zip`,
   );
   expect(within(lab).getByText("GitHub has it: nothing more to do.")).toBeInTheDocument();
+});
+
+it("a link GitHub gave is shown only if it's on github.com", async () => {
+  const dialog = await openSaved(
+    report({
+      states: ["saved_locally", "confirmed_delivery"],
+      github: { state: "confirmed", repo: REPO_OK.repo, attempts: 1, commit_sha: "abc", html_url: "javascript:alert(1)" },
+    }),
+  );
+  expect(within(dialog).getByRole("list", { name: "Where this report stands" })).toHaveTextContent("Delivered to");
+  expect(within(dialog).queryByRole("link", { name: "View it on GitHub" })).not.toBeInTheDocument();
 });
 
 it("the destination is shown before sending, and a public repository can't be sent to", async () => {

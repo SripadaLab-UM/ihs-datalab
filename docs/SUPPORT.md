@@ -30,7 +30,10 @@ or a suggestion, packaged as one ZIP the maintainer can read. The code is
 DL-20260928-7F3K.zip
   summary.md          what the person wrote, and the basics, to read
   diagnostics.json    what DataLab collected (below), structured
-  attachments/…       the files the person chose, if any
+  attachments/…       the files the person chose, if any, as attachment-1.png,
+                      attachment-2.pdf…: never their own names, which could
+                      hold an ID or an email address (only a short plain
+                      extension is kept; a type that runs gets .txt added)
   manifest.json       each other file's path, size and sha256; the report ID,
                       when it was made, the type, DataLab's version and the
                       schema version
@@ -39,9 +42,12 @@ DL-20260928-7F3K.zip
 The report ID is `DL-<date>-<4 characters>`, the characters from Crockford's
 base 32 (no I, L, O or U), so it can be read out over the phone.
 
-The ZIP is built from the saved report alone, with fixed timestamps, order,
-permissions and compression: building it again gives the same bytes and the
-same sha256. Saved reports live in `<data_dir>/support/<report-id>/`:
+The ZIP is built from the saved report alone, with fixed timestamps, order
+and permissions, and nothing compressed (so a newer zlib can't change it):
+building it again gives the same bytes and the same sha256. The summary's
+text is stored with the report and used as it is, never rendered anew. A
+report is written into a hidden folder, read back and checked to build the
+same ZIP, and only then renamed into place. Saved reports live in `<data_dir>/support/<report-id>/`:
 `report.json` (what the ZIP is built from), `attachments/`, the ZIP, and
 `status.json` (where it has been saved or sent).
 
@@ -98,8 +104,14 @@ the email link.
 Saving again is harmless: an identical `<report-id>.zip` already there counts
 as saved and nothing is written. A different file with that name is left
 alone, and the person is told. The ZIP is written to a hidden partial file
-first and then linked into place, so a save that's interrupted never leaves a
-half-written `<report-id>.zip`; the partial file is removed at the next save.
+first and then linked into place (a hard link, or where the folder can't hold
+one a rename that refuses an existing name: `renameatx_np` with
+`RENAME_EXCL` on a Mac, `renameat2` with `RENAME_NOREPLACE` on Linux,
+`os.rename` on Windows). So a save that's interrupted never leaves a
+half-written `<report-id>.zip`, and the partial file is removed at the next
+save. Only on a system with none of these is the name checked just before
+the rename, which leaves a moment in which another program could put a file
+there.
 
 ### Send to the lab (one click)
 
@@ -112,7 +124,9 @@ reports/<YYYY>/<MM>/<report-id>.zip
 reports/<YYYY>/<MM>/<report-id>.md     the summary, to read on GitHub
 ```
 
-each with the commit message "Report <ID> (bug)" or "(suggestion)".
+Only `https://api.github.com` is ever sent the token: the request refuses any
+path that could lead elsewhere, and redirects aren't followed. Each file gets
+the commit message "Report <ID> (bug)" or "(suggestion)".
 
 - The destination is shown first ("SripadaLab-UM/ihs-support (private)").
   DataLab asks GitHub whether the repository is private, and won't send to a
@@ -121,8 +135,9 @@ each with the commit message "Report <ID> (bug)" or "(suggestion)".
   the commit and the file's link.
 - **Pending retry** when it can't be sent now: offline, not signed in, no
   access, or GitHub limiting requests, each said plainly. **Retry** tries
-  again, and DataLab tries each pending report once when it starts. The
-  report is kept whatever happens.
+  again, and DataLab tries pending reports once when it starts: at most 10,
+  stopping at the first that finds GitHub out of reach or limiting requests.
+  The report is kept whatever happens.
 - Never a duplicate: before writing, DataLab looks at the path. A file with
   the same git blob hash as the report's counts as sent, with no second
   commit. A different file there is left alone and the send is refused, for

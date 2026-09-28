@@ -50,6 +50,7 @@ _B64_MAX = (support.MAX_ATTACHMENT_BYTES * 4) // 3 + 8
 _DRAFTS_KEPT = 5
 _DRAFT_SECONDS = 30 * 60
 MAILTO_LIMIT = 1800  # some mail apps cut mailto: links at about 2,000 characters
+RETRY_BATCH = 10  # pending sends tried at each start
 
 
 @dataclass(frozen=True)
@@ -389,7 +390,10 @@ def build_support_router(services: SupportServices) -> APIRouter:
 
     def detail(report_id: str) -> SupportReportDetailOut:
         report, status = find(report_id)
-        built = support.preview(report, store.attachments(report))
+        try:
+            built = support.preview(report, store.attachments(report))
+        except support.SupportError as error:
+            raise HTTPException(409, f"This report can't be opened: {error}") from error
         return SupportReportDetailOut(
             **_report_fields(report, status, settings), contents=_contents(built.files)
         )
@@ -490,13 +494,17 @@ def build_support_router(services: SupportServices) -> APIRouter:
         if repo is None or auth is None or not auth.signed_in():
             return 0
         done = 0
-        for report_id in support.pending_sends(store):
+        # At most RETRY_BATCH a start, and none more once GitHub is out of reach.
+        for report_id in support.pending_sends(store)[:RETRY_BATCH]:
             try:
                 status = support.send_to_repo(store, report_id, auth, repo, support.now_utc())
             except Exception as error:  # never stop DataLab starting
                 log.warning("a pending support report wasn't retried: %s", type(error).__name__)
                 continue
-            done += (status.get("github") or {}).get("state") == "confirmed"
+            github = status.get("github") or {}
+            done += github.get("state") == "confirmed"
+            if github.get("unreachable"):
+                break  # offline or rate-limited: the rest wait for the next start
         return done
 
     router.retry_pending = retry_pending  # type: ignore[attr-defined]
@@ -571,10 +579,15 @@ def _warnings(body: SupportDraftIn, attachments: int) -> list[str]:
                 )
     if attachments:
         if attachments == 1:
-            said = "You chose a file: DataLab doesn't look inside it. Check it shows"
+            said = (
+                "You chose a file: it goes in as attachment-1, without its own name, but "
+                "DataLab doesn't look inside it. Check it shows"
+            )
         else:
             said = (
-                f"You chose {attachments} files: DataLab doesn't look inside them. Check they show"
+                f"You chose {attachments} files: they go in as attachment-1 to "
+                f"attachment-{attachments}, without their own names, but DataLab doesn't look "
+                "inside them. Check they show"
             )
         found.append(f"{said} no participant data, query results or conversations.")
     return found
@@ -615,13 +628,39 @@ def _report_fields(
         ],
         "states": support.states(status),
         "folders": folders,
-        "github": SupportGitHubSendOut(**_known(github, SupportGitHubSendOut)) if github else None,
+        "github": SupportGitHubSendOut(
+            **{
+                **_known(github, SupportGitHubSendOut),
+                "html_url": support.github_link(github.get("html_url")),
+            }
+        )
+        if github
+        else None,
         "email": email_for(report, folders[-1] if folders else None, settings.repos.access_contact),
     }
 
 
 def _known(raw: dict[str, Any], model: type[BaseModel]) -> dict[str, Any]:
     return {k: v for k, v in raw.items() if k in model.model_fields}
+
+
+_CUT = "\n\n(The summary is cut short here: all of it is in the attached file.)\n"
+
+
+def _cut_to_fit(head: str, summary: str, fits: Callable[[str], bool]) -> str:
+    """head + the longest start of the summary that fits, and a note that it's cut.
+    Measured on the whole link as it will be, so any text (non-ASCII too) fits."""
+    low, high = 0, len(summary)
+    while low < high:  # the longest prefix that fits
+        middle = (low + high + 1) // 2
+        if fits(head + summary[:middle].rstrip() + _CUT):
+            low = middle
+        else:
+            high = middle - 1
+    body = head + summary[:low].rstrip() + _CUT
+    while not fits(body) and len(body) > len(_CUT):  # rstrip can't grow it, but be sure
+        body = body[: -len(_CUT) - 1].rstrip() + _CUT
+    return body
 
 
 def email_for(
@@ -638,7 +677,7 @@ def email_for(
         f"attached.\n\nAttach the file: {support.zip_name(report_id)}{where}. (An email link "
         "can't attach it for you.)\n\n"
     )
-    summary = support.summary_text(report)
+    summary = support.summary_of(report)
     summary = summary.split("\n## Diagnostics", 1)[0].rstrip() + "\n"
     body = head + summary
 
@@ -649,16 +688,7 @@ def email_for(
     if who.email:
         mailto = link(body)
         if len(mailto) > MAILTO_LIMIT:
-            cut = head + "(The summary is cut short here: all of it is in the attached file.)\n"
-            room = MAILTO_LIMIT - len(link(cut))
-            text = summary
-            while text and len(quote(text)) > room:
-                text = text[: max(0, len(text) - max(20, (len(quote(text)) - room) // 3))]
-            body = (
-                head
-                + text.rstrip()
-                + "\n\n(The summary is cut short here: all of it is in the attached file.)\n"
-            )
+            body = _cut_to_fit(head, summary, lambda text: len(link(text)) <= MAILTO_LIMIT)
             mailto = link(body)
     return SupportEmailOut(
         contact=who.contact, to=who.email, subject=subject, body=body, mailto=mailto

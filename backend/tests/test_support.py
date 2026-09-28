@@ -113,10 +113,10 @@ def test_the_bundle_holds_the_summary_diagnostics_manifest_and_attachments(setti
     assert list(files) == [
         "summary.md",
         "diagnostics.json",
-        "attachments/screenshot.png",
+        "attachments/attachment-1.png",
         "manifest.json",
     ]
-    assert files["attachments/screenshot.png"] == PNG
+    assert files["attachments/attachment-1.png"] == PNG
     manifest = json.loads(files["manifest.json"])
     assert manifest["report_id"] == report_id
     assert manifest["schema_version"] == support.SCHEMA_VERSION
@@ -125,7 +125,7 @@ def test_the_bundle_holds_the_summary_diagnostics_manifest_and_attachments(setti
     assert manifest["kind"] == "bug"
     assert manifest["files"] == [
         {"path": path, "bytes": len(files[path]), "sha256": hashlib.sha256(files[path]).hexdigest()}
-        for path in ("summary.md", "diagnostics.json", "attachments/screenshot.png")
+        for path in ("summary.md", "diagnostics.json", "attachments/attachment-1.png")
     ]
     assert files["manifest.json"].decode() == shown["contents"]["manifest"]
     assert files["diagnostics.json"].decode() == shown["contents"]["diagnostics"]
@@ -134,7 +134,9 @@ def test_the_bundle_holds_the_summary_diagnostics_manifest_and_attachments(setti
     assert summary.startswith(f"# DataLab report {report_id}")
     assert "## What happened\n\nThe results table stayed empty" in summary
     assert "## What I expected\n\nThe rows to show." in summary
-    assert "attachments/screenshot.png" in summary
+    assert "attachments/attachment-1.png" in summary
+    # Never the person's own file name.
+    assert all(b"screenshot" not in content for content in files.values())
     diagnostics = json.loads(files["diagnostics.json"])
     assert diagnostics["app"] == {"version": __version__, "profile": "practice"}
     assert diagnostics["context"] == {"tab": "workspace", "route": "/workspace"}
@@ -154,7 +156,7 @@ def test_building_a_report_again_gives_the_same_bytes(settings, catalog):
     (store.folder(report_id) / f"{report_id}.zip").unlink()
     assert store.bundle(report_id) == first
     # A changed attachment is noticed, never packaged as if it were the saved one.
-    (store.folder(report_id) / "attachments" / "screenshot.png").write_bytes(b"other")
+    (store.folder(report_id) / "attachments" / "attachment-1.png").write_bytes(b"other")
     (store.folder(report_id) / f"{report_id}.zip").unlink()
     with pytest.raises(support.SupportError):
         store.bundle(report_id)
@@ -200,18 +202,25 @@ def test_attachments_are_limited_and_named_safely(settings, catalog):
             json=draft(
                 attachments=[
                     {"name": "../../evil.sh", "data_base64": base64.b64encode(b"echo").decode()},
-                    {"name": "C:\\Users\\me\\shot.png", "data_base64": one["data_base64"]},
+                    {"name": "C:\\Users\\me\\shot.PNG", "data_base64": one["data_base64"]},
                     {"name": "shot.png", "data_base64": one["data_base64"]},
+                    {"name": "no extension", "data_base64": one["data_base64"]},
+                    {"name": "odd.p\u202eng", "data_base64": one["data_base64"]},
                 ]
             ),
         ).json()
         paths = [f["path"] for f in shown["contents"]["files"]]
-        assert paths[2:5] == [
-            "attachments/evil.sh.txt",
-            "attachments/shot.png",
-            "attachments/shot (2).png",
+        assert paths[2:7] == [
+            "attachments/attachment-1.sh.txt",
+            "attachments/attachment-2.png",
+            "attachments/attachment-3.png",
+            "attachments/attachment-4",
+            "attachments/attachment-5.png",
         ]
-        assert "You chose 3 files: DataLab doesn't look inside them." in shown["warnings"][-1]
+        assert shown["warnings"][-1].startswith(
+            "You chose 5 files: they go in as attachment-1 to attachment-5, without their own "
+            "names, but DataLab doesn't look inside them."
+        )
 
 
 def test_lines_that_look_like_identifiers_are_pointed_out(settings, catalog):
@@ -938,3 +947,229 @@ def test_the_routes_need_the_sign_in_and_json_from_datalabs_own_page(settings, c
             ).status_code
             == 204
         )
+
+
+# ------------------------------------------------------------------ review fixes
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".evil.example/x",
+        "@evil.example/x",
+        "/x@evil.example/y",
+        "//evil.example/x",
+        "/repos/a/../../x",
+        "/repos\\evil",
+        "/repos/a?x=1",
+        "/repos/a#x",
+        "https://evil.example/x",
+        "",
+        "/repos/a b",
+    ],
+)
+def test_the_github_token_only_ever_goes_to_api_github_com(path):
+    seen: list[httpx.Request] = []
+    TokenStore().save(Tokens(TOKEN, None, None, None))
+    auth = GitHubAuth(
+        "Iv23liTestClient",
+        http=httpx.Client(
+            transport=httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))
+        ),
+    )
+    with pytest.raises(ValueError):
+        auth.request("GET", path)
+    assert seen == []
+
+
+def test_the_github_request_takes_no_headers_auth_or_redirects_of_its_own():
+    seen: list[httpx.Request] = []
+    TokenStore().save(Tokens(TOKEN, None, None, None))
+    auth = GitHubAuth(
+        "Iv23liTestClient",
+        http=httpx.Client(
+            transport=httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))
+        ),
+    )
+    for extra in ({"headers": {"x": "1"}}, {"auth": ("a", "b")}, {"follow_redirects": True}):
+        with pytest.raises(ValueError):
+            auth.request("GET", "/repos/a/b", **extra)
+    assert seen == []
+    auth.request("GET", "/repos/a/b/contents/reports/x.zip", params={"per_page": 1})
+    [request] = seen
+    assert request.url.scheme == "https" and request.url.host == "api.github.com"
+    assert request.url.path == "/repos/a/b/contents/reports/x.zip"
+    assert request.headers["authorization"] == f"Bearer {TOKEN}"
+
+
+def test_attachment_names_never_reach_the_report(repo_settings, tmp_path):
+    fake = FakeGitHub()
+    app, _ = github_app(repo_settings, fake)
+    name = "participant P-00123 jane.doe@example.org 2026-09-01.png"
+    with TestClient(app) as client:
+        saved = save_report(
+            client, attachments=[{"name": name, "data_base64": base64.b64encode(PNG).decode()}]
+        )
+        report_id = saved["report_id"]
+        data = client.get(f"/api/support/reports/{report_id}/bundle").content
+        send(client, report_id)
+    folder = repo_settings.data_dir / "support" / report_id
+    texts = [
+        saved["email"]["mailto"] or "",
+        unquote(saved["email"]["mailto"] or ""),
+        saved["email"]["body"],
+    ]
+    texts += [c.decode("utf-8", "replace") for c in unzip(data).values()]
+    texts += [(folder / f).read_text() for f in ("report.json", "status.json")]
+    texts += [c.decode("utf-8", "replace") for c in fake.files.values()]
+    texts += [p.name for p in folder.rglob("*")]
+    for text in texts:
+        for part in ("P-00123", "jane.doe", "2026-09-01", "participant"):
+            assert part not in text
+    assert "attachments/attachment-1.png" in unzip(data)
+
+
+def test_names_the_disk_treats_as_one_dont_break_a_report(settings, catalog):
+    nfc, nfd = "café.png", "café.png"
+    one = base64.b64encode(PNG).decode()
+    other = base64.b64encode(PNG + b"x").decode()
+    with TestClient(make_app(settings, catalog)) as client:
+        saved = save_report(
+            client,
+            attachments=[{"name": nfc, "data_base64": one}, {"name": nfd, "data_base64": other}],
+        )
+        reopened = client.get(f"/api/support/reports/{saved['report_id']}")
+    assert reopened.status_code == 200
+    assert [a["path"] for a in reopened.json()["attachments"]] == [
+        "attachments/attachment-1.png",
+        "attachments/attachment-2.png",
+    ]
+
+
+def test_a_report_that_doesnt_read_back_leaves_no_folder(settings, catalog, monkeypatch):
+    real = support.ReportStore._attachments_in
+
+    def changed(folder, report):
+        found = real(folder, report)
+        return {name: data + b"!" for name, data in found.items()}
+
+    with TestClient(make_app(settings, catalog)) as client:
+        shown = client.post("/api/support/preview", json=draft()).json()
+        monkeypatch.setattr(support.ReportStore, "_attachments_in", staticmethod(changed))
+        failed = client.post("/api/support/reports", json={"draft_id": shown["draft_id"]})
+        assert failed.status_code == 422
+        assert list((settings.data_dir / "support").iterdir()) == []
+        monkeypatch.setattr(support.ReportStore, "_attachments_in", staticmethod(real))
+        saved = save_report(client)
+        # A saved report whose file was changed since: 409, not a 500.
+        folder = settings.data_dir / "support" / saved["report_id"]
+        (folder / "attachments" / "attachment-1.png").write_bytes(b"changed")
+        reopened = client.get(f"/api/support/reports/{saved['report_id']}")
+    assert reopened.status_code == 409
+
+
+def test_a_long_non_ascii_summary_is_cut_to_the_longest_start_that_fits(lab_settings, catalog):
+    with TestClient(make_app(lab_settings, catalog)) as client:
+        saved = save_report(client, happened="été " * 1200, attachments=[])
+    mailto = saved["email"]["mailto"]
+    assert len(mailto) <= 1800
+    text = unquote(mailto)
+    assert "What happened" in text and "été été" in text
+    assert "cut short here" in text
+    # The longest that fits: a few more characters wouldn't.
+    assert len(mailto) > 1800 - 60
+
+
+def test_the_summary_is_stored_and_sent_as_it_was(repo_settings, monkeypatch):
+    fake = FakeGitHub()
+    app, _ = github_app(repo_settings, fake)
+    with TestClient(app) as client:
+        saved = save_report(client)
+        report_id = saved["report_id"]
+        stored = support.ReportStore(repo_settings.data_dir / "support").report(report_id)
+        assert stored["summary_md"] == saved["contents"]["summary"]
+        monkeypatch.setattr(support, "summary_text", lambda report: "rendered anew")
+        (repo_settings.data_dir / "support" / report_id / f"{report_id}.zip").unlink()
+        data = client.get(f"/api/support/reports/{report_id}/bundle").content
+        send(client, report_id)
+    assert hashlib.sha256(data).hexdigest() == saved["zip_sha256"]
+    md = next(v for k, v in fake.files.items() if k.endswith(".md"))
+    assert md.decode() == saved["contents"]["summary"]
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert {i.compress_type for i in archive.infolist()} == {zipfile.ZIP_STORED}
+
+
+@pytest.mark.parametrize("status", [204, 302, 500])
+def test_an_unexpected_answer_about_the_file_is_pending_and_writes_nothing(repo_settings, status):
+    fake = FakeGitHub()
+    real = fake.handler
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/contents/" in request.url.path:
+            fake.calls.append((request.method, request.url.path))
+            return httpx.Response(status, headers={"location": "https://evil.example/"})
+        return real(request)
+
+    fake.handler = handler  # type: ignore[method-assign]
+    app, _ = github_app(repo_settings, fake)
+    with TestClient(app) as client:
+        shown = send(client, save_report(client)["report_id"])
+    assert shown["github"]["state"] == "pending"
+    assert not any(method == "PUT" for method, _ in fake.calls)
+
+
+def test_a_403_with_retry_after_is_a_rate_limit(repo_settings):
+    fake = FakeGitHub()
+    real = fake.handler
+    fake.handler = lambda request: (  # type: ignore[method-assign]
+        httpx.Response(403, headers={"retry-after": "60"}, json={})
+        if request.url.path.endswith("ihs-support")
+        else real(request)
+    )
+    app, _ = github_app(repo_settings, fake)
+    with TestClient(app) as client:
+        shown = send(client, save_report(client)["report_id"])
+    assert "limiting requests" in shown["github"]["reason"]
+
+
+def test_retrying_at_start_stops_once_github_is_out_of_reach(repo_settings):
+    fake = FakeGitHub()
+    fake.offline = True
+    app, router = github_app(repo_settings, fake)
+    with TestClient(app) as client:
+        ids = [save_report(client, attachments=[])["report_id"] for _ in range(3)]
+        for report_id in ids:
+            send(client, report_id)
+        assert router.retry_pending() == 0
+        attempts = [
+            client.get(f"/api/support/reports/{i}").json()["github"]["attempts"] for i in ids
+        ]
+    assert sorted(attempts) == [1, 1, 2]  # one was tried, then the rest waited
+
+
+def test_only_a_github_com_link_is_kept():
+    assert (
+        support.github_link("https://github.com/o/r/blob/main/x")
+        == "https://github.com/o/r/blob/main/x"
+    )
+    for url in (
+        "javascript:alert(1)",
+        "https://github.com.evil.example/x",
+        "http://github.com/x",
+        None,
+    ):
+        assert support.github_link(url) is None
+
+
+def test_a_link_into_place_never_replaces_a_file(tmp_path):
+    from datalab.exports import Folder
+
+    (tmp_path / "part").write_text("new")
+    (tmp_path / "taken").write_text("old")
+    with Folder.at(tmp_path) as folder:
+        with pytest.raises(FileExistsError):
+            folder.link_new("part", "taken")
+        folder.link_new("part", "free")
+        assert sorted(folder.names()) == ["free", "part", "taken"]
+    assert (tmp_path / "taken").read_text() == "old"
+    assert (tmp_path / "free").read_text() == "new"

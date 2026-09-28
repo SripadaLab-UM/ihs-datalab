@@ -58,6 +58,7 @@ import sqlite3
 import stat
 import sys
 import threading
+import unicodedata
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -540,38 +541,48 @@ class NewAttachment:
     data: bytes
 
 
-def attachment_name(name: str, taken: set[str]) -> str:
-    """A safe, unique file name for an attachment: no folders, no characters
-    Windows or a Mac refuse, and `.txt` added to a type that would run."""
+# Bidirectional-text controls and zero-width characters: they can make a
+# name read differently from what it is.
+_INVISIBLE = re.compile("[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_EXTENSION = re.compile(r"[a-z0-9]{1,10}")
+
+
+def safe_extension(name: str) -> str:
+    """The file's type from its name, if it's a short plain one ("png"), else "".
+
+    The name itself never goes into a report: it could hold an ID, a date
+    or an email address, and DataLab can't tell. Only the extension is kept,
+    normalised (NFC), without invisible characters, in lower case.
+    """
+    name = _INVISIBLE.sub("", unicodedata.normalize("NFC", name)).strip().rstrip(" .")
     base = name.replace("\\", "/").rsplit("/", 1)[-1]
-    base = exports.inert_name(exports.effective_name(exports.safe_name(base, 80, 120)))
-    if base in ("export", ""):
-        base = "attachment"
-    stem, dot, suffix = base.rpartition(".")
-    if not dot:
-        stem, suffix = base, ""
-    candidate, number = base, 2
-    while candidate.casefold() in taken:
-        candidate = f"{stem} ({number}).{suffix}" if suffix else f"{stem} ({number})"
-        number += 1
-    taken.add(candidate.casefold())
-    return candidate
+    _, dot, suffix = base.rpartition(".")
+    suffix = suffix.lower()
+    return suffix if dot and _EXTENSION.fullmatch(suffix) else ""
+
+
+def attachment_name(number: int, original: str) -> str:
+    """attachment-<n>.<ext>: never the person's own file name. A type that
+    would run when opened gets `.txt` added (exports.inert_name)."""
+    extension = safe_extension(original)
+    name = f"attachment-{number}.{extension}" if extension else f"attachment-{number}"
+    return exports.inert_name(name)
 
 
 def check_attachments(attachments: list[NewAttachment]) -> list[NewAttachment]:
-    """The person's files, named safely, or SupportError for too many or too large."""
+    """The person's files, as attachment-1.png, attachment-2.pdf… (never their own
+    names), or SupportError for too many or too large."""
     if len(attachments) > MAX_ATTACHMENTS:
         raise SupportError(f"Attach at most {MAX_ATTACHMENTS} files.")
     total = 0
-    taken: set[str] = set()
     named = []
-    for attachment in attachments:
+    for number, attachment in enumerate(attachments, start=1):
         if len(attachment.data) > MAX_ATTACHMENT_BYTES:
             raise SupportError(
-                f"{attachment.name[:80]} is larger than {MAX_ATTACHMENT_BYTES // 1024**2} MB."
+                f"File {number} is larger than {MAX_ATTACHMENT_BYTES // 1024**2} MB."
             )
         total += len(attachment.data)
-        named.append(NewAttachment(attachment_name(attachment.name, taken), attachment.data))
+        named.append(NewAttachment(attachment_name(number, attachment.name), attachment.data))
     if total > MAX_ATTACHMENTS_BYTES:
         raise SupportError(
             f"The attachments come to more than {MAX_ATTACHMENTS_BYTES // 1024**2} MB together."
@@ -590,8 +601,9 @@ def new_report(
     attachments: list[NewAttachment],
     diagnostics: dict[str, Any],
 ) -> dict[str, Any]:
-    """The report as it's stored (report.json): everything the bundle is built from."""
-    return {
+    """The report as it's stored (report.json): everything the bundle is built
+    from, the summary's very text included, so it's never rendered anew."""
+    report = {
         "schema_version": SCHEMA_VERSION,
         "report_id": report_id,
         "created_at": created_at,
@@ -605,6 +617,14 @@ def new_report(
         ],
         "diagnostics": diagnostics,
     }
+    report["summary_md"] = summary_text(report)
+    return report
+
+
+def summary_of(report: dict[str, Any]) -> str:
+    """summary.md as it was when the report was made."""
+    stored = report.get("summary_md")
+    return stored if isinstance(stored, str) else summary_text(report)
 
 
 def _tidy(text: str) -> str:
@@ -682,7 +702,7 @@ def _json_bytes(value: Any) -> bytes:
 def bundle_files(report: dict[str, Any], attachments: dict[str, bytes]) -> list[tuple[str, bytes]]:
     """The bundle's files, in order, manifest last."""
     files = [
-        (SUMMARY, summary_text(report).encode()),
+        (SUMMARY, summary_of(report).encode()),
         (DIAGNOSTICS, _json_bytes(report["diagnostics"])),
     ]
     for entry in report["attachments"]:
@@ -707,17 +727,19 @@ def bundle_files(report: dict[str, Any], attachments: dict[str, bytes]) -> list[
 
 def zip_bytes(files: list[tuple[str, bytes]], created_at: str) -> bytes:
     """The ZIP, the same bytes every time for the same files: fixed times,
-    order, permissions and compression."""
+    order and permissions, and nothing compressed."""
     when = datetime.fromisoformat(created_at.replace("Z", "+00:00")).astimezone(UTC)
     stamp = (max(when.year, 1980), when.month, when.day, when.hour, when.minute, when.second)
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for path, data in files:
             info = zipfile.ZipInfo(path, date_time=stamp)
-            info.compress_type = zipfile.ZIP_DEFLATED
+            # Stored, not compressed: a newer zlib could compress differently,
+            # and a rebuilt report must be the same bytes.
+            info.compress_type = zipfile.ZIP_STORED
             info.create_system = 3
             info.external_attr = (stat.S_IFREG | 0o644) << 16
-            archive.writestr(info, data, compresslevel=6)
+            archive.writestr(info, data)
     return buffer.getvalue()
 
 
@@ -782,9 +804,16 @@ class ReportStore:
             work.mkdir(mode=0o700)
             try:
                 (work / ATTACHMENTS).mkdir()
-                for name, data in attachments.items():
-                    (work / ATTACHMENTS / name).write_bytes(data)
+                for entry in report["attachments"]:
+                    name = entry["name"]
+                    # O_EXCL: two names the disk treats as one never overwrite each other.
+                    with open(work / ATTACHMENTS / name, "xb") as out:
+                        out.write(attachments[name])
                 (work / "report.json").write_bytes(_json_bytes(report))
+                # Read back as a reopened report will be: it must build the same ZIP.
+                again = self._read(work)
+                if preview(again, self._attachments_in(work, again)).zip != built.zip:
+                    raise SupportError("The report didn't read back the same. Nothing was saved.")
                 (work / zip_name(report_id)).write_bytes(built.zip)
                 status = {
                     "saved_at": now,
@@ -795,9 +824,23 @@ class ReportStore:
                 }
                 (work / "status.json").write_bytes(_json_bytes(status))
                 os.rename(work, final)
+            except FileExistsError as error:
+                shutil.rmtree(work, ignore_errors=True)
+                raise SupportError("Two of the files would have the same name.") from error
             except BaseException:
                 shutil.rmtree(work, ignore_errors=True)
                 raise
+
+    @staticmethod
+    def _read(folder: Path) -> dict[str, Any]:
+        return json.loads((folder / "report.json").read_text(encoding="utf-8"))
+
+    @staticmethod
+    def _attachments_in(folder: Path, report: dict[str, Any]) -> dict[str, bytes]:
+        return {
+            a["name"]: (folder / ATTACHMENTS / a["name"]).read_bytes()
+            for a in report["attachments"]
+        }
 
     def ids(self) -> list[str]:
         try:
@@ -819,8 +862,10 @@ class ReportStore:
             raise LookupError("No such report.") from error
 
     def attachments(self, report: dict[str, Any]) -> dict[str, bytes]:
-        folder = self.folder(report["report_id"]) / ATTACHMENTS
-        return {a["name"]: (folder / a["name"]).read_bytes() for a in report["attachments"]}
+        try:
+            return self._attachments_in(self.folder(report["report_id"]), report)
+        except OSError as error:
+            raise SupportError("One of this report's files is missing.") from error
 
     def bundle(self, report_id: str) -> bytes:
         """The saved ZIP, checked against the hash recorded when it was saved;
@@ -973,7 +1018,7 @@ def _sha256_of(folder: exports.Folder, name: str) -> str | None:
 def _remove_partials(folder: exports.Folder, report_id: str) -> None:
     """Remove partial files this report's earlier saves left (only those)."""
     try:
-        names = os.listdir(folder.path)
+        names = folder.names()
     except OSError:
         return
     for name in names:
@@ -1007,6 +1052,10 @@ class Pending(Exception):
     """Not sent now, but may be later: the reason, in plain words."""
 
 
+class Unreachable(Pending):
+    """GitHub can't be reached or is limiting requests: no use trying more now."""
+
+
 class Refused(Exception):
     """Not sent, and trying again won't help until something changes."""
 
@@ -1028,13 +1077,19 @@ def check_repo(api: GitHubApi, repo: str) -> None:
             "access, or to install the lab's GitHub App on it."
         )
     _raise_for(response)
-    info = response.json()
-    if not info.get("private"):
+    try:
+        info = response.json()
+    except ValueError:
+        info = None
+    if response.status_code != 200 or not isinstance(info, dict):
+        raise Pending("GitHub's answer about the repository couldn't be read. Try again.")
+    if info.get("private") is not True:
         raise Refused(
             f"{repo} is a public repository, so DataLab won't send reports there. Ask the "
             "maintainer to make it private, or to set a private one in settings.toml."
         )
-    if not (info.get("permissions") or {}).get("push"):
+    permissions = info.get("permissions")
+    if not isinstance(permissions, dict) or permissions.get("push") is not True:
         raise Pending(f"Your GitHub account can read {repo} but not add files to it.")
 
 
@@ -1065,6 +1120,7 @@ def put_file(api: GitHubApi, repo: str, path: str, data: bytes, message: str) ->
             return Sent(_last_commit(api, repo, path), found.get("html_url"), True)
         if existing.status_code != 404:
             _raise_for(existing)
+            raise Pending(f"GitHub gave an unexpected answer ({existing.status_code}). Try again.")
         created = _call(
             api,
             "PUT",
@@ -1080,6 +1136,7 @@ def put_file(api: GitHubApi, repo: str, path: str, data: bytes, message: str) ->
         if created.status_code == 422:
             continue  # it appeared meanwhile: look again
         _raise_for(created)
+        raise Pending(f"GitHub gave an unexpected answer ({created.status_code}). Try again.")
     raise Pending("GitHub didn't settle whether the file is there. Try again.")
 
 
@@ -1098,8 +1155,10 @@ def _call(api: GitHubApi, method: str, path: str, **kwargs: Any) -> httpx.Respon
         return api.request(method, path, **kwargs)
     except SignInNeeded as error:
         raise Pending(f"{error} (Settings → Connections → GitHub)") from None
+    except ValueError:
+        raise Refused("DataLab refused to send to that address.") from None
     except GitHubUnavailable:
-        raise Pending(
+        raise Unreachable(
             "GitHub couldn't be reached: this computer may be offline. DataLab will try "
             "again when it next starts, or press Retry."
         ) from None
@@ -1107,7 +1166,13 @@ def _call(api: GitHubApi, method: str, path: str, **kwargs: Any) -> httpx.Respon
 
 def _rate_limited(response: httpx.Response) -> bool:
     code = response.status_code
-    return code == 429 or (code == 403 and response.headers.get("x-ratelimit-remaining") == "0")
+    return code == 429 or (
+        code == 403
+        and (
+            response.headers.get("x-ratelimit-remaining") == "0"
+            or "retry-after" in response.headers
+        )
+    )
 
 
 def _raise_for(response: httpx.Response) -> None:
@@ -1117,7 +1182,7 @@ def _raise_for(response: httpx.Response) -> None:
     if code == 401:
         raise Pending("GitHub didn't accept the sign-in. Sign in again in Settings → Connections.")
     if _rate_limited(response):
-        raise Pending("GitHub is limiting requests for now. Try again in a while.")
+        raise Unreachable("GitHub is limiting requests for now. Try again in a while.")
     if code in (403, 404):
         raise Pending("GitHub says your account can't add files there. Ask the maintainer.")
     if code >= 500:
@@ -1141,9 +1206,11 @@ def send_to_repo(store: ReportStore, report_id: str, api: GitHubApi, repo: str, 
     try:
         check_repo(api, repo)
         sent = put_file(api, repo, zip_path, data, message)
-        put_file(api, repo, md_path, summary_text(report).encode(), message)
+        put_file(api, repo, md_path, summary_of(report).encode(), message)
     except Pending as reason:
-        outcome.update(state="pending", reason=str(reason))
+        outcome.update(
+            state="pending", reason=str(reason), unreachable=isinstance(reason, Unreachable)
+        )
     except Refused as reason:
         outcome.update(state="refused", reason=str(reason))
     else:
@@ -1151,7 +1218,7 @@ def send_to_repo(store: ReportStore, report_id: str, api: GitHubApi, repo: str, 
             state="confirmed",
             confirmed_at=now,
             commit_sha=sent.commit_sha,
-            html_url=sent.html_url,
+            html_url=github_link(sent.html_url),
             path=zip_path,
             already_there=sent.already_there,
         )
@@ -1161,6 +1228,11 @@ def send_to_repo(store: ReportStore, report_id: str, api: GitHubApi, repo: str, 
         status["github"] = {**outcome, "attempts": int(before.get("attempts") or 0) + 1}
 
     return store.update_status(report_id, record)
+
+
+def github_link(url: object) -> str | None:
+    """A link GitHub gave, only if it's a page on github.com."""
+    return url if isinstance(url, str) and url.startswith("https://github.com/") else None
 
 
 def pending_sends(store: ReportStore) -> list[str]:
