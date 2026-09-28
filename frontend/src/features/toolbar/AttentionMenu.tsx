@@ -36,6 +36,9 @@ export function useAttention(): AttentionItem[] {
   const real = health.data !== undefined && health.data.profile !== "practice";
   const githubQuery = useQuery({ queryKey: ["github-status"], queryFn: githubApi.status, enabled: real });
   const github = githubQuery.data;
+  const noCatalog = real && health.data?.catalog_state === "empty";
+  // Where it comes from says what to do: the knowledge base syncs; a folder in settings is the maintainer's.
+  const catalog = useQuery({ queryKey: ["catalog-status", "attention"], queryFn: api.catalogStatus, enabled: noCatalog });
   const update = useUpdateCheck().data;
   const items: AttentionItem[] = [];
   const db = databaseStanding(connections, test?.database);
@@ -46,11 +49,11 @@ export function useAttention(): AttentionItem[] {
   if (key.attention) {
     items.push({ id: "key", text: key.attention, hint: "U-M GPT key: open connection settings", section: "connections", anchor: "connection-umgpt" });
   }
-  // Once GitHub's status is known, so the hint doesn't change under the pointer.
-  if (real && health.data?.catalog_state === "empty" && !githubQuery.isPending) {
+  // Once where it comes from is known, so the hint doesn't change under the pointer.
+  if (noCatalog && !githubQuery.isPending && !catalog.isPending) {
     // Every query names columns the check looks up in it: none runs without one.
     items.push(
-      github?.available
+      github?.available && catalog.data?.source === "knowledge"
         ? { id: "catalog", text: "No table catalog", hint: "No query can run: sign in to GitHub and sync the knowledge base", section: "connections", anchor: "connection-github" }
         : { id: "catalog", text: "No table catalog", hint: "No query can run: see why, and ask the DataLab maintainer", section: "about" },
     );

@@ -211,6 +211,19 @@ access. It never gains it.
   against the catalog. Oracle runs a bare name that isn't a column, such as
   `ORA_DATABASE_NAME` or `DBMS_UTILITY.PORT_STRING`, as a function call with
   no arguments. With no catalog, no query runs.
+  - **The catalog is a trust input.** Without a `catalog_dir` setting, the
+    real DataLab reads it from the lab knowledge base's `generated/schema` on
+    GitHub's `main`, as last synced: a column name there is what lets that
+    bare name through. So it relies on `main`'s protection: only lab members
+    with write access push; the repo's ruleset refuses force-pushes and
+    deleting `main`; DataLab's Save & share runs the knowledge-base check
+    before every push, and GitHub Actions runs it after every push. And
+    DataLab checks each file as that check does (catalog fields only, names
+    matching paths, no links or submodules), leaves out column names over
+    128 bytes or with quotes or control characters, leaves out columns named
+    as Oracle's no-argument built-ins (`USER`, `UID`, `SYSDATE`,
+    `ORA_INVOKING_USER`, `ORA_DATABASE_NAME`, …), and doesn't read a
+    `generated/schema` over 20,000 files or 64 MB (`data/catalog_source.py`).
   - Allowed without a catalog column: Oracle's pseudo-columns (`ROWNUM`,
     `LEVEL`, `USER`, `SYSDATE`, …). All are reserved words, and the Oracle
     test checks none of them can be taken over.

@@ -58,6 +58,9 @@ export function GitHubSection() {
 function SignInOrOut({ github }: { github: GitHubStatus }) {
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const noCatalog = health.data?.catalog_state === "empty";
+  // Only when the catalog comes from the knowledge base: a folder in settings is the maintainer's.
+  const catalog = useQuery({ queryKey: ["catalog-status", "github"], queryFn: () => api.catalogStatus(), enabled: noCatalog });
   const areas = new Set(github.repos.map((r) => r.area));
   const signIn = useQuery({ queryKey: SIGN_IN, queryFn: githubApi.signIn });
   // Each repo's own state, and its Sync.
@@ -159,7 +162,7 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
   return (
     <Part id={GITHUB_ANCHOR} title="GitHub" state={state}>
       <p className="mt-1 text-sm text-muted">For the lab's {what}: reading it, and sharing the changes you save.</p>
-      {areas.has("knowledge") && health.data?.catalog_state === "empty" && (
+      {areas.has("knowledge") && noCatalog && catalog.data?.source === "knowledge" && (
         <p className="mt-2 flex items-baseline gap-1.5 text-sm text-attn" role="status">
           <Icon name="alert" size={13} className="translate-y-[2px]" /> DataLab has no catalog of the cohorts' tables
           yet. It comes from the knowledge base: sign in and sync it, and queries can be checked and run.

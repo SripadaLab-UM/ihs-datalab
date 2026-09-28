@@ -15,7 +15,7 @@ import { FoldersShortcut } from "./FoldersShortcut";
 import { MoreMenu } from "./MoreMenu";
 import { activityWarning, SessionMenu } from "./SessionMenu";
 
-vi.mock("@/api/client", () => ({ api: { health: vi.fn(), destinations: vi.fn() } }));
+vi.mock("@/api/client", () => ({ api: { health: vi.fn(), destinations: vi.fn(), catalogStatus: vi.fn() } }));
 vi.mock("@/api/github", () => ({ githubApi: { status: vi.fn() } }));
 vi.mock("@/api/session", () => ({ sessionApi: { end: vi.fn(), activity: vi.fn() } }));
 vi.mock("@/features/settings/updateCheck", () => ({ useUpdateCheck: vi.fn(() => ({ data: undefined })) }));
@@ -78,6 +78,7 @@ function show(ui: ReactNode) {
 beforeEach(() => {
   vi.mocked(api.health).mockReset().mockResolvedValue({ profile: "real", version: "0.2.0" } as never);
   vi.mocked(api.destinations).mockReset().mockResolvedValue([]);
+  vi.mocked(api.catalogStatus).mockReset().mockResolvedValue({ state: "empty", tables: 0, detail: "x", source: "knowledge" });
   vi.mocked(githubApi.status).mockReset().mockResolvedValue({ available: false } as never);
   vi.mocked(settingsApi.connections).mockReset().mockResolvedValue(connections());
   vi.mocked(settingsApi.testConnections).mockReset();
@@ -411,6 +412,17 @@ it("attention: no table catalog on the real DataLab points at GitHub's sign-in a
   expect(item).toHaveTextContent("sign in to GitHub and sync the knowledge base");
   fireEvent.click(item);
   expect(screen.getByTestId("at")).toHaveTextContent("/settings/connections#connection-github");
+});
+
+it("attention: an empty catalog folder named in the settings is the maintainer's to fix", async () => {
+  vi.mocked(api.health).mockResolvedValue({ profile: "real", version: "0.2.0", catalog_state: "empty" } as never);
+  vi.mocked(api.catalogStatus).mockResolvedValue({ state: "empty", tables: 0, detail: "x", source: "setting" });
+  vi.mocked(githubApi.status).mockResolvedValue({ available: true, signed_in: true, account: null, message: null, repos: [] } as never);
+  show(<AttentionMenu />);
+  fireEvent.click(await screen.findByRole("button", { name: "Needs attention: No table catalog" }));
+  const [item] = within(screen.getByRole("menu")).getAllByRole("menuitem");
+  expect(item).toHaveTextContent("ask the DataLab maintainer");
+  expect(item).not.toHaveTextContent("sign in");
 });
 
 it("attention: practice DataLab building its own catalog isn't flagged", async () => {

@@ -425,7 +425,9 @@ own slot, and the shared modules offer extension points:
   last synced, from git's objects, each file checked as the knowledge-base
   check checks it), else `<data_dir>/catalog`; and again after each sync,
   with no restart (`data/catalog_source.py`). With none, every query is
-  refused, saying what's missing and how to fix it. Practice DataLab, which
+  refused, saying what's missing and how to fix it. The knowledge base's
+  `main` is therefore a trust input for the SQL check, relying on its branch
+  protection (SAFETY.md, "Every column must be a real column"). Practice DataLab, which
   names no catalog folder, builds its own in `<data_dir>/catalog` from the synthetic database's catalog views the
   first time it connects (metadata only; `data/autocatalog.py`). To rebuild
   it, delete `<data_dir>/catalog` and start DataLab again.

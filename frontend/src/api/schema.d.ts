@@ -2401,6 +2401,8 @@ export interface components {
             tables: number;
             /** Detail */
             detail: string | null;
+            /** Source */
+            source?: ("setting" | "knowledge" | "data folder") | null;
         };
         /** CatalogTable */
         CatalogTable: {
