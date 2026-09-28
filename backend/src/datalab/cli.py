@@ -209,6 +209,9 @@ def _serve(settings, *, open_browser: bool) -> int:
     threading.Thread(
         target=app.state.update_checker.check_on_start, name="update-check", daemon=True
     ).start()
+    # On Windows, a policy can stop Docker's virtual machine from starting;
+    # this says so in DataLab's window and offers to fix it, while DataLab runs.
+    threading.Thread(target=_check_windows_vm, name="windows-vm-check", daemon=True).start()
 
     class Server(uvicorn.Server):
         async def serve(self, sockets=None) -> None:
@@ -235,6 +238,17 @@ def _serve(settings, *, open_browser: bool) -> int:
     app.state.shutdown = shutdown
     server.run()
     return 0
+
+
+def _check_windows_vm() -> None:
+    import logging
+
+    from datalab import windows_vm
+
+    try:
+        windows_vm.check_before_serve(say=lambda text: print(text, flush=True))
+    except Exception:  # never a reason for DataLab to stop
+        logging.getLogger(__name__).exception("couldn't check Docker's virtual machine")
 
 
 def _refresh_launcher_icons() -> None:

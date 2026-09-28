@@ -129,6 +129,64 @@ $SystemSid = "S-1-5-18"
 $AdminsSid = "S-1-5-32-544"
 $OwnerRightsSid = "S-1-3-4"
 $TrustedInstallerSid = "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464"
+# WSL's virtual machine (and so Docker's) signs in as NT VIRTUAL MACHINE\Virtual
+# Machines, which needs the "Log on as a service" right. Hyper-V adds it when
+# Windows starts; a domain policy that sets that right to its own list (on the
+# Michigan Medicine network) takes it away again, and then no WSL virtual
+# machine starts (HCS 0x80070569) and Docker Desktop waits for ever. This puts
+# back that one right for that one account, and changes nothing else. It's the
+# same text as GRANT_SCRIPT in DataLab's windows_vm.py (tests check they match),
+# which offers the same fix whenever DataLab starts.
+$VmLogonRefused = "0x80070569"
+$VmLogonGrant = @'
+$ErrorActionPreference = 'Stop'
+$Sid = 'S-1-5-83-0'
+$Right = 'SeServiceLogonRight'
+$Marshal = [Runtime.InteropServices.Marshal]
+$assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly(
+    (New-Object Reflection.AssemblyName 'DataLabVmLogonRight'),
+    [Reflection.Emit.AssemblyBuilderAccess]::Run)
+$type = $assembly.DefineDynamicModule('DataLabVmLogonRight').DefineType('Lsa', 'Public, Class')
+foreach ($method in @(
+    @('LsaOpenPolicy', @([IntPtr], [byte[]], [UInt32], [IntPtr].MakeByRefType())),
+    @('LsaAddAccountRights', @([IntPtr], [byte[]], [IntPtr], [UInt32])),
+    @('LsaNtStatusToWinError', @([UInt32])),
+    @('LsaClose', @([IntPtr])))) {
+    $defined = $type.DefinePInvokeMethod($method[0], 'advapi32.dll',
+        'Public, Static, PinvokeImpl', [Reflection.CallingConventions]::Standard,
+        [UInt32], [Type[]]$method[1], [Runtime.InteropServices.CallingConvention]::Winapi,
+        [Runtime.InteropServices.CharSet]::Unicode)
+    # The NTSTATUS comes back as the value, not turned into an exception.
+    $defined.SetImplementationFlags([Reflection.MethodImplAttributes]::PreserveSig)
+}
+$Lsa = $type.CreateType()
+function Test-Status($status) {
+    if ($status -ne 0) {
+        throw (New-Object ComponentModel.Win32Exception([int]$Lsa::LsaNtStatusToWinError($status)))
+    }
+}
+$sidObject = New-Object Security.Principal.SecurityIdentifier($Sid)
+$sidBytes = New-Object byte[] $sidObject.BinaryLength
+$sidObject.GetBinaryForm($sidBytes, 0)
+# LSA_OBJECT_ATTRIBUTES, all zero (LsaOpenPolicy ignores its members).
+$attributes = New-Object byte[] 64
+$policy = [IntPtr]::Zero
+# POLICY_CREATE_ACCOUNT | POLICY_LOOKUP_NAMES
+Test-Status ($Lsa::LsaOpenPolicy([IntPtr]::Zero, $attributes, 0x810, [ref]$policy))
+$name = $Marshal::StringToHGlobalUni($Right)
+$unicode = $Marshal::AllocHGlobal(16)
+try {
+    # LSA_UNICODE_STRING: Length, MaximumLength (in bytes), then the text's address.
+    $Marshal::WriteInt16($unicode, 0, [int16]($Right.Length * 2))
+    $Marshal::WriteInt16($unicode, 2, [int16]($Right.Length * 2 + 2))
+    $Marshal::WriteIntPtr($unicode, [IntPtr]::Size, $name)
+    Test-Status ($Lsa::LsaAddAccountRights($policy, $sidBytes, $unicode, 1))
+} finally {
+    $Marshal::FreeHGlobal($unicode)
+    $Marshal::FreeHGlobal($name)
+    $null = $Lsa::LsaClose($policy)
+}
+'@
 
 function Step($text) { Write-Host "`n== $text ==" -ForegroundColor Cyan }
 function Say($text) { Write-Host "   $text" }
@@ -216,6 +274,67 @@ function Test-DockerServiceManual {
     if (-not (Test-Path $DockerDesktop)) { return $false }
     $service = Get-Service $DockerService -ErrorAction SilentlyContinue
     return [bool]($service -and "$($service.StartType)" -eq "Manual")
+}
+
+# Whether Windows refuses to let WSL's virtual machine sign in (see
+# $VmLogonGrant). Found out by starting WSL's own system distribution, never
+# Docker's: a docker-desktop started outside Docker Desktop can leave it
+# waiting for that to shut down. Asking Windows directly needs an administrator.
+function Test-VmLogonRefused {
+    $wsl = Join-Path $SystemDir "wsl.exe"
+    if (-not (Test-Path $wsl)) { return $false }
+    $out = [System.IO.Path]::GetTempFileName()
+    $Env:WSL_UTF8 = "1"  # wsl.exe's own messages in UTF-8, not UTF-16
+    try {
+        $process = Start-Process $wsl -ArgumentList "--system", "-e", "true" -NoNewWindow -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError "$out.err"
+        $null = $process.Handle  # without this, Windows PowerShell loses the exit code
+        if (-not $process.WaitForExit(90 * 1000)) {
+            try { $process.Kill() } catch {}
+            return $false
+        }
+        if ($process.ExitCode -eq 0) { return $false }
+        $said = (@(Get-Content -Raw -LiteralPath $out, "$out.err" -ErrorAction SilentlyContinue) -join "") -replace "`0", ""
+        return $said.ToLower().Contains($VmLogonRefused)
+    } finally {
+        Remove-Item Env:WSL_UTF8 -ErrorAction SilentlyContinue
+        Remove-Item $out, "$out.err" -ErrorAction SilentlyContinue
+    }
+}
+
+# Puts the virtual machines' sign-in right back (Step 2), behind one
+# administrator prompt that runs only the fixed $VmLogonGrant text, from memory.
+function Repair-VmLogon {
+    Write-Host ""
+    Note "Docker can't start on this computer right now: Windows won't let its virtual"
+    Note "machine sign in. A Windows policy took away a right it needs (this happens on"
+    Note "the Michigan Medicine network)."
+    Say "Two ways to fix it:"
+    Say "  - Restart Windows (no administrator needed), then run the installer again, or"
+    Say "  - Fix it now: Windows asks for administrator permission once, and the right is"
+    Say "    given back. If your computer gives you administrator access for a limited"
+    Say "    time, request it first."
+    Say "It can happen again later; DataLab then offers the same fix when it starts."
+    if (-not (Ask "Fix it now?")) {
+        Stop-Install "Docker can't start until that's fixed. Restart Windows, then run the installer again."
+    }
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($VmLogonGrant))
+    Say "Asking Windows for permission now (look for the box; it may be behind this window)..."
+    try {
+        $grant = Start-Process $WindowsPowerShell -Verb RunAs -Wait -PassThru -WindowStyle Hidden `
+            -ArgumentList "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand $encoded"
+    } catch {
+        Stop-Install ("Windows didn't give administrator permission, so nothing was changed. " +
+            "Restart Windows (or get administrator access), then run the installer again.")
+    }
+    if ($grant.ExitCode -ne 0 -or (Test-VmLogonRefused)) {
+        Stop-Install "That didn't fix it. Restart Windows, then run the installer again."
+    }
+    Good "Docker's virtual machine may start again."
+    # A Docker Desktop already waiting for its engine doesn't try again by itself.
+    if (Get-Process "com.docker.backend" -ErrorAction SilentlyContinue) {
+        $null = Invoke-Quiet "docker" @("desktop", "restart", "--detach") 60
+    }
 }
 
 # --- Shared by install.ps1 and uninstall.ps1 (keep both copies the same) ----
@@ -634,6 +753,16 @@ if ($Prepare) {
                 # (The list above can come back short, e.g. with a member Windows can't name.)
                 Good "You're already in the $DockerUsers group."
             }
+        }
+
+        Step "Letting Docker's virtual machine start"
+        # A policy can take this away again later: Step 2 and DataLab itself
+        # check for that and offer the same fix.
+        try {
+            & ([scriptblock]::Create($VmLogonGrant))
+            Good "Its virtual machine has the right it needs to sign in."
+        } catch {
+            Note "Couldn't give Docker's virtual machine the right it needs to sign in: $_"
         }
         $result.ok = $true
         Write-Host "`nAll done here. This window closes in a moment." -ForegroundColor Green
@@ -1114,6 +1243,7 @@ if (-not (Test-DockerRunning)) {
     Say "If Docker Desktop shows a welcome screen or asks you to sign in, you can"
     Say "skip it: DataLab doesn't need a Docker account. Leave Docker Desktop running."
     Clear-StaleDockerSockets
+    if (Test-VmLogonRefused) { Repair-VmLogon }
     if (Test-Path $DockerDesktop) { Start-Process $DockerDesktop }
     # A real clock: each check can itself take up to 30 seconds.
     $clock = [System.Diagnostics.Stopwatch]::StartNew()
@@ -1259,6 +1389,9 @@ Say "Next, DataLab asks for your U-M GPT API key (and the database password, if"
 Say "your lab uses one). Nothing shows on screen while you type or paste; that's"
 Say "normal. Press Enter when done. They're kept in Windows Credential Manager."
 if ($Settings) { & $DataLab --profile $DataLabProfile setup --settings $Settings } else { & $DataLab --profile $DataLabProfile setup }
+if ($LASTEXITCODE -ne 0) {
+    Stop-Install "Saving your keys didn't work (the messages above say why)."
+}
 
 Step "Step 7 of 8: The lab's knowledge base and pipelines"
 if ($Practice) {

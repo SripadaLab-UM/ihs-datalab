@@ -665,11 +665,38 @@ Windows specifics).
     downloads, `docker-users` membership) and how to remove each.
 - Credentials go in Windows Credential Manager, and paths use
   `%LOCALAPPDATA%`.
-- **Updating on Windows is UNTESTED on a real machine.** It follows the
-  same steps as on Mac, with the Windows paths (`Scripts\datalab.exe`,
-  `bin\datalab.cmd`), the helper started detached, the new version opened in
-  a new PowerShell window, and a process check through the Windows API; unit
-  tests cover the paths and commands it builds.
+- **Updating on Windows** follows the same steps as on Mac, with the Windows
+  paths (`Scripts\datalab.exe`, `bin\datalab.cmd`), the helper started
+  detached, the new version opened in a new PowerShell window, and a process
+  check through the Windows API. Tried once on the re-test machine
+  (0.2.0b3 to 0.2.0b4, practice profile): backup, install beside, switch and
+  restart took about 20 seconds, and `datalab versions --use` went back and
+  forward again.
+- **Docker's virtual machine and "Log on as a service".** WSL 2's virtual
+  machine signs in as `NT VIRTUAL MACHINE\Virtual Machines` (S-1-5-83-0),
+  which needs the "Log on as a service" right. Hyper-V adds it when Windows
+  starts; Michigan Medicine's security policy ("CoreOne-Security") sets that
+  right to its own list and takes it away again whenever Windows re-applies
+  it on the network. Then no WSL virtual machine starts (`wsl.exe`:
+  `HCS/0x80070569`, "the user has not been granted the requested logon
+  type") and Docker Desktop waits for its engine for ever, saying nothing.
+  Restarting Windows fixes it until the next time. So does adding that one
+  right back, which needs an administrator (asking IT would take too long):
+  - The installer's administrator part adds it; Step 2 checks before starting
+    Docker and, if it's missing, offers the fix behind one administrator
+    prompt.
+  - `datalab serve` on Windows checks too, whenever Docker isn't answering,
+    and offers the same fix in its window, then restarts Docker Desktop
+    (`datalab/windows_vm.py`). This is the part that reaches people through
+    updates.
+  - Checking whether the right is there needs an administrator, so both
+    start WSL's own system distribution (`wsl.exe --system -e true`), never
+    Docker's, and look for that code.
+  - The fix is fixed text (`GRANT_SCRIPT`, the same as the installer's
+    `$VmLogonGrant`; a test checks they match) run from `-EncodedCommand`. It
+    calls `LsaAddAccountRights` for that one account and that one right,
+    through methods defined in memory rather than `Add-Type`, which compiles
+    into the person's own TEMP folder.
 - Windows must be tested on a real managed machine before it's promised to
   colleagues. The installer's first version was re-tested on one: a Michigan
   Medicine Windows 11 Enterprise (26100) laptop with CrowdStrike, Defender
