@@ -102,9 +102,13 @@ class RepoSettings:
     # Whom to ask for access to the repos, shown when GitHub says no
     # (e.g. "Ali, the DataLab maintainer").
     access_contact: str | None = None
+    # The lab's private repository for support reports (Send feedback → Send
+    # to the lab), e.g. "SripadaLab-UM/ihs-support". It must be private:
+    # DataLab checks, and won't send to a public one. See docs/SUPPORT.md.
+    support: str | None = None
 
     def __post_init__(self) -> None:
-        for key in ("knowledge", "pipelines"):
+        for key in ("knowledge", "pipelines", "support"):
             _check_repo(f"repos.{key}", getattr(self, key))
         if self.client_id is not None and not re.fullmatch(r"[A-Za-z0-9._-]{8,64}", self.client_id):
             raise ValueError("repos.client_id must be a GitHub App client id, such as Iv23li…")

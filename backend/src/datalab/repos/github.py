@@ -385,6 +385,18 @@ class GitHubAuth:
         permissions = response.json().get("permissions") or {}
         return "write" if permissions.get("push") else "read"
 
+    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """A request to GitHub's API (`path` such as /repos/owner/name/contents/…)
+        as the signed-in person, with this sign-in's own client. The token is
+        only ever in the request's header, never logged or returned."""
+        token = self.access_token()
+        try:
+            return self._http.request(method, f"{API}{path}", headers=_api_headers(token), **kwargs)
+        except httpx.HTTPError as error:
+            raise GitHubUnavailable(
+                f"GitHub couldn't be reached ({type(error).__name__})."
+            ) from None
+
     # ------------------------------------------------------------------------
 
     def _load(self) -> Tokens | None:

@@ -215,6 +215,28 @@ class Folder:
         where, kw = self._where(name)
         return os.stat(where, follow_symlinks=False, **kw)
 
+    def link_new(self, name: str, new_name: str) -> None:
+        """Give the file `name` the name `new_name` as well, never replacing a
+        file already called that (FileExistsError). Where the folder can't
+        hold hard links (some drives and sync folders), it's renamed instead,
+        after checking nothing has the new name."""
+        where, kw = self._where(name)
+        target, _ = self._where(new_name)
+        fd = kw.get("dir_fd")
+        try:
+            os.link(where, target, src_dir_fd=fd, dst_dir_fd=fd)
+            return
+        except FileExistsError:
+            raise
+        except OSError:
+            pass
+        try:
+            self.lstat(new_name)
+        except FileNotFoundError:
+            os.rename(where, target, src_dir_fd=fd, dst_dir_fd=fd)
+        else:
+            raise FileExistsError(new_name)
+
     def unlink(self, name: str) -> None:
         where, kw = self._where(name)
         os.unlink(where, **kw)

@@ -72,7 +72,7 @@ def unavailable(settings: Settings, auth: GitHubAuth | None) -> str | None:
     repos = settings.repos
     if settings.profile == "practice":
         return "Practice DataLab doesn't use the lab's repositories."
-    if repos.knowledge is None and repos.pipelines is None:
+    if repos.knowledge is None and repos.pipelines is None and repos.support is None:
         return "Neither of the lab's repositories is set in settings.toml ([repos])."
     if auth is None:
         return "The lab's GitHub App isn't set in settings.toml ([repos] client_id)."
