@@ -6,35 +6,47 @@
 //   - The rigor review (sessions/rigor.py): the agent reviewing its own work
 //     against the lab's checklist, whose first point is about untraced numbers.
 //   - Steps that failed along the way: a query or command that didn't work,
-//     which the agent may have retried.
+//     which the agent may have done again.
 // So each line says whose check it is, whether a problem remains, and, when two
-// seem to disagree, why they can. Pure, so it's tested without a browser.
+// can disagree, why. Nothing here may claim more than the data shows: a
+// problem counts as dealt with only on clear evidence, and the review's words
+// are quoted unless they're a plain yes. Pure, so it's tested without a browser.
 import type { Row, Step } from "./activity";
 import type { Item, Turn } from "./transcript";
 
 export interface CheckLine {
-  key: "trace" | "review" | "differ" | "steps";
+  key: "trace" | "review" | "differ" | "steps" | "notices";
   tone: "good" | "attn" | "bad" | "plain";
   text: string;
 }
 
-/** A step or notice that went wrong, and whether a later step did the same thing successfully. */
+/**
+ * A step that failed, and whether a later step of the same kind worked; or an
+ * error DataLab reported during the turn (`notice`), which never counts as
+ * dealt with: nothing shows whether it was.
+ */
 export interface Failure {
   title: string;
   resolved: boolean;
+  notice?: boolean;
 }
 
 type Review = Extract<Item, { kind: "review" }>;
 
+// Titles that name no particular thing (activity.ts): two such steps aren't
+// the same step just because their titles match.
+const GENERIC =
+  /^(Ran a (command|query|short (R|Python) snippet)|Searched the files|Looked at the files in .*|Looked at the results of .*|Tried to install a package|Wrote \d+ files|Used .*)$/;
+
 /**
- * The turn's failed steps and error notices, in order, each resolved or not.
- * A failed step is resolved when a later step of the same kind worked: the
- * same kind of action (the same icon) on the same thing (the same title, or a
- * table or file they share), such as a query that was fixed and run again, or
- * a missing tool swapped for another on the same file. An error notice is
- * resolved when the agent went on to finish the turn with a working step.
+ * The turn's failed steps and error notices, in order. A failed step is
+ * resolved only when a later step of the same kind worked on at least
+ * everything it touched: the same icon, every table or file the failed one
+ * touched, and the same title unless that title is generic. A generic step
+ * that touched nothing is never resolved. So a query on SLEEP and MOOD isn't
+ * resolved by a later one on MOOD alone.
  */
-export function failures(rows: Row[], status: Turn["status"]): Failure[] {
+export function failures(rows: Row[]): Failure[] {
   type Entry = { step: Step } | { notice: string };
   const flat = rows.flatMap((row): Entry[] =>
     row.type === "step"
@@ -45,49 +57,67 @@ export function failures(rows: Row[], status: Turn["status"]): Failure[] {
           ? [{ notice: row.text }]
           : [],
   );
-  const worked = (entry: Entry) => "step" in entry && (entry.step.tone === "done" || entry.step.tone === "attn");
   const out: Failure[] = [];
   flat.forEach((entry, index) => {
-    const later = flat.slice(index + 1);
     if ("notice" in entry) {
-      out.push({ title: entry.notice, resolved: status === "completed" && later.some(worked) });
+      out.push({ title: entry.notice, resolved: false, notice: true });
       return;
     }
     const failed = entry.step;
     if (failed.tone !== "error") return;
-    const resolved = later.some(
-      (next) =>
-        "step" in next &&
-        worked(next) &&
-        next.step.icon === failed.icon &&
-        (next.step.title === failed.title || (failed.touches ?? []).some((t) => (next.step.touches ?? []).includes(t))),
-    );
+    const touched = failed.touches ?? [];
+    const generic = GENERIC.test(failed.title);
+    const resolved =
+      !(generic && touched.length === 0) &&
+      flat.slice(index + 1).some((next) => {
+        if (!("step" in next)) return false;
+        const step = next.step;
+        return (
+          (step.tone === "done" || step.tone === "attn") &&
+          step.icon === failed.icon &&
+          (generic || step.title === failed.title) &&
+          touched.every((t) => (step.touches ?? []).includes(t))
+        );
+      });
     out.push({ title: failed.title, resolved });
   });
   return out;
 }
 
+/** The review's point on traced claims as it wrote it, without the label or markup; "" if it has none. */
+export function reviewTraceLine(text: string): string {
+  const line = text.split("\n").find((l) => /traced claims/i.test(l));
+  if (!line) return "";
+  return line
+    .replace(/\*\*|__|`/g, "")
+    .replace(/^.*?traced claims\s*[:\-–—]?\s*/i, "")
+    .trim();
+}
+
 /**
- * What the rigor review said about its first point, traced claims: "clean"
- * when it says the numbers hold, "flags" when it says some don't, "unknown"
- * when it can't be read. The review's own words stay in the review box.
+ * What the rigor review said on traced claims. "clean" only when the whole
+ * point is a plain yes ("Holds.", "No untraced numbers.", "Yes: no untraced
+ * numbers."); "flags" when it has any word of doubt or exception; "unknown"
+ * otherwise. Anything but a plain yes is shown in the review's own words.
  */
 export function reviewTraceVerdict(text: string): "clean" | "flags" | "unknown" {
-  const line = text
-    .split("\n")
-    .find((l) => /traced claims/i.test(l))
-    ?.replace(/\*\*|__|`/g, "")
-    .replace(/^.*?traced claims\s*[:\-–—]?\s*/i, "")
-    .toLowerCase();
+  const line = reviewTraceLine(text).toLowerCase();
   if (!line) return "unknown";
-  if (/\b(partly|partially|mostly|largely|except|however|but)\b|\bdoes(?:n['’]t| not) hold|\bnot hold|\bfails?\b|\bno\b\.?$|^no\b/.test(line)) return "flags";
-  if (/\bno untraced|\b(?:do|did) not see (?:any )?untraced|\bdon['’]t see (?:any )?untraced|^holds\b|^yes\b|\ball (?:the )?numbers?\b.*\b(?:trace|come from)/.test(line)) {
-    return "clean";
-  }
+  if (/^(holds|yes)\.?$|^no untraced numbers\.?$|^(holds|yes)\s*[.;:,—–-]\s*no untraced numbers\.?$/.test(line)) return "clean";
+  if (/untraced|not|n['’]t|cannot|unclear|apart|other than|otherwise|except|but|\b(no|mostly|partly|partially)\b/.test(line)) return "flags";
   return "unknown";
 }
 
+/** The review's traced-claims point, short enough for a line: its first sentence, and one about tracing. */
+function quoted(line: string): string {
+  const sentences = line.match(/.+?(?:[.!?](?=\s|$)|$)/g)?.map((s) => s.trim()).filter(Boolean) ?? [line];
+  const about = sentences.slice(1).find((s) => /trace/i.test(s));
+  const text = about ? `${sentences[0]} … ${about}` : sentences.length > 1 ? `${sentences[0]} …` : sentences[0];
+  return text.length > 240 ? `${text.slice(0, 239)}…` : text;
+}
+
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const names = (list: Failure[]) => list.slice(0, 2).map((f) => `“${f.title}”`).join(", ") + (list.length > 2 ? ", …" : "");
 
 /** The checks on one answer, DataLab's own first. */
 export function checkLines({
@@ -122,58 +152,70 @@ export function checkLines({
       });
     }
   }
-  const verdict = review?.status === "done" ? reviewTraceVerdict(review.text) : "unknown";
+  const done = review?.status === "done" && !reviewing;
+  const verdict = done && review ? reviewTraceVerdict(review.text) : "unknown";
   if (review) {
     const who = "Rigor review (the agent's check of its own work)";
+    const said = done ? reviewTraceLine(review.text) : "";
     const text = reviewing
       ? `${who}: running…`
-      : review.status === "done"
-        ? verdict === "clean"
+      : !done
+        ? `${who}: didn't finish.`
+        : verdict === "clean"
           ? `${who}: no untraced numbers.`
-          : verdict === "flags"
-            ? `${who}: questions some numbers; its notes are below.`
-            : `${who}: done; its notes are below.`
-        : `${who}: didn't finish.`;
-    lines.push({ key: "review", tone: !reviewing && verdict === "flags" ? "attn" : "plain", text });
+          : said
+            ? `${who}, on traced numbers: “${quoted(said)}”`
+            : `${who}: done; its notes are below.`;
+    lines.push({ key: "review", tone: "plain", text });
   }
-  if (trace && !reviewing && trace.untraced.length > 0 && verdict === "clean") {
+  if (trace && done && trace.untraced.length > 0) {
     lines.push({
       key: "differ",
       tone: "plain",
       text:
-        "Why these differ: the rigor review is the agent checking its own work, while the number check is DataLab's " +
-        "own comparison with what the turn actually produced. Go by DataLab's check.",
+        "The two can differ: the rigor review is the agent checking its own work, while the number check is " +
+        "DataLab's own comparison with what the turn actually produced. Go by DataLab's check.",
     });
-  } else if (trace && !reviewing && trace.numbers > 0 && trace.untraced.length === 0 && verdict === "flags") {
+  } else if (trace && done && trace.numbers > 0 && trace.untraced.length === 0 && verdict === "flags") {
     lines.push({
       key: "differ",
       tone: "plain",
       text:
-        "Why these differ: DataLab's check only finds each number's value in what the turn produced; the review also " +
-        "asks how it was worked out, so it can question a number whose value does appear.",
+        "The two can differ: DataLab's check only finds each number's value in what the turn produced; the review " +
+        "also asks how it was worked out, so it can question a number whose value does appear.",
     });
   }
-  if (failed.length > 0) {
-    const open = failed.filter((f) => !f.resolved);
-    const lead = `${plural(failed.length, "step")} failed along the way`;
+  const steps = failed.filter((f) => !f.notice);
+  if (steps.length > 0) {
+    const open = steps.filter((f) => !f.resolved);
+    const lead = `${plural(steps.length, "step")} failed along the way`;
     if (open.length === 0) {
       lines.push({
         key: "steps",
         tone: "plain",
-        text: `${lead}; ${failed.length === 1 ? "it was" : "all were"} retried successfully (resolved).`,
+        text: `${lead}; for ${steps.length === 1 ? "it" : "each"}, a later step of the same kind worked.`,
       });
     } else {
-      const names = open.slice(0, 2).map((f) => `“${f.title}”`).join(", ") + (open.length > 2 ? ", …" : "");
-      const retried = failed.length - open.length;
+      const worked = steps.length - open.length;
       lines.push({
         key: "steps",
         tone: "bad",
         text:
           `${lead}: ` +
-          (retried ? `${retried} retried successfully, ` : "") +
-          `${open.length} unresolved, not retried successfully (${names}).`,
+          (worked ? `for ${worked}, a later step of the same kind worked; ` : "") +
+          `${open.length} unresolved (${names(open)}).`,
       });
     }
+  }
+  const notices = failed.filter((f) => f.notice);
+  if (notices.length > 0) {
+    lines.push({
+      key: "notices",
+      tone: "bad",
+      text:
+        `${plural(notices.length, "error")} reported during the turn (${names(notices)}); ` +
+        `DataLab can't tell whether ${notices.length === 1 ? "it was" : "they were"} dealt with.`,
+    });
   }
   return lines;
 }
@@ -181,7 +223,15 @@ export function checkLines({
 /** The short form for the folded "How this answer was made" row. */
 export function failureChip(failed: Failure[]): { text: string; tone?: "bad" } | null {
   if (failed.length === 0) return null;
-  const open = failed.filter((f) => !f.resolved).length;
-  if (open === 0) return { text: `${plural(failed.length, "failed step")}, all retried successfully` };
-  return { text: `${plural(failed.length, "failed step")}, ${open} unresolved`, tone: "bad" };
+  const steps = failed.filter((f) => !f.notice);
+  const notices = failed.length - steps.length;
+  const open = steps.filter((f) => !f.resolved).length;
+  const parts = [
+    steps.length > 0 &&
+      (open === 0
+        ? `${plural(steps.length, "failed step")}, a later one of the same kind worked`
+        : `${plural(steps.length, "failed step")}, ${open} unresolved`),
+    notices > 0 && `${plural(notices, "error")} reported`,
+  ].filter(Boolean) as string[];
+  return { text: parts.join("; "), tone: open > 0 || notices > 0 ? "bad" : undefined };
 }

@@ -13,8 +13,8 @@ keywords: answer, trace, numbers, matched, provenance, how was this made, review
 The answer sits under a single dark rule, labelled **Answer**. Once it's
 finished, the work behind it folds into one row, **How this answer was
 made**, which counts the steps, queries, lab guides read and files changed,
-and names any steps that failed along the way, with whether each was retried
-successfully. Open it to read the whole story again. **Made in this turn**
+and names any steps that failed along the way, with whether a later step of
+the same kind worked. Open it to read the whole story again. **Made in this turn**
 lists the output files the turn wrote, to open straight away. Files the
 answer names show as buttons that say what they are (**Open report**,
 **Open table: flow (CSV)**); hover to see the full path. Query ids and SQL
@@ -32,11 +32,13 @@ found in that turn's query results, command output, or data files in
 - "… 10 of 12 matched (2 not found, listed below: check them)", followed by
   those numbers in amber.
 
-Then the rigor review's own view of the numbers, when it ran, and how many
-steps failed along the way: "all were retried successfully", or which remain
-unresolved. The rigor review is the agent checking its own work, so it can
-disagree with DataLab's check; when they seem to, a line says why. Go by
-DataLab's check.
+Then the rigor review's own view of the numbers, when it ran: "no untraced
+numbers" only when that's all it said, otherwise its own words. Then how many
+steps failed along the way, and for which a later step of the same kind (on
+the same tables or files) worked; the rest are unresolved. Errors DataLab
+reported during the turn are listed too: DataLab can't tell whether they
+were dealt with. The rigor review is the agent checking its own work, so it
+can disagree with DataLab's check; a line says so. Go by DataLab's check.
 
 A match means the number appears in something the turn produced. It doesn't
 show that it's the right statistic from the right analysis. An unmatched
