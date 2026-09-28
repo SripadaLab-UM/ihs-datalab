@@ -42,7 +42,8 @@ def refuse_if_running(settings: Settings) -> None:
         if probe.connect_ex(("127.0.0.1", settings.port)) == 0:
             sys.exit(
                 f"DataLab ({settings.profile}) is already running on port {settings.port}. "
-                "Use it (Settings & Safety has the Safety check), or stop it first."
+                "Use it (Settings & Safety has the Safety check), or stop it first. "
+                "If you ended your session, quit DataLab first, then start it again."
             )
 
 

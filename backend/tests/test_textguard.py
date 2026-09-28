@@ -55,13 +55,15 @@ def test_a_lone_surrogate_anywhere_in_the_json_is_refused(client, method, url, b
 def test_written_raw_or_without_a_content_type_it_is_refused_too(client):
     raw = b'{"text": "a: \xed\xa0\x80"}'  # a surrogate UTF-8 can't have, as json reads it
     assert send(client, "POST", "/api/workflows/validate", raw).status_code == 422
+    # Anything but application/json is refused before its body is read
+    # (web.refuse_cross_site: what another local page could send).
     bare = client.post("/api/workflows/validate", content=json.dumps({"text": "\ud800"}))
-    assert bare.status_code == 422 and "isn't text" in bare.json()["detail"]
+    assert bare.status_code == 403 and "JSON requests only" in bare.json()["detail"]
     json_ld = send(
         client, "POST", "/api/workflows/validate", json.dumps({"text": "\ud800"}),
         **{"content-type": "application/merge-patch+json"},
     )  # fmt: skip
-    assert json_ld.status_code == 422
+    assert json_ld.status_code == 403
 
 
 def test_other_json_gets_through_whole(client):
@@ -79,12 +81,15 @@ def test_signing_in_is_checked_first(settings, catalog):
     with TestClient(app) as client:
         refused = send(client, "POST", "/api/workflows/validate", json.dumps({"text": "\ud800"}))
         # /api/health needs no sign-in, so its body is never read here: a
-        # POST (as a cross-origin form can send, with no content type) is
-        # the route's own 405, however large or odd the body.
+        # POST as a cross-origin form can send (no JSON content type) is
+        # refused unread, however large or odd the body; as JSON, it's the
+        # route's own 405.
         big = b'{"a": "\\ud800", "b": "' + b"x" * (MAX_BODY_BYTES + 1) + b'"}'
         health = client.post("/api/health", content=big)
+        as_json = send(client, "POST", "/api/health", big)
     assert refused.status_code == 401
-    assert health.status_code == 405
+    assert health.status_code == 403
+    assert as_json.status_code == 405
 
 
 def test_the_body_guard_reads_only_signed_in_requests():

@@ -51,6 +51,7 @@ from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pip
 from datalab.repos.git import GitError
 from datalab.repos.github import GitHubUnavailable, SignInNeeded
 from datalab.sessions.containers import instance_of
+from datalab.web import ended_since
 from datalab.workflows.drafts import (
     MAX_QUERIES,
     DraftQuery,
@@ -601,9 +602,11 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         """Server-sent events: the run, with its steps, each time it changes, until it ends."""
         run_or_404(run_id)
 
+        ended = ended_since(request)
+
         async def events() -> AsyncIterator[str]:
             async for snapshot in runner.watch(run_id):
-                if await request.is_disconnected():
+                if await request.is_disconnected() or ended():
                     return
                 if snapshot is None:
                     yield ": keep-alive\n\n"

@@ -4,6 +4,8 @@ from datalab.app import create_app
 from datalab.web import BrowserSession
 from tests.conftest import FakeDatabase
 
+JSON = {"content-type": "application/json"}
+
 
 def make(settings, catalog, tmp_path):
     dist = tmp_path / "dist"
@@ -92,3 +94,124 @@ def test_web_ui_serves_files_and_falls_back_to_index(settings, catalog, tmp_path
         # Outside the built folder: never served.
         assert "not for the browser" not in client.get("/../secret.txt").text
         assert "not for the browser" not in client.get("/assets/%2e%2e/%2e%2e/secret.txt").text
+
+
+def test_end_session_signs_every_window_out_until_a_new_sign_in(settings, catalog, tmp_path):
+    app, browser = make(settings, catalog, tmp_path)
+    link = browser.sign_in_path()
+    with TestClient(app) as client:
+        # Only a signed-in window can end it.
+        assert client.post("/api/session/end", headers=JSON).status_code == 401
+        signed_in = client.get(link, follow_redirects=False)
+        cookie = signed_in.cookies[browser.cookie_name]
+        client.cookies.set(browser.cookie_name, cookie)
+        assert client.get("/api/conversations").status_code == 200
+        ended = client.post("/api/session/end", headers=JSON)
+        assert ended.status_code == 204
+        # The browser is told to forget the cookie...
+        forget = ended.headers["set-cookie"].lower()
+        assert forget.startswith(f"{browser.cookie_name}=") and "max-age=0" in forget
+        # ...and a copy kept anywhere (another window, another tab) no longer works.
+        client.cookies.clear()
+        client.cookies.set(browser.cookie_name, cookie)
+        assert client.get("/api/conversations").status_code == 401
+        # The used link doesn't sign in again: it takes DataLab's next one.
+        assert client.get(link, follow_redirects=False).headers["location"] == "/signed-out"
+
+
+def signed_in_client(app, browser) -> TestClient:
+    client = TestClient(app, base_url="http://127.0.0.1:8766")
+    signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
+    client.cookies.set(browser.cookie_name, signed_in.cookies[browser.cookie_name])
+    return client
+
+
+def test_another_local_page_cant_end_the_session(settings, catalog, tmp_path):
+    """Every port of 127.0.0.1 is one site to a browser, so a page on another
+    port gets the SameSite=Strict cookie sent. Its simple (text/plain) POST is
+    refused, and the session carries on."""
+    app, browser = make(settings, catalog, tmp_path)
+    with signed_in_client(app, browser) as client:
+        refused = client.post(
+            "/api/session/end",
+            content="x",
+            headers={
+                "content-type": "text/plain",
+                "origin": "http://127.0.0.1:9999",
+                "sec-fetch-site": "same-site",
+            },
+        )
+        assert refused.status_code == 403
+        assert client.get("/api/conversations").status_code == 200
+        assert browser.generation == 0
+
+
+def test_cross_origin_and_non_json_requests_are_refused(settings, catalog, tmp_path):
+    app, browser = make(settings, catalog, tmp_path)
+    with signed_in_client(app, browser) as client:
+        for headers in (
+            # Another origin, whatever it says about the fetch.
+            {**JSON, "origin": "http://127.0.0.1:9999"},
+            {**JSON, "origin": "http://localhost:8766"},
+            {**JSON, "origin": "null"},
+            {**JSON, "origin": "http://127.0.0.1:8766", "sec-fetch-site": "cross-site"},
+            {**JSON, "sec-fetch-site": "same-site"},
+            # This origin, but not JSON: a form post.
+            {
+                "content-type": "application/x-www-form-urlencoded",
+                "origin": "http://127.0.0.1:8766",
+            },
+            {"content-type": "multipart/form-data; boundary=x", "sec-fetch-site": "same-origin"},
+            {},
+        ):
+            refused = client.post("/api/session/end", headers=headers)
+            assert refused.status_code == 403, headers
+        # Other state-changing methods are checked the same way.
+        assert client.put("/api/settings/connections/model-key", content="{}").status_code == 403
+        assert client.delete("/api/export-destinations/x").status_code == 403
+        assert client.get("/api/conversations").status_code == 200
+        assert browser.generation == 0
+
+
+def test_the_pages_own_json_requests_pass(settings, catalog, tmp_path):
+    """From DataLab's own page (same-origin), and from older browsers or tests
+    that send no Sec-Fetch-Site, with this origin or none."""
+    app, browser = make(settings, catalog, tmp_path)
+    with signed_in_client(app, browser) as client:
+        for headers in (
+            {**JSON, "origin": "http://127.0.0.1:8766", "sec-fetch-site": "same-origin"},
+            {"content-type": "application/json; charset=utf-8", "origin": "http://127.0.0.1:8766"},
+            JSON,
+        ):
+            made = client.post("/api/conversations", json={}, headers=headers)
+            assert made.status_code == 201, (headers, made.text)
+        assert client.post("/api/session/end", headers=JSON).status_code == 204
+
+
+def test_streams_learn_the_session_ended(settings):
+    """What the live-update streams (conversations, workflow runs) check."""
+    from types import SimpleNamespace
+
+    from datalab.web import ended_since
+
+    browser = BrowserSession(settings.port)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(browser=browser)))
+    ended = ended_since(request)  # type: ignore[arg-type]
+    assert not ended()
+    browser.end()
+    assert ended()
+    # A stream opened after the end follows the new session.
+    assert not ended_since(request)()  # type: ignore[arg-type]
+    # No browser session (a router tested on its own): never ended.
+    assert not ended_since(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))()  # type: ignore[arg-type]
+
+
+def test_session_activity_says_what_is_still_going(settings, catalog, tmp_path):
+    app, browser = make(settings, catalog, tmp_path)
+    with signed_in_client(app, browser) as client:
+        assert client.get("/api/session/activity").json() == {
+            "agent_turn": False,
+            "workflow_run": False,
+        }
+        app.state.services.sessions._starting.add("c1")
+        assert client.get("/api/session/activity").json()["agent_turn"] is True

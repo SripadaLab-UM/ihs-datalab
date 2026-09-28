@@ -1,7 +1,7 @@
 import type { IconName } from "@/components/chat/activity";
 
 // One stroke style for every icon, drawn on a 24-unit grid.
-const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | "open" | "history" | "export" | "attach" | "image" | "page" | "restore" | "menu" | "trash", string> = {
+const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | "open" | "history" | "export" | "attach" | "image" | "page" | "restore" | "menu" | "trash" | "key" | "sun" | "more" | "message" | "user", string> = {
   book: "M4 5.5A1.5 1.5 0 0 1 5.5 4H11v15H5.5A1.5 1.5 0 0 0 4 20.5zM20 5.5A1.5 1.5 0 0 0 18.5 4H13v15h5.5a1.5 1.5 0 0 1 1.5 1.5z",
   search: "M16.5 10.5a6 6 0 1 1-12 0 6 6 0 0 1 12 0zM15 15l5 5",
   table: "M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 17.5zM4 10h16M10 10v9",
@@ -31,6 +31,11 @@ const PATHS: Record<IconName | "lock" | "send" | "stop" | "close" | "chevron" | 
   restore: "M4 12a8 8 0 1 0 2.4-5.7M4 4.5v3.8h3.8",
   menu: "M4 7h16M4 12h16M4 17h16",
   trash: "M4 7h16M9 7V4.5h6V7M6.5 7l1 12.5a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-12.5M10 11v6M14 11v6",
+  key: "M12 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM12 12h8.5M17.5 12v3M20.5 12v2.5",
+  sun: "M15.5 12a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0zM12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4",
+  more: "M7 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM13 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0zM19 12a1 1 0 1 1-2 0 1 1 0 0 1 2 0z",
+  message: "M4.5 5.5h15v10h-8l-4.5 3.5v-3.5h-2.5z",
+  user: "M15.5 8a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0zM5 20c.8-3.6 3.6-5.5 7-5.5s6.2 1.9 7 5.5",
   attach: "m19 11.5-7.3 7.3a4.5 4.5 0 0 1-6.4-6.4l7.6-7.6a3 3 0 0 1 4.3 4.3l-7.6 7.6a1.5 1.5 0 0 1-2.1-2.1l7-7",
 };
 

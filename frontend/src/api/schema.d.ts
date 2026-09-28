@@ -1796,6 +1796,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/feedback-contact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Feedback Contact Route */
+        get: operations["feedback_contact_route_api_settings_feedback_contact_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -1827,6 +1844,40 @@ export interface paths {
         get: operations["catalog_status_api_catalog_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Session Activity */
+        get: operations["session_activity_api_session_activity_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/session/end": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** End Session */
+        post: operations["end_session_api_session_end_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2506,6 +2557,13 @@ export interface components {
             output: string;
             /** Tables */
             tables: string[];
+        };
+        /** FeedbackContactOut */
+        FeedbackContactOut: {
+            /** Contact */
+            contact: string | null;
+            /** Email */
+            email: string | null;
         };
         /** FileDetail */
         FileDetail: {
@@ -3943,6 +4001,13 @@ export interface components {
             folder: string | null;
             /** Message */
             message: string;
+        };
+        /** SessionActivityOut */
+        SessionActivityOut: {
+            /** Agent Turn */
+            agent_turn: boolean;
+            /** Workflow Run */
+            workflow_run: boolean;
         };
         /** SetDestinationKey */
         SetDestinationKey: {
@@ -7638,6 +7703,26 @@ export interface operations {
             };
         };
     };
+    feedback_contact_route_api_settings_feedback_contact_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeedbackContactOut"];
+                };
+            };
+        };
+    };
     health_api_health_get: {
         parameters: {
             query?: never;
@@ -7677,6 +7762,44 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["CatalogStatusOut"];
                 };
+            };
+        };
+    };
+    session_activity_api_session_activity_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionActivityOut"];
+                };
+            };
+        };
+    };
+    end_session_api_session_end_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -7,6 +7,7 @@ import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { SqlPage } from "@/features/sql/SqlPage";
 import { WorkflowsPage } from "@/features/workflows/WorkflowsPage";
+import { SessionEnded } from "@/features/toolbar/SessionMenu";
 import { WorkspacePage } from "@/features/workspace/WorkspacePage";
 
 import { Shell } from "./Shell";
@@ -20,6 +21,8 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <Routes>
+          {/* Outside the shell: after End session, nothing here may call the API. */}
+          <Route path="session-ended" element={<SessionEnded />} />
           <Route element={<Shell />}>
             <Route index element={<Navigate to="/workspace" replace />} />
             <Route path="workspace" element={<WorkspacePage />} />

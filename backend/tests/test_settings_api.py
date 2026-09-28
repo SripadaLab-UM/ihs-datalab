@@ -895,3 +895,35 @@ def test_offline_shows_as_a_state_not_an_error(settings, keychain, tmp_path):
     h = Harness(settings, checker=checker, updater=update)
     checked = h.client.post("/api/settings/updates/check")
     assert checked.status_code == 200 and checked.json()["state"] == "offline"
+
+
+# ------------------------------------------------------------ feedback contact
+
+
+def test_feedback_goes_to_the_labs_contact_and_the_address_in_it(tmp_path, keychain):
+    from datalab.config import RepoSettings
+
+    settings = Settings(
+        profile="real",
+        data_dir=tmp_path / "data",
+        oracle=LAB_ORACLE,
+        repos=RepoSettings(access_contact="Ali, the DataLab maintainer <ali.m@umich.edu>"),
+    )
+    shown = Harness(settings).client.get("/api/settings/feedback-contact").json()
+    assert shown == {
+        "contact": "Ali, the DataLab maintainer <ali.m@umich.edu>",
+        "email": "ali.m@umich.edu",
+    }
+
+
+def test_feedback_contact_without_an_address_or_unset(real, practice):
+    from datalab.api.settings import feedback_contact
+
+    assert feedback_contact("Ali, the DataLab maintainer").model_dump() == {
+        "contact": "Ali, the DataLab maintainer",
+        "email": None,
+    }
+    assert feedback_contact("  ").model_dump() == {"contact": None, "email": None}
+    for harness in (real, practice):
+        shown = harness.client.get("/api/settings/feedback-contact").json()
+        assert shown == {"contact": None, "email": None}

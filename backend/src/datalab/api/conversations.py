@@ -24,6 +24,7 @@ from datalab.sessions.modes import MODES
 from datalab.sessions.plan_schema import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
+from datalab.web import ended_since
 
 _HEARTBEAT_SECONDS = 15
 MAX_PLAN_BODY = 100_000
@@ -364,9 +365,11 @@ def build_conversations_router(
         get_or_404(conversation_id)
         start = int(last_event_id) if last_event_id and last_event_id.isdigit() else after
 
+        ended = ended_since(request)
+
         async def events() -> AsyncIterator[str]:
             seq = start
-            while not await request.is_disconnected():
+            while not await request.is_disconnected() and not ended():
                 batch = store.events_after(conversation_id, seq)
                 for event in batch:
                     seq = event.seq

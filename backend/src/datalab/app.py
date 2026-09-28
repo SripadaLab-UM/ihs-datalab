@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import threading
 import time
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -58,7 +59,13 @@ from datalab.sessions.titles import TitleWriter
 from datalab.sessions.tokens import SessionTokens
 from datalab.update_gate import UpdateGate, UpdateGateMiddleware
 from datalab.updater import Updater, busy_reason
-from datalab.web import ApiProtection, BrowserSession, mount_web_ui
+from datalab.web import (
+    ApiProtection,
+    BrowserSession,
+    SessionActivityOut,
+    add_session_routes,
+    mount_web_ui,
+)
 
 VERSION = __version__
 
@@ -369,6 +376,16 @@ def create_app(
             detail=catalog_problem(settings, catalog, catalog_build),
         )
 
+    def activity() -> SessionActivityOut:
+        try:
+            run = connection.execute(
+                "SELECT 1 FROM workflow_runs WHERE status IN ('queued', 'running') LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            run = None
+        return SessionActivityOut(agent_turn=sessions.any_busy(), workflow_run=run is not None)
+
+    add_session_routes(app, browser, activity)
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(app, browser, web_dist)
     return app

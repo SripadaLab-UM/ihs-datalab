@@ -778,3 +778,23 @@ def test_an_approved_plans_answer_carries_the_plan_as_approved(app):
             if e["type"] == "approval_answered"
         ]
     assert answered["data"]["plan"]["rationale"] == "Edited by the person."
+
+
+def test_stream_stops_once_the_session_ends(app):
+    """After End session, a stream opened before sends nothing more and closes."""
+    store = app.state.services.conversations
+    cid = store.create(kind="data", mode="analysis", title="t", model="m").id
+    store.append(cid, "answer_delta", {"text": "a"})
+    with (
+        live_server(app) as base_url,
+        httpx.stream(
+            "GET", f"{base_url}/api/conversations/{cid}/stream", params={"after": 0}, timeout=20
+        ) as response,
+    ):
+        lines = response.iter_lines()
+        first = next(line for line in lines if line.startswith("data: "))
+        assert json.loads(first[6:])["data"]["text"] == "a"
+        app.state.browser.end()
+        store.append(cid, "answer_delta", {"text": "after the end"})
+        rest = list(lines)  # ends: the stream closed
+    assert not any("after the end" in line for line in rest)
