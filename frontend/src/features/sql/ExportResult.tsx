@@ -5,6 +5,7 @@ import { Link } from "react-router";
 import { api } from "@/api/client";
 import { sqlApi } from "@/api/sql";
 import { Button, Modal } from "@/components/ui";
+import { settingsLink } from "@/features/settings/highlight";
 
 /** Export one result's file to an export folder, with a manifest saying what query made it. */
 export function ExportResult({ queryId, practice, onClose }: { queryId: string; practice: boolean; onClose: () => void }) {
@@ -38,7 +39,7 @@ export function ExportResult({ queryId, practice, onClose }: { queryId: string; 
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-[12.5px] text-muted">
                 No export folders yet. Add one in{" "}
-                <Link to="/settings/export-folders" className="text-ink underline">
+                <Link {...settingsLink("export-folders", "export-folders")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
                   Settings
                 </Link>
                 .

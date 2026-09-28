@@ -153,7 +153,7 @@ describe("an open proposal", () => {
     show();
     await screen.findByText(/Sign in to GitHub \(in Settings\)/);
     expect(await saveButton()).toHaveProperty("disabled", true);
-    expect(screen.getByRole("link", { name: "Open Settings to sign in" }).getAttribute("href")).toBe("/settings");
+    expect(screen.getByRole("link", { name: "Open Settings to sign in" }).getAttribute("href")).toBe("/settings/connections#connection-github");
   });
 
   it("lets the person edit a file's text, leave a file out, or discard it all", async () => {

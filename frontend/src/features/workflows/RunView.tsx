@@ -18,7 +18,7 @@ export function RunPage({ runId }: { runId: string }) {
     return (
       <div className="px-6 py-6">
         <p className="font-sans text-[13.5px] text-danger">{run.error.message}</p>
-        <Link to="/workflows" className="font-sans text-[13px] text-muted underline underline-offset-4">
+        <Link to="/workflows" className="font-sans text-[13px] text-muted underline decoration-faint underline-offset-4 hover:text-ink hover:decoration-ink">
           Back to the workflows
         </Link>
       </div>
@@ -78,7 +78,7 @@ export function RunLine({ run }: { run: RunDetail }) {
       {run.of_run && (
         <span>
           of{" "}
-          <Link to={runPath(run.of_run)} className="font-mono text-[12px] text-ink underline decoration-faint underline-offset-4">
+          <Link to={runPath(run.of_run)} className="font-mono text-[12px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
             {run.of_run}
           </Link>
         </span>

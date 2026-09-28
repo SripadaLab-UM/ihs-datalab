@@ -8,6 +8,7 @@ import { commitUrl, type Finding, knowledgeApi, type ProposalDetail, type Propos
 import { CodeEditor, type EditorLanguage } from "@/components/editor/CodeEditor";
 import { DiffView } from "@/components/editor/DiffView";
 import { Button, Chip, Icon, InfoTip } from "@/components/ui";
+import { settingsLink } from "@/features/settings/highlight";
 
 import { checkChips, proposalState, proposalTitle, saveBlocker } from "./activity";
 import type { KbProposalItem } from "./transcript";
@@ -280,7 +281,7 @@ function Review({
           {blocker && <p className="font-sans text-[13px] text-muted">{blocker}</p>}
           {!signedIn && (
             <p className="font-sans text-[13px]">
-              <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+              <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
                 Open Settings to sign in
               </Link>
             </p>

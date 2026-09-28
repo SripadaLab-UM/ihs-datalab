@@ -121,6 +121,40 @@ palette that follows the system setting.
   paper tokens, so they follow light and dark, and load as their own chunk.
   Syntax is weight and italics, not colour; only problems are coloured.
 
+## Cursor, hover and focus
+
+The global rules are one block in the base layer of
+`frontend/src/styles/index.css` (Tailwind's preflight gives buttons the
+arrow, so without them nothing shows the hand):
+
+- **The hand** for anything you can press: buttons, links, summaries,
+  selects, labels of checkboxes and radios, and the button-like roles (tab,
+  menuitem, option, switch, checkbox, radio).
+- **The text cursor** in fields, text areas and the code editor while it can
+  be edited. Plain text, a read-only code view, and data keep the arrow.
+- **Disabled** controls show not-allowed and fade to 75%, which keeps ink
+  text above 5.9:1 and muted and faint text above 3:1 on every surface in
+  both themes. Their hover doesn't
+  change: write a control's hover as `enabled:hover:` (or
+  `group-enabled:group-hover:` inside it), as `Button` does.
+- **Focus:** one 2px ink ring, 2px outside the control, for the keyboard
+  only (`:focus-visible`). Fields keep their own ink border instead.
+- **Hover** is quiet: a link's underline darkens (`decoration-faint` to
+  `hover:decoration-ink`), a row that opens underlines its title (`HOVER_TITLE`
+  in `Story.tsx`), a bordered chip's border turns ink.
+- Something you can click is a `<button>` or a link. A row with nothing to
+  open is plain text (`Pressable` in `Story.tsx`), not a disabled button.
+  `styles/clickables.test.ts` reads the JSX with TypeScript's parser and
+  fails on any other element with `onClick`, `onPointerDown` or
+  `onMouseDown` that lacks an interactive role and a tabIndex. The justified
+  exceptions are marked in the source: `data-scrim` (the dimmed page behind a
+  drawer, chat or dialog, which Escape also closes), `data-row` (the results
+  grid, keyboard on the grid) and `data-tree-row` (keyboard on the parent
+  treeitem).
+- There are no drag handles or resizers yet. When one is added, it gets
+  `cursor-col-resize` / `cursor-row-resize`, or `cursor-grab` with
+  `active:cursor-grabbing`.
+
 ## Writing
 
 Short, plain sentences, in the second person to the scientist ("You can

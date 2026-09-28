@@ -128,11 +128,11 @@ function Samples({ onAttach, disabled }: { onAttach: (sample: string) => void; d
             <button
               disabled={disabled}
               onClick={() => onAttach(name)}
-              className="group flex w-full items-center gap-3 py-2 text-left text-xs disabled:opacity-50"
+              className="group flex w-full items-center gap-3 py-2 text-left text-xs"
             >
               <FileGlyph kind={name.includes(".") ? kindOf(name) : "folder"} size={26} />
               <span className="min-w-0 flex-1 truncate font-mono">{name}</span>
-              <span className="shrink-0 font-sans text-[12.5px] text-ink underline decoration-faint underline-offset-4 group-hover:decoration-ink">
+              <span className="shrink-0 font-sans text-[12.5px] text-ink underline decoration-faint underline-offset-4 group-enabled:group-hover:decoration-ink">
                 Attach
               </span>
             </button>

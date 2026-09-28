@@ -6,7 +6,29 @@ import { api, type Conversation } from "@/api/client";
 
 import { type ChatContext, DockedChat, withContext } from "./DockedChat";
 
-vi.mock("./useConversationEvents", () => ({ useConversationEvents: () => [] }));
+// The events DataLab streams: a sent message's own event arrives, as it would.
+const stream = vi.hoisted(() => {
+  let events: { seq: number; type: string; data: Record<string, unknown> }[] = [];
+  const listeners = new Set<() => void>();
+  return {
+    get: () => events,
+    subscribe: (listener: () => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    push: (type: string, data: Record<string, unknown> = {}) => {
+      events = [...events, { seq: events.length + 1, type, data }];
+      listeners.forEach((l) => l());
+    },
+    reset: () => {
+      events = [];
+    },
+  };
+});
+vi.mock("./useConversationEvents", async () => {
+  const { useSyncExternalStore } = await import("react");
+  return { useConversationEvents: () => useSyncExternalStore(stream.subscribe, stream.get) };
+});
 vi.mock("@/api/client", () => ({
   api: {
     modes: vi.fn(),
@@ -42,7 +64,16 @@ beforeEach(() => {
     listed = [conversation("new1")];
     return listed[0];
   });
-  vi.mocked(api.send).mockReset().mockImplementation(async (id) => conversation(id));
+  stream.reset();
+  vi.mocked(api.send).mockReset().mockImplementation(async (id, text) => {
+    // DataLab records the message, and the chat hears of it, then the turn ends.
+    setTimeout(() => {
+      stream.push("user_message", { text });
+      stream.push("turn_finished", { status: "completed" });
+      stream.push("turn_done");
+    });
+    return conversation(id);
+  });
 });
 
 let client: QueryClient;

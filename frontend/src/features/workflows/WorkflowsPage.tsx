@@ -8,6 +8,7 @@ import { pipelinesApi } from "@/api/pipelines";
 import { workflowsApi } from "@/api/workflows";
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { Button, Icon } from "@/components/ui";
+import { useEscapeToClose, useMediaQuery } from "@/components/ui/overlay";
 import { ACTIONABLE } from "@/features/pipelines/pipelines";
 import { useTabState } from "@/features/sql/hooks";
 
@@ -37,6 +38,9 @@ export function WorkflowsPage() {
     "datalab:workflows:chat-open",
     typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
   );
+  // Over the page on a narrow window, the chat closes on Escape, as on a click beside it.
+  const chatDocked = useMediaQuery(WIDE);
+  useEscapeToClose(chatOpen === "open" && !chatDocked, () => setChatOpen("closed"));
   const [chatId, setChatId] = useTabState("datalab:workflows:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
@@ -160,7 +164,7 @@ export function WorkflowsPage() {
 
       {chatOpen === "open" && (
         <>
-          <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
+          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
             aria-label="Workflow authoring chat"
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"
@@ -250,7 +254,7 @@ function FileRoute() {
     return (
       <div className="px-6 py-6 font-sans text-[13px] text-muted">
         <p>There's no workflow file {path ? <span className="font-mono">{path}</span> : ""} in the folder any more.</p>
-        <Link to="/workflows" className="text-ink underline underline-offset-4">
+        <Link to="/workflows" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
           Back to the workflows
         </Link>
       </div>

@@ -7,6 +7,7 @@ import { api, type Conversation, type FileRoot, type WorkspaceFile } from "@/api
 import { Button, FileGlyph, Icon, Modal } from "@/components/ui";
 import { kindOf } from "@/lib/files";
 import { formatBytes } from "@/lib/csv";
+import { settingsLink } from "@/features/settings/highlight";
 
 import { buildReport, REPORT_CSS } from "./report";
 
@@ -112,7 +113,8 @@ export function ExportDialog({
               <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Files from outputs/</p>
               {(shown?.files.length ?? 0) > 0 && (
                 <button
-                  className="text-xs text-accent underline"
+                  type="button"
+                  className="text-xs text-accent underline decoration-faint underline-offset-4 hover:decoration-ink"
                   onClick={() => setPicked(chosen.size ? new Set() : new Set(shown?.files.map((f) => f.path)))}
                 >
                   {chosen.size ? "Select none" : "Select all"}
@@ -129,7 +131,7 @@ export function ExportDialog({
                 The agent has saved newer files since you opened this.{" "}
                 <button
                   type="button"
-                  className="underline"
+                  className="underline hover:decoration-2"
                   onClick={() => {
                     // A different version is a different choice: pick again.
                     setShown(listed);
@@ -171,7 +173,7 @@ export function ExportDialog({
             <span className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">To</span>
             {destinations.data?.length === 0 ? (
               <p className="mt-1 text-xs text-muted">
-                No export folders yet. Add one in <Link to="/settings/export-folders" className="text-accent underline">Settings</Link>.
+                No export folders yet. Add one in <Link {...settingsLink("export-folders", "export-folders")} className="text-accent underline decoration-faint underline-offset-4 hover:decoration-ink">Settings</Link>.
               </p>
             ) : (
               <select

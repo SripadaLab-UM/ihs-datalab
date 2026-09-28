@@ -72,8 +72,15 @@ export function Marker({ tone, open }: { tone: Step["tone"] | "you"; open: boole
   );
 }
 
-/** A button when there is something to open; otherwise plain text, so it isn't a dead stop for the keyboard. */
-function Pressable({
+/** Underlines a row's title while the pointer is over the row, when the row opens. */
+export const HOVER_TITLE = "group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4";
+
+/**
+ * A button when there is something to open; otherwise plain text, so it isn't
+ * a dead stop for the keyboard. Only the button is a hover group, so a row
+ * with nothing to open doesn't react to the pointer.
+ */
+export function Pressable({
   open,
   onToggle,
   className,
@@ -86,7 +93,7 @@ function Pressable({
 }) {
   if (open === null) return <div className={className}>{children}</div>;
   return (
-    <button type="button" onClick={onToggle} aria-expanded={open} className={className}>
+    <button type="button" onClick={onToggle} aria-expanded={open} className={clsx("group", className)}>
       {children}
     </button>
   );
@@ -115,7 +122,7 @@ function Title({ step }: { step: Pick<Step, "icon" | "title" | "tone"> }) {
       )}
     >
       <Icon name={step.icon} size={13} className="shrink-0 translate-y-[1.5px] text-faint" />
-      {step.title}
+      <span className={HOVER_TITLE}>{step.title}</span>
     </span>
   );
 }
@@ -128,7 +135,7 @@ export function StepRow({ step }: { step: Step }) {
       <Pressable
         open={can ? open : null}
         onToggle={() => setOpen(!open)}
-        className={clsx("group flex w-full items-start gap-3 py-2.5 text-left", can ? "cursor-pointer" : "cursor-default")}
+        className="flex w-full items-start gap-3 py-2.5 text-left"
       >
         <Marker tone={step.tone} open={can ? open : null} />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
@@ -178,10 +185,12 @@ function InnerStep({ step }: { step: Step }) {
       <Pressable
         open={step.detail ? open : null}
         onToggle={() => setOpen(!open)}
-        className="group flex w-full items-start gap-3 py-2 text-left"
+        className="flex w-full items-start gap-3 py-2 text-left"
       >
         <Marker tone={step.tone} open={step.detail ? open : null} />
-        <span className="flex-1 font-sans text-[14px] text-ink">{step.title}</span>
+        <span className="flex-1 font-sans text-[14px] text-ink">
+          <span className={HOVER_TITLE}>{step.title}</span>
+        </span>
         <Chips chips={step.chips.slice(0, 2)} />
       </Pressable>
       {open && step.detail && (

@@ -130,7 +130,7 @@ function HelperCard({ conversationId, approval }: { conversationId: string; appr
           </p>
           {approval.answer && (
             <details className="mt-2">
-              <summary className="cursor-pointer text-xs text-muted">
+              <summary className="text-xs text-muted hover:text-ink">
                 {approval.answerStatus === "answered" ? "The helper's answer" : "No answer came back"}
               </summary>
               <div className="mt-1">

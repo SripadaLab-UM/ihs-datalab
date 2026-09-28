@@ -4,7 +4,8 @@ import { type ReactNode, useId, useRef, useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
 
-import { Chat, ChatHeader, ComposerBox, type ComposerNote, EmptyState, useEffortChoice } from "./Chat";
+import { Chat, ChatHeader, ComposerBox, type ComposerDraft, type ComposerNote, EmptyState, PendingTurn, useEffortChoice } from "./Chat";
+import type { PendingMessage } from "./Pending";
 
 /** Something from the tab beside the chat that goes with each message, such as the SQL being edited. */
 export interface ChatContext {
@@ -62,6 +63,8 @@ export function DockedChat({
   onSending?: () => void;
 }) {
   const [started, setStarted] = useState<Conversation | null>(null);
+  // The first message, shown in the new conversation until its event arrives.
+  const [firstMessage, setFirstMessage] = useState<PendingMessage | undefined>(undefined);
   const [includeContext, setIncludeContext] = useState(false);
   // Context about something else now (another file, say): the person ticks
   // it again if they want it sent. Edits to the same thing keep the tick.
@@ -111,6 +114,7 @@ export function DockedChat({
         autoFocus={started?.id === conversation.id || undefined}
         placeholder={placeholder}
         sendLabel={sendLabel}
+        pending={started?.id === conversation.id ? firstMessage : undefined}
       />
     );
   }
@@ -124,7 +128,8 @@ export function DockedChat({
       headerActions={headerActions}
       placeholder={placeholder}
       sendLabel={sendLabel}
-      onStarted={(conversation) => {
+      onStarted={(conversation, text) => {
+        setFirstMessage({ text, after: 0 });
         setStarted(conversation);
         onConversation?.(conversation);
       }}
@@ -214,7 +219,8 @@ function NotStarted({
   headerActions?: ReactNode;
   placeholder?: string;
   sendLabel?: string;
-  onStarted: (conversation: Conversation) => void;
+  /** With what the person typed or picked (not the context sent along). */
+  onStarted: (conversation: Conversation, text: string) => void;
 }) {
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
   const models = useQuery({ queryKey: ["models"], queryFn: api.models, staleTime: 5 * 60_000 });
@@ -226,8 +232,11 @@ function NotStarted({
   const creating = useRef<Promise<Conversation> | null>(null);
   // Set at once on Send, before any state update can render: a double click sends once.
   const inFlight = useRef(false);
+  // The message on its way, shown at once; and what goes back in the box if it fails.
+  const [pending, setPending] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ComposerDraft | null>(null);
   const start = useMutation({
-    mutationFn: async (message: string) => {
+    mutationFn: async ({ message }: { message: string; text: string }) => {
       creating.current ??= api.createConversation(modeId, model).then(
         (conversation) => {
           // In the lists straight away, even if the first message then fails.
@@ -242,18 +251,28 @@ function NotStarted({
       const conversation = await creating.current;
       return (await api.send(conversation.id, message, effort)) ?? conversation;
     },
-    onSuccess: (conversation) => {
+    onSuccess: (conversation, { text }) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      onStarted(conversation);
+      onStarted(conversation, text);
     },
   });
-  const send = (text: string): Promise<unknown> => {
+  // `starter`: a picked question, which the box gets back if it fails (a typed one comes back by itself).
+  const send = (text: string, starter = false): Promise<unknown> => {
     if (inFlight.current) return Promise.reject(new Error("Already sending."));
     inFlight.current = true;
+    setDraft(null);
+    setPending(text);
     // Made now, before anything waits: what's sent is what the person saw as they pressed Send.
-    return start.mutateAsync(prepare(text)).finally(() => {
-      inFlight.current = false;
-    });
+    return start
+      .mutateAsync({ message: prepare(text), text })
+      .catch((error: unknown) => {
+        setPending(null);
+        if (starter) setDraft({ text, key: Date.now() });
+        throw error;
+      })
+      .finally(() => {
+        inFlight.current = false;
+      });
   };
   const unknownMode = modes.isSuccess && !mode;
   // Shown once, over the message box, whether a starter or a typed message failed.
@@ -274,21 +293,23 @@ function NotStarted({
       )}
       <div className="relative min-h-0 flex-1 overflow-y-auto px-4 py-8 sm:px-8">
         <div className="mx-auto flex max-w-[48rem] flex-col gap-14 2xl:max-w-[54rem]">
-          {mode && (
+          {mode && pending === null && (
             <EmptyState
               mode={mode.id}
               kind={mode.kind}
-              onPick={(text) => send(text).catch(() => undefined)}
+              onPick={(text) => send(text, true).catch(() => undefined)}
               starting={start.isPending}
             />
           )}
+          {pending !== null && <PendingTurn text={pending} />}
         </div>
       </div>
       <ComposerBox
         running={false}
-        sending={start.isPending || !mode}
+        sending={pending !== null || start.isPending || !mode}
         error={error}
         onSend={send}
+        draft={draft}
         note={note}
         placeholder={placeholder}
         sendLabel={sendLabel}

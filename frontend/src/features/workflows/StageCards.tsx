@@ -4,13 +4,14 @@ import { Link } from "react-router";
 
 import type { DestinationChoice, ProcessItem, StageEdits, Stages } from "@/api/workflows";
 import { Button, Chip, Icon } from "@/components/ui";
+import { settingsLink } from "@/features/settings/highlight";
 
 /** An edit to the draft, made by the backend from the workflow model (never by editing the YAML here).
  *  `chosen` is the export folder the Deliver card picked, whose key is mapped only when the draft is saved. */
 export type Edit = (edits: StageEdits, chosen?: DestinationChoice) => void;
 
 const FIELD =
-  "w-full rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13px] text-ink outline-none focus:border-ink disabled:opacity-60";
+  "w-full rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13px] text-ink outline-none focus:border-ink";
 const MONO = "font-mono text-[12.5px]";
 
 /** A draft as the three stages a workflow has: Extract → Process & QC → Deliver, each with plain fields. */
@@ -490,7 +491,7 @@ function NoFolders() {
       <Icon name="folder" size={13} className="shrink-0 translate-y-[2px]" />
       <span>
         No export folders are set up yet. Add an export folder in{" "}
-        <Link to="/settings" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+        <Link {...settingsLink("export-folders", "export-folders")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
           Settings → Export folders
         </Link>
         , then choose it here. Until then the outputs stay in the run's folder on this computer.

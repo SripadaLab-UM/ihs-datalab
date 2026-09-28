@@ -9,6 +9,7 @@ import { type HistoryItem, type SqlCheck, type SqlProposal, type SqlRun, sqlApi 
 import { type ChatContext, DockedChat } from "@/components/chat/DockedChat";
 import { CodeEditor } from "@/components/editor/CodeEditor";
 import { Button, Icon, InfoTip, Tabs } from "@/components/ui";
+import { useEscapeToClose, useMediaQuery } from "@/components/ui/overlay";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 
 import { CatalogBrowser } from "./CatalogBrowser";
@@ -57,10 +58,15 @@ export function SqlPage() {
   const [saving, setSaving] = useState(false);
   const [side, setSide] = useState<"tables" | "history">("tables");
   const [drawer, setDrawer] = useState(false);
+  // Over the page on a narrow window, the drawer and the chat close on Escape, as on a click beside them.
+  const drawerDocked = useMediaQuery("(min-width: 1024px)");
+  const chatDocked = useMediaQuery(WIDE);
+  useEscapeToClose(drawer && !drawerDocked, () => setDrawer(false));
   const [chatOpen, setChatOpen] = useTabState<"open" | "closed">(
     "datalab:sql:chat-open",
     typeof window !== "undefined" && window.matchMedia?.(WIDE).matches ? "open" : "closed",
   );
+  useEscapeToClose(chatOpen === "open" && !chatDocked, () => setChatOpen("closed"));
   const [chatId, setChatId] = useTabState("datalab:sql:chat", "");
   const [chatKey, setChatKey] = useState(0);
   useForgetMissingChat(chatId, () => setChatId(""));
@@ -254,7 +260,7 @@ export function SqlPage() {
         chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
       )}
     >
-      {drawer && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
       <aside
         aria-label="Tables and history"
         className={clsx(
@@ -422,7 +428,7 @@ export function SqlPage() {
 
       {chatOpen === "open" && (
         <>
-          <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
+          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
             aria-label={CHAT_LABEL}
             className="absolute inset-y-0 right-0 z-30 flex w-[min(28rem,100%)] min-h-0 flex-col border-l border-line bg-surface shadow-xl xl:static xl:w-auto xl:shadow-none"

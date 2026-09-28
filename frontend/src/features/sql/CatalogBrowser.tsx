@@ -71,7 +71,7 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
         ) : (
           cohorts.map((cohort) => (
             <details key={cohort.schema_name} className="group/cohort border-t border-line first:border-t-0">
-              <summary className="flex cursor-pointer list-none items-center gap-1.5 py-2 font-mono text-[12.5px] font-medium text-ink select-none [&::-webkit-details-marker]:hidden">
+              <summary className="flex list-none items-center gap-1.5 py-2 font-mono text-[12.5px] font-medium text-ink select-none hover:underline hover:decoration-faint hover:underline-offset-4 [&::-webkit-details-marker]:hidden">
                 <Icon name="chevron" size={12} className="text-faint transition-transform group-open/cohort:rotate-90" />
                 {cohort.schema_name}
                 <span className="font-sans text-[11.5px] font-normal text-faint">{cohort.tables.length} tables</span>

@@ -14,6 +14,7 @@ import { useTabState } from "@/features/sql/hooks";
 
 import { findPage, groupPages, resolveLink, statusTone } from "./pages";
 import { ago, repoState } from "./repoState";
+import { settingsLink } from "@/features/settings/highlight";
 
 const WIDE = "(min-width: 1280px)";
 // Below these widths the list and the chat are shown over the page.
@@ -127,7 +128,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
         chatOpen === "open" && "xl:grid-cols-[17rem_minmax(0,1fr)_26rem] 2xl:grid-cols-[18rem_minmax(0,1fr)_30rem]",
       )}
     >
-      {drawer && <div className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
+      {drawer && <div data-scrim className="absolute inset-0 z-20 bg-black/30 lg:hidden" onClick={() => setDrawer(false)} />}
       <aside
         ref={drawerBox}
         aria-label="Pages and skills"
@@ -188,7 +189,7 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
 
       {chatOpen === "open" && (
         <>
-          <div className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
+          <div data-scrim className="absolute inset-0 z-20 bg-black/30 xl:hidden" onClick={() => setChatOpen("closed")} />
           <aside
             ref={chatBox}
             aria-label="Knowledge chat"
@@ -216,7 +217,7 @@ function SignInFirst() {
   return (
     <>
       Sign in to GitHub first:{" "}
-      <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+      <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
         Settings → Connections → GitHub
       </Link>
       .
@@ -245,7 +246,7 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
       {status.repo === "signed out" ? (
         <p className="text-muted">
           {repo.text}{" "}
-          <Link to="/settings/connections#github" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
+          <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
             Sign in
           </Link>
         </p>

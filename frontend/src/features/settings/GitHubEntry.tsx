@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import { api } from "@/api/client";
 import { githubApi } from "@/api/github";
 
-import { GITHUB_ANCHOR, settingsPath } from "./sectionIds";
+import { settingsLink } from "./highlight";
 
 /** GitHub's mark (Primer Octicons, MIT), so the entry is recognisable at a glance. */
 function GitHubMark({ size = 15 }: { size?: number }) {
@@ -32,7 +32,7 @@ export function GitHubEntry() {
   const signedIn = github.signed_in && login;
   return (
     <Link
-      to={settingsPath("connections", GITHUB_ANCHOR)}
+      {...settingsLink("connections", "connection-github")}
       aria-label={signedIn ? `GitHub: signed in as ${login}` : "Sign in to GitHub"}
       title={
         signedIn

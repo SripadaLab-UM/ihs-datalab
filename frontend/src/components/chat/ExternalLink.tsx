@@ -41,7 +41,7 @@ export function ExternalLink({
   if (!link) return <span title="This link can't be opened from DataLab.">{children}</span>;
   return (
     <>
-      <button type="button" className="text-accent underline" title={link.url} onClick={() => setAsking(true)}>
+      <button type="button" className="text-accent underline decoration-faint underline-offset-[3px] hover:decoration-ink" title={link.url} onClick={() => setAsking(true)}>
         {children}
       </button>
       {asking && (

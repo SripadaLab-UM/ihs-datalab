@@ -13,7 +13,8 @@ import { ProposalCard } from "./ProposalCard";
 import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { type CheckLine, checkLines, failureChip, failures } from "./checks";
-import { GroupRow, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
+import { type PendingMessage, SendingLine } from "./Pending";
+import { GroupRow, HOVER_TITLE, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
 
@@ -31,6 +32,7 @@ export function Chat({
   autoFocus,
   placeholder,
   sendLabel,
+  pending: firstPending,
 }: {
   conversation: Conversation;
   headerStart?: ReactNode;
@@ -45,6 +47,8 @@ export function Chat({
   /** The message box's own wording, for a tab that asks for something particular. */
   placeholder?: string;
   sendLabel?: string;
+  /** A message already on its way (DockedChat's first one): shown until its event arrives. */
+  pending?: PendingMessage;
 }) {
   const events = useConversationEvents(conversation.id);
   const turns = useMemo(() => buildTranscript(events), [events]);
@@ -57,11 +61,29 @@ export function Chat({
   const [following, setFollowing] = useState(true);
   const [effort, setEffort] = useEffortChoice();
   const queryClient = useQueryClient();
-  // A starter question is sent as it is, so the agent starts at once.
-  const start = useMutation({
+  // A typed message or a starter question (sent as it is, so the agent starts at once).
+  const send = useMutation({
     mutationFn: (message: string) => api.send(conversation.id, message, effort),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
+  // The message on its way, shown at once with a line under it, until its own
+  // event arrives; and what goes back in the message box if it couldn't be sent.
+  const [pending, setPending] = useState<PendingMessage | null>(firstPending ?? null);
+  const [draft, setDraft] = useState<{ text: string; key: number } | null>(null);
+  const arrived = pending !== null && events.some((e) => e.type === "user_message" && e.seq > pending.after);
+  useEffect(() => {
+    if (arrived) setPending(null);
+  }, [arrived]);
+  const sending = pending !== null && !arrived;
+  // DataLab took it, but its event hasn't come (the stream dropped, say): after
+  // a while the chat stops waiting for it, so Send isn't held for good.
+  useEffect(() => {
+    if (!sending || !send.isSuccess) return;
+    const timer = setTimeout(() => setPending(null), STUCK_MS);
+    return () => clearTimeout(timer);
+  }, [sending, send.isSuccess]);
+  // Set at once on a click, before any state update can render: a double click sends once.
+  const inFlight = useRef(false);
 
   // Working: DataLab says so, or the transcript does and DataLab hasn't
   // answered since. A restart mid-turn leaves the transcript without an end,
@@ -82,6 +104,31 @@ export function Chat({
   });
   const running = conversation.busy || (transcriptRunning && status.dataUpdatedAt <= turnEventAt);
   const known = useKnownFiles(conversation.id);
+
+  /**
+   * Send what the person typed or picked. It shows at once, and nothing else
+   * can be sent until its event arrives (DataLab refuses a second message
+   * meanwhile). If it fails, the box gets the text back: the box does that
+   * itself for a typed one, `starter` asks for it for a picked one.
+   */
+  const sendMessage = (text: string, starter = false): Promise<unknown> => {
+    if (inFlight.current || running || sending) return Promise.reject(new Error("Already sending."));
+    inFlight.current = true;
+    setDraft(null);
+    setPending({ text, after: events.at(-1)?.seq ?? 0 });
+    // Made now, before anything waits: what's sent is what the person saw as they pressed Send.
+    const message = prepareMessage ? prepareMessage(text) : text;
+    return send
+      .mutateAsync(message)
+      .catch((error: unknown) => {
+        setPending(null);
+        if (starter) setDraft({ text, key: Date.now() });
+        throw error;
+      })
+      .finally(() => {
+        inFlight.current = false;
+      });
+  };
 
   // When a turn finishes, refresh what depends on it (busy dots, data accessed).
   useEffect(() => {
@@ -114,7 +161,7 @@ export function Chat({
   useEffect(() => setFollowing(true), [conversation.id, turns.length]);
   useEffect(() => {
     if (following) bottom.current?.scrollIntoView({ block: "end" });
-  }, [events.length, following]);
+  }, [events.length, following, sending]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -140,13 +187,12 @@ export function Chat({
         }}
       >
         <div className="mx-auto flex max-w-[48rem] flex-col gap-14 2xl:max-w-[54rem]">
-          {turns.length === 0 && (
+          {turns.length === 0 && !sending && (
             <EmptyState
               mode={conversation.mode}
               kind={conversation.kind}
-              onPick={(text) => start.mutate(prepareMessage ? prepareMessage(text) : text)}
-              starting={start.isPending || start.isSuccess || running}
-              error={start.error?.message}
+              onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
+              starting={send.isPending || running}
             />
           )}
           <KnownFilesContext value={known}>
@@ -160,6 +206,7 @@ export function Chat({
               />
             ))}
           </KnownFilesContext>
+          {sending && <PendingTurn text={pending.text} />}
           <div ref={bottom} />
         </div>
         {!following && running && (
@@ -176,9 +223,12 @@ export function Chat({
       </div>
       <Composer
         conversation={conversation}
-        running={running || start.isPending}
-        effort={effort}
-        prepareMessage={prepareMessage}
+        running={running}
+        // Held from Send until the message's event arrives (then the agent is working).
+        sending={send.isPending || sending}
+        error={send.error?.message}
+        onSend={sendMessage}
+        draft={draft}
         note={composerNote}
         autoFocus={autoFocus}
         placeholder={placeholder}
@@ -323,7 +373,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
   });
   return (
     <span className="flex items-center gap-1">
-      <label className="flex cursor-pointer items-center gap-2 font-sans text-[13px] text-muted hover:text-ink">
+      <label className="flex items-center gap-2 font-sans text-[13px] text-muted hover:text-ink has-[:disabled]:cursor-not-allowed">
         <input
           type="checkbox"
           className="peer sr-only"
@@ -333,7 +383,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
         />
         <span
           aria-hidden="true"
-          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-1 peer-focus-visible:outline-ink after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
+          className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink peer-disabled:opacity-70 after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
         />
         Rigor review
       </label>
@@ -400,8 +450,8 @@ export function EmptyState({
                   disabled={starting}
                   className="group flex w-full items-baseline gap-4 py-3.5 text-left font-serif text-[18.5px] leading-snug text-ink"
                 >
-                  <span className="flex-1 group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">{starter}</span>
-                  <Icon name="chevron" size={14} className="shrink-0 text-faint group-hover:text-ink" />
+                  <span className="flex-1 group-enabled:group-hover:underline group-enabled:group-hover:decoration-faint group-enabled:group-hover:underline-offset-4">{starter}</span>
+                  <Icon name="chevron" size={14} className="shrink-0 text-faint group-enabled:group-hover:text-ink" />
                 </button>
               </li>
             ))}
@@ -478,7 +528,10 @@ function TurnView({
           line={
             turn.model?.state === "retrying"
               ? retryLine(turn.model)
-              : nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")
+              : // Before turn_started, DataLab is starting (or checking) the turn's sandbox.
+                !turn.started && rows.length === 0
+                ? "Starting the agent's sandbox…"
+                : nowLine(rows, reasoning?.kind === "reasoning" ? reasoning.text : "")
           }
           waiting={waitingFor(rows)}
           onStop={() => stop.mutate()}
@@ -588,7 +641,9 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
       <button type="button" data-tour="how-made" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-3 text-left">
         <Marker tone="done" open={open} />
         <span className="flex min-w-0 flex-1 flex-col gap-1.5">
-          <span className="font-sans text-[14.5px] text-ink">How this answer was made</span>
+          <span className="font-sans text-[14.5px] text-ink">
+            <span className={HOVER_TITLE}>How this answer was made</span>
+          </span>
           <span className="flex flex-wrap gap-1.5">
             {facts.map((fact) => (
               <Chip key={fact}>{fact}</Chip>
@@ -619,6 +674,16 @@ function Question({ text, continues }: { text: string; continues?: boolean }) {
     <h2 className="font-serif text-[28px] leading-[1.18] tracking-[-0.005em] break-words whitespace-pre-wrap text-balance text-ink">
       {text}
     </h2>
+  );
+}
+
+/** A message on its way: the question as it will be, with what's happening under it. */
+export function PendingTurn({ text }: { text: string }) {
+  return (
+    <article className="flex flex-col gap-5" data-testid="pending-message">
+      <Question text={text} />
+      <SendingLine />
+    </article>
   );
 }
 
@@ -799,7 +864,9 @@ function ReviewBox({
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex flex-1 items-start gap-3 text-left">
         {reviewing ? <Marker tone="now" open={null} /> : <Marker tone="done" open={open} />}
         <span className="flex-1">
-          <span className="block font-sans text-[14.5px] text-ink">Rigor review</span>
+          <span className="block font-sans text-[14.5px] text-ink">
+            <span className={HOVER_TITLE}>Rigor review</span>
+          </span>
           <span className="block font-serif text-[15.5px] text-muted italic">
             {reviewing
               ? "The agent is checking its own work against the lab's checklist…"
@@ -820,7 +887,7 @@ function ReviewBox({
             type="button"
             onClick={() => stop.mutate()}
             disabled={stop.isPending}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:text-danger disabled:opacity-55"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 enabled:hover:text-danger"
           >
             Stop the review
           </button>
@@ -830,7 +897,7 @@ function ReviewBox({
             type="button"
             onClick={() => again.mutate()}
             disabled={running || again.isPending || again.isSuccess}
-            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 hover:decoration-ink disabled:opacity-55"
+            className="shrink-0 font-sans text-[13px] text-ink underline decoration-faint underline-offset-4 enabled:hover:decoration-ink"
           >
             Run the review again
           </button>
@@ -859,8 +926,10 @@ function ReviewBox({
 function Composer({
   conversation,
   running,
-  effort,
-  prepareMessage,
+  sending,
+  error,
+  onSend,
+  draft,
   note,
   autoFocus,
   placeholder,
@@ -868,18 +937,16 @@ function Composer({
 }: {
   conversation: Conversation;
   running: boolean;
-  effort: Effort;
-  prepareMessage?: (text: string) => string;
+  sending: boolean;
+  error?: string;
+  onSend: (text: string) => Promise<unknown>;
+  draft?: ComposerDraft | null;
   note?: ComposerNote;
   autoFocus?: boolean;
   placeholder?: string;
   sendLabel?: string;
 }) {
   const queryClient = useQueryClient();
-  const send = useMutation({
-    mutationFn: (message: string) => api.send(conversation.id, message, effort),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
-  });
   const stop = useMutation({
     mutationFn: () => api.stop(conversation.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
@@ -887,10 +954,10 @@ function Composer({
   return (
     <ComposerBox
       running={running}
-      sending={send.isPending}
-      error={send.error?.message}
-      // The message is made as Send is pressed, so what's sent is what was shown then.
-      onSend={(text) => send.mutateAsync(prepareMessage ? prepareMessage(text) : text)}
+      sending={sending}
+      error={error}
+      onSend={onSend}
+      draft={draft}
       onStop={() => stop.mutate()}
       stopping={stop.isPending}
       note={note}
@@ -901,15 +968,28 @@ function Composer({
   );
 }
 
+/** A message that couldn't be sent, back in the box before whatever was typed since. */
+export function restored(message: string, typedSince: string): string {
+  if (!typedSince.trim()) return message;
+  return /\n$/.test(message) ? message + typedSince : `${message}\n${typedSince}`;
+}
+
+/** After this long, a message DataLab took but whose event never came stops holding Send. */
+const STUCK_MS = 20_000;
+
 /** What sits over the message box; given whether a message is being sent, to hold still meanwhile. */
 export type ComposerNote = ReactNode | ((sending: boolean) => ReactNode);
 
-/** The message box under a chat. It clears once `onSend` has succeeded. */
+/** Text to put back in the message box (a message that couldn't be sent); a new `key` puts it back again. */
+export type ComposerDraft = { text: string; key: number };
+
+/** The message box under a chat. It clears as Send is pressed, and gets the text back if `onSend` fails. */
 export function ComposerBox({
   running,
   sending,
   error,
   onSend,
+  draft,
   onStop,
   stopping = false,
   note,
@@ -921,6 +1001,7 @@ export function ComposerBox({
   sending: boolean;
   error?: string;
   onSend: (text: string) => Promise<unknown>;
+  draft?: ComposerDraft | null;
   onStop?: () => void;
   stopping?: boolean;
   note?: ComposerNote;
@@ -929,6 +1010,10 @@ export function ComposerBox({
   sendLabel?: string;
 }) {
   const [text, setText] = useState("");
+  // A message that couldn't be sent comes back, before anything typed meanwhile.
+  useEffect(() => {
+    if (draft) setText((current) => restored(draft.text, current));
+  }, [draft]);
   // The box grows with what's typed (wrapped lines too), up to about eight lines.
   const box = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => {
@@ -939,8 +1024,13 @@ export function ComposerBox({
   }, [text]);
 
   const submit = () => {
-    // A failed send keeps what was typed; the error shows above the box.
-    if (text.trim() && !running && !sending) onSend(text.trim()).then(() => setText(""), () => undefined);
+    const typed = text;
+    const message = typed.trim();
+    if (!message || running || sending) return;
+    // Cleared at once: the message shows in the chat. If it fails, it comes back
+    // here as it was typed, before anything typed since, and the error shows above.
+    setText("");
+    onSend(message).catch(() => setText((current) => restored(typed, current)));
   };
 
   return (
@@ -1014,7 +1104,7 @@ function EffortSelect({ effort, onChange }: { effort: Effort; onChange: (effort:
       onChange={(e) => onChange(e.target.value as Effort)}
       aria-label="How hard the agent thinks"
       title="How hard the agent thinks, for the next message you send"
-      className="bg-transparent font-sans text-[12px] text-muted hover:text-ink"
+      className="bg-transparent font-sans text-[12px] text-muted enabled:hover:text-ink"
     >
       <option value="low">Quick</option>
       <option value="medium">Balanced</option>

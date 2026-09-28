@@ -123,8 +123,59 @@ body {
 }
 
 @layer base {
+  /* Cursor, hover and focus: see docs/DESIGN.md, "Cursor, hover and focus".
+     Tailwind's preflight gives buttons the arrow; here anything you can press
+     shows the hand, anything you type in shows the text cursor, plain text
+     keeps the arrow, and a disabled control shows it can't be used. All in
+     :where(), so a component's own utility still wins. Styles/cursor.test.ts
+     checks these rules are here. */
+  :where(
+      button,
+      a[href],
+      summary,
+      select,
+      label[for],
+      label:has(> input:is([type="checkbox"], [type="radio"])),
+      input:is([type="checkbox"], [type="radio"], [type="file"], [type="button"], [type="submit"], [type="reset"]),
+      [role="button"],
+      [role="link"],
+      [role="tab"],
+      [role="menuitem"],
+      [role="option"],
+      [role="switch"],
+      [role="checkbox"],
+      [role="radio"]
+    ) {
+    cursor: pointer;
+  }
+  :where(
+      input:not([type="checkbox"], [type="radio"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="range"], [type="color"]),
+      textarea,
+      [contenteditable="true"],
+      [contenteditable="plaintext-only"],
+      .cm-content[contenteditable="true"]
+    ) {
+    cursor: text;
+  }
+  /* Read-only code (a knowledge page, a diff) is text to select, not a field. */
+  :where(.cm-content[contenteditable="false"]) {
+    cursor: auto;
+  }
+  /* Disabled: the arrow with a bar, faded to 75% (ink text stays above
+     5.9:1, muted and faint text above 3:1, on every surface in both themes:
+     styles/cursor.test.tsx), and no hover change: components use
+     enabled:hover: for theirs. */
+  :where(button, select, input, textarea, [role="button"], [role="tab"], [role="switch"]):where(:disabled, [aria-disabled="true"]) {
+    cursor: not-allowed;
+    opacity: 0.75;
+  }
+  :where(label:has(> input:disabled), [aria-disabled="true"]) {
+    cursor: not-allowed;
+  }
+  /* One focus ring for the keyboard: 2px of ink (far above 3:1 on every
+     surface), just outside the control. Fields keep their own ink border. */
   :focus-visible {
-    outline: 1.5px solid var(--color-ink);
+    outline: 2px solid var(--color-ink);
     outline-offset: 2px;
   }
 }
@@ -287,4 +338,40 @@ input[type="radio"] {
 [data-tour-on] {
   outline: 2px solid var(--color-ink);
   outline-offset: 3px;
+}
+
+/* The part of Settings a link from elsewhere pointed at (features/settings/
+   highlight.ts): an amber ring and tint around it that fade, so the eye lands
+   there. Shadows and a background only, so nothing moves. Under reduced
+   motion it holds still for the same time and then goes. */
+@keyframes dl-highlight {
+  0%,
+  35% {
+    background-color: var(--color-attn-soft);
+    box-shadow:
+      0 0 0 8px var(--color-attn-soft),
+      0 0 0 10px var(--color-attn);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow:
+      0 0 0 8px transparent,
+      0 0 0 10px transparent;
+  }
+}
+.dl-highlight {
+  border-radius: var(--radius-md);
+  animation: dl-highlight 1.8s ease-out both;
+}
+.dl-highlight-still {
+  border-radius: var(--radius-md);
+  background-color: var(--color-attn-soft);
+  box-shadow:
+    0 0 0 8px var(--color-attn-soft),
+    0 0 0 10px var(--color-attn);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dl-highlight {
+    animation: none;
+  }
 }

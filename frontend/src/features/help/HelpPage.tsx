@@ -114,7 +114,7 @@ export function HelpPage() {
                 There's no Help page here
               </h1>
               <p className="font-serif text-[17px] text-muted">
-                <Link to="/help" className="text-ink underline decoration-faint underline-offset-4">
+                <Link to="/help" className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink">
                   Start here
                 </Link>{" "}
                 for the list of guides, or search for what you need.

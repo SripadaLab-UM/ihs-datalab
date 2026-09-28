@@ -70,6 +70,8 @@ export interface Turn {
   continues?: boolean;
   /** The question's event, for tabs that link to a turn (the SQL Playground's "How this SQL was created"). */
   seq?: number;
+  /** The agent has begun the turn (turn_started): before that, DataLab is starting its sandbox. */
+  started?: boolean;
   /** Numbers in the answer that nothing the turn produced contains. */
   trace?: { numbers: number; untraced: string[] };
   /** Where each number in the answer appears, and the output files it names. */
@@ -171,6 +173,9 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true, seq: event.seq };
         turns.push(turn);
         byId.clear();
+        break;
+      case "turn_started":
+        current().started = true;
         break;
       case "answer_started": {
         const item: Item = { kind: "message", id, phase: (data.phase as never) ?? null, text: "" };
