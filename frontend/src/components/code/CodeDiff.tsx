@@ -74,11 +74,14 @@ export function CodeDiff({
   );
 }
 
-/** "@@ -3,7 +3,8 @@" → "Lines 3–9 → 3–10". */
-function hunkLabel(header: string): string {
+/** "@@ -3,7 +3,8 @@" → "Lines 3–9 → 3–10"; a side with no lines is "after line 2". */
+export function hunkLabel(header: string): string {
   const match = /^@@ -(\d+),(\d+) \+(\d+),(\d+) @@/.exec(header);
   if (!match) return header;
   const [a, n, b, m] = match.slice(1).map(Number);
-  const span = (start: number, count: number) => (count <= 1 ? `${start}` : `${start}–${start + count - 1}`);
-  return `Lines ${span(a, n)} → ${span(b, m)}`;
+  // A side with no lines starts where they would go: after the line before it.
+  const span = (start: number, count: number) =>
+    count === 0 ? (start <= 1 ? "at the start" : `after line ${start - 1}`) : count === 1 ? `line ${start}` : `lines ${start}–${start + count - 1}`;
+  const label = `${span(a, n)} → ${span(b, m)}`;
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }

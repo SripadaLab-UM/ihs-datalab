@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 
 import { CodeBlock, HighlightedCode } from "./CodeBlock";
-import { CodeDiff } from "./CodeDiff";
+import { CodeDiff, hunkLabel } from "./CodeDiff";
 import { codeLanguage, isCodeFile, languageOfPath, MAX_HIGHLIGHT_CHARS } from "./languages";
 
 afterEach(() => {
@@ -92,7 +92,7 @@ it("marks a unified diff's lines, each highlighted as its own version has it", a
       ]}
     />,
   );
-  expect(screen.getByText("Lines 1–2 → 1–2")).toBeInTheDocument();
+  expect(screen.getByText("Lines 1–2 → lines 1–2")).toBeInTheDocument();
   await waitFor(() => expect(document.querySelector("[data-op=same] .tok-keyword")).toHaveTextContent("import"));
   expect(document.querySelector("[data-op=removed]")).toHaveTextContent("x = 1");
   expect(document.querySelector("[data-op=added] .tok-number")).toHaveTextContent("2");
@@ -120,4 +120,11 @@ it("never renders code through dangerouslySetInnerHTML", () => {
   for (const [name, source] of Object.entries(sources)) {
     expect(source, name).not.toMatch(/dangerouslySetInnerHTML|innerHTML/);
   }
+});
+
+it("names a hunk's lines, and where a side with none would be", () => {
+  expect(hunkLabel("@@ -7,6 +7,11 @@")).toBe("Lines 7–12 → lines 7–17");
+  expect(hunkLabel("@@ -4,0 +4,2 @@")).toBe("After line 3 → lines 4–5");
+  expect(hunkLabel("@@ -3,1 +3,0 @@")).toBe("Line 3 → after line 2");
+  expect(hunkLabel("@@ -1,0 +1,5 @@")).toBe("At the start → lines 1–5");
 });

@@ -43,9 +43,9 @@ export function ExportDialog({
   const [rawHtml, setRawHtml] = useState(false);
   const [report, setReport] = useState(withReport);
   const [includeWork, setIncludeWork] = useState(false);
-  // Scripts go with the outputs unless the person leaves them out.
-  const [includeCode, setIncludeCode] = useState(true);
-  const scripts = includeCode ? (shown?.scripts ?? []) : [];
+  // Scripts leave only when the person ticks them, like everything else.
+  const [pickedScripts, setPickedScripts] = useState<Set<string>>(new Set());
+  const scripts = (shown?.scripts ?? []).filter((file) => pickedScripts.has(file.path));
   const [destination, setDestination] = useState<string>("");
   // Nothing is chosen for the person: they pick what leaves.
   const chosen = picked;
@@ -145,6 +145,7 @@ export function ExportDialog({
                     // A different version is a different choice: pick again.
                     setShown(listed);
                     setPicked(new Set());
+                    setPickedScripts(new Set());
                   }}
                 >
                   Show the newer files
@@ -168,17 +169,41 @@ export function ExportDialog({
           </div>
           {(shown?.scripts.length ?? 0) > 0 && (
             <div>
-              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Code</p>
-              <label className="mt-1 flex cursor-pointer items-start gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sunken">
-                <input type="checkbox" checked={includeCode} onChange={(e) => setIncludeCode(e.target.checked)} className="mt-0.5" />
-                <span className="flex-1">
-                  The {shown!.scripts.length === 1 ? "script" : `${shown!.scripts.length} scripts`} in scripts/, as the
-                  workspace has {shown!.scripts.length === 1 ? "it" : "them"} now
-                  <span className="block truncate font-mono text-xs text-muted">
-                    {shown!.scripts.map((f) => f.path.replace(/^scripts\//, "")).join(", ")}
-                  </span>
-                </span>
-              </label>
+              <div className="flex items-center justify-between">
+                <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Code from scripts/</p>
+                <label className="flex items-center gap-1.5 text-xs text-muted">
+                  <input
+                    type="checkbox"
+                    checked={scripts.length === shown!.scripts.length}
+                    onChange={(e) => setPickedScripts(e.target.checked ? new Set(shown!.scripts.map((f) => f.path)) : new Set())}
+                  />
+                  Include all scripts
+                </label>
+              </div>
+              <ul className="mt-1.5 flex max-h-40 flex-col gap-0.5 overflow-y-auto">
+                {shown!.scripts.map((file) => (
+                  <li key={file.path}>
+                    <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sunken">
+                      <input
+                        type="checkbox"
+                        checked={pickedScripts.has(file.path)}
+                        onChange={() => {
+                          const next = new Set(pickedScripts);
+                          if (next.has(file.path)) next.delete(file.path);
+                          else next.add(file.path);
+                          setPickedScripts(next);
+                        }}
+                      />
+                      <Icon name="code" size={15} className="shrink-0 text-muted" />
+                      <span className="min-w-0 flex-1 truncate font-mono text-xs">{file.path}</span>
+                      <span className="text-xs text-muted">
+                        {file.path.toLowerCase().endsWith(".ipynb") ? "without outputs · " : ""}
+                        {formatBytes(file.size)}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
           {pages.length > 0 && (

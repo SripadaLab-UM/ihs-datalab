@@ -243,6 +243,8 @@ def build_code_router(store: ConversationStore, sessions: SessionManager) -> API
             texts.append(None if too_large or unreadable else text)
         too_large = any(t is None for t in texts)
         diff = code.Diff() if too_large else code.diff_texts(texts[0] or "", texts[1] or "")
+        # Too long, or too different, to compare quickly.
+        too_large = too_large or diff.too_large
         return CodeDiffOut(
             path=file.path,
             language=language,

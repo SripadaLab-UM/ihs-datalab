@@ -279,3 +279,61 @@ def test_scripts_are_exported_beside_the_outputs_under_every_export_rule(
                 },
             )
             assert refused.status_code in (404, 422)
+
+
+def test_a_notebook_leaves_without_its_outputs_and_only_scripts_leave_from_work(settings, catalog):
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"title": "Notebook"}).json()["id"]
+        work = app.state.services.sessions.paths(cid).work
+        (work / "outputs").mkdir(parents=True)
+        (work / "scripts").mkdir()
+        leak = "participant P0009 slept 4h"
+        notebook = {
+            "metadata": {"kernelspec": {"language": "python"}, "widgets": {"state": leak}},
+            "nbformat": 4,
+            "cells": [
+                {"cell_type": "markdown", "source": ["# Sleep"], "attachments": {"a.png": leak}},
+                {
+                    "cell_type": "code",
+                    "source": ["df.head()"],
+                    "execution_count": 7,
+                    "outputs": [{"output_type": "stream", "text": [leak]}],
+                },
+            ],
+        }
+        (work / "scripts" / "explore.ipynb").write_text(json.dumps(notebook))
+        (work / "joined.csv").write_text("pid\nP0001\n")
+        (work / "scripts" / "rows.csv").write_text("pid\nP0001\n")
+        app.state.services.sessions.checkpoints(cid).take("After turn 1", turn=1)
+        checkpoint = client.get(f"/api/conversations/{cid}/files", params={"root": "work"}).json()
+        number = checkpoint[0]["checkpoint"]
+
+        def export(path):
+            return client.post(
+                f"/api/conversations/{cid}/exports",
+                json={
+                    "destination_id": "practice",
+                    "files": [{"root": "work", "path": path}],
+                    "checkpoint": number,
+                },
+            )
+
+        # Joined data, or anything but a script, never leaves from /work.
+        for path in ("joined.csv", "scripts/rows.csv", "outputs/../joined.csv"):
+            assert export(path).status_code in (400, 422), path
+        assert export("scripts/explore.ipynb").status_code == 201
+        [folder] = list((settings.data_dir / "practice-exports").iterdir())
+        exported = (folder / "files" / "workspace" / "scripts" / "explore.ipynb").read_text()
+        assert "P0009" not in exported
+        cells = json.loads(exported)["cells"]
+        assert cells[1] == {
+            "cell_type": "code",
+            "source": ["df.head()"],
+            "outputs": [],
+            "execution_count": None,
+        }
+        assert cells[0]["source"] == ["# Sleep"]
+        # The viewer shows it without outputs too.
+        shown_nb = client.get(f"/api/conversations/{cid}/files/work/scripts/explore.ipynb")
+        assert shown_nb.status_code == 200 and "P0009" not in shown_nb.text

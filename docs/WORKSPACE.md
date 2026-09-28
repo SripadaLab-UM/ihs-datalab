@@ -286,10 +286,13 @@ The layout is the same for every mode:
   - **Inputs**: attach files and folders, read-only.
   - **Outputs**: preview files and HTML reports, and **Export** them to a
     destination. Deliverables only: scripts, SQL and notebooks are listed in
-    **Code**, and Outputs links there. Export has a **Code** group, on by
-    default: the scripts in `/work/scripts` from the same checkpoint as the
-    outputs, under the same rules (manifest, inert names, the quarantine
-    flag, practice exports only to the practice folder).
+    **Code**, and Outputs links there. Export has a **Code** group: each
+    script in `/work/scripts` (from the same checkpoint as the outputs),
+    unticked like every file, with **Include all scripts**. The same rules
+    apply (manifest, inert names, the quarantine flag, practice exports only
+    to the practice folder), notebooks leave without outputs, execution
+    counts, attachments or widget state, and the API refuses any other file
+    from `/work`.
   - **Code** (built): the scripts, SQL and notebooks the agent created or
     changed in this conversation, found by comparing checkpoints, grouped
     as new, modified or deleted, newest first. Files DataLab copied into
@@ -304,8 +307,11 @@ The layout is the same for every mode:
     the agent ran without saving a file (and multi-line shell commands),
     each linking to its step in "How this answer was made". Versions over
     1 MB are listed but not shown. The agent is asked to save its analysis
-    code as named scripts (`/work/scripts/<name>.R`), which are exported
-    with the outputs.
+    code as named scripts (`/work/scripts/<name>.R`), which can be
+    exported with the outputs. A version that reads like a table (most lines
+    splitting into the same fields) is marked "looks like data". Diffs are
+    capped: over 20,000 lines a side, or too different to compare within a
+    fixed amount of work, they say so instead.
   - **History**: turn checkpoints. **Roll back** restores the workspace files
     to how they were after a chosen turn. The conversation isn't rewound, and
     the agent is told its files were restored. Very large files aren't

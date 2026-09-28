@@ -18,11 +18,12 @@ never leave here, and nor does anything a command printed.
 
 from __future__ import annotations
 
-import difflib
 import json
 import os
 import re
 import shlex
+import threading
+from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -46,14 +47,9 @@ _LANGUAGES = {
     ".qmd": "markdown",
     ".rmd": "markdown",
     ".sh": "shell",
-    ".bash": "shell",
-    ".zsh": "shell",
     ".yaml": "yaml",
     ".yml": "yaml",
-    ".jl": "text",
-    ".do": "text",
-    ".sas": "text",
-}
+}  # Only types the file viewer shows as text too (api/files.py _TEXT).
 CODE_SUFFIXES = frozenset(_LANGUAGES)
 # Tool folders, not the agent's code: git's own files, caches, installed packages.
 _SKIPPED_DIRS = frozenset(
@@ -108,6 +104,34 @@ class Listing:
     more: int = 0  # files left out past MAX_FILES
 
 
+# Checkpoints never change once written, so what each holds (its code files)
+# is read once; a listing is kept until a new checkpoint or baseline.
+_ENTRIES: OrderedDict[tuple[str, int], tuple[Checkpoint, dict[str, Entry]]] = OrderedDict()
+_LISTINGS: OrderedDict[tuple[Any, ...], Listing] = OrderedDict()
+_MAX_ENTRIES = 5000  # checkpoints' code entries kept, across conversations
+_MAX_LISTINGS = 64
+_cache_lock = threading.Lock()
+
+
+def _code_entries(
+    checkpoints: Checkpoints, number: int
+) -> tuple[Checkpoint, dict[str, Entry]] | None:
+    key = (str(checkpoints.store), number)
+    with _cache_lock:
+        if key in _ENTRIES:
+            _ENTRIES.move_to_end(key)
+            return _ENTRIES[key]
+    summary = checkpoints.get(number)
+    if summary is None:
+        return None
+    entries = {rel: e for rel, e in checkpoints.entries(number).items() if is_code(rel)}
+    with _cache_lock:
+        _ENTRIES[key] = (summary, entries)
+        while len(_ENTRIES) > _MAX_ENTRIES:
+            _ENTRIES.popitem(last=False)
+    return summary, entries
+
+
 def code_files(checkpoints: Checkpoints, baseline_folders: Iterable[str] = ()) -> Listing:
     """Every code file the checkpoints saw, with its versions, newest change first.
 
@@ -116,24 +140,40 @@ def code_files(checkpoints: Checkpoints, baseline_folders: Iterable[str] = ()) -
     (conversations from before they did): then a file there as the first
     checkpoint has it counts as copied in.
     """
-    listed = checkpoints.list()
+    numbers = checkpoints.numbers()
+    folders = tuple(sorted(f"{folder.rstrip('/')}/" for folder in baseline_folders))
+    key = (
+        str(checkpoints.store),
+        tuple(numbers[-1:]),
+        len(numbers),
+        checkpoints.baseline_stamp(),
+        folders,
+    )
+    with _cache_lock:
+        if key in _LISTINGS:
+            _LISTINGS.move_to_end(key)
+            return _LISTINGS[key]
+    listing = _code_files(checkpoints, numbers, folders)
+    with _cache_lock:
+        _LISTINGS[key] = listing
+        while len(_LISTINGS) > _MAX_LISTINGS:
+            _LISTINGS.popitem(last=False)
+    return listing
+
+
+def _code_files(checkpoints: Checkpoints, numbers: list[int], folders: tuple[str, ...]) -> Listing:
+    listed = [c for c in (_code_entries(checkpoints, n) for n in numbers) if c is not None]
     recorded = {rel: v for rel, v in checkpoints.baseline().items() if is_code(rel)}
     history: dict[str, list[Version]] = {
         rel: [Version(0, None, "", "As copied into the workspace", sha, size)]
         for rel, (sha, size) in recorded.items()
     }
     baseline = set(recorded)
-    if not recorded and listed:
-        folders = tuple(f"{folder.rstrip('/')}/" for folder in baseline_folders)
-        if folders:
-            first = checkpoints.entries(listed[0].number)
-            baseline = {rel for rel in first if rel.startswith(folders) and is_code(rel)}
+    if not recorded and listed and folders:
+        baseline = {rel for rel in listed[0][1] if rel.startswith(folders)}
     latest_entries: dict[str, Entry] = {}
-    for checkpoint in listed:
-        entries = checkpoints.entries(checkpoint.number)
+    for checkpoint, entries in listed:
         for rel, entry in entries.items():
-            if not is_code(rel):
-                continue
             versions = history.setdefault(rel, [])
             if not versions or versions[-1].sha256 != entry.sha256:
                 versions.append(_version(checkpoint, entry))
@@ -155,7 +195,9 @@ def code_files(checkpoints: Checkpoints, baseline_folders: Iterable[str] = ()) -
     # Newest change first; then by path, so the order is stable.
     files.sort(key=lambda f: (-f.last.checkpoint, f.path))
     return Listing(
-        files, sum(f.status == "unchanged" for f in files), listed[-1].number if listed else None
+        files,
+        sum(f.status == "unchanged" for f in files),
+        listed[-1][0].number if listed else None,
     )
 
 
@@ -243,6 +285,36 @@ def read_notebook(data: bytes) -> Notebook | None:
     return Notebook(language, cells)
 
 
+def strip_notebook(data: bytes) -> bytes | None:
+    """A Jupyter notebook without anything a run left in it: no cell outputs,
+    execution counts, attachments or widget state (any can hold data). The
+    code and Markdown stay. None if it isn't a notebook DataLab can read."""
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("cells"), list):
+        return None
+    cells = []
+    for cell in raw["cells"]:
+        if not isinstance(cell, dict):
+            continue
+        kept = {
+            k: v for k, v in cell.items() if k not in ("outputs", "execution_count", "attachments")
+        }
+        if cell.get("cell_type") == "code":
+            kept["outputs"] = []
+            kept["execution_count"] = None
+        cells.append(kept)
+    metadata = {k: v for k, v in _dict(raw.get("metadata")).items() if k != "widgets"}
+    stripped = {
+        **{k: v for k, v in raw.items() if k not in ("cells", "metadata")},
+        "metadata": metadata,
+        "cells": cells,
+    }
+    return (json.dumps(stripped, indent=1, ensure_ascii=False) + "\n").encode()
+
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -272,14 +344,32 @@ class Diff:
     added: int = 0
     removed: int = 0
     truncated: bool = False
+    # Too long or too different to compare (MAX_DIFF_INPUT_LINES, DIFF_BUDGET).
+    too_large: bool = False
+
+
+MAX_DIFF_INPUT_LINES = 20_000  # of either side: longer ones aren't compared
+DIFF_BUDGET = 3_000_000  # steps of work one comparison may take
 
 
 def diff_texts(old: str, new: str, context: int = 3) -> Diff:
-    """A unified diff, line by line, with the line numbers on each side."""
+    """A unified diff, line by line, with the line numbers on each side.
+
+    Myers' algorithm, with its work capped: versions over MAX_DIFF_INPUT_LINES
+    lines, or too different to compare within DIFF_BUDGET, come back
+    `too_large` (checked before, and while, comparing), so a large or
+    repetitive file can't hold the server up.
+    """
     a, b = old.splitlines(), new.splitlines()
     diff = Diff()
-    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-    for group in matcher.get_grouped_opcodes(context):
+    if len(a) > MAX_DIFF_INPUT_LINES or len(b) > MAX_DIFF_INPUT_LINES:
+        diff.too_large = True
+        return diff
+    ops = _opcodes(a, b, DIFF_BUDGET)
+    if ops is None:
+        diff.too_large = True
+        return diff
+    for group in _grouped(ops, len(a), len(b), context):
         first, last = group[0], group[-1]
         header = f"@@ -{first[1] + 1},{last[2] - first[1]} +{first[3] + 1},{last[4] - first[3]} @@"
         diff.lines.append(DiffLine("@", None, None, header))
@@ -299,6 +389,102 @@ def diff_texts(old: str, new: str, context: int = 3) -> Diff:
             diff.truncated = True
             break
     return diff
+
+
+Opcode = tuple[str, int, int, int, int]
+
+
+def _opcodes(a: list[str], b: list[str], budget: int) -> list[Opcode] | None:
+    """difflib-style opcodes from Myers' shortest edit script, or None past `budget`."""
+    n, m = len(a), len(b)
+    offset = n + m + 1
+    v = [0] * (2 * offset + 1)
+    snapshots: list[list[int]] = []
+    work = 0
+    found = False
+    for d in range(n + m + 1):
+        for k in range(-d, d + 1, 2):
+            if k == -d or (k != d and v[offset + k - 1] < v[offset + k + 1]):
+                x = v[offset + k + 1]
+            else:
+                x = v[offset + k - 1] + 1
+            y = x - k
+            while x < n and y < m and a[x] == b[y]:
+                x += 1
+                y += 1
+                work += 1
+            v[offset + k] = x
+            work += 1
+            if x >= n and y >= m:
+                found = True
+                break
+        snapshots.append(v[offset - d : offset + d + 1])
+        work += 2 * d + 1
+        if found:
+            break
+        if work > budget:
+            return None
+    # Back from the end: each step is one line removed or added, after a run of equal ones.
+    steps: list[tuple[str, int, int]] = []  # ("=", i, j), ("-", i, j), ("+", i, j)
+    x, y = n, m
+    for d in range(len(snapshots) - 1, 0, -1):
+        before = snapshots[d - 1]
+        k = x - y
+        down = k == -d or (k != d and before[k - 1 + d - 1] < before[k + 1 + d - 1])
+        previous_k = k + 1 if down else k - 1
+        px = before[previous_k + d - 1]
+        py = px - previous_k
+        sx, sy = (px, py + 1) if down else (px + 1, py)
+        while x > sx and y > sy:
+            x -= 1
+            y -= 1
+            steps.append(("=", x, y))
+        steps.append(("+", px, py) if down else ("-", px, py))
+        x, y = px, py
+    while x > 0 and y > 0:
+        x -= 1
+        y -= 1
+        steps.append(("=", x, y))
+    steps.reverse()
+    ops: list[list[Any]] = []
+    i = j = 0
+    for kind, _, _ in steps:
+        tag = {"=": "equal", "-": "delete", "+": "insert"}[kind]
+        if ops and (ops[-1][0] == tag or (ops[-1][0] != "equal" and tag != "equal")):
+            if ops[-1][0] != tag:
+                ops[-1][0] = "replace"
+        else:
+            ops.append([tag, i, i, j, j])
+        if kind != "+":
+            i += 1
+        if kind != "-":
+            j += 1
+        ops[-1][2], ops[-1][4] = i, j
+    return [(str(t), int(i1), int(i2), int(j1), int(j2)) for t, i1, i2, j1, j2 in ops]
+
+
+def _grouped(ops: list[Opcode], n: int, m: int, context: int) -> list[list[Opcode]]:
+    """The changes, each with `context` equal lines around it (difflib's grouping)."""
+    codes = list(ops) or [("equal", 0, 1, 0, 1)]
+    if codes[0][0] == "equal":
+        tag, i1, i2, j1, j2 = codes[0]
+        codes[0] = (tag, max(i1, i2 - context), i2, max(j1, j2 - context), j2)
+    if codes[-1][0] == "equal":
+        tag, i1, i2, j1, j2 = codes[-1]
+        codes[-1] = (tag, i1, min(i2, i1 + context), j1, min(j2, j1 + context))
+    span = context + context
+    groups: list[list[Opcode]] = []
+    group: list[Opcode] = []
+    for tag, i1, i2, j1, j2 in codes:
+        if tag == "equal" and i2 - i1 > span:
+            group.append((tag, i1, min(i2, i1 + context), j1, min(j2, j1 + context)))
+            groups.append(group)
+            group = []
+            i1, j1 = max(i1, i2 - context), max(j1, j2 - context)
+        group.append((tag, i1, i2, j1, j2))
+    if group and not (len(group) == 1 and group[0][0] == "equal"):
+        groups.append(group)
+    return groups
 
 
 # --- Inline code, from the event log -------------------------------------------

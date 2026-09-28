@@ -7,7 +7,7 @@ import { api, type Conversation } from "@/api/client";
 import { type CodeFile, type CodeListing, codeApi } from "@/api/code";
 import { SHOW_STEP } from "@/components/chat/showStep";
 
-import { CodePanel } from "./Code";
+import { CodePanel, looksLikeData } from "./Code";
 import { SidePanel } from "./SidePanel";
 
 vi.mock("@/api/client", () => ({
@@ -200,4 +200,26 @@ it("keeps code out of Outputs, with a link to the Code tab", async () => {
   fireEvent.click(await screen.findByRole("button", { name: /4 code files in the Code tab/ }));
   expect(screen.getByRole("tab", { name: "Code", selected: true })).toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "New" })).toBeInTheDocument();
+});
+
+it("takes whether a version is current from the listing, not from an old response", async () => {
+  // The version response says current, but the listing (newer) says it's since been deleted.
+  vi.mocked(codeApi.list).mockResolvedValue({ ...listing, files: [file("old.py", "deleted", [1], "python")] });
+  wrap(<CodePanel conversationId="c1" />);
+  fireEvent.click(await screen.findByTitle("old.py"));
+  const label = await screen.findByTestId("code-version-label");
+  expect(label).toHaveTextContent("snapshot, not the live file (it has since been deleted)");
+  expect(label).not.toHaveTextContent("Current file");
+});
+
+it("notes when a script looks like data", async () => {
+  const rows = ["pid,week,steps", ...Array.from({ length: 30 }, (_, i) => `P${i},2025-03-0${i % 9},${1000 + i}`)].join("\n");
+  expect(looksLikeData(rows)).toBe(true);
+  expect(looksLikeData("library(dplyr)\nx <- c(1, 2, 3)\n".repeat(20))).toBe(false);
+  vi.mocked(codeApi.version).mockResolvedValue({
+    path: "scripts/steps_by_week.R", language: "r", version: version(2), current: true, too_large: false, text: rows, notebook: null, unreadable: false,
+  });
+  wrap(<CodePanel conversationId="c1" />);
+  fireEvent.click(await screen.findByTitle("scripts/steps_by_week.R"));
+  expect(await screen.findByTestId("looks-like-data")).toHaveTextContent("looks like data");
 });

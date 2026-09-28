@@ -38,6 +38,7 @@ from datalab.sessions.checkpoints import (
     list_files,
     open_workspace_file,
 )
+from datalab.sessions.code import strip_notebook
 from datalab.sessions.containers import DockerError
 from datalab.sessions.manager import Busy, SessionManager
 from datalab.sessions.store import ConversationStore
@@ -70,6 +71,7 @@ _PREVIEW_TYPES = {
 }
 _MAX_IMAGE_BYTES = 25 * 1024**2
 _MAX_PREVIEW_BYTES = 25 * 1024**2
+_MAX_NOTEBOOK_BYTES = 25 * 1024**2
 _DEFAULT_HEAD = 256 * 1024
 # Workspace files opened directly in a tab are inert: no scripts, no requests.
 _FILE_POLICY = "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'"
@@ -269,6 +271,17 @@ def build_files_router(
                     raise HTTPException(413, "This image is too large to preview.")
                 media_type = _IMAGES[os.path.splitext(path)[1].lower()]
                 truncated = False
+            elif path.lower().endswith(".ipynb") and root != "results":
+                # A notebook is shown without its outputs, which can hold data.
+                raw = source.read(_MAX_NOTEBOOK_BYTES + 1)
+                if len(raw) > _MAX_NOTEBOOK_BYTES:
+                    raise HTTPException(413, "This notebook is too large to show.")
+                data = strip_notebook(raw)
+                if data is None:
+                    raise HTTPException(415, "DataLab can't show this notebook.")
+                truncated = len(data) > head
+                data = data[:head]
+                media_type = "text/plain; charset=utf-8"
             else:
                 data = source.read(head + 1)
                 truncated = len(data) > head

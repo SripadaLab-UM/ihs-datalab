@@ -34,7 +34,8 @@ export function languageOfPath(path: string): CodeLanguage {
 }
 
 // The code files the Code tab lists (mirrors the backend's sessions/code.py).
-const CODE = new Set(["r", "py", "sql", "ipynb", "qmd", "rmd", "sh", "bash", "zsh", "yaml", "yml", "jl", "do", "sas"]);
+// Only types the file viewer also shows as text (backend api/files.py _TEXT).
+const CODE = new Set(["r", "py", "sql", "ipynb", "qmd", "rmd", "sh", "yaml", "yml"]);
 
 /** Whether a file is code (a script, SQL, a notebook…): the Code tab's, not Outputs'. */
 export function isCodeFile(path: string): boolean {

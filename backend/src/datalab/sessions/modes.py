@@ -154,7 +154,8 @@ Pilot first, then ask before scaling up:
 Reproducibility:
 - Write the complete analysis source as named scripts (such as
   /work/scripts/steps_by_week.R) and run them, not as long inline snippets.
-  DataLab exports /work/scripts with the outputs, so don't copy them there.
+  The person can export /work/scripts with the outputs, so don't copy them
+  there.
 - Put a concise researcher-facing report in /work/outputs. Keep joined or
   row-level data in /work, not in outputs.
 - Record the exact data provenance in the report: the queries you ran (their

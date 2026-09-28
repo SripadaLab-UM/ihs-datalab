@@ -186,6 +186,24 @@ class Checkpoints:
             return []
         return [_summary(p) for p in sorted(self._manifests.glob("[0-9]*[0-9].json"))]
 
+    @property
+    def store(self) -> Path:
+        """Where this conversation's checkpoints are kept (DataLab's own folder)."""
+        return self._store
+
+    def numbers(self) -> list[int]:
+        """The checkpoints' numbers, oldest first, without reading them."""
+        if not self._manifests.exists():
+            return []
+        return [int(p.stem) for p in sorted(self._manifests.glob("[0-9]*[0-9].json"))]
+
+    def baseline_stamp(self) -> int:
+        """When the baseline was last recorded (0 if never): it changes only then."""
+        try:
+            return (self._store / "baseline.json").stat().st_mtime_ns
+        except OSError:
+            return 0
+
     def get(self, number: int) -> Checkpoint | None:
         path = self._summary_path(number)
         return _summary(path) if path.exists() else None

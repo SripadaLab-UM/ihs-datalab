@@ -666,8 +666,10 @@ function HowItWasMade({ rows, shown, children }: { rows: Row[]; shown: ShownStep
   );
 }
 
-/** A step of this turn the chat was asked to show (showStep.ts), or null. */
-function useShownStep(rows: Row[]): ShownStep | null {
+/** A step of this turn the chat was asked to show (showStep.ts), or null.
+ *  Its `key` says which (activity.ts: "cmd-<id>"), so a view that folds steps
+ *  can unfold the one holding it. */
+export function useShownStep(rows: Row[]): ShownStep | null {
   const keys = rows
     .flatMap((row) => (row.type === "step" ? [row.step.key] : row.type === "group" ? row.steps.map((step) => step.key) : []))
     .join("\u0000");

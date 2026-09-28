@@ -1,6 +1,7 @@
 """The Code tab's API: code files across checkpoints, versions, diffs, and inline code."""
 
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -346,3 +347,56 @@ def test_inline_r_from_a_double_quoted_wrapper_has_no_leftover_escapes():
         "r",
         'x <- readr::read_csv("a.csv"); stopifnot(all(x$n > 10))',
     )
+
+
+def test_a_large_or_repetitive_file_isnt_compared_at_length():
+    started = time.monotonic()
+    long = code.diff_texts("x <- 1\n" * 100_000, "y\n" + "x <- 1\n" * 99_999 + "z\n")
+    repetitive = code.diff_texts("x <- 1\n" * 15_000, "x <- 1\ny\n" * 7_500)
+    assert long.too_large and repetitive.too_large
+    assert long.lines == [] and repetitive.lines == []
+    assert time.monotonic() - started < 10
+    # An ordinary large file with a few changes still compares, quickly.
+    old = "".join(f"line {i}\n" for i in range(15_000))
+    new = "".join("changed\n" if i % 500 == 0 else f"line {i}\n" for i in range(15_000))
+    ordinary = code.diff_texts(old, new)
+    assert not ordinary.too_large and (ordinary.added, ordinary.removed) == (30, 30)
+
+
+def test_the_diff_api_says_when_versions_are_too_different(app, monkeypatch):
+    monkeypatch.setattr(code, "DIFF_BUDGET", 10)
+    with TestClient(app) as client:
+        cid, work = new_conversation(app, client, seed=False)
+        (work / "a.py").write_text("".join(f"a{i}\n" for i in range(50)))
+        turn(app, cid, 1)
+        (work / "a.py").write_text("".join(f"b{i}\n" for i in range(50)))
+        turn(app, cid, 2)
+        diff = client.get(f"/api/conversations/{cid}/code/diff", params={"path": "a.py", "base": 1})
+        assert diff.json()["too_large"] and diff.json()["lines"] == []
+
+
+def test_listings_are_kept_until_a_new_checkpoint(app, monkeypatch):
+    from datalab.sessions.checkpoints import Checkpoints
+
+    reads: list[int] = []
+    original = Checkpoints.entries
+    monkeypatch.setattr(
+        Checkpoints, "entries", lambda self, n: reads.append(n) or original(self, n)
+    )
+    with TestClient(app) as client:
+        cid, work = new_conversation(app, client, seed=False)
+        (work / "a.py").write_text("x = 1\n")
+        turn(app, cid, 1)
+        (work / "a.py").write_text("x = 2\n")
+        turn(app, cid, 2)
+        first = listing(client, cid)
+        assert sorted(reads) == [1, 2]
+        reads.clear()
+        assert listing(client, cid) == first  # nothing read again
+        client.get(f"/api/conversations/{cid}/code/version", params={"path": "a.py"})
+        assert reads == []
+        (work / "b.py").write_text("y = 1\n")
+        turn(app, cid, 3)
+        paths = [f["path"] for f in listing(client, cid)["files"]]
+        assert paths == ["b.py", "a.py"]
+        assert reads == [3]  # only the new checkpoint is read

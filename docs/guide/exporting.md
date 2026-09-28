@@ -53,8 +53,10 @@ test too; Dropbox setup is available on the real DataLab.
 1. Press **Export** in the conversation's header, or **Export…** in the
    **Outputs** tab.
 2. Tick the output files you want. Nothing is ticked for you. Under
-   **Code**, the scripts in `scripts/` are included, as the workspace has
-   them now; untick them to leave them out.
+   **Code from scripts/**, tick any of the agent's scripts too (or
+   **Include all scripts**), as the workspace has them now. A notebook is
+   exported without its outputs, which can hold data. Nothing else in the
+   workspace can be exported.
 3. If you like, tick **The conversation, as one self-contained web page**:
    the questions and answers, charts, and the SQL that was run. It can also
    include the agent's reasoning and the commands it ran, but never their

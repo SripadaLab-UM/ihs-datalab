@@ -359,6 +359,8 @@ function VersionText({ conversationId, file, version }: { conversationId: string
   const text = useQuery({
     queryKey: ["code-version", conversationId, file.path, version.checkpoint],
     queryFn: () => codeApi.version(conversationId, file.path, version.checkpoint),
+    // A saved version never changes. Whether it's the current file comes from
+    // the listing (SnapshotLabel), never from this response, which could be old.
     staleTime: Infinity,
   });
   if (text.error) return <p className="text-sm text-danger">{text.error.message}</p>;
@@ -371,7 +373,36 @@ export function CodeTextView({ text, label }: { text: CodeText; label: string })
   if (text.too_large) return <TooLarge size={text.version.size} />;
   if (text.unreadable) return <p className="text-sm text-muted">DataLab couldn't read this notebook, so it isn't shown.</p>;
   if (text.notebook) return <NotebookView notebook={text.notebook} />;
-  return <CodeBlock code={text.text ?? ""} language={codeLanguage(text.language)} lineNumbers label={label} className="rounded-[4px]" />;
+  const code = text.text ?? "";
+  return (
+    <>
+      {looksLikeData(code) && (
+        <p data-testid="looks-like-data" className="mb-2 flex items-center gap-1.5 rounded-[3px] border border-attn/40 bg-attn-soft px-3 py-1.5 font-sans text-[12.5px] text-attn">
+          <Icon name="alert" size={13} /> This looks like data rather than code: many lines have the same columns. Check it
+          before you export it.
+        </p>
+      )}
+      <CodeBlock code={code} language={codeLanguage(text.language)} lineNumbers label={label} className="rounded-[4px]" />
+    </>
+  );
+}
+
+/**
+ * Whether text reads as a table rather than code: most of its lines (20 or
+ * more) split into the same number (3 or more) of comma, tab, semicolon or
+ * pipe separated fields. A hint only.
+ */
+export function looksLikeData(text: string): boolean {
+  const lines = text.split("\n").filter((line) => line.trim() && !/^\s*(#|--|\/\/)/.test(line)).slice(0, 2000);
+  if (lines.length < 20) return false;
+  return [",", "\t", ";", "|"].some((separator) => {
+    const counts = new Map<number, number>();
+    for (const line of lines) {
+      const fields = line.split(separator).length;
+      if (fields >= 3) counts.set(fields, (counts.get(fields) ?? 0) + 1);
+    }
+    return Math.max(0, ...counts.values()) >= lines.length * 0.8;
+  });
 }
 
 /** A notebook's cells: code highlighted, Markdown as text, outputs never shown. */
@@ -422,6 +453,8 @@ function VersionDiff({
   const diff = useQuery({
     queryKey: ["code-diff", conversationId, file.path, base, head.checkpoint],
     queryFn: () => codeApi.diff(conversationId, file.path, base, head.checkpoint),
+    // A saved version never changes. Whether it's the current file comes from
+    // the listing (SnapshotLabel), never from this response, which could be old.
     staleTime: Infinity,
   });
   const from = versions.find((v) => v.checkpoint === base);
@@ -441,7 +474,13 @@ function VersionDiff({
         )}
       </p>
       {d.too_large ? (
-        <TooLarge size={Math.max(d.base.size, d.head.size)} />
+        Math.max(d.base.size, d.head.size) > 1024 ** 2 ? (
+          <TooLarge size={Math.max(d.base.size, d.head.size)} />
+        ) : (
+          <p className="rounded-xl bg-sunken p-6 text-center text-sm text-muted">
+            These versions are too long, or too different, to compare here. Pick each one under Version to read it.
+          </p>
+        )
       ) : d.lines.length === 0 ? (
         <p className="text-sm text-muted">No changes to the code between these versions.</p>
       ) : (
