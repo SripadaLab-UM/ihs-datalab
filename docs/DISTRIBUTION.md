@@ -729,8 +729,11 @@ content's hash (`/favicon.svg?v=<sha8>`, `frontend/brandIcons.ts`), in
 
 - **Oracle needs the Michigan Medicine VPN.** DataLab's host process does the
   database connections, which avoids the prototype's trouble with Docker
-  reaching the VPN. When Oracle is unreachable, the app says "Can't reach the
-  database — are you on the VPN?" instead of failing obscurely.
+  reaching the VPN. When Oracle is unreachable (its name won't resolve, or the
+  connection fails), the app says "Can't reach the database. Connect to the U-M
+  VPN (or check your network), then test again." instead of failing obscurely.
+  Settings → Connections tests the database and U-M GPT independently: one
+  failing never hides the other's result.
 - **U-M GPT** is reached through the gateway container.
 
 ## For the maintainer: releasing

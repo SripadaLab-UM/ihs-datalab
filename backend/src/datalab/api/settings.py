@@ -393,7 +393,24 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
 
     @router.post("/connections/test")
     async def test_connections() -> ConnectionTestOut:
-        database, model = await asyncio.gather(asyncio.to_thread(check_database), check_model())
+        # Each check stands alone: one that fails, however it fails, never hides the other.
+        database, model = await asyncio.gather(
+            asyncio.to_thread(check_database), check_model(), return_exceptions=True
+        )
+        if isinstance(database, BaseException):
+            database = DatabaseCheckOut(
+                ok=False,
+                message=f"The database check failed ({type(database).__name__}). Test again, "
+                "or tell the DataLab maintainer.",
+                enabled_roles=[],
+                read_only=None,
+            )
+        if isinstance(model, BaseException):
+            model = ConnectionCheckOut(
+                ok=False,
+                message=f"The U-M GPT check failed ({type(model).__name__}). Test again, "
+                "or tell the DataLab maintainer.",
+            )
         return ConnectionTestOut(database=database, model=model)
 
     def check_database() -> DatabaseCheckOut:

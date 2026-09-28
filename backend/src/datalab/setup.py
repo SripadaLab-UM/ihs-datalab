@@ -8,6 +8,7 @@ import contextlib
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tomllib
 from dataclasses import dataclass
@@ -226,6 +227,11 @@ def check_database(
         return DatabaseCheck(False, str(error))
     except oracledb.Error as error:
         return DatabaseCheck(False, _database_problem(error, practice=practice))
+    except socket.gaierror:
+        # The server's name didn't resolve: off the VPN, or no network at all.
+        return DatabaseCheck(False, _unreachable("DNS lookup failed", practice=practice))
+    except OSError as error:
+        return DatabaseCheck(False, _unreachable(type(error).__name__, practice=practice))
     roles = tuple(sorted(privileges.enabled_roles))
     if not privileges.is_read_only:
         return DatabaseCheck(
@@ -251,9 +257,16 @@ def _database_problem(error: Exception, *, practice: bool) -> str:
     unreachable = found is None or code.startswith(("DPY-6", "DPY-4011", "ORA-12", "ORA-03"))
     if not unreachable:
         return f"The database refused the connection ({code}). Tell the DataLab maintainer."
+    return _unreachable(code, practice=practice)
+
+
+def _unreachable(why: str, *, practice: bool) -> str:
     if practice:
-        return f"Can't reach the practice database. Is the synthetic database running? ({code})"
-    return f"Can't reach the database — are you on the VPN? ({code})"
+        return f"Can't reach the practice database. Is the synthetic database running? ({why})"
+    return (
+        "Can't reach the database. Connect to the U-M VPN (or check your network), "
+        f"then test again. ({why})"
+    )
 
 
 def uninstall(*, delete_data: bool | None) -> int:

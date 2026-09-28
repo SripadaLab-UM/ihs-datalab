@@ -95,13 +95,13 @@ it("saves a password write-only and clears the field", async () => {
 it("tests the connection and says how it went", async () => {
   mocked.connections.mockResolvedValue(REAL);
   mocked.testConnections.mockResolvedValue({
-    database: { ok: false, message: "Can't reach the database — are you on the VPN? (DPY-6005)", enabled_roles: [], read_only: null },
+    database: { ok: false, message: "Can't reach the database. Connect to the U-M VPN (or check your network), then test again. (DNS lookup failed)", enabled_roles: [], read_only: null },
     model: { ok: true, message: "U-M GPT accepted the key and offers 3 approved models." },
   });
   wrap(<ConnectionsSection />);
   await screen.findByText("Not saved");
   fireEvent.click(screen.getAllByRole("button", { name: "Test connection" })[0]);
-  expect(await screen.findByText(/are you on the VPN/)).toBeTruthy();
+  expect(await screen.findByText(/Connect to the U-M VPN/)).toBeTruthy();
   expect(screen.getByText(/offers 3 approved models/)).toBeTruthy();
 });
 

@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import socket
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
@@ -273,6 +274,76 @@ def test_database_problems_name_the_code_never_the_server():
     assert "synthetic database" in setup._database_problem(OracleError("timed out"), practice=True)
     other = setup._database_problem(OracleError("ORA-01924: role 'X' not granted"), practice=False)
     assert "ORA-01924" in other and "VPN" not in other
+
+
+def test_an_oracle_dns_failure_says_vpn_and_keeps_the_u_m_gpt_result(
+    tmp_path, keychain, monkeypatch
+):
+    """Regression: a name that won't resolve (off the VPN) raised socket.gaierror,
+    which failed the whole test and hid U-M GPT's successful check."""
+    from datalab.data import oracle as oracle_module
+
+    def unresolvable(self, *, timeout=None):
+        raise socket.gaierror(8, "nodename nor servname provided: db.canary-host.example")
+
+    monkeypatch.setattr(setup, "oracle_password", lambda oracle: PASSWORD)
+    monkeypatch.setattr(oracle_module.OracleDatabase, "session_privileges", unresolvable)
+    ok_models = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+        )
+    )
+    h = Harness(
+        real_settings(tmp_path),
+        check_database=setup.check_database,
+        model_http=ok_models,
+        model_key=lambda: MODEL_KEY,
+    )
+    response = h.client.post("/api/settings/connections/test")
+    assert response.status_code == 200
+    tested = response.json()
+    assert tested["model"]["ok"] is True
+    assert tested["database"]["ok"] is False
+    assert "VPN" in tested["database"]["message"]
+    assert "canary-host" not in json.dumps(tested) and PASSWORD not in json.dumps(tested)
+
+
+def test_each_connection_check_stands_alone(tmp_path, keychain):
+    """However one check fails, the other's result still shows."""
+
+    def crashes(*args, **kwargs):
+        raise RuntimeError("db.canary-host.example exploded")
+
+    ok_models = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda r: httpx.Response(200, json={"data": [{"id": "gpt-5.5"}]})
+        )
+    )
+    h = Harness(
+        real_settings(tmp_path),
+        check_database=crashes,
+        model_http=ok_models,
+        model_key=lambda: MODEL_KEY,
+    )
+    tested = h.client.post("/api/settings/connections/test").json()
+    assert tested["model"]["ok"] is True
+    assert tested["database"]["ok"] is False and "RuntimeError" in tested["database"]["message"]
+    assert "canary-host" not in json.dumps(tested)
+
+    class Broken(httpx.AsyncClient):
+        async def get(self, *args, **kwargs):
+            raise RuntimeError("unexpected")
+
+    connected = setup.DatabaseCheck(True, "Connected, read-only.", ("IHS_2025_RO",), True)
+    h = Harness(
+        real_settings(tmp_path / "b"),
+        check_database=lambda *a, **k: connected,
+        model_http=Broken(),
+        model_key=lambda: MODEL_KEY,
+    )
+    tested = h.client.post("/api/settings/connections/test").json()
+    assert tested["database"]["ok"] is True
+    assert tested["model"]["ok"] is False and "U-M GPT check failed" in tested["model"]["message"]
 
 
 def test_datalab_setup_saves_through_the_same_checks(tmp_path, keychain, monkeypatch):
