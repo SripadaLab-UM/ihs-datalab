@@ -587,14 +587,15 @@ function SaveDraft({
   const [confirmed, setConfirmed] = useState<Set<string>>(new Set());
   const savedText = useRef<string | null>(null);
   const save = useMutation({
-    mutationFn: () =>
+    // `usedBy`: the other workflow files the person confirmed name the key, when Save said so.
+    mutationFn: (usedBy?: string[]) =>
       workflowsApi.save({
         text,
         confirmed: [...confirmed],
         source: "authoring",
         conversation_id: conversationId || null,
         map_destination: mapTo?.destination_id ?? null,
-        confirm_key_used_by: mapTo?.used_by ?? [],
+        confirm_key_used_by: usedBy ?? mapTo?.used_by ?? [],
       }),
     onMutate: () => {
       savedText.current = text;
@@ -626,6 +627,8 @@ function SaveDraft({
   const saving = save.isPending || saved?.state === "saving";
   const canSave = target.kind !== "unavailable" && current.valid && !saving && errors.length === 0 && unconfirmed.length === 0;
   const saveProblems = save.error instanceof ApiError ? problemsOf(save.error) : [];
+  // Save refused: other workflow files name the key now (maybe more than the page knew).
+  const usedBy = save.error instanceof ApiError ? usedByOf(save.error) : [];
   return (
     <section aria-labelledby="save-title" className="flex flex-col gap-3 border-t border-line pt-4 font-sans text-[13.5px]">
       <h2 id="save-title" className="dl-label">
@@ -646,6 +649,16 @@ function SaveDraft({
               <span className="font-mono text-[12px]">{p.path}</span> {p.message}
             </p>
           ))}
+          {usedBy.length > 0 && mapTo && (
+            <div className="mt-1.5 flex flex-col gap-1.5 text-ink">
+              <p>
+                They would deliver to {mapTo.name} too: <span className="font-mono text-[12px]">{usedBy.join(", ")}</span>
+              </p>
+              <Button className="self-start px-2.5 py-1 text-[12.5px]" disabled={saving} onClick={() => save.mutate(usedBy)}>
+                Save, and deliver those to {mapTo.name} too
+              </Button>
+            </div>
+          )}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -661,7 +674,7 @@ function SaveDraft({
               )
             )
               return;
-            save.mutate();
+            save.mutate(undefined);
           }}
         >
           {saving ? "Saving…" : target.kind === "share" ? "Save & share" : "Save"}
@@ -693,6 +706,11 @@ function SavedNote({ saved, practice, onNew }: { saved: WorkflowSave; practice: 
               : "Saved on this computer."}
       </p>
       <p className="text-muted">{saved.message}</p>
+      {saved.mapping && saved.mapping !== "none" && saved.mapping_message && (
+        <p role={saved.mapping === "skipped" ? "alert" : undefined} className={saved.mapping === "skipped" ? "text-attn" : "text-muted"}>
+          {saved.mapping_message}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         <Link
           to={workflowPath(saved.path)}
@@ -704,4 +722,10 @@ function SavedNote({ saved, practice, onNew }: { saved: WorkflowSave; practice: 
       </div>
     </div>
   );
+}
+
+/** The workflow files a refused Save says already name the key (`detail.used_by`). */
+function usedByOf(error: ApiError): string[] {
+  const detail = error.detail as { used_by?: unknown } | undefined;
+  return Array.isArray(detail?.used_by) ? detail.used_by.filter((p): p is string => typeof p === "string") : [];
 }

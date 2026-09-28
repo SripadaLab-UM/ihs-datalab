@@ -515,8 +515,13 @@ as every draft is (the file check and Save & share's data check).
   nothing: the key is mapped to the folder only when the workflow is saved
   (`SaveIn.map_destination`; for Save & share, once it has saved), and a key
   other workflow files already name is mapped only after the person
-  confirms those files by name. A written file is "saved locally", never
-  "synced".
+  confirms those files by name. The key is set only if neither it nor the
+  folder has been mapped meanwhile (one transaction), and only if no more
+  files name it than were confirmed; otherwise the file is saved and the
+  reply says why the folder wasn't mapped. A Save & share's mapping is
+  applied when its status is next checked, and is lost if DataLab restarts
+  before then: delivery then asks you to choose a folder. A written file is
+  "saved locally", never "synced".
 - **Advanced: YAML** shows the file in the editor; edits there are checked
   the same way, and the stages follow.
 

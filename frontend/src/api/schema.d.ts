@@ -4360,6 +4360,14 @@ export interface components {
             findings: components["schemas"]["PipelineFindingOut"][];
             /** Test */
             test?: string | null;
+            /**
+             * Mapping
+             * @default none
+             * @enum {string}
+             */
+            mapping: "none" | "mapped" | "skipped" | "pending";
+            /** Mapping Message */
+            mapping_message?: string | null;
         };
         /**
          * WorkflowTextOut

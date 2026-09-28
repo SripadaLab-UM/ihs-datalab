@@ -486,6 +486,78 @@ def test_a_key_other_workflows_use_is_mapped_only_after_a_confirm_naming_them(re
     assert client.post("/api/workflows/saves", json=taken).status_code == 409
 
 
+def test_a_key_is_mapped_only_if_still_free_checked_and_set_together(real, tmp_path):
+    """set_key_if_free never moves a key off the folder that has it."""
+    _, _, _, store = real
+    first = _folder(tmp_path, store, "First")
+    second = _folder(tmp_path, store, "Second")
+    assert store.set_key_if_free(first.id, "lab") is True
+    assert store.set_key_if_free(second.id, "lab") is False  # the key means First
+    assert store.set_key_if_free(first.id, "other") is False  # First already has a key
+    assert store.by_key("lab").id == first.id and store.get(second.id).key is None  # type: ignore[union-attr]
+
+
+def _save_meanwhile(monkeypatch, meanwhile):
+    """Run `meanwhile` while the file is being written: between the check and the mapping."""
+    from datalab.workflows.source import WorkflowFolder
+
+    add = WorkflowFolder.add
+
+    def add_then(self, name, text):
+        path = add(self, name, text)
+        meanwhile()
+        return path
+
+    monkeypatch.setattr(WorkflowFolder, "add", add_then)
+
+
+def test_a_mapping_made_in_settings_meanwhile_is_never_taken_over(real, tmp_path, monkeypatch):
+    client, _, _, store = real
+    picked = _folder(tmp_path, store, "Chosen")
+    settings_one = _folder(tmp_path, store, "Set in Settings")
+    _save_meanwhile(monkeypatch, lambda: store.set_key(settings_one.id, "my-exports"))
+    text = REAL_DAILY.replace("practice-exports", "my-exports")
+    body = {"text": text, "source": "authoring", "map_destination": picked.id}
+    saved = client.post("/api/workflows/saves", json=body)
+    assert saved.status_code == 201 and saved.json()["state"] == "saved"
+    assert saved.json()["mapping"] == "skipped"
+    assert saved.json()["mapping_message"].startswith("Saved, but the folder wasn't mapped because")
+    assert store.by_key("my-exports").id == settings_one.id  # type: ignore[union-attr]
+    assert store.get(picked.id).key is None  # type: ignore[union-attr]
+
+
+def test_a_key_more_workflows_start_using_meanwhile_isnt_mapped(real, tmp_path, monkeypatch):
+    client, _, settings, store = real
+    picked = _folder(tmp_path, store, "Chosen")
+    folder = settings.data_dir / "workflows-local"
+    lab = REAL_DAILY.replace("practice-exports", "lab-exports")
+    (folder / "lab.yaml").write_text(lab.replace("daily_clean", "lab"))
+    _save_meanwhile(
+        monkeypatch, lambda: (folder / "late.yaml").write_text(lab.replace("daily_clean", "late"))
+    )
+    body = {
+        "text": lab,
+        "source": "authoring",
+        "map_destination": picked.id,
+        "confirm_key_used_by": ["lab.yaml"],
+    }
+    saved = client.post("/api/workflows/saves", json=body).json()
+    assert saved["mapping"] == "skipped" and "late.yaml" in saved["mapping_message"]
+    assert store.by_key("lab-exports") is None
+    # With nothing meanwhile, the confirmed list is enough (the saved file doesn't count).
+    monkeypatch.undo()
+    fine = client.post(
+        "/api/workflows/saves",
+        json={
+            **body,
+            "text": lab.replace("daily_clean", "fine"),
+            "confirm_key_used_by": ["daily_clean.yaml", "lab.yaml", "late.yaml"],
+        },
+    ).json()
+    assert fine["mapping"] == "mapped", fine
+    assert store.by_key("lab-exports").id == picked.id  # type: ignore[union-attr]
+
+
 # ------------------------------------------------------------------ test runs are cleaned up
 
 

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
+import { ApiError } from "@/api/http";
 import type { Stages, StagesResult, Workflow } from "@/api/workflows";
 import { workflowsApi } from "@/api/workflows";
 import { EmptyState } from "@/components/chat/Chat";
@@ -302,6 +303,57 @@ it("maps a new folder's key only at Save, asking first when other workflows use 
     ),
   );
   confirm.mockRestore();
+});
+
+/** A real-profile draft whose Deliver card has chosen a folder that has no key yet. */
+async function chooseNewFolder(usedBy: string[] = []) {
+  sessionStorage.setItem("datalab:workflows:draft", DRAFT);
+  vi.mocked(workflowsApi.status).mockResolvedValue({ available: true, folder: "/r", profile: "real", target: LOCAL });
+  const folders = [
+    { key: "practice-exports", name: "Current", path: "/c", available: true, destination_id: "dest_a", mapped: true, used_by: [] },
+    { key: "lab-exports", name: "Lab exports", path: "/l", available: true, destination_id: "dest_b", mapped: false, used_by: usedBy },
+  ]; // prettier-ignore
+  vi.mocked(workflowsApi.stages).mockResolvedValue(result({ destinations: folders }));
+  show("/workflows/new");
+  const select = await screen.findByRole("combobox", { name: "Export folder" });
+  vi.mocked(workflowsApi.stages).mockResolvedValue(
+    result({ destinations: folders, stages: stages({ deliver: { destination: "lab-exports", folder: "x", files: ["drop_body"], without_small_cells: {} } }) }),
+  ); // prettier-ignore
+  fireEvent.change(select, { target: { value: "lab-exports" } });
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "Export folder" })).toHaveValue("lab-exports"));
+  await screen.findByText(/Passes DataLab's workflow check/);
+}
+
+it("says when a saved workflow's folder wasn't mapped, and why", async () => {
+  await chooseNewFolder();
+  vi.mocked(workflowsApi.save).mockResolvedValue({
+    id: null, state: "saved", shared: false, path: "x.yaml", message: "Saved on this computer.", findings: [],
+    mapping: "skipped", mapping_message: "Saved, but the folder wasn't mapped because 'lab-exports' or Lab exports was mapped to something else meanwhile.",
+  } as never); // prettier-ignore
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const why = await screen.findByRole("alert");
+  expect(why).toHaveTextContent("Saved, but the folder wasn't mapped because");
+});
+
+it("offers the confirm a refused Save asks for, naming the workflows it gives", async () => {
+  await chooseNewFolder();
+  vi.mocked(workflowsApi.save)
+    .mockRejectedValueOnce(
+      new ApiError(409, "Other workflows deliver to 'lab-exports' too.", {
+        message: "Other workflows deliver to 'lab-exports' too.",
+        used_by: ["workflows/late.yaml"],
+      }),
+    )
+    .mockResolvedValueOnce({ id: null, state: "saved", shared: false, path: "x.yaml", message: "Saved.", findings: [], mapping: "mapped", mapping_message: "Lab exports is now used for 'lab-exports'." } as never); // prettier-ignore
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("workflows/late.yaml")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Save, and deliver those to Lab exports too" }));
+  await waitFor(() =>
+    expect(workflowsApi.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ map_destination: "dest_b", confirm_key_used_by: ["workflows/late.yaml"] }),
+    ),
+  );
+  expect(await screen.findByText("Lab exports is now used for 'lab-exports'.")).toBeInTheDocument();
 });
 
 it("removes a discarded draft's test runs", async () => {
