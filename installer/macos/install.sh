@@ -234,22 +234,77 @@ find_docker_cli() {
     *) PATH="$PATH:$(dirname "$DOCKER")"; export PATH; DOCKER_ADDED_TO_PATH=1 ;;
   esac
 }
-# Runs a command, giving up after $1 seconds (a starting Docker can hang).
+# Runs a command, giving up after $1 seconds (a starting Docker can hang):
+# then it's sent SIGTERM, and SIGKILL 2 seconds later, and this returns 124.
+# The limit is kept by a parent process, not by an alarm in the command
+# itself: docker is a Go program, and Go ignores SIGALRM. Perl runs the
+# command directly (no shell), in a process group of its own so anything it
+# started goes too; without perl, a background watcher does the same.
+# DATALAB_TEST_WITHIN=sh (for tests) uses the watcher even with perl there.
 within() {
   seconds="$1"; shift
-  if command -v perl >/dev/null 2>&1; then
-    perl -e 'alarm shift; exec @ARGV or exit 127' "$seconds" "$@"
+  if [ "${DATALAB_TEST_WITHIN:-}" != sh ] && command -v perl >/dev/null 2>&1; then
+    perl -e '
+      use POSIX ":sys_wait_h";
+      my $seconds = shift;
+      my $pid = fork;
+      exit 127 unless defined $pid;
+      if ($pid == 0) { setpgrp(0, 0); exec { $ARGV[0] } @ARGV; exit 127 }
+      sub stop {
+        kill "TERM", -$pid, $pid;
+        for (1 .. 20) { return if waitpid($pid, WNOHANG) == $pid; select(undef, undef, undef, 0.1) }
+        kill "KILL", -$pid, $pid;
+        waitpid($pid, 0);
+      }
+      $SIG{INT} = sub { stop(); exit 130 };
+      $SIG{TERM} = sub { stop(); exit 143 };
+      $SIG{ALRM} = sub { stop(); exit 124 };
+      alarm $seconds;
+      waitpid($pid, 0);
+      alarm 0;
+      exit(($? & 127) ? 128 + ($? & 127) : $? >> 8);
+    ' "$seconds" "$@"
   else
-    "$@"
+    flag="$(mktemp "${TMPDIR:-/tmp}/datalab-within.XXXXXX")"
+    "$@" &
+    pid=$!
+    ( /bin/sleep "$seconds"; : > "$flag.fired"; kill -TERM "$pid" 2>/dev/null
+      /bin/sleep 2; kill -KILL "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    watcher=$!
+    status=0
+    wait "$pid" || status=$?
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    if [ -e "$flag.fired" ]; then status=124; fi
+    rm -f "$flag" "$flag.fired"
+    return "$status"
   fi
 }
-docker_ready() { [ -n "$DOCKER" ] && within 20 "$DOCKER" info >/dev/null 2>&1; }
+# Whether Docker's engine answers. DOCKER_HUNG=1 when `docker info` had to be
+# stopped (the app is up but its engine isn't answering).
+DOCKER_INFO_SECONDS="${DATALAB_DOCKER_INFO_SECONDS:-20}"
+DOCKER_HUNG=0
+docker_ready() {
+  [ -n "$DOCKER" ] || return 1
+  answered=0
+  within "$DOCKER_INFO_SECONDS" "$DOCKER" info >/dev/null 2>&1 || answered=$?
+  if [ "$answered" -eq 124 ]; then DOCKER_HUNG=1; else DOCKER_HUNG=0; fi
+  [ "$answered" -eq 0 ]
+}
 # Whether any of Docker Desktop's programs are running (to notice it quitting).
 # The path is compared as plain text, whatever characters it has.
 docker_app_alive() {
   running="$(ps -axo command= 2>/dev/null)" || return 0
-  printf '%s\n' "$running" | grep -qF "$1/Contents/MacOS/"
+  case "$running" in *"$1/Contents/MacOS/"*) return 0 ;; esac
+  return 1
 }
+# Whether the text $1 has the line $2, or (has_line_starting) a line that
+# starts with $2. Plain text, and no pipe (grep -q in a pipe can leave
+# printf writing to a closed pipe: "write error: Broken pipe").
+NL='
+'
+has_line() { case "$NL$1$NL" in *"$NL$2$NL"*) return 0 ;; esac; return 1; }
+has_line_starting() { case "$NL$1" in *"$NL$2"*) return 0 ;; esac; return 1; }
 # Whether $1 (a macOS version) is at least $2.
 version_at_least() {
   awk -v have="$1" -v need="$2" 'BEGIN {
@@ -285,15 +340,15 @@ docker_app_is_genuine() {
   codesign --verify --deep --strict -R="$DOCKER_SIGNER and identifier \"$DOCKER_BUNDLE_ID\"" "$1" \
     >/dev/null 2>&1 || return 1
   signed="$(codesign -dv --verbose=2 "$1" 2>&1)" || return 1
-  printf '%s\n' "$signed" | grep -qxF "TeamIdentifier=$DOCKER_TEAM_ID" || return 1
-  printf '%s\n' "$signed" | grep -qxF "Identifier=$DOCKER_BUNDLE_ID" || return 1
+  has_line "$signed" "TeamIdentifier=$DOCKER_TEAM_ID" || return 1
+  has_line "$signed" "Identifier=$DOCKER_BUNDLE_ID" || return 1
   assessed="$(spctl -a -vv -t exec "$1" 2>&1)" || return 1
-  if ! printf '%s\n' "$assessed" | grep -q '^origin='; then
+  if ! has_line_starting "$assessed" "origin="; then
     NOT_GENUINE=gatekeeper
     return 1
   fi
-  printf '%s\n' "$assessed" | grep -qxF "source=Notarized Developer ID" || return 1
-  printf '%s\n' "$assessed" | grep -qxF "origin=Developer ID Application: Docker Inc ($DOCKER_TEAM_ID)"
+  has_line "$assessed" "source=Notarized Developer ID" || return 1
+  has_line "$assessed" "origin=Developer ID Application: Docker Inc ($DOCKER_TEAM_ID)"
 }
 detach_docker_image() {
   if [ -n "$DOCKER_MOUNT" ]; then
@@ -533,7 +588,13 @@ start_docker() {
     rerun
     exit 1
   fi
-  # Timed by the clock: each `docker info` can take up to 20 seconds.
+  # Timed by the clock: each `docker info` is stopped after 20 seconds.
+  # A Docker Desktop that was already installed, whose programs are running
+  # but whose engine hasn't answered for 90 seconds, is restarted once
+  # (`docker desktop restart`, which fixes a stuck engine). Never on a first
+  # run: its window may still be waiting for the person.
+  restart_after="${DATALAB_DOCKER_RESTART_AFTER:-90}"
+  restarted=0
   started="$(now)"
   said=0
   gone=0
@@ -542,6 +603,17 @@ start_docker() {
     waited=$(($(now) - started))
     if [ "$waited" -ge "$limit" ]; then
       if [ "$limit" -ge 120 ]; then took="$((limit / 60)) minutes"; else took="$limit seconds"; fi
+      if [ "$DOCKER_HUNG" = 1 ] || { [ "$1" = existing ] && docker_app_alive "$DOCKER_APP"; }; then
+        echo "Docker Desktop is open, but its engine isn't answering after $took."
+        echo "  1. Restart it: whale menu at the top of the screen > Restart."
+        echo "  2. If that doesn't help: whale menu > Troubleshoot > Restart. If it still"
+        echo "     doesn't answer, Troubleshoot offers \"Clean / Purge data\" and \"Reset to"
+        echo "     factory defaults\": both DELETE Docker's containers, images and volumes"
+        echo "     (for DataLab's practice database, its made-up data), so only if you're sure."
+        leftovers
+        rerun
+        exit 1
+      fi
       echo "Docker Desktop isn't ready after $took."
       echo "  - If its window is asking something (its agreement, your password), answer it."
       echo "  - If it shows an error, choose Restart in its whale menu at the top of the screen."
@@ -550,10 +622,21 @@ start_docker() {
       rerun
       exit 1
     fi
-    if [ "$waited" -ge 30 ] && ! docker_app_alive "$DOCKER_APP"; then
+    alive=1
+    if ! docker_app_alive "$DOCKER_APP"; then alive=0; fi
+    if [ "$waited" -ge 30 ] && [ "$alive" -eq 0 ]; then
       gone=$((gone + 1))
     else
       gone=0
+    fi
+    if [ "$1" = existing ] && [ "$restarted" -eq 0 ] && [ "$alive" -eq 1 ] \
+      && [ "$waited" -ge "$restart_after" ] && [ -n "$DOCKER" ]; then
+      restarted=1
+      if within 20 "$DOCKER" desktop restart --help >/dev/null 2>&1; then
+        echo "Docker Desktop is open but its engine isn't answering; restarting it…"
+        within 120 "$DOCKER" desktop restart >/dev/null 2>&1 \
+          || echo "(Docker Desktop's restart didn't finish; still waiting.)"
+      fi
     fi
     if [ "$gone" -ge 2 ]; then
       echo "Docker Desktop closed before it was ready. If you declined its agreement, that's"

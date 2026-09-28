@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -611,7 +612,19 @@ def test_uninstall_leaves_someone_elses_app_in_your_applications(machine):
 
 FAKE_DOCKER = """#!/bin/sh
 echo "docker $*" >> "$DATALAB_TEST_DOCKERLOG"
+if [ "$1" = desktop ]; then
+  [ -z "${DATALAB_TEST_NO_DESKTOP_COMMAND:-}" ] || { echo "unknown command" >&2; exit 1; }
+  case "$*" in *--help*) exit 0 ;; esac
+  echo restarted > "$DATALAB_TEST_STATE.restarted"
+  exit 0
+fi
 if [ "$1" = info ]; then
+  # A stuck engine ("500 Internal Server Error"): answers only after a
+  # restart ("stuck"), or never ("dead").
+  case "${DATALAB_TEST_ENGINE:-}" in
+    dead) exit 1 ;;
+    stuck) [ -f "$DATALAB_TEST_STATE.restarted" ] || exit 1 ;;
+  esac
   calls=$(( $(cat "$DATALAB_TEST_STATE.calls" 2>/dev/null || echo 0) + 1 ))
   echo "$calls" > "$DATALAB_TEST_STATE.calls"
   [ "$(cat "$DATALAB_TEST_STATE" 2>/dev/null)" = running ] || exit 1
@@ -1041,11 +1054,12 @@ def test_docker_that_doesnt_start_in_time_is_explained(mac):
     fake_docker_app(mac["apps"])
     done = docker_install(mac, DATALAB_TEST_OPEN_STARTS="0", DATALAB_DOCKER_WAIT_SECONDS="60")
     assert done.returncode == 1, done.stdout + done.stderr
-    assert "isn't ready after 60 seconds" in done.stdout
-    assert "choose Restart in its whale menu" in done.stdout
+    # Its programs are running, so it's the engine that isn't answering.
+    assert "its engine isn't answering after 60 seconds" in done.stdout
+    assert "whale menu at the top of the screen > Restart" in done.stdout
     assert "Still waiting for Docker Desktop (30 seconds)" in done.stdout
     usual = docker_install(mac, DATALAB_TEST_OPEN_STARTS="0")
-    assert "isn't ready after 5 minutes" in usual.stdout
+    assert "isn't answering after 5 minutes" in usual.stdout
 
 
 def test_docker_that_cant_be_opened_is_explained(mac):
@@ -1194,14 +1208,14 @@ def test_the_wait_is_timed_by_the_clock(mac):
     )
     executable(mac["apps"] / "Docker.app" / "Contents" / "Resources" / "bin" / "docker", slow)
     done = docker_install(mac, DATALAB_TEST_OPEN_STARTS="0", DATALAB_DOCKER_WAIT_SECONDS="60")
-    assert done.returncode == 1 and "isn't ready after 60 seconds" in done.stdout
+    assert done.returncode == 1 and "isn't answering after 60 seconds" in done.stdout
     assert len([x for x in lines(mac["docker"]) if x == "docker info"]) <= 3
 
 
 def test_its_checks_use_dockers_code_requirement_and_notarization():
     text = INSTALLER.read_text(encoding="utf-8")
     assert 'certificate leaf[subject.OU] = \\"$DOCKER_TEAM_ID\\"' in text
-    assert 'grep -qxF "source=Notarized Developer ID"' in text
+    assert 'has_line "$assessed" "source=Notarized Developer ID"' in text
     assert "--speed-limit 10240 --speed-time 120" in text and "--tlsv1.2" in text
 
 
@@ -1265,3 +1279,79 @@ def test_a_fresh_install_works_in_a_utf8_locale(mac):
     done = docker_install(mac, "--install-docker", LC_ALL="en_US.UTF-8", LANG="en_US.UTF-8")
     assert done.returncode == 0, done.stdout + done.stderr
     assert "Copying Docker Desktop to" in done.stdout and "unbound variable" not in done.stderr
+
+
+# Like Docker's engine hanging: `docker info` never returns, and (like a Go
+# program) it ignores SIGALRM and SIGTERM. Only SIGKILL stops it.
+HUNG_DOCKER = """#!/bin/sh
+echo "docker $*" >> "$DATALAB_TEST_DOCKERLOG"
+trap '' ALRM TERM
+[ "$1" = info ] && exec /bin/sleep 1017
+exit 0
+"""
+
+
+@pytest.mark.parametrize("way", ["perl", "sh"])
+def test_a_hung_docker_engine_is_given_up_on(mac, way):
+    app = fake_docker_app(mac["apps"])
+    executable(app / "Contents" / "Resources" / "bin" / "docker", HUNG_DOCKER)
+    started = time.monotonic()
+    done = docker_install(
+        mac,
+        DATALAB_TEST_WITHIN=way,
+        DATALAB_DOCKER_INFO_SECONDS="1",
+        DATALAB_DOCKER_WAIT_SECONDS="10",
+    )
+    took = time.monotonic() - started
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "is open, but its engine isn't answering after 10 seconds" in done.stdout
+    assert "whale menu at the top of the screen > Restart" in done.stdout
+    assert "Troubleshoot > Restart" in done.stdout and "DELETE Docker's containers" in done.stdout
+    # Each call was stopped after about 1 + 2 seconds, not left hanging.
+    calls = [line for line in lines(mac["docker"]) if line == "docker info"]
+    assert 2 <= len(calls) <= 5 and took < 40
+    running = subprocess.run(["ps", "-axo", "command="], capture_output=True, text=True).stdout
+    assert "sleep 1017" not in running
+
+
+def restarts(mac) -> list[str]:
+    return [line for line in lines(mac["docker"]) if line == "docker desktop restart"]
+
+
+def test_a_stuck_engine_is_restarted_once_and_then_answers(mac):
+    fake_docker_app(mac["apps"])
+    done = docker_install(mac, DATALAB_TEST_ENGINE="stuck")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "engine isn't answering; restarting it" in done.stdout
+    assert restarts(mac) == ["docker desktop restart"]
+    assert "Docker Desktop is running." in done.stdout
+
+
+def test_a_dead_engine_is_restarted_only_once(mac):
+    fake_docker_app(mac["apps"])
+    done = docker_install(mac, DATALAB_TEST_ENGINE="dead")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert len(restarts(mac)) == 1
+    assert "is open, but its engine isn't answering after 5 minutes" in done.stdout
+
+
+def test_a_first_run_is_never_restarted(mac):
+    done = docker_install(
+        mac, "--install-docker", DATALAB_TEST_ENGINE="dead", DATALAB_DOCKER_WAIT_SECONDS="300"
+    )
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert restarts(mac) == [] and "restarting it" not in done.stdout
+    assert "isn't ready after 5 minutes" in done.stdout  # its window may be waiting
+
+
+def test_an_older_docker_without_its_restart_command_isnt_restarted(mac):
+    fake_docker_app(mac["apps"])
+    done = docker_install(mac, DATALAB_TEST_ENGINE="dead", DATALAB_TEST_NO_DESKTOP_COMMAND="1")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert restarts(mac) == [] and "restarting it" not in done.stdout
+
+
+def test_no_printf_or_echo_is_piped_into_grep():
+    # grep -q in a pipe exits early: "printf: write error: Broken pipe".
+    text = INSTALLER.read_text(encoding="utf-8")
+    assert not re.search(r"(printf|echo)[^\n|]*\|\s*grep", text)

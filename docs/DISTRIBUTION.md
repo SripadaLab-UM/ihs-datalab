@@ -546,7 +546,16 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
 - **Running already:** nothing is done. **Installed but stopped:** it opens
   the app and waits until `docker info` answers (up to 5 minutes, saying
   every 30 seconds that it's still waiting; each `docker info` is given 20
-  seconds, and the wait is timed by the clock). A Docker.app that isn't
+  seconds, and the wait is timed by the clock). A `docker` call that hangs
+  is stopped by a parent process (perl, or a background watcher without
+  perl): SIGTERM, then SIGKILL 2 seconds later, since docker (a Go program)
+  ignores SIGALRM. If an existing Docker Desktop's programs are running but
+  its engine hasn't answered for 90 seconds, it runs `docker desktop
+  restart` once (not on a first run, whose window may be waiting for the
+  person, nor on a Docker without that command). If the engine still
+  doesn't answer, it says to Restart from the whale menu, then Troubleshoot,
+  and that "Clean / Purge data" and "Reset to factory defaults" delete
+  Docker's containers and images. A Docker.app that isn't
   complete (no program named by its `CFBundleExecutable`) is reported, with
   "drag it to the Trash and run this again". An existing Docker Desktop is never reinstalled, upgraded, reset
   or reconfigured; the installer never prunes or removes containers, images
