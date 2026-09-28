@@ -1,12 +1,14 @@
 import clsx from "clsx";
-import { type ReactNode, use, useState } from "react";
+import { type ReactNode, use, useEffect, useRef, useState } from "react";
 
+import { CodeBlock } from "@/components/code/CodeBlock";
 import { Button, Chip, Icon } from "@/components/ui";
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
 import type { Detail, Row, Step } from "./activity";
 import { shortTable, unwrapShell as unwrap } from "./activity";
 import { Markdown } from "./Markdown";
+import { ShownStepContext, stepElementId } from "./showStep";
 
 /**
  * The agent's work, told as a story: plain sentences on hairline rules, each
@@ -127,11 +129,28 @@ function Title({ step }: { step: Pick<Step, "icon" | "title" | "tone"> }) {
   );
 }
 
+/**
+ * Opens a step when the chat is asked to show it (the Code tab's inline code
+ * links here), and scrolls to it.
+ */
+function useShown(key: string, setOpen: (open: boolean) => void) {
+  const shown = use(ShownStepContext);
+  const row = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (shown?.key !== key) return;
+    setOpen(true);
+    row.current?.scrollIntoView?.({ block: "center", behavior: "smooth" });
+    row.current?.focus({ preventScroll: true });
+  }, [shown, key, setOpen]);
+  return row;
+}
+
 export function StepRow({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
+  const row = useShown(step.key, setOpen);
   const can = step.detail !== null;
   return (
-    <div>
+    <div ref={row} id={stepElementId(step.key)} tabIndex={-1} className="outline-none">
       <Pressable
         open={can ? open : null}
         onToggle={() => setOpen(!open)}
@@ -155,6 +174,10 @@ export function StepRow({ step }: { step: Step }) {
 /** Several steps of one kind, folded into a row that opens onto each. */
 export function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
   const [open, setOpen] = useState(false);
+  const shown = use(ShownStepContext);
+  useEffect(() => {
+    if (shown && row.steps.some((step) => step.key === shown.key)) setOpen(true);
+  }, [shown, row.steps]);
   return (
     <div>
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="group flex w-full items-start gap-3 py-2.5 text-left">
@@ -180,8 +203,9 @@ export function GroupRow({ row }: { row: Extract<Row, { type: "group" }> }) {
 /** A step inside a group: the same, a little quieter. */
 function InnerStep({ step }: { step: Step }) {
   const [open, setOpen] = useState(false);
+  const row = useShown(step.key, setOpen);
   return (
-    <div>
+    <div ref={row} id={stepElementId(step.key)} tabIndex={-1} className="outline-none">
       <Pressable
         open={step.detail ? open : null}
         onToggle={() => setOpen(!open)}
@@ -356,7 +380,11 @@ export function DetailView({ detail }: { detail: Detail }) {
               ? "The database refused this query. Nothing was read."
               : `A read-only query${detail.rows === null ? "" : `: ${detail.rows.toLocaleString()} row${detail.rows === 1 ? "" : "s"}`}. It's listed under Queries.`}
           </Caption>
-          <Mono>{detail.sql || "(no SQL recorded)"}</Mono>
+          {detail.sql ? (
+            <CodeBlock code={detail.sql} language="sql" wrap className="max-h-72 overflow-auto" label="The query's SQL" />
+          ) : (
+            <Mono>(no SQL recorded)</Mono>
+          )}
           {detail.error && <p className="mt-2 text-[13px] text-danger">{detail.error}</p>}
           {detail.columns.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-1">
@@ -384,10 +412,7 @@ export function DetailView({ detail }: { detail: Detail }) {
             In this conversation's own sealed container.
             {detail.exitCode !== null && detail.exitCode !== 0 && <span className="text-danger"> It stopped with an error.</span>}
           </Caption>
-          <Mono>
-            <span className="text-faint select-none">$ </span>
-            {unwrap(detail.command)}
-          </Mono>
+          <CodeBlock code={unwrap(detail.command)} language="shell" wrap className="max-h-72 overflow-auto" label="The command" />
           {detail.output && (
             <div className="mt-2">
               <Mono>{detail.output}</Mono>

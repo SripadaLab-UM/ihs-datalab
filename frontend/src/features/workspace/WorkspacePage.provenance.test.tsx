@@ -20,6 +20,27 @@ vi.mock("@/api/client", () => ({
   },
 }));
 vi.mock("@/api/provenance", () => ({ provenanceApi: { file: vi.fn() } }));
+const version = (checkpoint: number) => ({ checkpoint, turn: checkpoint, created_at: "", label: `After turn ${checkpoint}`, size: 10, too_large: false });
+vi.mock("@/api/code", () => ({
+  codeApi: {
+    list: vi.fn(async () => ({
+      files: [{ path: "analysis.py", language: "python", status: "new", size: 10, current: true, versions: [version(2), version(3)] }],
+      inline: [],
+      unchanged: 0,
+      more: 0,
+      latest_checkpoint: 3,
+    })),
+    version: vi.fn(async (_id: string, path: string, checkpoint: number) => ({
+      path,
+      language: "python",
+      version: version(checkpoint),
+      current: checkpoint === 3,
+      too_large: false,
+      text: "save('outputs/fig1.png')",
+      notebook: null,
+    })),
+  },
+}));
 vi.mock("@/components/chat/DockedChat", () => ({ DockedChat: () => null }));
 vi.mock("./SidePanel", () => ({
   SidePanel: ({ onOpen }: { onOpen: (file: OpenFile) => void }) => (
@@ -79,6 +100,8 @@ it("opens a file's script from How was this made?, as it was then, in the real w
   expect(provenanceApi.file).toHaveBeenCalledWith("c1", "outputs/fig1.png", 3);
   // The script opens in a fresh viewer, pinned to that checkpoint (not the file's).
   fireEvent.click(screen.getByRole("button", { name: "analysis.py" }));
-  expect(await screen.findByTestId("file-version")).toHaveTextContent("As saved at checkpoint 2.");
+  // A script opens with its versions, labelled as the snapshot it is.
+  expect(await screen.findByTestId("code-version-label")).toHaveTextContent("Saved at turn 2");
+  expect(screen.getByTestId("code-version-label")).toHaveTextContent("snapshot, not the live file");
   expect(screen.getByText("analysis.py", { selector: "span.truncate" })).toBeInTheDocument();
 });

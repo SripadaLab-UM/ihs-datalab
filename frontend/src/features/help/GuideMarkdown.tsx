@@ -4,6 +4,8 @@ import { Link } from "react-router";
 import remarkGfm from "remark-gfm";
 
 import { ExternalLink } from "@/components/chat/ExternalLink";
+import { HighlightedCode } from "@/components/code/CodeBlock";
+import { codeLanguage } from "@/components/code/languages";
 import { type GuidePage, headings, resolveGuideLink } from "@/lib/guide";
 
 type Positioned = { position?: { start?: { line?: number } } };
@@ -43,6 +45,16 @@ export function GuideMarkdown({
       h1: heading(1),
       h2: heading(2),
       h3: heading(3),
+      // A fenced block in a known language is highlighted, as text (never HTML).
+      code({ className, children }) {
+        const language = /language-(\S+)/.exec(className ?? "")?.[1];
+        if (!language) return <code className={className}>{children}</code>;
+        return (
+          <code className={className}>
+            <HighlightedCode code={String(children).replace(/\n$/, "")} language={codeLanguage(language)} />
+          </code>
+        );
+      },
       img: ({ alt }) => <span className="text-xs text-muted">[{alt || "image"}]</span>,
       a({ href, children }) {
         const to = href ? resolveGuideLink(href, page) : null;

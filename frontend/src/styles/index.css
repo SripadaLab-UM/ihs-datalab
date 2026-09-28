@@ -320,6 +320,47 @@ body {
   .prose-datalab hr {
     border-color: var(--color-line);
   }
+
+  /* Highlighted code (components/code): syntax as the editor draws it
+     (components/editor/theme.ts), in weight and italics, not colour. The
+     classes are @lezer/highlight's classHighlighter. */
+  .tok-keyword,
+  .tok-heading,
+  .tok-strong {
+    font-weight: 600;
+  }
+  .tok-propertyName,
+  .tok-definition {
+    font-weight: 500;
+  }
+  .tok-comment {
+    color: var(--color-faint);
+    font-style: italic;
+  }
+  .tok-string,
+  .tok-string2 {
+    color: var(--color-muted);
+  }
+  .tok-emphasis {
+    font-style: italic;
+  }
+  .tok-link,
+  .tok-url {
+    text-decoration: underline;
+  }
+  .tok-meta {
+    color: var(--color-faint);
+  }
+  .tok-invalid {
+    color: var(--color-danger);
+  }
+  /* Diffs: the tones used for added and removed everywhere else. */
+  .tok-inserted {
+    color: var(--color-data);
+  }
+  .tok-deleted {
+    color: var(--color-danger);
+  }
 }
 
 input[type="checkbox"],

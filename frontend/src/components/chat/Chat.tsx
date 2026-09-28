@@ -14,6 +14,7 @@ import { ShowQueryContext } from "./provenance";
 import { activityRows, answerOf, nowLine, type Row } from "./activity";
 import { type CheckLine, checkLines, failureChip, failures } from "./checks";
 import { type PendingMessage, SendingLine } from "./Pending";
+import { SHOW_STEP, type ShownStep, ShownStepContext } from "./showStep";
 import { GroupRow, HOVER_TITLE, Marker, NowCard, SayRow, StepRow, Story } from "./Story";
 import { buildTranscript, canContinue, type Item, type ModelStatus, type Turn } from "./transcript";
 import { useConversationEvents } from "./useConversationEvents";
@@ -481,12 +482,14 @@ function TurnView({
   const proposals = rows.flatMap((row) => (row.type === "proposal" ? [row.proposal] : []));
   const reviews = turn.items.filter((item): item is Extract<Item, { kind: "review" }> => item.kind === "review");
   const reasoning = [...turn.items].reverse().find((item) => item.kind === "reasoning");
+  const shown = useShownStep(storyRows);
   const queryClient = useQueryClient();
   const stop = useMutation({
     mutationFn: () => api.stop(conversationId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   const story = (
+    <ShownStepContext value={shown}>
     <Story
       rows={storyRows}
       renderRow={(row) => {
@@ -515,6 +518,7 @@ function TurnView({
         }
       }}
     />
+    </ShownStepContext>
   );
   // Completed with an answer: the answer leads, the work behind it folds away.
   // A failed or stopped turn keeps its whole story in view.
@@ -561,7 +565,7 @@ function TurnView({
       ))}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && (
-        <HowItWasMade rows={storyRows}>
+        <HowItWasMade rows={storyRows} shown={shown}>
           {story}
         </HowItWasMade>
       )}
@@ -618,8 +622,12 @@ function MadeHere({ items, conversationId }: { items: Item[]; conversationId: st
  * amounted to. Failed steps and the plan are named on the row itself, so
  * folding never hides them.
  */
-function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) {
+function HowItWasMade({ rows, shown, children }: { rows: Row[]; shown: ShownStep | null; children: ReactNode }) {
   const [open, setOpen] = useState(false);
+  // Asked to show one of its steps (from the Code tab): open onto it.
+  useEffect(() => {
+    if (shown) setOpen(true);
+  }, [shown]);
   if (rows.length === 0) return null;
   const steps = rows.flatMap((row) => (row.type === "step" ? [row.step] : row.type === "group" ? row.steps : []));
   const count = (icon: string) => steps.filter((step) => step.icon === icon).length;
@@ -656,6 +664,24 @@ function HowItWasMade({ rows, children }: { rows: Row[]; children: ReactNode }) 
       {open && <div className="pb-4 pl-[19px]">{children}</div>}
     </section>
   );
+}
+
+/** A step of this turn the chat was asked to show (showStep.ts), or null. */
+function useShownStep(rows: Row[]): ShownStep | null {
+  const keys = rows
+    .flatMap((row) => (row.type === "step" ? [row.step.key] : row.type === "group" ? row.steps.map((step) => step.key) : []))
+    .join("\u0000");
+  const [shown, setShown] = useState<ShownStep | null>(null);
+  useEffect(() => {
+    const mine = new Set(keys.split("\u0000"));
+    const show = (event: Event) => {
+      const key = String((event as CustomEvent<{ key?: string }>).detail?.key ?? "");
+      if (key && mine.has(key)) setShown((before) => ({ key, n: (before?.n ?? 0) + 1 }));
+    };
+    window.addEventListener(SHOW_STEP, show);
+    return () => window.removeEventListener(SHOW_STEP, show);
+  }, [keys]);
+  return shown;
 }
 
 /** The first line of Markdown text, without its markup. */

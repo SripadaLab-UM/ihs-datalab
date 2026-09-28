@@ -2,6 +2,8 @@ import { type ComponentProps, createContext, lazy, Suspense, use, useMemo } from
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { HighlightedCode } from "@/components/code/CodeBlock";
+import { codeLanguage } from "@/components/code/languages";
 import { FileGlyph, Icon } from "@/components/ui";
 import { type AnswerFileLink, answerFileLinks, KnownFilesContext, OpenFileContext, QUERY_ID, workspaceFile, containerPath } from "@/lib/files";
 
@@ -89,6 +91,14 @@ export function Markdown({ text, numbers, answer = false }: { text: string; numb
             const link = named ? files.get(containerOf(path)) : undefined;
             if (link && openFile) return <FileChip link={link} onOpen={openFile} />;
             if (inline && QUERY_ID.test(path)) return <QueryMention id={path} known={known} />;
+            // A fenced block in a known language is highlighted (as text nodes, never HTML).
+            if (language && inBlock) {
+              return (
+                <code className={className}>
+                  <HighlightedCode code={source} language={codeLanguage(language)} />
+                </code>
+              );
+            }
             return <code className={className}>{children}</code>;
           },
           img({ src, alt }) {

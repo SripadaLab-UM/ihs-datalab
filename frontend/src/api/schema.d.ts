@@ -338,6 +338,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Code
+         * @description Code files this conversation made or changed (every one with `all`), and inline code.
+         */
+        get: operations["list_code_api_conversations__conversation_id__code_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/code/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Code Version
+         * @description One version of a code file: as saved at `checkpoint` (its latest if not given).
+         */
+        get: operations["code_version_api_conversations__conversation_id__code_version_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/code/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Code Diff
+         * @description What changed in a code file from the version at checkpoint `base` to the one
+         *     at `head` (the file as it is now, if not given).
+         */
+        get: operations["code_diff_api_conversations__conversation_id__code_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/input-samples": {
         parameters: {
             query?: never;
@@ -2039,6 +2100,18 @@ export interface components {
             /** Columns */
             columns: components["schemas"]["CatalogColumn"][];
         };
+        /** CellOut */
+        CellOut: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "code" | "markdown" | "raw";
+            /** Source */
+            source: string;
+            /** Outputs */
+            outputs: number;
+        };
         /** ChainCommandOut */
         ChainCommandOut: {
             /** Id */
@@ -2170,6 +2243,97 @@ export interface components {
             bytes: number;
             /** Skipped */
             skipped: components["schemas"]["SkippedOut"][];
+        };
+        /** CodeDiffOut */
+        CodeDiffOut: {
+            /** Path */
+            path: string;
+            /** Language */
+            language: string;
+            base: components["schemas"]["CodeVersionOut"];
+            head: components["schemas"]["CodeVersionOut"];
+            /** Head Current */
+            head_current: boolean;
+            /** Too Large */
+            too_large: boolean;
+            /** Base Text */
+            base_text: string | null;
+            /** Head Text */
+            head_text: string | null;
+            /** Lines */
+            lines: components["schemas"]["DiffLineOut"][];
+            /** Added */
+            added: number;
+            /** Removed */
+            removed: number;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** CodeFileOut */
+        CodeFileOut: {
+            /** Path */
+            path: string;
+            /** Language */
+            language: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "new" | "modified" | "deleted" | "unchanged";
+            /** Size */
+            size: number;
+            /** Versions */
+            versions: components["schemas"]["CodeVersionOut"][];
+            /** Current */
+            current: boolean;
+        };
+        /** CodeListingOut */
+        CodeListingOut: {
+            /** Files */
+            files: components["schemas"]["CodeFileOut"][];
+            /** Inline */
+            inline: components["schemas"]["InlineCodeOut"][];
+            /** Unchanged */
+            unchanged: number;
+            /** More */
+            more: number;
+            /** Latest Checkpoint */
+            latest_checkpoint: number | null;
+        };
+        /** CodeTextOut */
+        CodeTextOut: {
+            /** Path */
+            path: string;
+            /** Language */
+            language: string;
+            version: components["schemas"]["CodeVersionOut"];
+            /** Current */
+            current: boolean;
+            /** Too Large */
+            too_large: boolean;
+            /** Text */
+            text: string | null;
+            notebook: components["schemas"]["NotebookOut"] | null;
+            /**
+             * Unreadable
+             * @default false
+             */
+            unreadable: boolean;
+        };
+        /** CodeVersionOut */
+        CodeVersionOut: {
+            /** Checkpoint */
+            checkpoint: number;
+            /** Turn */
+            turn: number | null;
+            /** Created At */
+            created_at: string;
+            /** Label */
+            label: string;
+            /** Size */
+            size: number;
+            /** Too Large */
+            too_large: boolean;
         };
         /** ColumnOut */
         ColumnOut: {
@@ -2431,6 +2595,20 @@ export interface components {
         };
         /** DiagnosticsOut */
         DiagnosticsOut: {
+            /** Text */
+            text: string;
+        };
+        /** DiffLineOut */
+        DiffLineOut: {
+            /**
+             * Op
+             * @enum {string}
+             */
+            op: " " | "+" | "-" | "@";
+            /** Old */
+            old: number | null;
+            /** New */
+            new: number | null;
             /** Text */
             text: string;
         };
@@ -2825,6 +3003,23 @@ export interface components {
             /** Has Result */
             has_result: boolean;
         };
+        /** InlineCodeOut */
+        InlineCodeOut: {
+            /** Id */
+            id: string;
+            /** Step */
+            step: string;
+            /** Turn */
+            turn: number;
+            /** Language */
+            language: string;
+            /** Code */
+            code: string;
+            /** Truncated */
+            truncated: boolean;
+            /** Exit Code */
+            exit_code: number | null;
+        };
         /** KbCommitOut */
         KbCommitOut: {
             /** Commit */
@@ -3086,6 +3281,15 @@ export interface components {
             path: string;
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** NotebookOut */
+        NotebookOut: {
+            /** Language */
+            language: string;
+            /** Cells */
+            cells: components["schemas"]["CellOut"][];
+            /** Outputs */
+            outputs: number;
         };
         /** OracleConnectionOut */
         OracleConnectionOut: {
@@ -5290,6 +5494,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RestoreOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_code_api_conversations__conversation_id__code_get: {
+        parameters: {
+            query?: {
+                all?: boolean;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeListingOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    code_version_api_conversations__conversation_id__code_version_get: {
+        parameters: {
+            query: {
+                path: string;
+                checkpoint?: number | null;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeTextOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    code_diff_api_conversations__conversation_id__code_diff_get: {
+        parameters: {
+            query: {
+                path: string;
+                base: number;
+                head?: number | null;
+            };
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeDiffOut"];
                 };
             };
             /** @description Validation Error */
