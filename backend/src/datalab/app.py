@@ -38,6 +38,7 @@ from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
 from datalab.data.catalog import Catalog
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
+from datalab.data.sql_drafts import SqlDrafts
 from datalab.exports import DestinationStore
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
@@ -130,6 +131,14 @@ def create_app(
     plan_desk.turn_running = sessions.turn_running
     plan_desk.current_turn = sessions.current_turn
     plan_desk.queries_so_far = access_log.for_session
+    # The SQL Playground chat's proposed queries (propose_sql), checked as the editor checks.
+    sql_drafts = SqlDrafts(
+        conversations,
+        catalog,
+        lambda: settings.oracle.allowed_schemas if settings.oracle else frozenset(),
+        access_log,
+    )
+    sql_drafts.turn_running = sessions.turn_running
     # One GitHub sign-in for both lab repos: only one object may refresh its
     # tokens, since each refresh replaces the refresh token.
     github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
@@ -156,6 +165,7 @@ def create_app(
         research_helper,
         plan_desk,
         check_workflow_text=workflows_router.runner.check_text,  # type: ignore[attr-defined]
+        drafts=sql_drafts,
     )
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
@@ -201,6 +211,7 @@ def create_app(
 
     app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
     app.state.services = services
+    app.state.sql_drafts = sql_drafts
     app.router.routes.extend(agent_tools_app.routes)
 
     def model_status(session_id: str, data: dict) -> None:
@@ -274,7 +285,9 @@ def create_app(
     # otherwise changes only its own module (and registers any session hooks
     # or mounts from there).
     app.include_router(
-        build_sql_router(SqlServices(settings, data, catalog, access_log, destinations))
+        build_sql_router(
+            SqlServices(settings, data, catalog, access_log, destinations, drafts=sql_drafts)
+        )
     )
     app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(

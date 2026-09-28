@@ -68,6 +68,8 @@ export interface Turn {
   model?: ModelStatus;
   /** Started by Continue: it picks up the turn before, which failed or was stopped. */
   continues?: boolean;
+  /** The question's event, for tabs that link to a turn (the SQL Playground's "How this SQL was created"). */
+  seq?: number;
   /** Numbers in the answer that nothing the turn produced contains. */
   trace?: { numbers: number; untraced: string[] };
   /** Where each number in the answer appears, and the output files it names. */
@@ -166,7 +168,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
-        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true };
+        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true, seq: event.seq };
         turns.push(turn);
         byId.clear();
         break;

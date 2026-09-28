@@ -15,6 +15,8 @@ export type HistoryItem = Schemas["HistoryItem"];
 export type CatalogCohort = Schemas["CatalogCohort"];
 export type CatalogTable = Schemas["CatalogTable"];
 export type CatalogHit = Schemas["CatalogHit"];
+export type SqlProposal = Schemas["SqlProposalOut"];
+export type ProposedBind = Schemas["ProposedBindOut"];
 export type BindValue = string | number | null;
 
 const post = (body: unknown, signal?: AbortSignal): RequestInit => ({
@@ -43,6 +45,8 @@ export const sqlApi = {
   /** Every cohort's tables and columns, with their comments. */
   catalog: () => request<CatalogCohort[]>("/api/sql/catalog"),
   search: (q: string) => request<CatalogHit[]>(`/api/sql/catalog/search?q=${id(q)}`),
+  /** The queries a conversation's agent proposed for the editor (propose_sql): each turn's latest. Never run. */
+  proposals: (conversationId: string) => request<SqlProposal[]>(`/api/sql/proposals/${id(conversationId)}`),
   /** Export a result's file to an export folder, with a manifest. */
   export: (queryId: string, destinationId: string) =>
     request<Schemas["ExportOut"]>(`/api/sql/results/${id(queryId)}/export`, post({ destination_id: destinationId })),

@@ -20,7 +20,7 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
     enabled: words.length > 1,
     staleTime: 60_000,
   });
-  // Newest cohort first: it's usually the one people want.
+  // Newest cohort first. Every cohort starts folded: the person opens the one they want.
   const cohorts = useMemo(
     () => [...(catalog.data ?? [])].sort((a, b) => b.schema_name.localeCompare(a.schema_name)),
     [catalog.data],
@@ -70,7 +70,7 @@ export function CatalogBrowser({ onInsert }: { onInsert: (text: string) => void 
           </section>
         ) : (
           cohorts.map((cohort) => (
-            <details key={cohort.schema_name} open={cohort === cohorts[0]} className="group/cohort border-t border-line first:border-t-0">
+            <details key={cohort.schema_name} className="group/cohort border-t border-line first:border-t-0">
               <summary className="flex cursor-pointer list-none items-center gap-1.5 py-2 font-mono text-[12.5px] font-medium text-ink select-none [&::-webkit-details-marker]:hidden">
                 <Icon name="chevron" size={12} className="text-faint transition-transform group-open/cohort:rotate-90" />
                 {cohort.schema_name}

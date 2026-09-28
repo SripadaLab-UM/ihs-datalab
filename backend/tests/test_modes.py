@@ -24,11 +24,12 @@ def test_every_mode_has_its_label_kind_and_starters():
         "engineering": ("Data engineering", "data"),
         "workflows": ("Workflow authoring", "data"),
         "knowledge": ("Knowledge writing", "data"),
+        "sql": ("SQL drafting", "data"),
         "research": ("Research", "research"),
     }
     assert all(m.description and m.starters for m in MODES.values())
-    # The two new ones are docked by their tabs, not offered for a new conversation.
-    assert {m.id for m in MODES.values() if m.tab_only} == {"workflows", "knowledge"}
+    # These are docked by their tabs, not offered for a new conversation.
+    assert {m.id for m in MODES.values() if m.tab_only} == {"workflows", "knowledge", "sql"}
 
 
 def test_every_mode_gets_the_knowledge_base_note():
@@ -45,10 +46,10 @@ def test_workflow_authoring_queries_like_data_extraction():
             extraction.queries,
             extraction.tools_off,
         )
-        == ("data", True, ())
+        == ("data", True, ("propose_sql",))
     )
     server = config("workflows")["mcp_servers"]["ihs-data"]
-    assert "disabled_tools" not in server
+    assert server["disabled_tools"] == ["propose_sql"]
     assert config("workflows")["web_search"] == "disabled"
 
 
@@ -79,13 +80,30 @@ def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     assert mode.tools == CATALOG_TOOLS
     server = config("knowledge")["mcp_servers"]["ihs-data"]
     assert server["disabled_tools"] == [
-        "query", "check_workflow", "propose_plan", "ask_research_helper"
+        "query", "check_workflow", "propose_plan", "ask_research_helper", "propose_sql"
     ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
-    # Every other mode keeps its tools and attachments.
-    for other in set(MODES) - {"knowledge"}:
-        assert MODES[other].tools is None and MODES[other].tools_off == ()
+    # Every other mode keeps its tools and attachments, all but the SQL tab's own.
+    for other in set(MODES) - {"knowledge", "sql"}:
+        assert MODES[other].tools is None and MODES[other].tools_off == ("propose_sql",)
         assert MODES[other].queries and MODES[other].attachments
+
+
+def test_only_the_sql_playgrounds_chat_proposes_sql():
+    """propose_sql fills the Playground's editor, so only its chat has it;
+    it queries (small checks) but can't plan, check workflows or attach files."""
+    mode = MODES["sql"]
+    assert (mode.kind, mode.queries, mode.attachments, mode.tab_only) == ("data", True, False, True)
+    assert "propose_sql" in mode.allowed_tools
+    assert [m.id for m in MODES.values() if "propose_sql" in m.allowed_tools] == ["sql"]
+    assert config("sql")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
+        "check_workflow", "propose_plan"
+    ]  # fmt: skip
+    text = mode.instructions
+    assert "call `propose_sql` exactly once" in text
+    assert "Only that query reaches the editor" in text
+    assert "you never run the final extraction" in " ".join(text.split())
+    assert "call propose_sql again with the whole revised query" in " ".join(text.split())
 
 
 def test_knowledge_writings_instructions():
