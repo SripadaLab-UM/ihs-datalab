@@ -132,7 +132,7 @@ beforeEach(() => {
     zip_bytes: 2048,
     zip_sha256: "e".repeat(64),
     contents: CONTENTS,
-    warnings: ["You chose this file: DataLab doesn't look inside them."],
+    warnings: ["You chose a file: DataLab doesn't look inside it."],
   });
   vi.mocked(supportApi.save).mockReset().mockResolvedValue(report());
   vi.mocked(supportApi.remove).mockReset().mockResolvedValue(undefined);

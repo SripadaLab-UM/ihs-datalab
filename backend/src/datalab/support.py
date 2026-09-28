@@ -324,7 +324,7 @@ def _system(docker: str) -> dict[str, Any]:
     elif sys.platform == "win32":
         os_version = platform.version() or os_version
     return {
-        "os": platform.system(),
+        "os": {"Darwin": "macOS"}.get(platform.system(), platform.system()),
         "os_version": os_version[:40],
         "machine": platform.machine()[:20],
         "python": platform.python_version(),
@@ -888,6 +888,27 @@ _PARTIAL = re.compile(r"\.(DL-\d{8}-[0-9A-HJKMNP-TV-Z]{4})\.zip\.partial-[0-9a-f
 
 
 def save_to_folder(store: ReportStore, report_id: str, target: Target) -> FolderCopy:
+    """Copy the report's ZIP into a checked export folder (see _save_to_folder),
+    or SupportError saying plainly why not. The report is kept either way."""
+    try:
+        return _save_to_folder(store, report_id, target)
+    except PermissionError:
+        raise SupportError(
+            f"Your account can't save files in {target.name} now. The report is kept: check "
+            "the folder's permissions, then save again."
+        ) from None
+    except FileNotFoundError:
+        raise SupportError(
+            f"{target.name} isn't there now. The report is kept: save again once it's back."
+        ) from None
+    except OSError as error:
+        raise SupportError(
+            f"DataLab couldn't save to {target.name} ({error.strerror or type(error).__name__}). "
+            "The report is kept: try again."
+        ) from None
+
+
+def _save_to_folder(store: ReportStore, report_id: str, target: Target) -> FolderCopy:
     """Copy the report's ZIP into a checked export folder, as `<report-id>.zip`.
 
     Through the folder opened when it was checked (never by path). Written

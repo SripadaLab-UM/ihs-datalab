@@ -211,7 +211,7 @@ def test_attachments_are_limited_and_named_safely(settings, catalog):
             "attachments/shot.png",
             "attachments/shot (2).png",
         ]
-        assert any("DataLab doesn't look inside them" in w for w in shown["warnings"])
+        assert "You chose 3 files: DataLab doesn't look inside them." in shown["warnings"][-1]
 
 
 def test_lines_that_look_like_identifiers_are_pointed_out(settings, catalog):
@@ -545,10 +545,20 @@ def test_an_unavailable_folder_keeps_the_report(lab_settings, catalog, tmp_path)
         url = f"/api/support/reports/{saved['report_id']}/save-to-folder"
         failed = client.post(url, json={"destination_id": destination.id})
         assert failed.status_code == 422
+        assert "The report is kept" in failed.json()["detail"]
         kept = client.get(f"/api/support/reports/{saved['report_id']}").json()
         assert kept["states"] == ["saved_locally"] and kept["folders"] == []
-        # Back again (the drive is connected): saved.
+        # Back again (the drive is connected), but read-only for now.
         folder.mkdir()
+        folder.chmod(0o500)
+        try:
+            locked = client.post(url, json={"destination_id": destination.id})
+        finally:
+            folder.chmod(0o700)
+        assert locked.status_code == 422
+        assert "Your account can't save files" in locked.json()["detail"]
+        assert "The report is kept" in locked.json()["detail"]
+        assert list(folder.iterdir()) == []
         assert client.post(url, json={"destination_id": destination.id}).status_code == 200
 
 
@@ -865,9 +875,20 @@ def test_practice_saves_to_its_own_folder_and_never_uses_github(settings, catalo
             f"/api/support/reports/{report_id}/save-to-folder", json={"destination_id": "dest_x"}
         )
         assert other.status_code == 404
-        own = client.post(
-            f"/api/support/reports/{report_id}/save-to-folder", json={"destination_id": "practice"}
-        ).json()
+        url = f"/api/support/reports/{report_id}/save-to-folder"
+        own_folder = settings.data_dir / "practice-exports"
+        own_folder.mkdir(exist_ok=True)
+        own_folder.chmod(0o500)
+        try:
+            locked = client.post(url, json={"destination_id": "practice"})
+        finally:
+            own_folder.chmod(0o700)
+        assert locked.status_code == 422
+        assert locked.json()["detail"].startswith(
+            "Your account can't save files in Practice exports now. The report is kept"
+        )
+        assert list(own_folder.iterdir()) == []
+        own = client.post(url, json={"destination_id": "practice"}).json()
     [copy] = own["folders"]
     assert copy["practice"] and copy["name"] == "Practice exports"
     assert Path(copy["file"]) == settings.data_dir / "practice-exports" / f"{report_id}.zip"

@@ -441,11 +441,18 @@ def build_support_router(services: SupportServices) -> APIRouter:
         """Copy the ZIP to an export folder (practice: its own) as <report-id>.zip.
         Trying again never makes a second copy."""
         find(report_id)
-        target = export_target(settings, services.destinations, body.destination_id)
+        try:
+            target = export_target(settings, services.destinations, body.destination_id)
+        except HTTPException as refused:
+            if refused.status_code != 422:
+                raise
+            raise HTTPException(
+                422, f"{refused.detail} The report is kept: save again once the folder is there."
+            ) from None
         try:
             copy = await asyncio.to_thread(support.save_to_folder, store, report_id, target)
         except (support.SupportError, ExportError, OSError) as error:
-            raise HTTPException(422, f"The report wasn't saved there: {error}") from error
+            raise HTTPException(422, str(error)) from error
         entry = {
             "name": copy.name,
             "file": copy.file,
@@ -563,11 +570,13 @@ def _warnings(body: SupportDraftIn, attachments: int) -> list[str]:
                     "Check it isn't participant data."
                 )
     if attachments:
-        them = "this file" if attachments == 1 else f"these {attachments} files"
-        found.append(
-            f"You chose {them}: DataLab doesn't look inside them. Check they show no "
-            "participant data, query results or conversations."
-        )
+        if attachments == 1:
+            said = "You chose a file: DataLab doesn't look inside it. Check it shows"
+        else:
+            said = (
+                f"You chose {attachments} files: DataLab doesn't look inside them. Check they show"
+            )
+        found.append(f"{said} no participant data, query results or conversations.")
     return found
 
 

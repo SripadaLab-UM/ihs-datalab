@@ -750,9 +750,17 @@ practice the app also swaps the tab's icon and title for practice's.
   folder as `~`, whether keys are saved (never the keys, the database server
   or account), Safety check results by check id, the database layout and
   update state, failure counts, and recent problems as DataLab's own message
-  templates without their values. The user pastes it into an email or a
-  GitHub issue. The prototype's feedback flow could zip query results and
-  upload them to Dropbox; nothing like that exists in v1.
+  templates without their values. The user pastes it into an email.
+- **Support reports, without uploads to Dropbox or the public repo.**
+  Send feedback packages a bug report or suggestion as a ZIP (a summary,
+  allowlisted diagnostics, a manifest, and files the person chose), saved
+  under the data folder. The person saves it to an export folder and emails
+  it, or, on real DataLab, sends it in one click to the lab's private
+  support repository (`[repos] support`) with their GitHub sign-in. It's
+  called delivered only when GitHub confirms the commit. See
+  [SUPPORT.md](SUPPORT.md), which also says how to set the repository up.
+  The prototype's feedback flow could zip query results and upload them
+  through Dropbox's API; nothing like that exists in v1.
 
 ## Decided
 
