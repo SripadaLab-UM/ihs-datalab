@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import type { Connections, Storage, StorageItem, UpdateCheck, Updates } from "@/api/settings";
+import type { Connections, PracticeDatabase, Storage, StorageItem, UpdateCheck, Updates } from "@/api/settings";
 import { formatBytes, settingsApi } from "@/api/settings";
 
 import { ConnectionsSection } from "./ConnectionsSection";
@@ -31,6 +31,9 @@ vi.mock("@/api/settings", async (original) => ({
     saveDatabasePassword: vi.fn(async () => undefined),
     saveModelKey: vi.fn(async () => undefined),
     testConnections: vi.fn(),
+    practiceDatabase: vi.fn(),
+    startPracticeDatabase: vi.fn(),
+    resetPracticeDatabase: vi.fn(),
     storage: vi.fn(),
     removeStorageItem: vi.fn(),
     updates: vi.fn(),
@@ -105,23 +108,93 @@ it("tests the connection and says how it went", async () => {
   expect(screen.getByText(/offers 3 approved models/)).toBeTruthy();
 });
 
+const PRACTICE: Connections = {
+  ...REAL,
+  profile: "practice",
+  oracle: { ...REAL.oracle, practice: true, password: null, can_set_password: false },
+  model: { ...REAL.model, can_set_key: false },
+  read_only_because: "Practice DataLab uses the local synthetic database, whose settings are fixed.",
+};
+
+const PRACTICE_DB: PracticeDatabase = {
+  phase: "ready",
+  message: "The practice database is running, with its made-up data.",
+  container: "datalab-practice-oracle",
+  volume: "datalab-practice-oracle-data",
+  port: 1522,
+  managed: true,
+  busy: false,
+  cant_reset_because: null,
+};
+
 it("practice shows its synthetic database and offers no changes", async () => {
-  mocked.connections.mockResolvedValue({
-    ...REAL,
-    profile: "practice",
-    oracle: { ...REAL.oracle, practice: true, password: null, can_set_password: false },
-    model: { ...REAL.model, can_set_key: false },
-    read_only_because: "Practice DataLab uses the local synthetic database, whose settings are fixed.",
-  });
+  mocked.connections.mockResolvedValue(PRACTICE);
+  mocked.practiceDatabase.mockResolvedValue(PRACTICE_DB);
   wrap(<ConnectionsSection />);
   expect(await screen.findByText(/whose settings are fixed/)).toBeTruthy();
-  expect(screen.getByText("Fixed: the synthetic database's own")).toBeTruthy();
+  expect(screen.getByText("None to enter: DataLab saved the synthetic database's own")).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^(Save|Replace) (key|password)$/ })).toBeNull();
   // What practice fixes is labelled, not missing, and can still be tested.
   expect(screen.getByText("Fixed on the practice DataLab: the synthetic database")).toBeTruthy();
   expect(screen.getByText("Fixed on the practice DataLab")).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Test connection" })).toHaveLength(2);
   expect(screen.getByText("Saved in keychain")).toBeTruthy();
+});
+
+it("says which features need the U-M GPT key and which don't", async () => {
+  mocked.connections.mockResolvedValue(PRACTICE);
+  mocked.practiceDatabase.mockResolvedValue(PRACTICE_DB);
+  wrap(<ConnectionsSection />);
+  const umgpt = within(await screen.findByRole("region", { name: "U-M GPT" }));
+  expect(umgpt.getByText("The key is optional on the practice DataLab.")).toBeTruthy();
+  expect(umgpt.getByText("Conversations with the agent, in the Workspace")).toBeTruthy();
+  expect(umgpt.getByText(/Edit with agent, and the agent's suggested updates \(in the real DataLab\)/)).toBeTruthy();
+  expect(umgpt.getByText("The SQL Playground")).toBeTruthy();
+  expect(umgpt.getByText("Save as workflow, and running workflows")).toBeTruthy();
+});
+
+it("practice says how its database stands and resets it only once confirmed", async () => {
+  mocked.connections.mockResolvedValue(PRACTICE);
+  mocked.practiceDatabase.mockResolvedValue(PRACTICE_DB);
+  mocked.resetPracticeDatabase.mockResolvedValue({ ...PRACTICE_DB, phase: "resetting", busy: true });
+  wrap(<ConnectionsSection />);
+  expect(await screen.findByText("Running")).toBeTruthy();
+  expect(screen.getByText(/with its made-up data/)).toBeTruthy();
+  expect(screen.getByText("datalab-practice-oracle-data")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Reset practice data…" }));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(dialog.getByText(/sets it up again from scratch/)).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(mocked.resetPracticeDatabase).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Reset practice data…" }));
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Reset" }));
+  await waitFor(() => expect(mocked.resetPracticeDatabase).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("Resetting…")).toBeTruthy();
+});
+
+it("a practice database problem is said, with Try again", async () => {
+  mocked.connections.mockResolvedValue(PRACTICE);
+  mocked.practiceDatabase.mockResolvedValue({
+    ...PRACTICE_DB,
+    phase: "problem",
+    message: "Docker Desktop isn't running, and the practice database runs in it.",
+  });
+  mocked.startPracticeDatabase.mockResolvedValue({ ...PRACTICE_DB, phase: "starting" });
+  wrap(<ConnectionsSection />);
+  expect(await screen.findByText("Not running")).toBeTruthy();
+  expect(screen.getByText(/Docker Desktop isn't running/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  await waitFor(() => expect(mocked.startPracticeDatabase).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText("Starting…")).toBeTruthy();
+});
+
+it("the real profile shows no practice database", async () => {
+  mocked.connections.mockResolvedValue(REAL);
+  wrap(<ConnectionsSection />);
+  await screen.findByText("Not saved");
+  expect(mocked.practiceDatabase).not.toHaveBeenCalled();
+  expect(screen.queryByText(/Reset practice data/)).toBeNull();
 });
 
 function item(overrides: Partial<StorageItem>): StorageItem {

@@ -33,7 +33,7 @@ class OracleSettings:
     allowed_schemas: frozenset[str]
     # The practice profile must only ever talk to the synthetic database, even
     # if something else answers on its port (an SSH tunnel, say). It checks for
-    # a marker table that exists only there (see synthetic/guard.py).
+    # a marker table that exists only there (see practice_db/guard.py).
     require_synthetic_marker: bool = False
 
     @property
@@ -213,11 +213,21 @@ class Settings:
         return self.data_dir / "datalab.sqlite"
 
 
+def _practice_db_port() -> int:
+    """The synthetic database's port on this computer: 1522, or
+    DATALAB_PRACTICE_DB_PORT (tests and development, beside another one)."""
+    value = os.environ.get("DATALAB_PRACTICE_DB_PORT") or "1522"
+    if not value.isdigit() or not 1024 <= int(value) <= 65535:
+        raise ValueError(f"DATALAB_PRACTICE_DB_PORT must be a port number, not {value!r}")
+    return int(value)
+
+
 # The practice profile always uses the local synthetic database, so its
-# connection details are fixed (see synthetic/README.md).
+# connection details are fixed (see synthetic/README.md). DataLab runs that
+# database itself (datalab.practice_db), on 127.0.0.1 only.
 PRACTICE_ORACLE = OracleSettings(
     host="127.0.0.1",
-    port=1522,
+    port=_practice_db_port(),
     service="FREEPDB1",
     user="DATALAB_RO",
     keychain_service="datalab-practice",

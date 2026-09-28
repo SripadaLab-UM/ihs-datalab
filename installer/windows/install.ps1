@@ -23,11 +23,14 @@
 #   4. Installs DataLab, with its own Python, in your user account (no admin rights).
 #      Each version gets its own folder, so an update installs beside the one in use
 #      and the previous version is kept (docs/DISTRIBUTION.md).
-#   5. Downloads the pinned container images.
+#   5. Downloads the pinned container images (with -Practice, Oracle Database Free too).
 #   6. Saves the lab's settings and asks for your U-M GPT key and database password,
-#      which go into Windows Credential Manager.
+#      which go into Windows Credential Manager. -Practice asks for no password, and
+#      the key is optional there.
 #   7. Offers the GitHub sign-in for the lab's knowledge base and pipelines, then
-#      downloads both. Skipped for the practice profile (-Practice).
+#      downloads both. With -Practice, instead: sets up the practice database (a
+#      container on this computer only, with made-up data), keeping any data it
+#      already has.
 #   8. Adds DataLab to the Start menu and the Desktop ("DataLab", or "DataLab (practice)",
 #      each with its own icon).
 #
@@ -1385,17 +1388,33 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Step "Step 6 of 8: Your keys"
-Say "Next, DataLab asks for your U-M GPT API key (and the database password, if"
-Say "your lab uses one). Each character shows as *. Press Enter when done."
-Say "They're kept in Windows Credential Manager."
+if ($Practice) {
+    Say "Next, DataLab asks for your U-M GPT API key. It's optional for practice: press"
+    Say "Enter to skip it. No database password, VPN or GitHub account is needed."
+} else {
+    Say "Next, DataLab asks for your U-M GPT API key (and the database password, if"
+    Say "your lab uses one)."
+}
+Say "Each character shows as *. Press Enter when done. Keys are kept in Windows Credential Manager."
 if ($Settings) { & $DataLab --profile $DataLabProfile setup --settings $Settings } else { & $DataLab --profile $DataLabProfile setup }
 if ($LASTEXITCODE -ne 0) {
     Stop-Install "Saving your keys didn't work (the messages above say why)."
 }
 
-Step "Step 7 of 8: The lab's knowledge base and pipelines"
 if ($Practice) {
-    Say "Skipped: practice DataLab doesn't use the lab's repositories."
+    Step "Step 7 of 8: Setting up the practice database"
+} else {
+    Step "Step 7 of 8: The lab's knowledge base and pipelines"
+}
+if ($Practice) {
+    Say "Skipped: practice DataLab doesn't use the lab's repositories. Instead it runs its"
+    Say "own database of made-up data, in Docker, reachable from this computer only."
+    Say "The first time, this takes a few minutes; data it already has is kept."
+    # Not a reason to stop: DataLab sets it up (or starts it) each time it opens.
+    & $DataLab --profile $DataLabProfile practice-db setup
+    if ($LASTEXITCODE -ne 0) {
+        Note "It isn't ready yet (the messages above say why). DataLab tries again each time it opens."
+    }
 } elseif ($NoGitHub -or $Yes) {
     # (-Yes runs unattended; the sign-in needs the person at github.com.)
     Say "Skipped. Sign in later in DataLab, under Settings > GitHub."

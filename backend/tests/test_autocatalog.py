@@ -390,3 +390,48 @@ def test_practice_datalab_builds_its_catalog_from_the_synthetic_database(tmp_pat
         assert set(health["catalog_schemas"]) == set(PRACTICE_ORACLE.allowed_schemas)
     table = Catalog.load(tmp_path / "data" / "catalog").get("IHS_2025.VFITBITDAILYDATA")
     assert table is not None and table.columns
+
+
+def test_practice_starts_its_database_then_builds_the_catalog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Practice DataLab opens at once, starts its database in the background
+    (health says how it's going), and builds its catalog once it's up."""
+    import threading
+
+    from datalab.practice_db import PracticeDatabaseKeeper
+    from tests.test_practice_db import FakeDocker, FakeOracle, database
+
+    reads = []
+    monkeypatch.setattr(
+        _LazyOracle, "build_catalog", lambda lazy: reads.append(1) or sample_catalog()
+    )
+    docker = FakeDocker()
+    oracle = FakeOracle(docker)
+    release = threading.Event()
+    held = database(docker, oracle)
+    held.has_data = lambda dsn, wait=180: release.wait(5) and oracle.has_data(dsn)
+    keeper = PracticeDatabaseKeeper(held)
+    settings = Settings(profile="practice", data_dir=tmp_path / "data", oracle=PRACTICE_ORACLE)
+    app = create_app(settings, manage_containers=False, protect_api=False, practice_database=keeper)
+    with TestClient(app) as client:
+        assert client.get("/api/health").json()["practice_database"] in ("checking", "starting")
+        release.set()
+        for _ in range(200):
+            if client.get("/api/health").json()["practice_database"] == "ready":
+                break
+            time.sleep(0.02)
+        status = _wait(client, lambda s: s["state"] == "ready")
+        assert status["tables"] == len(sample_catalog())
+    assert oracle.loads and reads
+
+
+def test_only_practice_looks_after_a_synthetic_database(tmp_path: Path) -> None:
+    from datalab.practice_db import PracticeDatabaseKeeper
+
+    settings = Settings(profile="real", data_dir=tmp_path / "data", oracle=None)
+    with pytest.raises(ValueError, match="Only the practice DataLab"):
+        create_app(settings, manage_containers=False, practice_database=PracticeDatabaseKeeper())
+    datalock.release_all()
+    health = TestClient(create_app(settings, manage_containers=False)).get("/api/health").json()
+    assert health["practice_database"] is None

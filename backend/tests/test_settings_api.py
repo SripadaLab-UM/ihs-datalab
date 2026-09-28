@@ -1023,3 +1023,61 @@ def test_a_feedback_contact_cant_smuggle_mail_headers():
 
     found = _EMAIL.search("Maintainer (a%0ABcc%3Aevil@x.com)")
     assert found is None or "%" not in found.group(0)
+
+
+# ----------------------------------------------------- the practice database
+
+
+class FakeKeeper:
+    """PracticeDatabaseKeeper's surface, recording what it was asked."""
+
+    def __init__(self) -> None:
+        from datalab.practice_db import Target
+
+        self.database = type("Db", (), {"target": Target(port=1522)})()
+        self.phase = "ready"
+        self.message = "The practice database is running, with its made-up data."
+        self.adopted = False
+        self.busy = False
+        self.asked: list[str] = []
+
+    def start(self) -> bool:
+        self.asked.append("start")
+        return True
+
+    def reset(self) -> bool:
+        self.asked.append("reset")
+        return True
+
+
+def test_practice_settings_show_the_database_and_reset_only_once_confirmed(settings, keychain):
+    keeper = FakeKeeper()
+    h = Harness(settings, practice_database=keeper)
+    shown = h.client.get("/api/settings/practice-database").json()
+    assert shown["phase"] == "ready" and shown["port"] == 1522 and shown["managed"] is True
+    assert shown["container"] == "datalab-practice-oracle"
+    assert shown["cant_reset_because"] is None
+    assert h.client.post("/api/settings/practice-database/start").status_code == 200
+    unconfirmed = h.client.post("/api/settings/practice-database/reset", json={"confirmed": False})
+    assert unconfirmed.status_code == 422
+    assert keeper.asked == ["start"]
+    done = h.client.post("/api/settings/practice-database/reset", json={"confirmed": True})
+    assert done.status_code == 200 and keeper.asked == ["start", "reset"]
+
+
+def test_the_practice_database_isnt_reset_while_something_reads_it(settings, keychain):
+    keeper = FakeKeeper()
+    h = Harness(settings, practice_database=keeper, practice_busy=lambda: "A workflow is running.")
+    refused = h.client.post("/api/settings/practice-database/reset", json={"confirmed": True})
+    assert refused.status_code == 409 and "workflow" in refused.json()["detail"]
+    keeper.adopted = True
+    h = Harness(settings, practice_database=keeper)
+    refused = h.client.post("/api/settings/practice-database/reset", json={"confirmed": True})
+    assert refused.status_code == 409 and "didn't set up" in refused.json()["detail"]
+    assert keeper.asked == []
+
+
+def test_the_real_profile_has_no_practice_database(real):
+    assert real.client.get("/api/settings/practice-database").status_code == 404
+    refused = real.client.post("/api/settings/practice-database/reset", json={"confirmed": True})
+    assert refused.status_code == 404

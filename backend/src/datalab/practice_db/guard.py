@@ -1,4 +1,4 @@
-"""Make sure these scripts only ever touch the local synthetic database.
+"""Make sure the generator only ever touches the local synthetic database.
 
 The generator drops and recreates the IHS cohort schemas, so it must never run
 against a real database. Three checks, all required:
@@ -12,18 +12,28 @@ against a real database. Three checks, all required:
 from __future__ import annotations
 
 import re
-import sys
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+# Fixed, public, dev-only passwords (synthetic/README.md): SYSTEM's, and the
+# app user DATALAB_RO's. They unlock fake data on this computer and nothing
+# else. Never reuse them.
+ADMIN_PWD = "SynthDev2026"
+RO_PWD = "datalab_ro"
 MARKER_SCHEMA = "DATALAB_SYNTHETIC"
 MARKER_NOTE = "Synthetic IHS database: every row is fake (ihs_datalab/synthetic)."
+
+
+class NotTheSyntheticDatabase(RuntimeError):
+    """Refused: the database isn't the local synthetic one. Nothing was changed."""
 
 
 def require_local_dsn(dsn: str) -> None:
     match = re.match(r"^\[?([^\]/:]+)\]?", dsn.strip())
     host = match.group(1).lower() if match else ""
     if host not in LOCAL_HOSTS:
-        sys.exit(f"Refusing to run: {dsn!r} is not a database on this computer.")
+        raise NotTheSyntheticDatabase(
+            f"Refusing to run: {dsn!r} is not a database on this computer."
+        )
 
 
 def require_synthetic_server(cur) -> None:
@@ -33,14 +43,17 @@ def require_synthetic_server(cur) -> None:
     cur.execute("SELECT SYS_CONTEXT('USERENV', 'CON_NAME') FROM dual")
     container = cur.fetchone()[0]
     if "Free" not in banners or container != "FREEPDB1":
-        sys.exit(
+        raise NotTheSyntheticDatabase(
             "Refusing to run: this server doesn't look like the local Oracle Database Free "
             f"container (container {container!r})."
         )
 
 
 def create_marker(cur, reader: str) -> None:
-    """Create the marker DataLab's practice profile requires. Call as SYSTEM."""
+    """Create the marker DataLab's practice profile requires. Call as SYSTEM.
+
+    The generator creates it last, once every cohort is loaded, so a build
+    that stopped part way has no marker and is built again from scratch."""
     cur.execute(f"CREATE USER {MARKER_SCHEMA} NO AUTHENTICATION")
     cur.execute(f"GRANT UNLIMITED TABLESPACE TO {MARKER_SCHEMA}")
     cur.execute(f"CREATE TABLE {MARKER_SCHEMA}.MARKER (NOTE VARCHAR2(200))")

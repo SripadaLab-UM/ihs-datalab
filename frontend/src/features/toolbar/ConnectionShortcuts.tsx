@@ -4,6 +4,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 
+import { api, type Health } from "@/api/client";
 import { type Connections, type ConnectionTest, settingsApi } from "@/api/settings";
 import { Button, Icon } from "@/components/ui";
 import { settingsLink } from "@/features/settings/highlight";
@@ -45,9 +46,20 @@ interface Standing {
   attention?: string;
 }
 
-export function databaseStanding(connections: Connections | undefined, result?: ConnectionTest["database"]): Standing {
+export function databaseStanding(
+  connections: Connections | undefined,
+  result?: ConnectionTest["database"],
+  /** Practice only: how its synthetic database stands (health's practice_database). */
+  practiceDatabase?: Health["practice_database"],
+): Standing {
   if (!connections) return { state: "checking…", tone: undefined };
   const oracle = connections.oracle;
+  if (oracle.practice && practiceDatabase === "problem") {
+    return { state: "practice database not running", tone: "attn", attention: "DB: not running" };
+  }
+  if (oracle.practice && practiceDatabase && practiceDatabase !== "ready") {
+    return { state: "practice database starting…", tone: undefined };
+  }
   if (result && !result.ok) return { state: "test failed", tone: "attn", attention: "DB: not connected" };
   if (oracle.practice) {
     return { state: result?.ok ? "connected (synthetic)" : "synthetic, not tested yet", tone: result?.ok ? "good" : undefined };
@@ -85,7 +97,8 @@ export function DatabaseShortcut() {
   const test = useConnectionTest();
   const shown = connections.data;
   const result = test.result?.database;
-  const standing = databaseStanding(shown, result);
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const standing = databaseStanding(shown, result, health.data?.practice_database);
   const practice = shown?.oracle.practice;
   return (
     <Shortcut

@@ -29,6 +29,7 @@ if [ -n "${DATALAB_TEST_WHO:-}" ]; then echo "$0" >> "$DATALAB_TEST_WHO"; fi
 case "$*" in
   --version) echo "datalab $DATALAB_TEST_VERSION" ;;
   *"github sign-in"*) exit "${DATALAB_TEST_SIGNIN:-0}" ;;
+  *"practice-db setup"*) exit "${DATALAB_TEST_PRACTICE_DB:-0}" ;;
 esac
 exit 0
 """
@@ -98,7 +99,13 @@ def machine(tmp_path) -> dict[str, Path]:
 
 
 def install(
-    machine, version: str, *args: str, signin: int = 0, pinned: bool = True, **extra_env: str
+    machine,
+    version: str,
+    *args: str,
+    signin: int = 0,
+    practice_db: int = 0,
+    pinned: bool = True,
+    **extra_env: str,
 ) -> subprocess.CompletedProcess[str]:
     wheel = f"datalab-{version}-py3-none-any.whl"
     package = machine["packages"] / wheel
@@ -115,6 +122,7 @@ def install(
         "DATALAB_TEST_FAKE": str(machine["fake"]),
         "DATALAB_TEST_VERSION": version,
         "DATALAB_TEST_SIGNIN": str(signin),
+        "DATALAB_TEST_PRACTICE_DB": str(practice_db),
         "DATALAB_TEST_UVLOG": str(machine["uvlog"]),
         "DATALAB_SYSTEM_APPLICATIONS": str(machine["apps"]),
     }
@@ -188,6 +196,39 @@ def test_practice_skips_the_github_steps(machine):
     assert done.returncode == 0, done.stdout + done.stderr
     assert "Skipped: practice DataLab doesn't use the lab's repositories." in done.stdout
     assert not any("github" in line or "repos" in line for line in asked(machine))
+
+
+def test_practice_sets_up_its_database_and_asks_for_no_password(machine):
+    done = install(machine, "0.1.0a3", "--profile", "practice")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert asked(machine) == [
+        "--version",
+        "--version",
+        "--profile practice pull-images",
+        "--profile practice setup",
+        "--profile practice practice-db setup",
+    ]
+    assert "6/7 Setting up the practice database" in done.stdout
+    assert "reachable from this computer only" in done.stdout
+    assert "data it already has is kept" in done.stdout
+    assert "It's optional for practice" in done.stdout
+    assert "No database password, VPN or GitHub account is needed." in done.stdout
+    assert "database password, if" not in done.stdout
+
+
+def test_a_practice_database_that_isnt_ready_still_finishes_the_install(machine):
+    done = install(machine, "0.1.0a3", "--profile", "practice", practice_db=1)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "DataLab tries again each time it opens." in done.stdout
+    assert "7/7 Launcher" in done.stdout
+
+
+def test_the_real_install_never_touches_the_practice_database(machine):
+    done = install(machine, "0.1.0a3")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert not any("practice" in line for line in asked(machine))
+    assert "6/7 The lab's knowledge base and pipelines" in done.stdout
+    assert "database password, if" in done.stdout
 
 
 def test_nothing_to_sign_in_to_means_no_sync(machine):

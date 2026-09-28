@@ -213,3 +213,49 @@ def test_a_failed_key_step_stops_the_installer_instead_of_saying_all_done():
     step6 = INSTALL[INSTALL.index('Step "Step 6 of 8') : INSTALL.index('Step "Step 7 of 8')]
     assert step6.index("setup") < step6.index("if ($LASTEXITCODE -ne 0) {")
     assert "Stop-Install" in step6
+
+
+def practice_step(text: str) -> str:
+    """Step 7, from the `if ($Practice) {` that names it to step 8."""
+    title = text.index('Step "Step 7 of 8: Setting up the practice database"')
+    return text[text.rindex("if ($Practice) {", 0, title) : text.index('Step "Step 8 of 8')]
+
+
+def test_practice_sets_up_its_database_as_the_person_and_never_stops_the_install():
+    step7 = practice_step(INSTALL)
+    practice = step7[step7.index("if ($Practice) {\n    Say") : step7.index("} elseif")]
+    assert "& $DataLab --profile $DataLabProfile practice-db setup" in practice
+    assert "Stop-Install" not in practice
+    assert "DataLab tries again each time it opens." in practice
+    assert "reachable from this computer only" in practice
+    assert "data it already has is kept" in practice
+    assert "practice-db setup" in person_part(INSTALL)
+    assert "practice-db" not in admin_part(INSTALL)
+    # Only practice runs it: the real profile's step 7 is the GitHub one.
+    assert code(INSTALL).count("practice-db setup") == 1
+
+
+def test_practices_key_prompt_says_its_optional_and_asks_for_no_password():
+    step6 = INSTALL[INSTALL.index('Step "Step 6 of 8') : INSTALL.index('Step "Step 7 of 8')]
+    practice = step6[step6.index("if ($Practice) {") : step6.index("} else {")]
+    assert "It's optional for practice" in practice
+    assert "No database password, VPN or GitHub account is needed." in practice
+    assert "password, if" not in practice
+
+
+def test_the_practice_changes_keep_the_scripts_parseable_by_windows_powershell():
+    """Windows PowerShell 5.1 reads a script without a BOM as the ANSI code
+    page, so the scripts stay ASCII; and every block the practice steps open
+    is closed (CI's windows-installer job parses both scripts for real)."""
+    for text in (INSTALL, UNINSTALL):
+        assert text.isascii()
+    step = practice_step(INSTALL)
+    body = code(step)
+    assert body.count("{") == body.count("}")
+    assert body.count("(") == body.count(")")
+    assert body.count('"') % 2 == 0
+
+
+def test_the_uninstaller_says_it_asks_about_the_practice_database():
+    assert "before deleting the practice database" in UNINSTALL
+    assert "& $Shim uninstall @choice" in UNINSTALL  # which asks (setup.uninstall)

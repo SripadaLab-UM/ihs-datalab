@@ -38,6 +38,7 @@ from datalab.credentials import (
     save_model_api_key,
     save_oracle_password,
 )
+from datalab.practice_db.guard import RO_PWD
 from datalab.repos import github
 from datalab.secret_prompt import ask_secret
 
@@ -70,8 +71,26 @@ def setup(profile: Profile | None, lab_settings: Path | None, *, update: bool) -
         return 130
 
 
+# What the U-M GPT key is for. Everything that talks with the agent goes
+# through the model relay (relay/), which refuses without a key; the rest
+# of DataLab never asks a model (the Playground, workflows/drafts.py, the
+# workflow runner, exports).
+KEY_UNLOCKS = (
+    "With a U-M GPT (Toolkit) API key you can work with the agent: conversations in the "
+    "Workspace, and drafting a workflow with the agent (and, in the real DataLab, the "
+    "Knowledge tab's Edit with agent and the agent's suggested updates). Without one, "
+    "everything else works: the SQL Playground, Save as workflow, running workflows, and exports."
+)
+
+
 def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> int:
     if update or not _saved(model_api_key):
+        if profile == "practice":
+            print(
+                f"The U-M GPT key is optional on the practice DataLab. {KEY_UNLOCKS} "
+                "To skip it, press Enter. No database password, VPN or GitHub account is "
+                "needed for practice."
+            )
         key = ask_secret("U-M GPT API key")
         if key:
             try:
@@ -85,8 +104,8 @@ def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> i
             # it), but conversations can't start until there's a key.
             print(
                 "No U-M GPT key was entered, so none was saved. Conversations with the agent "
-                "can't start until there is one. To add it later, run: "
-                f"datalab --profile {profile} setup --update"
+                "can't start until there is one; the SQL Playground, workflows and exports work "
+                f"without it. To add it later, run: datalab --profile {profile} setup --update"
             )
 
     oracle = asks_for_oracle_password(settings)
@@ -122,7 +141,7 @@ def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> i
 
 # The synthetic database's app-user password: fixed, public and dev-only
 # (synthetic/README.md). It unlocks fake data on this computer and nothing else.
-SYNTHETIC_ORACLE_PASSWORD = "datalab_ro"
+SYNTHETIC_ORACLE_PASSWORD = RO_PWD
 
 
 def save_practice_password(settings: Settings, *, update: bool = False) -> bool:
@@ -270,7 +289,10 @@ def _database_problem(error: Exception, *, practice: bool) -> str:
 
 def _unreachable(why: str, *, practice: bool) -> str:
     if practice:
-        return f"Can't reach the practice database. Is the synthetic database running? ({why})"
+        return (
+            "Can't reach the synthetic database. Practice DataLab starts it when it opens: "
+            f"Settings → Connections says how that's going. ({why})"
+        )
     return (
         "Can't reach the database. Connect to the U-M VPN (or check your network), "
         f"then test again. ({why})"
@@ -319,8 +341,48 @@ def uninstall(*, delete_data: bool | None) -> int:
             print("Deleted.")
         else:
             print("Kept. You can delete them yourself later.")
+    _uninstall_practice_database(delete_data)
     print("Your export folders were not touched.")
     return 0
+
+
+def _uninstall_practice_database(delete: bool | None) -> None:
+    """Practice DataLab's synthetic database: its container and volume, only
+    if they're labelled as DataLab's. Asked about like the data folders."""
+    from datalab import practice_db
+
+    database = practice_db.PracticeDatabase()
+    target = database.target
+    try:
+        container = database.inspect()
+        volume = database.volume_state()
+    except practice_db.PracticeDatabaseProblem:
+        if shutil.which("docker") is not None:
+            print(
+                "\nDocker isn't running, so the practice database (if there is one) was left: "
+                f"the Docker container {target.container} and its volume {target.volume}."
+            )
+        return
+    ours = container is not None and container.ours
+    if not ours and volume != "ours":
+        return
+    print(
+        "\nThe practice database (made-up data only): the Docker container "
+        f"{target.container} and its volume {target.volume}."
+    )
+    if delete is None:
+        answer = input("Delete it too? Installing practice DataLab sets it up again. [y/N] ")
+        delete = answer.strip().lower() in ("y", "yes")
+    try:
+        if delete:
+            database.remove(volume=True)
+            print("Deleted.")
+        else:
+            if ours and container is not None and container.status == "running":
+                database.stop()
+            print("Kept (stopped). A practice DataLab installed again uses it as it is.")
+    except practice_db.PracticeDatabaseProblem as problem:
+        print(problem)
 
 
 def _saved(get) -> bool:

@@ -5,6 +5,8 @@ import { type Connections, type ConnectionTest, settingsApi } from "@/api/settin
 import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
 import { GitHubSection } from "./GitHubSection";
+import { KeyFeatures } from "./KeyFeatures";
+import { PracticeDatabaseStatus } from "./PracticeDatabase";
 import { FixedOnPractice, Part, Section } from "./Section";
 
 type Source = Connections["model"]["key"];
@@ -89,6 +91,8 @@ function Model({
             : "Your U-M GPT (Toolkit) API key."}
         </dd>
       </dl>
+      {practice && <p className="mt-3 text-sm text-muted">The key is optional on the practice DataLab.</p>}
+      <KeyFeatures practice={practice} />
       {result && <Outcome ok={result.ok} message={result.message} />}
     </SecretPart>
   );
@@ -141,7 +145,7 @@ function Database({
       {oracle.password === null && (
         <>
           <dt className="text-muted">Password</dt>
-          <dd className="text-muted">Fixed: the synthetic database's own</dd>
+          <dd className="text-muted">None to enter: DataLab saved the synthetic database's own</dd>
         </>
       )}
     </dl>
@@ -164,6 +168,7 @@ function Database({
         actions={oracle.configured && testButton}
       >
         {details}
+        {oracle.practice && <PracticeDatabaseStatus />}
         {outcome}
       </Part>
     );

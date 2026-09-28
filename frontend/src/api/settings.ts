@@ -18,6 +18,7 @@ export type UpdateInstall = Schemas["UpdateInstallOut"];
 export type BackupInfo = Schemas["BackupInfoOut"];
 export type DestinationKey = Schemas["DestinationKeyOut"];
 export type FeedbackContact = Schemas["FeedbackContactOut"];
+export type PracticeDatabase = Schemas["PracticeDatabaseOut"];
 
 export const settingsApi = {
   connections: () => request<Connections>("/api/settings/connections"),
@@ -29,6 +30,15 @@ export const settingsApi = {
   saveModelKey: (key: string) =>
     request<void>("/api/settings/connections/model-key", { method: "PUT", body: JSON.stringify({ key }) }),
   testConnections: () => request<ConnectionTest>("/api/settings/connections/test", { method: "POST" }),
+  /** Practice only: its synthetic database, which DataLab sets up and starts itself. */
+  practiceDatabase: () => request<PracticeDatabase>("/api/settings/practice-database"),
+  startPracticeDatabase: () => request<PracticeDatabase>("/api/settings/practice-database/start", { method: "POST" }),
+  /** Delete it and set it up again from scratch. Only after the person confirmed. */
+  resetPracticeDatabase: () =>
+    request<PracticeDatabase>("/api/settings/practice-database/reset", {
+      method: "POST",
+      body: JSON.stringify({ confirmed: true }),
+    }),
 
   storage: () => request<Storage>("/api/settings/storage"),
   removeStorageItem: (kind: RemovableKind, id: string, confirmed = false) =>
