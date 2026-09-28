@@ -7,9 +7,10 @@ Make every deliverable easy to find, understand, and regenerate.
 
 1. Put deliverables in `/work/outputs` with clear, descriptive file names.
    Keep scratch files in `/work`.
-2. Keep the source that produced each deliverable (`analysis.R`,
-   `report.md`, `figure.py`) in `/work`, with enough method detail for
-   another analyst to rerun it.
+2. Keep the source that produced each deliverable as named scripts in
+   `/work/scripts` (`steps_by_week.R`, `make_figure.py`), with enough method
+   detail for another analyst to rerun it. DataLab exports them with the
+   outputs.
 3. In reports, state the question, the data used (cohort schemas, tables,
    and attached file names), row and participant counts, filters,
    exclusions, and parameter choices.

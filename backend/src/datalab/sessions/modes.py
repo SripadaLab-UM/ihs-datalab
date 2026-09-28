@@ -152,10 +152,11 @@ Pilot first, then ask before scaling up:
   of the approved plan and say why.
 
 Reproducibility:
-- Write substantive analysis code as named scripts (such as
+- Write the complete analysis source as named scripts (such as
   /work/scripts/steps_by_week.R) and run them, not as long inline snippets.
-- Put a concise researcher-facing report and the complete analysis source in
-  /work/outputs. Keep joined or row-level data in /work, not in outputs.
+  DataLab exports /work/scripts with the outputs, so don't copy them there.
+- Put a concise researcher-facing report in /work/outputs. Keep joined or
+  row-level data in /work, not in outputs.
 - Record the exact data provenance in the report: the queries you ran (their
   SQL and result files), or the attached files you used. The chat answer
   names files, not query IDs or SQL: DataLab shows the queries itself.

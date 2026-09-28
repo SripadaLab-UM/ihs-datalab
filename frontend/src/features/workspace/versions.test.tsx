@@ -114,3 +114,52 @@ it("a file opened from a link in an answer is pinned to the latest checkpoint", 
   await waitFor(() => expect(screen.getByTitle("r.html")).toHaveAttribute("src", "/preview/t3/r.html"));
   expect(vi.mocked(api.preview).mock.calls.map((call) => call[3])).toEqual([3]);
 });
+
+// The user's call: scripts go with the outputs by default (the Code group).
+function openWithScripts() {
+  const client = newClient();
+  vi.mocked(api.files).mockImplementation(async (_id, root) =>
+    root === "work"
+      ? [
+          { path: "outputs/report.html", size: 100, kind: "html", modified: "", checkpoint: 3 },
+          { path: "scripts/steps_by_week.R", size: 20, kind: "text", modified: "", checkpoint: 3 },
+          { path: "scripts/notes.txt", size: 5, kind: "text", modified: "", checkpoint: 3 },
+          { path: "explore.py", size: 5, kind: "text", modified: "", checkpoint: 3 },
+        ]
+      : [{ path: "report.html", size: 100, kind: "html", modified: "", checkpoint: 3 }],
+  );
+  render(
+    <QueryClientProvider client={client}>
+      <ExportDialog conversation={conversation} withReport={false} onClose={() => {}} />
+    </QueryClientProvider>,
+  );
+}
+
+it("exports the conversation's scripts beside the outputs, by default, from the checkpoint shown", async () => {
+  openWithScripts();
+  const code = await screen.findByRole("checkbox", { name: /The script in scripts\// });
+  expect(code).toBeChecked();
+  expect(screen.getByText("steps_by_week.R")).toBeInTheDocument();
+  // With only the scripts, there's something to export.
+  const button = screen.getByRole("button", { name: "Export" });
+  expect(button).toBeEnabled();
+  fireEvent.click(screen.getByLabelText(/report.html/));
+  fireEvent.click(button);
+  await waitFor(() => expect(api.export).toHaveBeenCalled());
+  const [, , files, , shown] = vi.mocked(api.export).mock.calls.at(-1)!;
+  expect(files).toEqual([
+    { root: "outputs", path: "report.html" },
+    { root: "work", path: "scripts/steps_by_week.R" },
+  ]);
+  expect(shown).toBe(3);
+});
+
+it("leaves the scripts out when the person unticks them", async () => {
+  openWithScripts();
+  fireEvent.click(await screen.findByRole("checkbox", { name: /The script in scripts\// }));
+  expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+  fireEvent.click(screen.getByLabelText(/report.html/));
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  await waitFor(() => expect(api.export).toHaveBeenCalled());
+  expect(vi.mocked(api.export).mock.calls.at(-1)?.[2]).toEqual([{ root: "outputs", path: "report.html" }]);
+});

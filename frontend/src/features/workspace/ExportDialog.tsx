@@ -5,6 +5,7 @@ import { Link } from "react-router";
 
 import { api, type Conversation, type FileRoot, type WorkspaceFile } from "@/api/client";
 import { Button, FileGlyph, Icon, Modal } from "@/components/ui";
+import { isCodeFile } from "@/components/code/languages";
 import { kindOf } from "@/lib/files";
 import { formatBytes } from "@/lib/csv";
 import { settingsLink } from "@/features/settings/highlight";
@@ -25,13 +26,15 @@ export function ExportDialog({
   onClose: () => void;
 }) {
   const outputs = useQuery({ queryKey: ["files", conversation.id], queryFn: () => api.files(conversation.id) });
+  // The Code group: the scripts in /work/scripts, from the same checkpoint as the outputs.
+  const work = useQuery({ queryKey: ["files", conversation.id, "work"], queryFn: () => api.files(conversation.id, "work") });
   const destinations = useQuery({ queryKey: ["destinations"], queryFn: api.destinations });
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
   // The listing the person chooses from, frozen when it first loads: the files
   // exported are exactly the versions shown, even if the agent saves new ones.
-  const [shown, setShown] = useState<{ checkpoint: number | null; files: WorkspaceFile[] } | null>(null);
-  const listed = outputs.data ? { checkpoint: outputs.data[0]?.checkpoint ?? null, files: outputs.data } : null;
+  const [shown, setShown] = useState<{ checkpoint: number | null; files: WorkspaceFile[]; scripts: WorkspaceFile[] } | null>(null);
+  const listed = listing(outputs.data, work.data);
   useEffect(() => {
     if (!shown && listed) setShown(listed);
   }, [shown, listed]);
@@ -40,6 +43,9 @@ export function ExportDialog({
   const [rawHtml, setRawHtml] = useState(false);
   const [report, setReport] = useState(withReport);
   const [includeWork, setIncludeWork] = useState(false);
+  // Scripts go with the outputs unless the person leaves them out.
+  const [includeCode, setIncludeCode] = useState(true);
+  const scripts = includeCode ? (shown?.scripts ?? []) : [];
   const [destination, setDestination] = useState<string>("");
   // Nothing is chosen for the person: they pick what leaves.
   const chosen = picked;
@@ -56,7 +62,10 @@ export function ExportDialog({
         ]);
         reportBody = { html: await buildReport(conversation, events, queries, { includeWork, practice }), css: REPORT_CSS };
       }
-      const files = [...chosen].map((path) => ({ root: "outputs" as FileRoot, path }));
+      const files = [
+        ...[...chosen].map((path) => ({ root: "outputs" as FileRoot, path })),
+        ...scripts.map((file) => ({ root: "work" as FileRoot, path: file.path })),
+      ];
       // The versions listed: never "whatever is latest" at the moment of export.
       return api.export(conversation.id, destinationId, files, reportBody, shown?.checkpoint ?? undefined, rawHtml);
     },
@@ -157,6 +166,21 @@ export function ExportDialog({
               ))}
             </ul>
           </div>
+          {(shown?.scripts.length ?? 0) > 0 && (
+            <div>
+              <p className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Code</p>
+              <label className="mt-1 flex cursor-pointer items-start gap-2.5 rounded-lg px-1.5 py-1 hover:bg-sunken">
+                <input type="checkbox" checked={includeCode} onChange={(e) => setIncludeCode(e.target.checked)} className="mt-0.5" />
+                <span className="flex-1">
+                  The {shown!.scripts.length === 1 ? "script" : `${shown!.scripts.length} scripts`} in scripts/, as the
+                  workspace has {shown!.scripts.length === 1 ? "it" : "them"} now
+                  <span className="block truncate font-mono text-xs text-muted">
+                    {shown!.scripts.map((f) => f.path.replace(/^scripts\//, "")).join(", ")}
+                  </span>
+                </span>
+              </label>
+            </div>
+          )}
           {pages.length > 0 && (
             <div className="rounded-lg bg-sunken p-2 text-xs">
               <p>
@@ -198,7 +222,10 @@ export function ExportDialog({
             <Button
               variant="primary"
               disabled={
-                run.isPending || !destinationId || (!report && chosen.size === 0) || (chosen.size > 0 && shown?.checkpoint == null)
+                run.isPending ||
+                !destinationId ||
+                (!report && chosen.size === 0 && scripts.length === 0) ||
+                (chosen.size + scripts.length > 0 && shown?.checkpoint == null)
               }
               onClick={() => run.mutate()}
             >
@@ -209,4 +236,17 @@ export function ExportDialog({
       )}
     </Modal>
   );
+}
+
+/**
+ * What the dialog offers, once both listings are in and from the same
+ * checkpoint: the outputs, and the code files in /work/scripts.
+ */
+function listing(outputs: WorkspaceFile[] | undefined, work: WorkspaceFile[] | undefined) {
+  if (!outputs || !work) return null;
+  const scripts = work.filter((file) => file.path.startsWith("scripts/") && isCodeFile(file.path));
+  const checkpoint = outputs[0]?.checkpoint ?? scripts[0]?.checkpoint ?? null;
+  // Scripts listed after a different turn (one listing refreshed first): wait for the other.
+  if (scripts.length && checkpoint !== scripts[0].checkpoint) return null;
+  return { checkpoint, files: outputs, scripts };
 }

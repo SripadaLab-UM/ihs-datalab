@@ -24,7 +24,8 @@ Save substantive analysis code as a named script, such as
 `/work/scripts/<short_descriptive_name>.R` or `.py`, and run it with
 `Rscript` or `python3`, rather than a long inline `-e`/`-c` snippet or
 heredoc; inline runs are fine for quick checks. The user sees every saved
-version of your scripts in DataLab's Code tab.
+version of your scripts in DataLab's Code tab, and exports `/work/scripts`
+with the outputs, so there's no need to copy scripts into `/work/outputs`.
 
 Edits you make in `/work/kb` become proposed changes to the lab knowledge
 base, which a person reviews before anything is shared (the `kb-propose`

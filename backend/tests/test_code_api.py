@@ -315,3 +315,34 @@ def test_diff_lines_carry_line_numbers():
         ("+", None, 4, "d"),
     ]
     assert code.diff_texts("same\n", "same\n").lines == []
+
+
+@pytest.mark.parametrize(
+    ("command", "inner"),
+    [
+        # bash's double-quote escapes: \$ \` \" \\ and a backslash-newline.
+        (
+            "/bin/bash -lc \"Rscript -e 'stopifnot(all(x\\$n > 10))'\"",
+            "Rscript -e 'stopifnot(all(x$n > 10))'",
+        ),
+        ('bash -lc "echo \\"hi\\" \\`date\\` a\\\\b \\q"', 'echo "hi" `date` a\\b \\q'),
+        ('bash -c "one \\\ntwo"', "one two"),
+        ("/bin/zsh -lc 'print($x)'", "print($x)"),
+        ("bash -lc 'it'\"'\"'s'", "it's"),
+        ('bash -lc "unclosed', 'bash -lc "unclosed'),
+        ("ls -la", "ls -la"),
+    ],
+)
+def test_the_command_inside_a_shell_wrapper_is_read_as_bash_reads_it(command, inner):
+    assert code.unwrap_shell(command) == inner
+
+
+def test_inline_r_from_a_double_quoted_wrapper_has_no_leftover_escapes():
+    command = (
+        '/bin/bash -lc "Rscript -e \'x <- readr::read_csv(\\"a.csv\\"); '
+        "stopifnot(all(x\\$n > 10))'\""
+    )
+    assert code.inline_code(command) == (
+        "r",
+        'x <- readr::read_csv("a.csv"); stopifnot(all(x$n > 10))',
+    )

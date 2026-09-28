@@ -44,6 +44,25 @@ it.each([
   expect(contrast(theme["accent-ink"], theme.accent)).toBeGreaterThanOrEqual(4.5);
 });
 
+// Syntax colour in code blocks (components/code): 4.5:1 on every background code sits on,
+// a diff's added and removed rows included.
+const CODE = ["code-keyword", "code-string", "code-number", "code-comment", "code-function", "code-type"];
+const CODE_BACKGROUNDS = ["sunken", "field", "surface", "data-soft", "danger-soft", "attn-soft"];
+
+it.each([
+  ["light", light],
+  ["dark", dark],
+])("code colours meet AA on code backgrounds in the %s theme", (_name, theme) => {
+  for (const token of CODE) {
+    expect(theme[token], token).toMatch(/^#[0-9a-f]{6}$/i);
+    for (const background of CODE_BACKGROUNDS) {
+      expect(contrast(theme[token], theme[background]), `${token} on ${background}`).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+  // Dark has its own values, not light's carried over.
+  if (theme === dark) for (const token of CODE) expect(dark[token]).not.toBe(light[token]);
+});
+
 it("keeps small labels at a readable size", () => {
   const label = /\.dl-label\s*{[^}]*font-size:\s*([\d.]+)px/.exec(css);
   expect(Number(label?.[1])).toBeGreaterThanOrEqual(11.5);

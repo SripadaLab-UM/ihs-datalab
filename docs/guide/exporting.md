@@ -52,7 +52,9 @@ test too; Dropbox setup is available on the real DataLab.
 
 1. Press **Export** in the conversation's header, or **Export…** in the
    **Outputs** tab.
-2. Tick the files you want. Nothing is ticked for you.
+2. Tick the output files you want. Nothing is ticked for you. Under
+   **Code**, the scripts in `scripts/` are included, as the workspace has
+   them now; untick them to leave them out.
 3. If you like, tick **The conversation, as one self-contained web page**:
    the questions and answers, charts, and the SQL that was run. It can also
    include the agent's reasoning and the commands it ran, but never their
@@ -73,7 +75,8 @@ looks like a participant ID, an email address or a date. Inside:
 - a manifest saying what the export is, when it was made and which
   conversation made it;
 - the report, if you chose it;
-- the agent's files, under `files/`.
+- the agent's files, under `files/`: outputs in `files/outputs/`, and
+  scripts in `files/workspace/scripts/`.
 
 Nothing already in the folder is overwritten. So that exported files can't
 act on your computer by themselves:

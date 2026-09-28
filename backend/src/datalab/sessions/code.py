@@ -325,8 +325,41 @@ _DUCKDB = re.compile(r"(?:^|[\s;&|(])(duckdb|sqlite3)\b[^\n]*?\s-c\s+")
 _WRITES_FILE = re.compile(r"\bcat\b[^\n]*>[^\n]*<<|\btee\b[^\n]*<<|<<[^\n]*>\s*\S")
 
 
+_WRAPPER = re.compile(r"^\s*(?:\S*/)?(?:ba|z)?sh\s+-l?c\s+\"")
+# Inside double quotes, bash's backslash escapes only these (and a newline).
+_DQ_ESCAPES = '$`"\\'
+
+
+def _double_quoted(text: str) -> str | None:
+    """A double-quoted shell word's text, as bash reads it: `text` starts just
+    after the opening quote and must end at the closing one. None if it doesn't."""
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        char = text[i]
+        if char == "\\" and i + 1 < len(text):
+            following = text[i + 1]
+            if following in _DQ_ESCAPES:
+                out.append(following)
+            elif following != "\n":  # a backslash-newline joins the lines
+                out.append(char + following)
+            i += 2
+            continue
+        if char == '"':
+            return "".join(out) if not text[i + 1 :].strip() else None
+        out.append(char)
+        i += 1
+    return None
+
+
 def unwrap_shell(command: str) -> str:
-    """The command inside a `bash -lc '…'` wrapper, as the agent wrote it."""
+    """The command inside a `bash -lc '…'` wrapper, as bash would run it."""
+    wrapped = _WRAPPER.match(command)
+    if wrapped:
+        # shlex doesn't know bash's double-quote escapes (\$, \`), so read those itself.
+        inner = _double_quoted(command[wrapped.end() :])
+        if inner is not None:
+            return inner
     try:
         argv = shlex.split(command)
     except ValueError:

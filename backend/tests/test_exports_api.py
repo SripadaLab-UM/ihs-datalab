@@ -222,3 +222,60 @@ def test_an_exported_page_keeps_its_own_images(settings, catalog):
 def shown(client, cid: str) -> int:
     """The checkpoint the outputs listing shows, as the export dialog sends it."""
     return client.get(f"/api/conversations/{cid}/files").json()[0]["checkpoint"]
+
+
+def test_scripts_are_exported_beside_the_outputs_under_every_export_rule(
+    settings, catalog, monkeypatch
+):
+    """The Export dialog's Code group: /work/scripts as the checkpoint shown has them."""
+    from datalab import exports
+
+    flagged: list[str] = []
+    monkeypatch.setattr(exports, "mark_downloaded", lambda path: flagged.append(path.name))
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"title": "Weekly steps"}).json()["id"]
+        work = app.state.services.sessions.paths(cid).work
+        (work / "outputs").mkdir(parents=True)
+        (work / "scripts").mkdir()
+        (work / "outputs" / "summary.csv").write_text("week,n\n1,118\n")
+        (work / "scripts" / "steps_by_week.R").write_text("x <- 1\n")
+        (work / "scripts" / "run_all.sh").write_text("Rscript steps_by_week.R\n")
+        app.state.services.sessions.checkpoints(cid).take("After turn 1", turn=1)
+        (work / "scripts" / "steps_by_week.R").write_text("changed after the checkpoint\n")
+        files = [
+            {"root": "outputs", "path": "summary.csv"},
+            {"root": "work", "path": "scripts/steps_by_week.R"},
+            {"root": "work", "path": "scripts/run_all.sh"},
+        ]
+        result = client.post(
+            f"/api/conversations/{cid}/exports",
+            json={"destination_id": "practice", "files": files, "checkpoint": shown(client, cid)},
+        )
+        assert result.status_code == 201, result.text
+        # Practice exports go only to the practice folder.
+        [export] = list((settings.data_dir / "practice-exports").iterdir())
+        scripts = export / "files" / "workspace" / "scripts"
+        assert (scripts / "steps_by_week.R").read_text() == "x <- 1\n"  # the version shown
+        # A shell script can't run when double-clicked: it's exported as text.
+        assert (scripts / "run_all.sh.txt").read_text() == "Rscript steps_by_week.R\n"
+        assert (export / "files" / "outputs" / "summary.csv").exists()
+        manifest = json.loads((export / MANIFEST).read_text())
+        by_from = {f["from"]: f for f in manifest["files"]}
+        assert by_from["/work/scripts/steps_by_week.R"]["path"] == (
+            "files/workspace/scripts/steps_by_week.R"
+        )
+        assert by_from["/work/scripts/run_all.sh"]["renamed_from"] == "workspace/scripts/run_all.sh"
+        # Every exported file carries the quarantine flag, scripts included.
+        assert {"steps_by_week.R", "run_all.sh.txt", "summary.csv"} <= set(flagged)
+        # Only files the checkpoint saved, inside the workspace.
+        for bad in ("scripts/../../settings.toml", "scripts/nope.R"):
+            refused = client.post(
+                f"/api/conversations/{cid}/exports",
+                json={
+                    "destination_id": "practice",
+                    "files": [{"root": "work", "path": bad}],
+                    "checkpoint": shown(client, cid),
+                },
+            )
+            assert refused.status_code in (404, 422)

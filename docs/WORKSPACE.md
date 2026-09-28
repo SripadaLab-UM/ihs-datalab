@@ -286,7 +286,10 @@ The layout is the same for every mode:
   - **Inputs**: attach files and folders, read-only.
   - **Outputs**: preview files and HTML reports, and **Export** them to a
     destination. Deliverables only: scripts, SQL and notebooks are listed in
-    **Code** (they're still exported), and Outputs links there.
+    **Code**, and Outputs links there. Export has a **Code** group, on by
+    default: the scripts in `/work/scripts` from the same checkpoint as the
+    outputs, under the same rules (manifest, inert names, the quarantine
+    flag, practice exports only to the practice folder).
   - **Code** (built): the scripts, SQL and notebooks the agent created or
     changed in this conversation, found by comparing checkpoints, grouped
     as new, modified or deleted, newest first. Files DataLab copied into
@@ -300,8 +303,9 @@ The layout is the same for every mode:
     can hold data), only counted. **Inline code** lists Python, R and SQL
     the agent ran without saving a file (and multi-line shell commands),
     each linking to its step in "How this answer was made". Versions over
-    1 MB are listed but not shown. The agent is asked to save substantive
-    analysis code as named scripts (`/work/scripts/<name>.R`).
+    1 MB are listed but not shown. The agent is asked to save its analysis
+    code as named scripts (`/work/scripts/<name>.R`), which are exported
+    with the outputs.
   - **History**: turn checkpoints. **Roll back** restores the workspace files
     to how they were after a chosen turn. The conversation isn't rewound, and
     the agent is told its files were restored. Very large files aren't
