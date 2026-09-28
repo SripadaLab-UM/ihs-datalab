@@ -86,7 +86,7 @@ frontend/    the web UI (React)
 images/      the agent image, and a small probe image for CI
 installer/   Mac and Windows install and uninstall scripts
 branding/    the Block M and IHS marks, and the script that makes the favicons and app icons
-synthetic/   a fake IHS database for development, tests, and practice mode
+synthetic/   db.sh and the README of the fake IHS database (its generator is backend/src/datalab/practice_db)
 spikes/      throwaway proofs of concept kept as design evidence
 docs/        design and safety documentation
 ```

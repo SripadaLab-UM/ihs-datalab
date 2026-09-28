@@ -216,9 +216,10 @@ def create_app(
         access_log.end_cut_off_queries()
         # DataLab's own catalog, if it has none yet. In the background: the
         # database may not be up yet (then it's tried again at the first query).
+        # Practice builds it once its database is up (practice_database.on_ready).
         building = (
             asyncio.create_task(asyncio.to_thread(catalog_build.ensure))
-            if catalog_build is not None
+            if catalog_build is not None and practice_database is None
             else None
         )
         if practice_database is not None:

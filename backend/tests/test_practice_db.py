@@ -76,7 +76,7 @@ class FakeDocker:
             }
             return 0, "id", ""
         if args[0] in ("start", "stop"):
-            self.containers[args[1]]["status"] = "running" if args[0] == "start" else "exited"
+            self.containers[args[-1]]["status"] = "running" if args[0] == "start" else "exited"
             return 0, "", ""
         if args[:2] == ["rm", "-f"]:
             self.containers.pop(args[2], None)

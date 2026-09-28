@@ -621,7 +621,7 @@ ihs_datalab/
   backend/     pyproject.toml, uv.lock, src/datalab/, tests/
   frontend/    package.json, package-lock.json, src/
   images/      agent/ (Dockerfile, AGENTS.md, skills/), gateway/
-  synthetic/   synthetic IHS generator and schema, eval tasks
+  synthetic/   db.sh and the synthetic database's README (generator: backend/src/datalab/practice_db)
   installer/   macos.sh, windows.ps1, uninstallers
   .github/     ci.yml, release.yml
 ```

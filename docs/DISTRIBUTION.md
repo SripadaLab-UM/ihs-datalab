@@ -44,6 +44,10 @@ It comes from the install page in the app repo. The installer then:
    On Mac, Git comes with Apple's command-line tools. On Windows, the
    installer installs Git for Windows.
 3. **Pulls the pinned images**, then asks for the keys (`datalab setup`).
+   For the practice profile it also pulls Oracle Database Free (from
+   Oracle's registry, pinned by digest in `datalab/practice_db`, tried again
+   a few times when the registry is busy), asks for no database password,
+   and says the U-M GPT key is optional there and what it unlocks.
 4. **Offers the GitHub sign-in** and clones the two lab repos, never as an
    administrator. The sign-in uses the "enter this code at
    github.com/login/device" flow (`datalab github sign-in`, the same code as
@@ -51,8 +55,15 @@ It comes from the install page in the app repo. The installer then:
    repos only; the app and images are public. Then `datalab repos sync`
    clones both. If GitHub says the account can't open a repo, it says whom
    to ask (`[repos] access_contact`) to be added to the `datalab-users` team,
-   and the installer finishes everything else. It's skipped for the practice
-   profile, when the lab's settings don't name the repos, or with
+   and the installer finishes everything else. For the practice profile this
+   step is **Setting up the practice database** instead
+   (`datalab --profile practice practice-db setup`): the container
+   `datalab-practice-oracle`, published on 127.0.0.1 only, with its data in
+   the labelled volume `datalab-practice-oracle-data`, loaded only when it
+   has none, so a reinstall or update keeps it (synthetic/README.md, "In
+   practice DataLab"). It never stops the install: practice DataLab sets
+   the database up, or starts it, each time it opens. GitHub is skipped for
+   the practice profile, when the lab's settings don't name the repos, or with
    `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
    Settings. The installer refuses to run as root (`sudo`), and so does
    `datalab github sign-in`: the sign-in belongs in the person's own
@@ -185,7 +196,10 @@ its own package (`datalab/release_keys.py`), and refuses a release with a
 missing or bad signature. Since `SHA256SUMS` names every other file by its
 checksum, including `requirements.txt` (every dependency by hash) and
 `images.json` (every image by digest), the signature covers everything an
-update installs. The package's name in `SHA256SUMS` carries its version,
+update installs. (Practice's Oracle Database Free image is pinned in the
+package itself, `datalab/practice_db`, so the signature covers it too. It
+isn't in `images.json`: every installed updater refuses an `images.json`
+that lists anything but the agent, gateway and proxy images.) The package's name in `SHA256SUMS` carries its version,
 which must be the tag's, so an old signed release can't be passed off as a
 newer one.
 

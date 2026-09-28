@@ -170,7 +170,7 @@ export function KeyShortcut() {
                   ? "Set by an environment variable (development only)."
                   : canSet
                     ? "No key saved yet. Add your U-M GPT (Toolkit) API key to use the Workspace."
-                    : "No key saved. Practice uses the key the real DataLab saved, or one saved with datalab setup --profile practice --update."}
+                    : "No key saved. Practice uses the key the real DataLab saved, or one saved with datalab --profile practice setup --update."}
             </p>
           )}
           {result && <Outcome ok={result.ok} message={result.message} />}

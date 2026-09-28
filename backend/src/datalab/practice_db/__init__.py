@@ -342,7 +342,7 @@ class PracticeDatabase:
             phase("ready")
             return "The practice database is running, with its made-up data."
         phase("loading")
-        say("Loading the made-up data (a minute or two; only this once)…")
+        say("Loading the made-up data (a minute or two)…")
         self.generate(self.target.dsn, say)
         phase("ready")
         return "The practice database is set up, with its made-up data."
@@ -366,8 +366,8 @@ class PracticeDatabase:
             self.pull(say, phase, show=show_download)
             phase("creating")
             say("Creating the practice database's container (on this computer only)…")
-            self._create()
-            created = True
+            # A volume kept from before already holds a database: no first start.
+            created = self._create()
         else:
             self._require_manageable(container)
             if container.status != "running":
@@ -416,7 +416,9 @@ class PracticeDatabase:
             return "There's no practice database container to stop."
         self._require_manageable(container, publish=False)
         if container.status == "running":
-            self._check(self._docker("stop", self.target.container, timeout=120), "stop it")
+            self._check(
+                self._docker("stop", "--time", "60", self.target.container, timeout=120), "stop it"
+            )
         return "Stopped the practice database. Its data is kept."
 
     def reset(
@@ -491,7 +493,7 @@ class PracticeDatabase:
             )
         if publish and not container.local_only:
             if container.status == "running":
-                self._docker("stop", self.target.container, timeout=120)
+                self._docker("stop", "--time", "60", self.target.container, timeout=120)
             raise PracticeDatabaseProblem(
                 f"The container {self.target.container} makes the practice database reachable "
                 "from other computers (not only 127.0.0.1), so DataLab stopped it. Reset the "
@@ -505,9 +507,12 @@ class PracticeDatabase:
                 "made, so DataLab won't use or change it."
             )
 
-    def _create(self) -> None:
+    def _create(self) -> bool:
+        """Create the container (and its volume, if there's none). Whether
+        the volume is new."""
         self._require_volume_manageable()
-        if self.volume_state() == "missing":
+        new_volume = self.volume_state() == "missing"
+        if new_volume:
             self._check(
                 self._docker("volume", "create", "--label", f"{LABEL}=1", self.target.volume),
                 "create its volume",
@@ -531,6 +536,7 @@ class PracticeDatabase:
             ),
             "create it",
         )
+        return new_volume
 
     def _start(self) -> None:
         self._check(self._docker("start", self.target.container, timeout=300), "start it")
@@ -620,15 +626,19 @@ class PracticeDatabaseKeeper:
 
     def start(self) -> bool:
         """Make it ready in the background, unless that's under way. Whether it began."""
-        return self._begin(self.database.ensure)
+        return self._begin(self.database.ensure, "checking", "Checking the practice database…")
 
     def reset(self) -> bool:
-        return self._begin(self.database.reset)
+        return self._begin(
+            self.database.reset, "resetting", "Removing the practice database and its data…"
+        )
 
-    def _begin(self, action: Callable[..., str]) -> bool:
+    def _begin(self, action: Callable[..., str], phase: Phase, message: str) -> bool:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():
                 return False
+            # Said at once, so the page that asked shows it straight away.
+            self._set(phase, message)
             self._thread = threading.Thread(
                 target=self._run, args=(action,), name="practice-database", daemon=True
             )

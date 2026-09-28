@@ -87,7 +87,7 @@ function Model({
         <dt className="text-muted">API key</dt>
         <dd>
           {practice && !model.can_set_key
-            ? "The key the real DataLab saved, or one saved with datalab setup --profile practice --update."
+            ? "The key the real DataLab saved, or one saved with datalab --profile practice setup --update."
             : "Your U-M GPT (Toolkit) API key."}
         </dd>
       </dl>
