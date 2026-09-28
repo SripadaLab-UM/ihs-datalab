@@ -1813,6 +1813,166 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/support/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Status Route */
+        get: operations["status_route_api_support_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Github Route
+         * @description Whether Send to the lab can be used; with check=true, asks GitHub
+         *     whether the repository is private and the person can add files.
+         */
+        get: operations["github_route_api_support_github_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Route */
+        post: operations["preview_route_api_support_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Route */
+        get: operations["list_route_api_support_reports_get"];
+        put?: never;
+        /**
+         * Save Route
+         * @description Save the previewed draft, as it was shown, under the data folder.
+         */
+        post: operations["save_route_api_support_reports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Route */
+        get: operations["get_route_api_support_reports__report_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Route
+         * @description Remove a saved report. Copies saved to folders or sent to the lab stay.
+         */
+        delete: operations["delete_route_api_support_reports__report_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/reports/{report_id}/bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bundle Route
+         * @description The ZIP, as a download to the browser's own downloads folder (the
+         *     browser marks it as downloaded).
+         */
+        get: operations["bundle_route_api_support_reports__report_id__bundle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/reports/{report_id}/save-to-folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save To Folder Route
+         * @description Copy the ZIP to an export folder (practice: its own) as <report-id>.zip.
+         *     Trying again never makes a second copy.
+         */
+        post: operations["save_to_folder_route_api_support_reports__report_id__save_to_folder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/support/reports/{report_id}/send": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Route
+         * @description Send the report to the lab's private support repository (Retry too).
+         *     Once GitHub has it, sending again changes nothing.
+         */
+        post: operations["send_route_api_support_reports__report_id__send_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -4364,6 +4524,275 @@ export interface components {
             id: string;
             /** Freed Bytes */
             freed_bytes: number;
+        };
+        /** SupportAttachmentIn */
+        SupportAttachmentIn: {
+            /** Name */
+            name: string;
+            /** Data Base64 */
+            data_base64: string;
+        };
+        /** SupportBundleFileOut */
+        SupportBundleFileOut: {
+            /** Path */
+            path: string;
+            /** Bytes */
+            bytes: number;
+            /** Sha256 */
+            sha256: string;
+        };
+        /**
+         * SupportClientEntryIn
+         * @description A failed request or an error in the page, as the browser recorded it:
+         *     the method, the path (only its route's shape is kept) and the status, or
+         *     an error's class. Never a message or a response.
+         */
+        SupportClientEntryIn: {
+            /** At */
+            at: string | number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "request" | "page_error";
+            /** Method */
+            method?: string | null;
+            /** Path */
+            path?: string | null;
+            /** Status */
+            status?: number | null;
+            /** Error */
+            error?: string | null;
+        };
+        /**
+         * SupportContentsOut
+         * @description Exactly what's in the bundle, to read before saving or sharing.
+         */
+        SupportContentsOut: {
+            /** Files */
+            files: components["schemas"]["SupportBundleFileOut"][];
+            /** Summary */
+            summary: string;
+            /** Diagnostics */
+            diagnostics: string;
+            /** Manifest */
+            manifest: string;
+        };
+        /** SupportDraftIn */
+        SupportDraftIn: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bug" | "suggestion";
+            /** Happened */
+            happened: string;
+            /**
+             * Expected
+             * @default
+             */
+            expected: string;
+            /**
+             * Steps
+             * @default
+             */
+            steps: string;
+            /** Route */
+            route?: string | null;
+            /** User Agent */
+            user_agent?: string | null;
+            /** Client Trail */
+            client_trail?: components["schemas"]["SupportClientEntryIn"][];
+            /** Attachments */
+            attachments?: components["schemas"]["SupportAttachmentIn"][];
+        };
+        /**
+         * SupportEmailOut
+         * @description "Email this file to …": a mailto: link can't attach the file, so it says to.
+         */
+        SupportEmailOut: {
+            /** Contact */
+            contact: string | null;
+            /** To */
+            to: string | null;
+            /** Subject */
+            subject: string;
+            /** Body */
+            body: string;
+            /** Mailto */
+            mailto: string | null;
+        };
+        /** SupportFolderCopyOut */
+        SupportFolderCopyOut: {
+            /** Name */
+            name: string;
+            /** File */
+            file: string;
+            /** Where */
+            where: string;
+            /** Saved At */
+            saved_at: string;
+            /** Saved To */
+            saved_to: string;
+            /** Sync Provider */
+            sync_provider: string | null;
+            /** Sync Note */
+            sync_note: string | null;
+            /** Practice */
+            practice: boolean;
+        };
+        /** SupportGitHubSendOut */
+        SupportGitHubSendOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "pending" | "confirmed" | "refused";
+            /** Repo */
+            repo: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Last Attempt At */
+            last_attempt_at?: string | null;
+            /** Confirmed At */
+            confirmed_at?: string | null;
+            /** Commit Sha */
+            commit_sha?: string | null;
+            /** Html Url */
+            html_url?: string | null;
+            /** Path */
+            path?: string | null;
+        };
+        /** SupportPreviewOut */
+        SupportPreviewOut: {
+            /** Draft Id */
+            draft_id: string;
+            /** Report Id */
+            report_id: string;
+            /** Created At */
+            created_at: string;
+            /** Zip Name */
+            zip_name: string;
+            /** Zip Bytes */
+            zip_bytes: number;
+            /** Zip Sha256 */
+            zip_sha256: string;
+            contents: components["schemas"]["SupportContentsOut"];
+            /** Warnings */
+            warnings: string[];
+        };
+        /**
+         * SupportRepoOut
+         * @description Send to the lab: the private support repository, when it can be used here.
+         */
+        SupportRepoOut: {
+            /** Configured */
+            configured: boolean;
+            /** Repo */
+            repo: string | null;
+            /** Available */
+            available: boolean;
+            /** Signed In */
+            signed_in: boolean;
+            /** Message */
+            message: string | null;
+            /** Private */
+            private?: boolean | null;
+            /** Can Write */
+            can_write?: boolean | null;
+        };
+        /** SupportReportDetailOut */
+        SupportReportDetailOut: {
+            /** Report Id */
+            report_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bug" | "suggestion";
+            /** Created At */
+            created_at: string;
+            /** Headline */
+            headline: string;
+            /** Saved At */
+            saved_at: string;
+            /** Zip Name */
+            zip_name: string;
+            /** Zip Bytes */
+            zip_bytes: number;
+            /** Zip Sha256 */
+            zip_sha256: string;
+            /** Attachments */
+            attachments: components["schemas"]["SupportBundleFileOut"][];
+            /** States */
+            states: ("saved_locally" | "saved_to_folder" | "pending_retry" | "confirmed_delivery" | "refused")[];
+            /** Folders */
+            folders: components["schemas"]["SupportFolderCopyOut"][];
+            github: components["schemas"]["SupportGitHubSendOut"] | null;
+            email: components["schemas"]["SupportEmailOut"];
+            contents: components["schemas"]["SupportContentsOut"];
+        };
+        /** SupportReportOut */
+        SupportReportOut: {
+            /** Report Id */
+            report_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "bug" | "suggestion";
+            /** Created At */
+            created_at: string;
+            /** Headline */
+            headline: string;
+            /** Saved At */
+            saved_at: string;
+            /** Zip Name */
+            zip_name: string;
+            /** Zip Bytes */
+            zip_bytes: number;
+            /** Zip Sha256 */
+            zip_sha256: string;
+            /** Attachments */
+            attachments: components["schemas"]["SupportBundleFileOut"][];
+            /** States */
+            states: ("saved_locally" | "saved_to_folder" | "pending_retry" | "confirmed_delivery" | "refused")[];
+            /** Folders */
+            folders: components["schemas"]["SupportFolderCopyOut"][];
+            github: components["schemas"]["SupportGitHubSendOut"] | null;
+            email: components["schemas"]["SupportEmailOut"];
+        };
+        /** SupportSaveIn */
+        SupportSaveIn: {
+            /** Draft Id */
+            draft_id: string;
+        };
+        /** SupportSaveToFolderIn */
+        SupportSaveToFolderIn: {
+            /** Destination Id */
+            destination_id: string;
+        };
+        /** SupportSendIn */
+        SupportSendIn: {
+            /**
+             * Confirmed
+             * @default false
+             */
+            confirmed: boolean;
+        };
+        /** SupportStatusOut */
+        SupportStatusOut: {
+            /** Profile */
+            profile: string;
+            /** Practice */
+            practice: boolean;
+            contact: components["schemas"]["FeedbackContactOut"];
+            github: components["schemas"]["SupportRepoOut"];
         };
         /** TestRunIn */
         TestRunIn: {
@@ -7719,6 +8148,304 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FeedbackContactOut"];
+                };
+            };
+        };
+    };
+    status_route_api_support_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportStatusOut"];
+                };
+            };
+        };
+    };
+    github_route_api_support_github_get: {
+        parameters: {
+            query?: {
+                check?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportRepoOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_route_api_support_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportDraftIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportPreviewOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_route_api_support_reports_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportReportOut"][];
+                };
+            };
+        };
+    };
+    save_route_api_support_reports_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportSaveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportReportDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_route_api_support_reports__report_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportReportDetailOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_route_api_support_reports__report_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bundle_route_api_support_reports__report_id__bundle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_to_folder_route_api_support_reports__report_id__save_to_folder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportSaveToFolderIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    send_route_api_support_reports__report_id__send_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SupportSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SupportReportOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

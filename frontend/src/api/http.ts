@@ -2,6 +2,8 @@
 // own file beside this one (conversations.ts, files.ts, sql.ts...), so a tab's
 // work never has to touch another's.
 
+import { recordFailedRequest } from "@/lib/supportTrail";
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -17,11 +19,18 @@ export class ApiError extends Error {
 export const SIGNED_OUT = "datalab:signed-out";
 
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init,
+      headers: { "content-type": "application/json", ...init?.headers },
+    });
+  } catch (error) {
+    recordFailedRequest(init?.method, path, 0); // for a support report's trail
+    throw error;
+  }
   if (!response.ok) {
+    recordFailedRequest(init?.method, path, response.status);
     if (response.status === 401) window.dispatchEvent(new Event(SIGNED_OUT));
     const body = await response.json().catch(() => ({}));
     const detail = typeof body.detail === "string" ? body.detail : (body.detail?.message ?? response.statusText);

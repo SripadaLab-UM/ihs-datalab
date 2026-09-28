@@ -215,6 +215,43 @@ class Folder:
         where, kw = self._where(name)
         return os.stat(where, follow_symlinks=False, **kw)
 
+    def link_new(self, name: str, new_name: str) -> None:
+        """Give the file `name` the name `new_name` as well, never replacing a
+        file already called that (FileExistsError).
+
+        A hard link where the folder can hold one. Otherwise (some drives and
+        sync folders) a rename that refuses an existing name: renameatx_np
+        with RENAME_EXCL on a Mac, renameat2 with RENAME_NOREPLACE on Linux,
+        and os.rename on Windows, which never replaces a file. Only where
+        none of these works is the name checked and then renamed, which
+        leaves a moment in which another program could put a file there.
+        """
+        where, kw = self._where(name)
+        target, _ = self._where(new_name)
+        fd = kw.get("dir_fd")
+        try:
+            os.link(where, target, src_dir_fd=fd, dst_dir_fd=fd)
+            return
+        except FileExistsError:
+            raise
+        except OSError:
+            pass
+        if sys.platform == "win32":
+            os.rename(where, target)  # refuses an existing name
+            return
+        if _rename_noreplace(where, target, fd):
+            return
+        try:
+            self.lstat(new_name)
+        except FileNotFoundError:
+            os.rename(where, target, src_dir_fd=fd, dst_dir_fd=fd)
+        else:
+            raise FileExistsError(new_name)
+
+    def names(self) -> list[str]:
+        """What's in the folder, listed through the open folder itself."""
+        return os.listdir(self._fd if self._fd is not None else self.path)
+
     def unlink(self, name: str) -> None:
         where, kw = self._where(name)
         os.unlink(where, **kw)
@@ -240,6 +277,35 @@ class Folder:
     def rmtree(self, name: str) -> None:
         where, kw = self._where(name)
         shutil.rmtree(where, ignore_errors=True, **kw)
+
+
+def _rename_noreplace(source: Any, target: Any, fd: int | None) -> bool:
+    """Rename without ever replacing a file (FileExistsError if one is there).
+    False where the system can't (the caller then falls back)."""
+    import ctypes
+    import errno
+
+    if sys.platform == "darwin":
+        symbol, flags, here = "renameatx_np", 0x00000004, -2  # RENAME_EXCL, AT_FDCWD
+    elif sys.platform.startswith("linux"):
+        symbol, flags, here = "renameat2", 0x1, -100  # RENAME_NOREPLACE, AT_FDCWD
+    else:
+        return False
+    try:
+        call = getattr(ctypes.CDLL(None, use_errno=True), symbol)
+    except (OSError, AttributeError):
+        return False
+    call.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    call.restype = ctypes.c_int
+    folder = here if fd is None else fd
+    if call(folder, os.fsencode(source), folder, os.fsencode(target), flags) == 0:
+        return True
+    code = ctypes.get_errno()
+    if code == errno.EEXIST:
+        raise FileExistsError(str(target))
+    if code in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP, errno.EOPNOTSUPP):
+        return False
+    raise OSError(code, os.strerror(code), str(target))
 
 
 class DestinationStore:
