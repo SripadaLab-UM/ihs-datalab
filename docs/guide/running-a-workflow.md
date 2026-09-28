@@ -38,8 +38,8 @@ Where each step runs:
 Files are delivered only once every step and check has passed. A failed
 check stops the run before anything leaves. The workflow names a
 destination, such as `lab-dropbox`, and each computer chooses the folder it
-means in **Settings & Safety → Workflow destinations**. Until a folder is
-chosen, a run that delivers there fails at delivery. The practice DataLab
+means in **Settings & Safety → Export folders → Workflow destinations**.
+Until a folder is chosen, a run that delivers there fails at delivery. The practice DataLab
 delivers only to its own practice folder.
 
 In the real DataLab, every delivered CSV needs a passing `small_cells` check

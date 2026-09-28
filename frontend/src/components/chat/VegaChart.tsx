@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import embed from "vega-embed";
 import { expressionInterpreter } from "vega-interpreter";
 
+import { isDark } from "@/lib/theme";
+
 /**
  * Draws a Vega-Lite chart from an agent's answer.
  * - The expression interpreter keeps Vega from generating code at runtime, so
@@ -27,7 +29,7 @@ export default function VegaChart({ spec }: { spec: string }) {
       setError("Charts can't load data from links. The data must be in the chart itself.");
       return Promise.reject(new Error("Charts can't load data from links."));
     };
-    const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = isDark();
     const result = embed(container.current, parsed as never, {
       actions: { export: true, source: false, compiled: false, editor: false },
       renderer: "svg",

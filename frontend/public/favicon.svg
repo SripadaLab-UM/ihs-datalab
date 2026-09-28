@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <title>DataLab</title>
+  <style>@media (prefers-color-scheme: dark){.tile{fill:#e9e6de}.letter{stroke:#161614}.letter-fill{fill:#161614}.dot{fill:#161614}}</style>
+  <rect class="tile" x="0" y="0" width="64" height="64" rx="10.0" fill="#2b2a26"/>
+  <circle class="letter" cx="26.0" cy="38.0" r="10.5" fill="none" stroke="#ffffff" stroke-width="6.5"/>
+  <rect class="letter-fill" x="33.25" y="12.0" width="6.5" height="39.75" fill="#ffffff"/>
+  <circle class="dot" cx="47.5" cy="47.5" r="4.25" fill="#ffffff"/>
+</svg>

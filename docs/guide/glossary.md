@@ -84,9 +84,9 @@ participants is shown or can be worked out, and nothing is overstated. See
 
 ## Trace and provenance
 
-The trace is DataLab's check that each number in an answer appears in that
-turn's query results, command output, or data files. A match means the number
-appears there, not that it's the right number.
+The trace is DataLab's own check that each number in an answer appears in
+that turn's query results, command output, or data files: a match, not proof
+it's right. The rigor review is the agent checking itself, so they can differ.
 
 Provenance is the chain behind a result: click a number to see where it
 appears, or open a file and choose **How was this made?** to see the turn,
@@ -122,7 +122,8 @@ and trying things out. It can't reach the real study database, attach your
 own files, sign in to GitHub, or export anywhere but its own practice folder.
 
 The practice DataLab shows **practice · synthetic data** at the top right of
-every screen. See [Practice and real data](practice-and-real.md).
+every screen. Settings it can't change are marked **Fixed on the practice
+DataLab**. See [Practice and real data](practice-and-real.md).
 
 ## Proposal
 
@@ -205,8 +206,8 @@ queries too. Both hold only metadata, never result values.
 ## Export
 
 The only way results leave DataLab: you choose files, and if you like the
-conversation as a report, and a folder you set up in Settings. The agent can
-prepare files but can't export them.
+conversation as a report, and a folder you set up in Settings → Export
+folders. The agent can prepare files but can't export them.
 
 Each export goes into its own dated folder with a note of what it is and where
 it came from, and nothing already there is overwritten. See
@@ -237,3 +238,22 @@ pasted rows. Anyone in the lab can improve it through reviewed
 The files the agent saves in `outputs/` for you: reports, figures and tables.
 They're listed in the **Outputs** tab beside the chat, and they're what you
 can export.
+
+## Safety check
+
+Live tests of DataLab's safety promises, run on your own computer when you
+press **Run safety check** in Settings & Safety → Safety. It starts sealed
+test sessions and tries to break out of them.
+
+The section says in one line how the last check went and when it ran; the
+full report, check by check, is under **Details**. Run it again after an
+update. See [What DataLab will and won't do](safety.md).
+
+## U-M GPT key
+
+Your U-M GPT (Toolkit) API key, which DataLab uses to reach the approved
+models. It's kept in your computer's keychain, never shown again, and never
+given to the agent.
+
+Save or replace it, and test it, in **Settings & Safety → Connections**. The
+practice DataLab uses the key the real DataLab saved.

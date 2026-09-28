@@ -69,6 +69,22 @@ it("practice never signs in to GitHub", async () => {
   expect(await screen.findByText(/Practice DataLab never signs in to GitHub/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: /Sign in/ })).toBeNull();
   expect(githubApi.status).not.toHaveBeenCalled();
+  // Labelled, not missing.
+  expect(screen.getByText("Not used on the practice DataLab")).toBeTruthy();
+});
+
+it("switches account: signs out, then asks GitHub for a new code", async () => {
+  vi.mocked(githubApi.status).mockResolvedValue(github({ signed_in: true, account: me }));
+  vi.mocked(knowledgeApi.status).mockResolvedValue(signedIn);
+  vi.mocked(githubApi.signIn).mockResolvedValue({ ...out, state: "signed in", account: me });
+  vi.mocked(githubApi.signOut).mockResolvedValue(out);
+  vi.mocked(githubApi.startSignIn).mockResolvedValue(waiting);
+  show();
+  expect(await screen.findByText("Signed in")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Switch account…" }));
+  expect(await screen.findByLabelText("Your code")).toHaveProperty("textContent", "WDJB-MJHT");
+  expect(githubApi.signOut).toHaveBeenCalledBefore(vi.mocked(githubApi.startSignIn));
+  expect(screen.getByText("Waiting for the code")).toBeTruthy();
 });
 
 it("says when the repositories aren't set up, and whom to ask", async () => {

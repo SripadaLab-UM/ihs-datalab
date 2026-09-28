@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/client";
 import { Button, FileGlyph } from "@/components/ui";
 
-import { Section } from "./Section";
+import { FixedOnPractice, Section } from "./Section";
 
 /** Folders the person has chosen to export to, such as a local Dropbox folder. */
 export function ExportDestinations({ practice }: { practice: boolean }) {
@@ -17,7 +17,9 @@ export function ExportDestinations({ practice }: { practice: boolean }) {
     <Section
       title="Export folders"
       actions={
-        !practice && (
+        practice ? (
+          <FixedOnPractice />
+        ) : (
           <Button onClick={() => add.mutate()} disabled={add.isPending}>
             {add.isPending ? "Choose in the window that opened…" : "Add a folder…"}
           </Button>

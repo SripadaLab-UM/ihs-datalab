@@ -186,7 +186,7 @@ function Results({ results }: { results: ReturnType<typeof searchGuide> }) {
                 <span className="block font-sans text-[13.5px] font-medium text-ink group-hover:underline group-hover:decoration-faint group-hover:underline-offset-4">
                   {r.title}
                 </span>
-                <span className="block font-sans text-[11px] tracking-[0.08em] text-faint uppercase">{r.within}</span>
+                <span className="block font-sans text-[11.5px] tracking-[0.08em] text-faint uppercase">{r.within}</span>
                 <span className="mt-0.5 line-clamp-3 block font-sans text-[12.5px] leading-snug text-muted">{r.snippet}</span>
               </Link>
             </li>

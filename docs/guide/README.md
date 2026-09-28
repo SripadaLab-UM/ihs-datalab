@@ -43,7 +43,7 @@ first-run tour. It's written for researchers who are new to DataLab.
 **Setting up**
 
 - [Sign in to GitHub](github-sign-in.md)
-- [Settings: Connections and Storage](settings.md)
+- [Settings & Safety](settings.md)
 - [Practice and real data](practice-and-real.md)
 
 **Reference**

@@ -21,7 +21,7 @@ Start with [Start here](guide/README.md).
 9. [Run a workflow](guide/running-a-workflow.md)
 10. [Pipelines](guide/pipelines.md)
 11. [Sign in to GitHub](guide/github-sign-in.md)
-12. [Settings: Connections and Storage](guide/settings.md)
+12. [Settings & Safety](guide/settings.md)
 13. [Practice and real data](guide/practice-and-real.md)
 14. [The tour](guide/tour.md)
 15. [Glossary](guide/glossary.md)

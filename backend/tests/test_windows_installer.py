@@ -137,7 +137,7 @@ def test_the_package_name_must_carry_a_version(name, ok):
 
 def test_the_uninstaller_removes_only_what_the_installer_put_in_the_app_folder():
     body = code(UNINSTALL)
-    assert 'foreach ($name in "versions", "bin")' in body
+    assert 'foreach ($name in "versions", "bin", "icons")' in body
     assert "$left.Count -eq 0) { Remove-Tree $Root }" in body
     assert 'Remove-Tree (Join-Path $StateDir "install")' in body
 
@@ -159,3 +159,51 @@ def test_virtualization_is_checked_before_any_administrator_step():
     body = body[: body.index("\n}\n")]
     assert "HypervisorPresent" in body and "VirtualizationFirmwareEnabled" in body
     assert "return $true" in body.split("catch")[1]
+
+
+def launcher_part(text: str) -> str:
+    return text[text.index('Step "Step 8 of 8') :]
+
+
+def test_the_start_menu_and_desktop_shortcuts_run_the_shim_with_each_profiles_icon():
+    part = launcher_part(INSTALL)
+    assert '$Links = @(Join-Path $StartMenu "$LinkName.lnk")' in part
+    assert '[Environment]::GetFolderPath("Desktop")' in part
+    assert '$DesktopLink = Join-Path $Desktop "$LinkName.lnk"' in part
+    assert "$Links += $DesktopLink" in part
+    # bin\datalab.cmd, which runs whichever version `current` names: never a
+    # version's own folder, so an update doesn't break them.
+    assert '$DataLab = Join-Path $Bin "datalab.cmd"' in INSTALL
+    assert "EscapeSingleQuotedStringContent($DataLab)" in part
+    assert "-Command `\"& '$QuotedShim' --profile $DataLabProfile serve`\"" in part
+    # Someone else's Desktop shortcut of that name (one that doesn't run this
+    # shim) is left alone, and it says so.
+    assert '"$($Existing.Arguments)".IndexOf("\'$QuotedShim\'"' in part
+    assert "that isn't DataLab's; it was left alone." in part
+    assert "versions\\" not in part and "Scripts\\datalab.exe" not in part
+    # The icon comes from the package, and is kept beside bin\ (not in a
+    # version's folder, which an update removes).
+    assert '$Icons = Join-Path $Root "icons"' in part
+    assert 'Join-Path $Target "Lib\\site-packages\\datalab\\branding\\$IconName"' in part
+    assert '"DataLab-practice.ico" } else { "DataLab.ico" }' in part
+    assert '$Shortcut.IconLocation = "$Icon,0"' in part
+
+
+def test_uninstall_removes_the_desktop_shortcuts_and_the_icons():
+    assert 'foreach ($name in "versions", "bin", "icons")' in UNINSTALL
+    part = UNINSTALL[UNINSTALL.index('[Environment]::GetFolderPath("Desktop")') :]
+    assert 'foreach ($name in "DataLab.lnk", "DataLab (practice).lnk")' in part
+    # Only DataLab's own: a shortcut that runs this DataLab's bin\datalab.cmd,
+    # quoted as install.ps1 writes it.
+    assert '$Shim = Join-Path $Root "bin\\datalab.cmd"' in UNINSTALL
+    assert "EscapeSingleQuotedStringContent($Shim)" in UNINSTALL
+    assert '"$($Shortcut.Arguments)".IndexOf("\'$QuotedShim\'"' in part
+    assert "-like" not in part.split('Write-Host "DataLab has been removed."')[0]
+
+
+def test_the_icons_the_installers_name_come_with_the_package():
+    branding = Path(__file__).resolve().parents[1] / "src" / "datalab" / "branding"
+    for name in ("DataLab.ico", "DataLab-practice.ico", "DataLab.icns", "DataLab-practice.icns"):
+        assert (branding / name).stat().st_size > 1000, name
+    assert (branding / "DataLab.ico").read_bytes()[:4] == b"\x00\x00\x01\x00"
+    assert (branding / "DataLab.icns").read_bytes()[:4] == b"icns"
