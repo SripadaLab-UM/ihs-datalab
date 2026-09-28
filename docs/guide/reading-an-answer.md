@@ -112,6 +112,7 @@ The agent saves the code behind a result as a named script and runs it,
 for example:
 
 ```sh
+# The code behind the weekly summary, saved as a file and run
 Rscript /work/scripts/steps_by_week.R
 ```
 
