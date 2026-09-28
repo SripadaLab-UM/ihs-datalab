@@ -1,7 +1,6 @@
 import type { Extension } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import clsx from "clsx";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "@/api/client";
@@ -262,9 +261,11 @@ export function SqlPage() {
 
       <main className="flex min-h-0 min-w-0 flex-col overflow-y-auto">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className={clsx("-ml-2 px-2", panels.navDocked && "hidden")} onClick={() => setDrawer(true)} aria-label="Show tables and history">
-            <Icon name="menu" size={16} />
-          </Button>
+          {!panels.navDocked && (
+            <Button variant="ghost" className="-ml-2 px-2" onClick={() => setDrawer(true)} aria-label="Show tables and history">
+              <Icon name="menu" size={16} />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">SQL Playground</h1>
             <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">

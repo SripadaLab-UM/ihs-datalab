@@ -307,9 +307,12 @@ export function Divider({
         onClick={onResetAll}
         className={clsx(
           "absolute top-2 left-1/2 -translate-x-1/2 rounded-[3px] border border-line bg-surface px-1.5 py-0.5 font-sans text-[11.5px] whitespace-nowrap text-muted shadow-sm",
-          // Shown while the divider is hovered or has focus; hidden, it takes no clicks meant for what's under it.
-          "invisible peer-hover:visible hover:visible group-focus-within:visible enabled:hover:text-ink",
-          dragging && "!invisible",
+          // Shown while the divider is hovered or has keyboard focus, and while it has focus itself (Tab from the
+          // divider). Unseen, it takes no clicks meant for what's under it.
+          "pointer-events-none opacity-0 enabled:hover:text-ink",
+          "peer-hover:pointer-events-auto peer-hover:opacity-100 peer-focus-visible:opacity-100",
+          "hover:pointer-events-auto hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
+          dragging && "hidden",
         )}
       >
         Reset panel widths

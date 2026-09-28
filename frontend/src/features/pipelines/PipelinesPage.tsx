@@ -148,9 +148,11 @@ export function PipelinesPage() {
 
       <main className="flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className={clsx("-ml-2 px-2", panels.navDocked && "hidden")} onClick={() => setDrawer(true)} aria-label="Show files and changes">
-            <Icon name="menu" size={16} />
-          </Button>
+          {!panels.navDocked && (
+            <Button variant="ghost" className="-ml-2 px-2" onClick={() => setDrawer(true)} aria-label="Show files and changes">
+              <Icon name="menu" size={16} />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">Pipelines</h1>
             <p className="mt-0.5 max-w-[46rem] font-sans text-[13px] text-muted">

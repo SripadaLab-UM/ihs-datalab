@@ -25,8 +25,10 @@ export function PageHeader({ children, actions }: { children?: ReactNode; action
   const any = Boolean(actions || shared?.actions);
   return (
     <header data-page-header className="flex flex-wrap items-start gap-x-6 gap-y-3">
-      {shared?.menu}
-      <div className="min-w-0 flex-1 basis-[18rem]">{children}</div>
+      <div className="flex min-w-0 flex-1 basis-[18rem] items-start gap-3">
+        {shared?.menu}
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
       {any && (
         <div data-header-actions className="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2">
           {shared?.actions}

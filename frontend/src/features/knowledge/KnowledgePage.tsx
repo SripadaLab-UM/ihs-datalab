@@ -147,9 +147,11 @@ function KnowledgeBase({ status }: { status: KnowledgeStatus }) {
       {/* A size container: the reading column's margins follow the page's own width, as the panels beside it change. */}
       <main className="@container flex min-h-0 min-w-0 flex-col">
         <header className="flex items-start gap-3 px-5 pt-4 pb-3">
-          <Button variant="ghost" className={clsx("-ml-2 px-2", listBeside && "hidden")} onClick={() => setDrawer(true)} aria-label="Show pages and skills">
-            <Icon name="menu" size={16} />
-          </Button>
+          {!listBeside && (
+            <Button variant="ghost" className="-ml-2 px-2" onClick={() => setDrawer(true)} aria-label="Show pages and skills">
+              <Icon name="menu" size={16} />
+            </Button>
+          )}
           <div className="min-w-0 flex-1">
             <h1 className="font-serif text-[23px] leading-tight">Knowledge</h1>
             <RepoLine status={status} onSync={() => sync.mutate()} syncing={sync.isPending} error={sync.error?.message} />
