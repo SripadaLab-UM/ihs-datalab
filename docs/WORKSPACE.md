@@ -292,7 +292,36 @@ The layout is the same for every mode:
 - **Right:**
   - **Inputs**: attach files and folders, read-only.
   - **Outputs**: preview files and HTML reports, and **Export** them to a
-    destination.
+    destination. Deliverables only: scripts, SQL and notebooks are listed in
+    **Code**, and Outputs links there. Export has a **Code** group: each
+    script in `/work/scripts` (from the same checkpoint as the outputs),
+    unticked like every file, with **Include all scripts**. The same rules
+    apply (manifest, inert names, the quarantine flag, practice exports only
+    to the practice folder), and the API refuses any other file from
+    `/work`. A notebook, from `outputs/` or `scripts/`, is shown and exported
+    in one form, rebuilt from an allowlist: `nbformat`, the kernel's and
+    language's names, and each cell's type and source (with a fresh id), with no outputs,
+    execution counts, attachments or other metadata. Pre-v4 notebooks and
+    ones with `worksheets` are refused.
+  - **Code** (built): the scripts, SQL and notebooks the agent created or
+    changed in this conversation, found by comparing checkpoints, grouped
+    as new, modified or deleted, newest first. Files DataLab copied into
+    `/work` before the first turn (the knowledge base, the pipelines repo)
+    are the baseline: those still as copied are left out unless you ask for
+    them. A file opens highlighted, read-only, with a version picker (each
+    turn and checkpoint it changed in) and a unified diff with the previous
+    or any other version. Every version is labelled: "Current file in the
+    workspace", or "Saved at turn N · checkpoint 2:41 PM", a snapshot, not
+    the live file. Notebooks show their cells; outputs are never shown (they
+    can hold data), only counted. **Inline code** lists Python, R and SQL
+    the agent ran without saving a file (and multi-line shell commands),
+    each linking to its step in "How this answer was made". Versions over
+    1 MB are listed but not shown. The agent is asked to save its analysis
+    code as named scripts (`/work/scripts/<name>.R`), which can be
+    exported with the outputs. A version that reads like a table (most lines
+    splitting into the same fields) is marked "looks like data". Diffs are
+    capped: over 20,000 lines a side, or too different to compare within a
+    fixed amount of work, they say so instead.
   - **History**: turn checkpoints. **Roll back** restores the workspace files
     to how they were after a chosen turn. The conversation isn't rewound, and
     the agent is told its files were restored. Very large files aren't

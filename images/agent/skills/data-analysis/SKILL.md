@@ -22,7 +22,9 @@ Workflow:
 3. Use R for tidyverse/data.table work, statistical models, and the lab's R
    code. Use Python where it fits better (tabular wrangling, plotting, PDF
    text extraction).
-4. Save the script that produced each result in `/work`, so it can be rerun.
+4. Save the script that produced each result as a named file, such as
+   `/work/scripts/<short_descriptive_name>.R`, and run that file, so it can be
+   rerun. Keep inline `Rscript -e`/`python3 -c` runs for quick checks.
 5. Summarize assumptions, filters, missing-data handling, and the paths of
    the files you created.
 

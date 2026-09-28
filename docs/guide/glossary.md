@@ -237,7 +237,8 @@ pasted rows. Anyone in the lab can improve it through reviewed
 
 The files the agent saves in `outputs/` for you: reports, figures and tables.
 They're listed in the **Outputs** tab beside the chat, and they're what you
-can export.
+can export. Scripts, SQL and notebooks are in the **Code** tab instead;
+scripts in `scripts/` can be exported too, if you tick them.
 
 ## Safety check
 

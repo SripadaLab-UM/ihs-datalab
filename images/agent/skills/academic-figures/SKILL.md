@@ -19,7 +19,7 @@ For a manuscript, thesis, poster, or serious analysis output, write these artifa
 2. `<slug>.png` at 300-600 dpi for quick preview.
 3. `<slug>_caption.md` with a concise title and explanatory caption.
 4. `<slug>_source_data.csv` with the plotted values, only when they are aggregates (means, counts, estimates). For plots of individual participants (scatter, spaghetti, strip plots), keep the data in `/work` and name its path in the caption.
-5. Source code under `/work`, such as `/work/make_<slug>.py` or `/work/make_<slug>.R`.
+5. Source code in `/work/scripts`, such as `/work/scripts/make_<slug>.py` or `/work/scripts/make_<slug>.R` (the user can export them with the outputs).
 
 If the user asks for a dashboard or exploratory data review, make a static HTML report (images and tables, no scripts): DataLab shows and exports web pages with scripts turned off.
 

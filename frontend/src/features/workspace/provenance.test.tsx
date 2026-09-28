@@ -87,7 +87,8 @@ it("shows a query asked for in the Queries tab, focused, and again when asked ag
     return found;
   });
   expect(entry).toHaveFocus();
-  expect(screen.getByText("SELECT 1 FROM dual")).toBeInTheDocument();
+  // The SQL is highlighted (split into tokens), so it's read as the entry's text.
+  expect(entry).toHaveTextContent("SELECT 1 FROM dual");
   // Moving on clears the outline; asking for it again shows it again.
   act(() => entry.blur());
   expect(entry).not.toHaveClass("border-ink");

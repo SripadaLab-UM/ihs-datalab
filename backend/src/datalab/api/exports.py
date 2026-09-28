@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import tempfile
 from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote
@@ -28,6 +29,7 @@ from datalab.export_folders import Location, Provider, Status
 from datalab.exports import Destination, DestinationStore, ExportError, ExportSource
 from datalab.sessions import picker
 from datalab.sessions.checkpoints import UnsafePath, check_relative, open_workspace_file
+from datalab.sessions.code import is_code, strip_notebook
 from datalab.sessions.inputs import AttachmentStore, NotAttachable, _same
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
@@ -477,12 +479,23 @@ def _sources(
             opener = _result_opener(results, ref.path)
             container_path = f"/data/oracle/{ref.path}"
         else:
+            # From the rest of /work, only the scripts (the dialog's Code group):
+            # never joined data or other intermediate files left there.
+            if ref.root == "work" and not (ref.path.startswith("scripts/") and is_code(ref.path)):
+                raise HTTPException(
+                    400,
+                    f"Only scripts in /work/scripts can be exported from the workspace: {ref.path}",
+                )
             rel = f"outputs/{ref.path}" if ref.root == "outputs" else ref.path
             entry = saved.get(rel)
             if entry is None:
                 raise HTTPException(404, f"No such file: {ref.path}")
             target = f"outputs/{ref.path}" if ref.root == "outputs" else f"workspace/{ref.path}"
             opener = _saved_opener(checkpoints, entry)
+            if ref.path.lower().endswith(".ipynb"):
+                # A notebook leaves as the viewer shows it: rebuilt without its
+                # outputs or anything else that can hold data (code.strip_notebook).
+                opener = _stripped_notebook_opener(checkpoints, entry, ref.path)
             container_path = f"/work/{rel}"
         key = target.casefold()
         if key in used or any(u.startswith(key + "/") or key.startswith(u + "/") for u in used):
@@ -519,6 +532,32 @@ def _sibling_reader(checkpoints, saved, page: str):
             return reader.read()
 
     return read
+
+
+_MAX_NOTEBOOK_BYTES = 100 * 1024**2
+
+
+def _stripped_notebook_opener(checkpoints, entry, path: str):
+    """The notebook as saved, without its outputs: checked before the export starts."""
+    if entry.size > _MAX_NOTEBOOK_BYTES:
+        raise HTTPException(413, f"This notebook is too large to export: {path}")
+    with os.fdopen(checkpoints.open_object(entry), "rb") as source:
+        stripped = strip_notebook(source.read())
+    if stripped is None:
+        raise HTTPException(
+            422,
+            f"DataLab can't read this notebook (it isn't a version 4 one), "
+            f"so it isn't exported: {path}",
+        )
+
+    def open_copy() -> int:
+        with tempfile.TemporaryFile() as copy:
+            copy.write(stripped)
+            copy.flush()
+            copy.seek(0)
+            return os.dup(copy.fileno())
+
+    return open_copy
 
 
 def _saved_opener(checkpoints, entry):

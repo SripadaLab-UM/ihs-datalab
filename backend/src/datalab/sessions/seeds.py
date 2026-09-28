@@ -33,6 +33,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from datalab.sessions.checkpoints import Checkpoints
+from datalab.sessions.code import is_code
 from datalab.sessions.containers import SessionPaths
 from datalab.sessions.hooks import WorkspaceSeed
 from datalab.sessions.store import Conversation
@@ -126,9 +128,20 @@ def _run(seed: Seed, conversation: Conversation, paths: SessionPaths) -> str | N
         # agent hasn't run yet (seeds run only before the first turn), so
         # nothing can appear between the check above and this.
         os.rename(staging, target)
+        # Once it's in place (the agent hasn't run yet, so /work is still as copied).
+        _record_baseline(paths, target, seed.into)
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
     return result
+
+
+def _record_baseline(paths: SessionPaths, staging: Path, into: str) -> None:
+    """Keep the code files as copied, so the Code tab can tell which the agent changed."""
+    try:
+        Checkpoints(paths.checkpoints, paths.work).record_baseline(staging, into, is_code)
+    except Exception:
+        # Only the Code tab's "modified or not" depends on it: never fail the seed.
+        log.exception("couldn't record the baseline of /work/%s", into)
 
 
 def _taken(path: Path) -> bool:

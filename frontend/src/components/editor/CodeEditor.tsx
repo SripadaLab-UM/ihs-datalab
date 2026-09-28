@@ -8,7 +8,7 @@ export type { CodeEditorProps, EditorDiagnostic, EditorLanguage } from "./types"
 // CodeMirror is its own chunk, fetched from DataLab the first time a page shows an editor.
 const CodeMirrorEditor = lazy(() => import("./CodeMirrorEditor"));
 
-/** The shared code editor: controlled, like a textarea. SQL, YAML, Markdown, R or plain text. */
+/** The shared code editor: controlled, like a textarea. SQL, YAML, Markdown, R, Python, shell, JSON or plain text. */
 export function CodeEditor({ className, ...props }: CodeEditorProps) {
   return (
     <div

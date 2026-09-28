@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { api, type Checkpoint, type Conversation, type WorkspaceFile } from "@/api/client";
 import { shortTable } from "@/components/chat/activity";
 import { SHOW_QUERY } from "@/components/chat/provenance";
+import { CodeBlock } from "@/components/code/CodeBlock";
+import { isCodeFile } from "@/components/code/languages";
 import { Button, Chip, EmptyNote, FileGlyph, Icon, InfoTip, Modal, Tabs } from "@/components/ui";
 import { SaveAsWorkflow } from "@/features/workflows/SaveAsWorkflow";
 import { formatBytes } from "@/lib/csv";
@@ -12,10 +14,11 @@ import { type OpenFile, sharedPrefix } from "@/lib/files";
 
 export { sharedPrefix };
 
+import { CodePanel, useCode } from "./Code";
 import { ExportDialog } from "./ExportDialog";
 import { Inputs } from "./Inputs";
 
-type Tab = "inputs" | "outputs" | "history" | "data";
+type Tab = "inputs" | "outputs" | "code" | "history" | "data";
 
 /** The Workspace's right-hand column: what the agent made, checkpoints, and data it read. */
 export function SidePanel({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
@@ -34,6 +37,7 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const tabs: { id: Tab; label: string }[] = [
     { id: "outputs", label: "Outputs" },
+    { id: "code", label: "Code" },
     { id: "inputs", label: "Inputs" },
     ...(conversation.kind === "data" ? [{ id: "data" as const, label: "Queries" }] : []),
     { id: "history", label: "History" },
@@ -43,7 +47,8 @@ export function SidePanel({ conversation, onOpen }: { conversation: Conversation
       <Tabs tabs={tabs} value={tab} onChange={setTab} />
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {tab === "inputs" && <Inputs conversation={conversation} practice={health.data?.profile === "practice"} />}
-        {tab === "outputs" && <Outputs conversation={conversation} onOpen={onOpen} />}
+        {tab === "outputs" && <Outputs conversation={conversation} onOpen={onOpen} onShowCode={() => setTab("code")} />}
+        {tab === "code" && <CodePanel conversationId={conversation.id} />}
         {tab === "history" && <History conversation={conversation} />}
         {tab === "data" && <DataAccessed conversationId={conversation.id} onOpen={onOpen} shown={shown} />}
       </div>
@@ -56,19 +61,38 @@ function splitPath(path: string) {
   return cut < 0 ? { dir: "", name: path } : { dir: path.slice(0, cut + 1), name: path.slice(cut + 1) };
 }
 
-function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen: (file: OpenFile) => void }) {
+function Outputs({
+  conversation,
+  onOpen,
+  onShowCode,
+}: {
+  conversation: Conversation;
+  onOpen: (file: OpenFile) => void;
+  onShowCode: () => void;
+}) {
   const conversationId = conversation.id;
   const files = useQuery({ queryKey: ["files", conversationId], queryFn: () => api.files(conversationId) });
+  const code = useCode(conversationId);
   const [exporting, setExporting] = useState(false);
-  if (files.data?.length === 0) {
+  // Deliverables only: scripts, SQL and notebooks are in the Code tab (they're still exported).
+  const codeFiles = code.data?.files.length ?? 0;
+  const toCode = codeFiles > 0 && (
+    <button type="button" onClick={onShowCode} className="inline-flex items-center gap-1 font-sans text-[12.5px] text-muted hover:text-ink">
+      <Icon name="code" size={13} /> {codeFiles} code file{codeFiles === 1 ? "" : "s"} in the Code tab
+    </button>
+  );
+  const all = (files.data ?? []).filter((f) => !isCodeFile(f.path));
+  if (files.data && all.length === 0) {
     return (
-      <EmptyNote icon="folder" title="Nothing made yet">
-        Charts, tables and reports the agent saves in <code className="font-mono">outputs/</code> show up here after
-        each turn.
-      </EmptyNote>
+      <div className="flex flex-col gap-3">
+        <EmptyNote icon="folder" title="Nothing made yet">
+          Charts, tables and reports the agent saves in <code className="font-mono">outputs/</code> show up here after
+          each turn.
+        </EmptyNote>
+        {toCode}
+      </div>
     );
   }
-  const all = files.data ?? [];
   // Grouped by kind of file, not by a guess at which one is the result.
   const groups: { title: string; files: WorkspaceFile[] }[] = [
     { title: "Documents", files: all.filter((f) => f.kind === "html" || f.kind === "pdf") },
@@ -92,6 +116,7 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
           <InfoTip term="export" align="end" />
         </span>
       </div>
+      {toCode && <div className="-mt-3">{toCode}</div>}
       {prefix && (
         <p className="-mt-3 font-sans text-[12px] text-muted">
           All start <span className="font-mono text-ink">{prefix}</span>; shown without it.
@@ -106,7 +131,7 @@ function Outputs({ conversation, onOpen }: { conversation: Conversation; onOpen:
               {group.files.map((file) => (
                 <li key={file.path}>
                   <button onClick={() => open(file)} title={file.path} className="group flex w-full flex-col text-left">
-                    <span className="flex aspect-[4/3] w-full items-center justify-center rounded-[3px] border border-line bg-white p-1 group-hover:border-ink">
+                    <span className="flex aspect-[4/3] w-full items-center justify-center rounded-[3px] border border-line bg-surface p-1 group-hover:border-ink">
                       <img
                         src={api.fileUrl(conversationId, "outputs", file.path, file.checkpoint)}
                         alt=""
@@ -365,9 +390,7 @@ function DataAccessed({
               <summary className="flex cursor-pointer list-none items-center gap-1 text-muted hover:text-ink">
                 <Icon name="chevron" size={12} className="transition-transform group-open:rotate-90" /> The SQL
               </summary>
-              <pre className="mt-1.5 overflow-x-auto whitespace-pre-wrap bg-sunken p-2.5 font-mono text-[11.5px] leading-relaxed">
-                {q.sql_text}
-              </pre>
+              <CodeBlock code={q.sql_text} language="sql" wrap className="mt-1.5 text-[11.5px]" label="The SQL" />
             </details>
             {q.result_file && q.status === "succeeded" && (
               <button

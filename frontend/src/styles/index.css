@@ -45,6 +45,14 @@
   --color-you-soft: #eef0f6;
   --color-danger: #9b2c1f;
   --color-danger-soft: #f9ece9;
+  /* Code only (components/code): muted syntax colour, quiet on paper. At
+     least 4.5:1 on every background code sits on (tokens.test.ts). */
+  --color-code-keyword: #6b3f6e;
+  --color-code-string: #4c6121;
+  --color-code-number: #8a4a1e;
+  --color-code-comment: #6b675d;
+  --color-code-function: #3c5478;
+  --color-code-type: #2e6166;
 }
 
 /* Dark: when the computer is dark and the person hasn't chosen Light, or when
@@ -78,6 +86,12 @@
   --color-you-soft: #20242f;
   --color-danger: #e58a7c;
   --color-danger-soft: #33201c;
+  --color-code-keyword: #cfaad2;
+  --color-code-string: #b8c78e;
+  --color-code-number: #e2ab7c;
+  --color-code-comment: #a29e93;
+  --color-code-function: #a6bcdf;
+  --color-code-type: #93c8c6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -105,6 +119,12 @@
     --color-you-soft: #20242f;
     --color-danger: #e58a7c;
     --color-danger-soft: #33201c;
+    --color-code-keyword: #cfaad2;
+    --color-code-string: #b8c78e;
+    --color-code-number: #e2ab7c;
+    --color-code-comment: #a29e93;
+    --color-code-function: #a6bcdf;
+    --color-code-type: #93c8c6;
   }
 }
 
@@ -328,6 +348,61 @@ body {
   }
   .prose-datalab hr {
     border-color: var(--color-line);
+  }
+
+  /* Highlighted code (components/code): muted colour on paper, with the
+     editor's weight and italics (components/editor/theme.ts). The classes
+     are @lezer/highlight's classHighlighter; the colours are code-only tokens. */
+  .tok-keyword {
+    color: var(--color-code-keyword);
+    font-weight: 600;
+  }
+  .tok-heading,
+  .tok-strong {
+    font-weight: 600;
+  }
+  .tok-definition,
+  .tok-propertyName {
+    color: var(--color-code-function);
+    font-weight: 500;
+  }
+  .tok-typeName,
+  .tok-className,
+  .tok-namespace {
+    color: var(--color-code-type);
+  }
+  .tok-comment {
+    color: var(--color-code-comment);
+    font-style: italic;
+  }
+  .tok-string,
+  .tok-string2 {
+    color: var(--color-code-string);
+  }
+  .tok-number,
+  .tok-bool,
+  .tok-atom {
+    color: var(--color-code-number);
+  }
+  .tok-emphasis {
+    font-style: italic;
+  }
+  .tok-link,
+  .tok-url {
+    text-decoration: underline;
+  }
+  .tok-meta {
+    color: var(--color-faint);
+  }
+  .tok-invalid {
+    color: var(--color-danger);
+  }
+  /* Diffs: the tones used for added and removed everywhere else. */
+  .tok-inserted {
+    color: var(--color-data);
+  }
+  .tok-deleted {
+    color: var(--color-danger);
   }
 }
 

@@ -114,3 +114,81 @@ it("a file opened from a link in an answer is pinned to the latest checkpoint", 
   await waitFor(() => expect(screen.getByTitle("r.html")).toHaveAttribute("src", "/preview/t3/r.html"));
   expect(vi.mocked(api.preview).mock.calls.map((call) => call[3])).toEqual([3]);
 });
+
+// The user's call: each script can go with the outputs, but only when ticked.
+function openWithScripts() {
+  const client = newClient();
+  vi.mocked(api.files).mockImplementation(async (_id, root) =>
+    root === "work"
+      ? [
+          { path: "outputs/report.html", size: 100, kind: "html", modified: "", checkpoint: 3 },
+          { path: "scripts/steps_by_week.R", size: 20, kind: "text", modified: "", checkpoint: 3 },
+          { path: "scripts/explore.ipynb", size: 30, kind: "text", modified: "", checkpoint: 3 },
+          { path: "scripts/notes.txt", size: 5, kind: "text", modified: "", checkpoint: 3 },
+          { path: "joined.csv", size: 5, kind: "csv", modified: "", checkpoint: 3 },
+          { path: "explore.py", size: 5, kind: "text", modified: "", checkpoint: 3 },
+        ]
+      : [{ path: "report.html", size: 100, kind: "html", modified: "", checkpoint: 3 }],
+  );
+  render(
+    <QueryClientProvider client={client}>
+      <ExportDialog conversation={conversation} withReport={false} onClose={() => {}} />
+    </QueryClientProvider>,
+  );
+}
+
+it("offers each script in scripts/, none ticked, and exports only those picked", async () => {
+  openWithScripts();
+  const script = await screen.findByRole("checkbox", { name: /scripts\/steps_by_week\.R/ });
+  const notebook = screen.getByRole("checkbox", { name: /scripts\/explore\.ipynb/ });
+  expect(script).not.toBeChecked();
+  expect(notebook).not.toBeChecked();
+  expect(screen.getByText(/without outputs/)).toBeInTheDocument();
+  // Only code in scripts/: not notes, not data, not code elsewhere in /work.
+  expect(screen.queryByText("scripts/notes.txt")).toBeNull();
+  expect(screen.queryByText("joined.csv")).toBeNull();
+  expect(screen.queryByText("explore.py")).toBeNull();
+  // Nothing picked: nothing to export.
+  expect(screen.getByRole("button", { name: "Export" })).toBeDisabled();
+  fireEvent.click(script);
+  const button = screen.getByRole("button", { name: "Export" });
+  expect(button).toBeEnabled();
+  fireEvent.click(button);
+  await waitFor(() => expect(api.export).toHaveBeenCalled());
+  const [, , files, , shown] = vi.mocked(api.export).mock.calls.at(-1)!;
+  expect(files).toEqual([{ root: "work", path: "scripts/steps_by_week.R" }]);
+  expect(shown).toBe(3);
+});
+
+it("includes all scripts at once, and none again", async () => {
+  openWithScripts();
+  const all = await screen.findByRole("checkbox", { name: "Include all scripts" });
+  expect(all).not.toBeChecked();
+  fireEvent.click(all);
+  expect(screen.getByRole("checkbox", { name: /steps_by_week\.R/ })).toBeChecked();
+  expect(screen.getByRole("checkbox", { name: /explore\.ipynb/ })).toBeChecked();
+  fireEvent.click(all);
+  expect(screen.getByRole("checkbox", { name: /steps_by_week\.R/ })).not.toBeChecked();
+  fireEvent.click(all);
+  fireEvent.click(screen.getByLabelText(/report.html/));
+  fireEvent.click(screen.getByRole("button", { name: "Export" }));
+  await waitFor(() => expect(api.export).toHaveBeenCalled());
+  expect(vi.mocked(api.export).mock.calls.at(-1)?.[2]).toEqual([
+    { root: "outputs", path: "report.html" },
+    { root: "work", path: "scripts/steps_by_week.R" },
+    { root: "work", path: "scripts/explore.ipynb" },
+  ]);
+});
+
+it("says a notebook in outputs is exported without its outputs", async () => {
+  vi.mocked(api.files).mockImplementation(async (_id, root) =>
+    root === "work" ? [] : [{ path: "explore.ipynb", size: 30, kind: "text", modified: "", checkpoint: 4 }],
+  );
+  render(
+    <QueryClientProvider client={newClient()}>
+      <ExportDialog conversation={conversation} withReport={false} onClose={() => {}} />
+    </QueryClientProvider>,
+  );
+  const notebook = await screen.findByRole("checkbox", { name: /explore\.ipynb.*without outputs/ });
+  expect(notebook).not.toBeChecked();
+});

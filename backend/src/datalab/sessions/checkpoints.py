@@ -21,6 +21,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import stat
@@ -185,6 +186,24 @@ class Checkpoints:
             return []
         return [_summary(p) for p in sorted(self._manifests.glob("[0-9]*[0-9].json"))]
 
+    @property
+    def store(self) -> Path:
+        """Where this conversation's checkpoints are kept (DataLab's own folder)."""
+        return self._store
+
+    def numbers(self) -> list[int]:
+        """The checkpoints' numbers, oldest first, without reading them."""
+        if not self._manifests.exists():
+            return []
+        return [int(p.stem) for p in sorted(self._manifests.glob("[0-9]*[0-9].json"))]
+
+    def baseline_stamp(self) -> int:
+        """When the baseline was last recorded (0 if never): it changes only then."""
+        try:
+            return (self._store / "baseline.json").stat().st_mtime_ns
+        except OSError:
+            return 0
+
     def get(self, number: int) -> Checkpoint | None:
         path = self._summary_path(number)
         return _summary(path) if path.exists() else None
@@ -206,7 +225,57 @@ class Checkpoints:
 
     def open_object(self, entry: Entry) -> int:
         """Open a file's saved content (in DataLab's own store) for reading."""
-        return os.open(self._object_path(entry.sha256), os.O_RDONLY | _BINARY)
+        return self.open_object_by_hash(entry.sha256)
+
+    def open_object_by_hash(self, digest: str) -> int:
+        """Open saved content by its hash: a checkpoint's, or the baseline's."""
+        if not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise UnsafePath(digest)
+        return os.open(self._object_path(digest), os.O_RDONLY | _BINARY)
+
+    # The baseline: what DataLab copied into /work before the first turn -------
+
+    def record_baseline(self, folder: Path, into: str, wanted) -> int:
+        """Save the files in `folder` that `wanted(path in /work)` picks, as copied
+        into `/work/<into>` before the first turn (a workspace seed). `folder`
+        is DataLab's own staging folder, which the agent can't reach. The
+        checkpoints then tell a file the agent changed from one it left as is.
+        """
+        self._objects.mkdir(parents=True, exist_ok=True)
+        folder_real = os.path.realpath(folder)
+        recorded = self.baseline()
+        count = 0
+        for rel, kind in _walk(folder):
+            path = f"{into}/{rel}"
+            if kind != "file" or not wanted(path):
+                continue
+            try:
+                size = os.lstat(folder / rel).st_size
+            except OSError:
+                continue
+            if size > self._max_file_bytes:
+                continue
+            digest = self._store_file(folder / rel, folder_real)
+            if digest is not None:
+                recorded[path] = (digest, size)
+                count += 1
+        _write_json(
+            self._store / "baseline.json",
+            {path: {"sha256": d, "size": n} for path, (d, n) in sorted(recorded.items())},
+        )
+        return count
+
+    def baseline(self) -> dict[str, tuple[str, int]]:
+        """What was copied in before the first turn: path in /work -> (hash, size)."""
+        try:
+            raw = json.loads((self._store / "baseline.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return {
+            path: (str(e["sha256"]), int(e["size"]))
+            for path, e in raw.items()
+            if isinstance(e, dict) and re.fullmatch(r"[0-9a-f]{64}", str(e.get("sha256", "")))
+        }
 
     # Restoring ---------------------------------------------------------------
 

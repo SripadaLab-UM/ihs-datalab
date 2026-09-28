@@ -8,7 +8,10 @@ import { formatBytes, parseCsv } from "@/lib/csv";
 import { provenanceApi } from "@/api/provenance";
 import { showQuery } from "@/components/chat/provenance";
 import { kindOf, type OpenFile } from "@/lib/files";
+import { CodeBlock } from "@/components/code/CodeBlock";
+import { isCodeFile, languageOfPath } from "@/components/code/languages";
 
+import { CodeFileView } from "./Code";
 import { HowWasThisMade } from "./HowWasThisMade";
 
 /**
@@ -43,6 +46,9 @@ export function FileViewer({
   }, [live, chosen, latest]);
   const pinned: OpenFile = { ...file, checkpoint: version };
   const newer = !live && version != null && latest != null && latest > version;
+  // Scripts, SQL and notebooks open with their versions (the Code tab's view), which says which copy it is.
+  const code = !live && isCodeFile(file.path);
+  const inWork = file.root === "outputs" ? `outputs/${file.path}` : file.path;
   return (
     <Modal
       wide
@@ -69,7 +75,7 @@ export function FileViewer({
         </>
       }
     >
-      {!live && version != null && (
+      {!live && !code && version != null && (
         <p className="mb-3 flex flex-wrap items-center gap-2 text-xs text-muted" data-testid="file-version">
           <Icon name="history" size={13} /> As saved at checkpoint {version}.
           {newer && (
@@ -96,18 +102,33 @@ export function FileViewer({
               <img
                 src={api.fileUrl(conversationId, file.root, file.path, version)}
                 alt={file.path}
-                className="max-h-full max-w-full rounded-md bg-white shadow-sm"
+                className="max-h-full max-w-full rounded-md bg-surface shadow-sm"
               />
             </div>
           )}
           {file.kind === "html" && !source && <HtmlPreview conversationId={conversationId} file={pinned} />}
-          {(file.kind === "text" || (file.kind === "html" && source)) && (
-            <TextPreview conversationId={conversationId} file={pinned} />
+          {code ? (
+            <CodeFileView
+              conversationId={conversationId}
+              path={inWork}
+              checkpoint={version}
+              fallback={
+                file.path.toLowerCase().endsWith(".ipynb") ? (
+                  <p className="text-sm text-muted">This notebook isn't in the saved checkpoints yet: files appear after each turn.</p>
+                ) : (
+                  <TextPreview conversationId={conversationId} file={pinned} />
+                )
+              }
+            />
+          ) : (
+            (file.kind === "text" || (file.kind === "html" && source)) && (
+              <TextPreview conversationId={conversationId} file={pinned} />
+            )
           )}
           {file.kind === "csv" && <CsvPreview conversationId={conversationId} file={pinned} />}
         </>
       )}
-      {(file.kind === "pdf" || file.kind === "other") && (
+      {!code && (file.kind === "pdf" || file.kind === "other") && (
         <p className="rounded-xl bg-sunken p-6 text-center text-sm text-muted">
           DataLab can't preview this kind of file yet. You can export it and open it on your computer.
         </p>
@@ -141,7 +162,7 @@ function HtmlPreview({ conversationId, file }: { conversationId: string; file: O
         // Kept out of the Tab order: focus inside a frame can't be held in the
         // dialog, and with scripts off the page has nothing to operate.
         tabIndex={-1}
-        className="min-h-0 w-full flex-1 rounded-lg border border-line bg-white"
+        className="min-h-0 w-full flex-1 rounded-lg border border-line bg-surface"
       />
     </div>
   );
@@ -161,9 +182,13 @@ function TextPreview({ conversationId, file }: { conversationId: string; file: O
   return (
     <>
       {text.data.truncated && <p className="mb-2 text-xs text-muted">Showing the start of the file.</p>}
-      <pre className="whitespace-pre-wrap break-words rounded-xl bg-sunken p-4 font-mono text-xs leading-relaxed">
-        {text.data.text}
-      </pre>
+      <CodeBlock
+        code={text.data.text}
+        language={file.kind === "html" ? "text" : languageOfPath(file.path)}
+        wrap
+        className="overflow-hidden rounded-xl text-xs"
+        label={file.path}
+      />
     </>
   );
 }
