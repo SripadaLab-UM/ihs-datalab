@@ -329,6 +329,7 @@ def test_a_notebook_leaves_without_its_outputs_and_only_scripts_leave_from_work(
         cells = json.loads(exported)["cells"]
         assert cells[1] == {
             "cell_type": "code",
+            "metadata": {},
             "source": ["df.head()"],
             "outputs": [],
             "execution_count": None,
@@ -337,3 +338,131 @@ def test_a_notebook_leaves_without_its_outputs_and_only_scripts_leave_from_work(
         # The viewer shows it without outputs too.
         shown_nb = client.get(f"/api/conversations/{cid}/files/work/scripts/explore.ipynb")
         assert shown_nb.status_code == 200 and "P0009" not in shown_nb.text
+
+
+MARK = "MARKER_P0042"
+_OUT = [{"output_type": "stream", "text": [MARK]}]
+# A marker in every place a notebook can carry something DataLab never shows.
+LEAKY_NOTEBOOK = {
+    "nbformat": 4,
+    "nbformat_minor": 5,
+    "results": _OUT,
+    "metadata": {
+        "kernelspec": {"name": "python3", "language": "python", "extra": MARK},
+        "language_info": {"name": "python", "nested": {"x": MARK}},
+        "widgets": {"state": MARK},
+        "papermill": {"parameters": {"pid": MARK}},
+    },
+    "cells": [
+        {
+            "cell_type": "code",
+            "id": "c1",
+            "source": ["df.head()"],
+            "execution_count": 3,
+            "outputs": _OUT,
+            "output": _OUT,
+            "metadata": {"cached": _OUT, "tags": [MARK]},
+        },
+        {
+            "cell_type": "markdown",
+            "source": "![a](attachment:a.png)",
+            "attachments": {"a.png": MARK},
+        },
+        {"cell_type": "raw", "source": "raw", "outputs": _OUT},
+        {"cell_type": "Code", "source": ["print(1)"], "outputs": _OUT},
+    ],
+}
+
+
+@pytest.mark.parametrize("root", ["work", "outputs"])
+def test_a_notebook_is_rebuilt_from_an_allowlist_wherever_it_is_seen_or_sent(
+    settings, catalog, root
+):
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"title": "Notebook"}).json()["id"]
+        work = app.state.services.sessions.paths(cid).work
+        (work / "outputs").mkdir(parents=True)
+        (work / "scripts").mkdir()
+        where = work / ("scripts" if root == "work" else "outputs") / "leaky.ipynb"
+        where.write_text(json.dumps(LEAKY_NOTEBOOK))
+        (work / "outputs" / "old.ipynb").write_text(
+            json.dumps({"nbformat": 3, "metadata": {}, "worksheets": [{"cells": []}]})
+        )
+        (work / "outputs" / "both.ipynb").write_text(
+            json.dumps({"nbformat": 4, "metadata": {}, "cells": [], "worksheets": [_OUT]})
+        )
+        app.state.services.sessions.checkpoints(cid).take("After turn 1", turn=1)
+        number = shown(client, cid)
+        path = "scripts/leaky.ipynb" if root == "work" else "leaky.ipynb"
+        in_work = "scripts/leaky.ipynb" if root == "work" else "outputs/leaky.ipynb"
+
+        viewer = client.get(f"/api/conversations/{cid}/files/{root}/{path}")
+        version = client.get(f"/api/conversations/{cid}/code/version", params={"path": in_work})
+        exported = client.post(
+            f"/api/conversations/{cid}/exports",
+            json={
+                "destination_id": "practice",
+                "files": [{"root": root, "path": path}],
+                "checkpoint": number,
+            },
+        )
+        assert viewer.status_code == 200 and MARK not in viewer.text
+        assert version.status_code == 200 and MARK not in version.text
+        assert exported.status_code == 201
+        [folder] = list((settings.data_dir / "practice-exports").iterdir())
+        target = "workspace/scripts" if root == "work" else "outputs"
+        sent = (folder / "files" / target / "leaky.ipynb").read_text()
+        assert MARK not in sent and MARK not in (folder / MANIFEST).read_text()
+        # What leaves is exactly what the viewer showed, and only the allowlist.
+        assert (
+            json.loads(sent)
+            == json.loads(viewer.text)
+            == {
+                "nbformat": 4,
+                "nbformat_minor": 5,
+                "metadata": {
+                    "kernelspec": {"name": "python3", "language": "python"},
+                    "language_info": {"name": "python"},
+                },
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "id": "c1",
+                        "metadata": {},
+                        "source": ["df.head()"],
+                        "outputs": [],
+                        "execution_count": None,
+                    },
+                    {"cell_type": "markdown", "metadata": {}, "source": "![a](attachment:a.png)"},
+                    {"cell_type": "raw", "metadata": {}, "source": "raw"},
+                    {"cell_type": "raw", "metadata": {}, "source": ["print(1)"]},
+                ],
+            }
+        )
+        cells = version.json()["notebook"]["cells"]
+        assert [(c["kind"], c["outputs"]) for c in cells] == [
+            ("code", 1),
+            ("markdown", 0),
+            ("raw", 1),
+            ("raw", 1),
+        ]
+        # Pre-v4 notebooks and ones with worksheets are refused, not guessed at.
+        if root == "outputs":
+            for name in ("old.ipynb", "both.ipynb"):
+                assert (
+                    client.get(f"/api/conversations/{cid}/files/outputs/{name}").status_code == 422
+                )
+                refused = client.post(
+                    f"/api/conversations/{cid}/exports",
+                    json={
+                        "destination_id": "practice",
+                        "files": [{"root": "outputs", "path": name}],
+                        "checkpoint": number,
+                    },
+                )
+                assert refused.status_code == 422, name
+                unreadable = client.get(
+                    f"/api/conversations/{cid}/code/version", params={"path": f"outputs/{name}"}
+                ).json()
+                assert unreadable["unreadable"] and unreadable["notebook"] is None

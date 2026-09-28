@@ -54,8 +54,9 @@ test too; Dropbox setup is available on the real DataLab.
    **Outputs** tab.
 2. Tick the output files you want. Nothing is ticked for you. Under
    **Code from scripts/**, tick any of the agent's scripts too (or
-   **Include all scripts**), as the workspace has them now. A notebook is
-   exported without its outputs, which can hold data. Nothing else in the
+   **Include all scripts**), as the workspace has them now. A notebook, from
+   either list, is exported without its outputs, which can hold data: just
+   its code and text, as the viewer shows it. Nothing else in the
    workspace can be exported.
 3. If you like, tick **The conversation, as one self-contained web page**:
    the questions and answers, charts, and the SQL that was run. It can also

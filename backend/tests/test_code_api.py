@@ -208,6 +208,7 @@ def test_a_link_in_work_is_never_followed(app, tmp_path):
 def notebook(outputs: list) -> str:
     return json.dumps(
         {
+            "nbformat": 4,
             "metadata": {"kernelspec": {"language": "R", "name": "ir"}},
             "cells": [
                 {"cell_type": "markdown", "source": ["# Steps\n", "By week."]},
@@ -400,3 +401,16 @@ def test_listings_are_kept_until_a_new_checkpoint(app, monkeypatch):
         paths = [f["path"] for f in listing(client, cid)["files"]]
         assert paths == ["b.py", "a.py"]
         assert reads == [3]  # only the new checkpoint is read
+
+
+def test_a_large_change_on_one_side_still_compares():
+    old = "".join(f"line {i}\n" for i in range(14_000))
+    added = "".join(f"new {i}\n" for i in range(5_000))
+    new = old[: len("".join(f"line {i}\n" for i in range(9_500)))] + added
+    new += "".join(f"line {i}\n" for i in range(9_500, 14_000))
+    started = time.monotonic()
+    diff = code.diff_texts(old, new)
+    assert not diff.too_large and (diff.added, diff.removed) == (5_000, 0)
+    assert time.monotonic() - started < 2
+    removed = code.diff_texts(new, old)
+    assert not removed.too_large and (removed.added, removed.removed) == (0, 5_000)

@@ -179,3 +179,16 @@ it("includes all scripts at once, and none again", async () => {
     { root: "work", path: "scripts/explore.ipynb" },
   ]);
 });
+
+it("says a notebook in outputs is exported without its outputs", async () => {
+  vi.mocked(api.files).mockImplementation(async (_id, root) =>
+    root === "work" ? [] : [{ path: "explore.ipynb", size: 30, kind: "text", modified: "", checkpoint: 4 }],
+  );
+  render(
+    <QueryClientProvider client={newClient()}>
+      <ExportDialog conversation={conversation} withReport={false} onClose={() => {}} />
+    </QueryClientProvider>,
+  );
+  const notebook = await screen.findByRole("checkbox", { name: /explore\.ipynb.*without outputs/ });
+  expect(notebook).not.toBeChecked();
+});

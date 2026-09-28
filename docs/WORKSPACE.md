@@ -290,9 +290,12 @@ The layout is the same for every mode:
     script in `/work/scripts` (from the same checkpoint as the outputs),
     unticked like every file, with **Include all scripts**. The same rules
     apply (manifest, inert names, the quarantine flag, practice exports only
-    to the practice folder), notebooks leave without outputs, execution
-    counts, attachments or widget state, and the API refuses any other file
-    from `/work`.
+    to the practice folder), and the API refuses any other file from
+    `/work`. A notebook, from `outputs/` or `scripts/`, is shown and exported
+    in one form, rebuilt from an allowlist: `nbformat`, the kernel's and
+    language's names, and each cell's type, source and id, with no outputs,
+    execution counts, attachments or other metadata. Pre-v4 notebooks and
+    ones with `worksheets` are refused.
   - **Code** (built): the scripts, SQL and notebooks the agent created or
     changed in this conversation, found by comparing checkpoints, grouped
     as new, modified or deleted, newest first. Files DataLab copied into

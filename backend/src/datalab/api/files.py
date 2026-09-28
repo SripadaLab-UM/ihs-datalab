@@ -278,7 +278,9 @@ def build_files_router(
                     raise HTTPException(413, "This notebook is too large to show.")
                 data = strip_notebook(raw)
                 if data is None:
-                    raise HTTPException(415, "DataLab can't show this notebook.")
+                    raise HTTPException(
+                        422, "DataLab can't show this notebook (it isn't a version 4 notebook)."
+                    )
                 truncated = len(data) > head
                 data = data[:head]
                 media_type = "text/plain; charset=utf-8"

@@ -161,7 +161,11 @@ export function ExportDialog({
                     <input type="checkbox" checked={chosen.has(file.path)} onChange={() => toggle(file.path)} />
                     <FileGlyph kind={kindOf(file.path)} size={24} />
                     <span className="min-w-0 flex-1 truncate font-mono text-xs">{file.path}</span>
-                    <span className="text-xs text-muted">{formatBytes(file.size)}</span>
+                    <span className="text-xs text-muted">
+                      {/* Exported as the viewer shows it: code and text only (backend strip_notebook). */}
+                      {file.path.toLowerCase().endsWith(".ipynb") ? "without outputs · " : ""}
+                      {formatBytes(file.size)}
+                    </span>
                   </label>
                 </li>
               ))}

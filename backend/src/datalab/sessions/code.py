@@ -255,64 +255,97 @@ class Notebook:
         return sum(c.outputs for c in self.cells)
 
 
-def read_notebook(data: bytes) -> Notebook | None:
-    """A Jupyter notebook's cells, without outputs. None if it isn't one."""
+_KERNELSPEC_KEYS = ("name", "display_name", "language")
+_LANGUAGE_INFO_KEYS = ("name", "version", "file_extension", "mimetype")
+
+
+def _load_notebook(data: bytes) -> tuple[dict[str, Any], list[int]] | None:
+    """A notebook rebuilt from an allowlist, and how many outputs each cell had.
+
+    Only what DataLab shows is kept: `nbformat` and `nbformat_minor`; of the
+    metadata, the kernel's and language's names (strings only); and for each
+    cell its type (code, markdown or raw), source, id, and empty metadata. A
+    code cell gets no outputs and no execution count. Anything else (outputs,
+    attachments, unknown keys, nested metadata, papermill parameters) is left
+    behind, since any of it can hold data. None if it isn't a notebook DataLab
+    can read: not JSON, a pre-v4 notebook, or one with `worksheets`.
+    """
     try:
-        raw = json.loads(data.decode("utf-8", "replace"))
-    except ValueError:
+        raw = json.loads(data.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError):
         return None
-    if not isinstance(raw, dict) or not isinstance(raw.get("cells"), list):
+    if not isinstance(raw, dict) or "worksheets" in raw or not isinstance(raw.get("cells"), list):
         return None
+    nbformat = raw.get("nbformat")
+    if not isinstance(nbformat, int) or isinstance(nbformat, bool) or nbformat < 4:
+        return None
+    minor = raw.get("nbformat_minor")
     metadata = _dict(raw.get("metadata"))
-    kernel, info = _dict(metadata.get("kernelspec")), _dict(metadata.get("language_info"))
-    named = str(kernel.get("language") or info.get("name") or "python").lower()
-    language = "r" if named == "r" else "python" if named.startswith("python") else "text"
-    cells = []
+    kept_metadata: dict[str, Any] = {}
+    for key, fields in (("kernelspec", _KERNELSPEC_KEYS), ("language_info", _LANGUAGE_INFO_KEYS)):
+        section = {
+            f: v for f, v in _dict(metadata.get(key)).items() if f in fields and isinstance(v, str)
+        }
+        if section:
+            kept_metadata[key] = section
+    cells: list[dict[str, Any]] = []
+    outputs: list[int] = []
     for cell in raw["cells"]:
         if not isinstance(cell, dict):
             continue
         kind = cell.get("cell_type")
+        kind = kind if kind in ("code", "markdown", "raw") else "raw"
         source = cell.get("source", "")
-        text = "".join(str(s) for s in source) if isinstance(source, list) else str(source)
-        outputs = cell.get("outputs")
-        cells.append(
-            Cell(
-                kind if kind in ("code", "markdown") else "raw",
-                text,
-                len(outputs) if isinstance(outputs, list) else 0,
-            )
-        )
+        if isinstance(source, list):
+            source = [part for part in source if isinstance(part, str)]
+        elif not isinstance(source, str):
+            source = ""
+        clean: dict[str, Any] = {"cell_type": kind}
+        if isinstance(cell.get("id"), str) and len(cell["id"]) <= 64:
+            clean["id"] = cell["id"]
+        clean["metadata"] = {}
+        clean["source"] = source
+        if kind == "code":
+            clean["outputs"] = []
+            clean["execution_count"] = None
+        cells.append(clean)
+        had = cell.get("outputs")
+        outputs.append(len(had) if isinstance(had, list) else 0)
+    notebook: dict[str, Any] = {"nbformat": nbformat}
+    if isinstance(minor, int) and not isinstance(minor, bool):
+        notebook["nbformat_minor"] = minor
+    notebook["metadata"] = kept_metadata
+    notebook["cells"] = cells
+    return notebook, outputs
+
+
+def read_notebook(data: bytes) -> Notebook | None:
+    """A notebook's cells as DataLab shows them: its allowlisted form (the same
+    one an export carries), with a count of the outputs left out. None if it
+    isn't one DataLab can read."""
+    loaded = _load_notebook(data)
+    if loaded is None:
+        return None
+    notebook, outputs = loaded
+    metadata = notebook["metadata"]
+    kernel, info = _dict(metadata.get("kernelspec")), _dict(metadata.get("language_info"))
+    named = str(kernel.get("language") or info.get("name") or "python").lower()
+    language = "r" if named == "r" else "python" if named.startswith("python") else "text"
+    cells = []
+    for cell, count in zip(notebook["cells"], outputs, strict=True):
+        source = cell["source"]
+        text = "".join(source) if isinstance(source, list) else source
+        cells.append(Cell(cell["cell_type"], text, count))
     return Notebook(language, cells)
 
 
 def strip_notebook(data: bytes) -> bytes | None:
-    """A Jupyter notebook without anything a run left in it: no cell outputs,
-    execution counts, attachments or widget state (any can hold data). The
-    code and Markdown stay. None if it isn't a notebook DataLab can read."""
-    try:
-        raw = json.loads(data.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+    """The notebook as it may leave DataLab or be shown: its allowlisted form
+    (see _load_notebook). None if it isn't one DataLab can read."""
+    loaded = _load_notebook(data)
+    if loaded is None:
         return None
-    if not isinstance(raw, dict) or not isinstance(raw.get("cells"), list):
-        return None
-    cells = []
-    for cell in raw["cells"]:
-        if not isinstance(cell, dict):
-            continue
-        kept = {
-            k: v for k, v in cell.items() if k not in ("outputs", "execution_count", "attachments")
-        }
-        if cell.get("cell_type") == "code":
-            kept["outputs"] = []
-            kept["execution_count"] = None
-        cells.append(kept)
-    metadata = {k: v for k, v in _dict(raw.get("metadata")).items() if k != "widgets"}
-    stripped = {
-        **{k: v for k, v in raw.items() if k not in ("cells", "metadata")},
-        "metadata": metadata,
-        "cells": cells,
-    }
-    return (json.dumps(stripped, indent=1, ensure_ascii=False) + "\n").encode()
+    return (json.dumps(loaded[0], indent=1, ensure_ascii=False) + "\n").encode()
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -349,7 +382,7 @@ class Diff:
 
 
 MAX_DIFF_INPUT_LINES = 20_000  # of either side: longer ones aren't compared
-DIFF_BUDGET = 3_000_000  # steps of work one comparison may take
+DIFF_BUDGET = 1_000_000  # steps of work one comparison may take
 
 
 def diff_texts(old: str, new: str, context: int = 3) -> Diff:
@@ -365,10 +398,22 @@ def diff_texts(old: str, new: str, context: int = 3) -> Diff:
     if len(a) > MAX_DIFF_INPUT_LINES or len(b) > MAX_DIFF_INPUT_LINES:
         diff.too_large = True
         return diff
-    ops = _opcodes(a, b, DIFF_BUDGET)
-    if ops is None:
+    # The lines both share at the start and the end aren't compared, so a
+    # large change on one side doesn't use up the budget on them.
+    head = 0
+    while head < len(a) and head < len(b) and a[head] == b[head]:
+        head += 1
+    tail = 0
+    while tail < len(a) - head and tail < len(b) - head and a[-1 - tail] == b[-1 - tail]:
+        tail += 1
+    middle = _opcodes(a[head : len(a) - tail], b[head : len(b) - tail], DIFF_BUDGET)
+    if middle is None:
         diff.too_large = True
         return diff
+    ops: list[Opcode] = [("equal", 0, head, 0, head)] if head else []
+    ops += [(t, i1 + head, i2 + head, j1 + head, j2 + head) for t, i1, i2, j1, j2 in middle]
+    if tail:
+        ops.append(("equal", len(a) - tail, len(a), len(b) - tail, len(b)))
     for group in _grouped(ops, len(a), len(b), context):
         first, last = group[0], group[-1]
         header = f"@@ -{first[1] + 1},{last[2] - first[1]} +{first[3] + 1},{last[4] - first[3]} @@"
@@ -397,6 +442,9 @@ Opcode = tuple[str, int, int, int, int]
 def _opcodes(a: list[str], b: list[str], budget: int) -> list[Opcode] | None:
     """difflib-style opcodes from Myers' shortest edit script, or None past `budget`."""
     n, m = len(a), len(b)
+    # Only added, or only removed: nothing to search.
+    if not n or not m:
+        return [("insert", 0, 0, 0, m)] if m else ([("delete", 0, n, 0, 0)] if n else [])
     offset = n + m + 1
     v = [0] * (2 * offset + 1)
     snapshots: list[list[int]] = []

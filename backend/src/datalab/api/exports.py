@@ -492,8 +492,9 @@ def _sources(
                 raise HTTPException(404, f"No such file: {ref.path}")
             target = f"outputs/{ref.path}" if ref.root == "outputs" else f"workspace/{ref.path}"
             opener = _saved_opener(checkpoints, entry)
-            if ref.root == "work" and ref.path.lower().endswith(".ipynb"):
-                # A notebook leaves without its outputs, which can hold data.
+            if ref.path.lower().endswith(".ipynb"):
+                # A notebook leaves as the viewer shows it: rebuilt without its
+                # outputs or anything else that can hold data (code.strip_notebook).
                 opener = _stripped_notebook_opener(checkpoints, entry, ref.path)
             container_path = f"/work/{rel}"
         key = target.casefold()
@@ -544,7 +545,9 @@ def _stripped_notebook_opener(checkpoints, entry, path: str):
         stripped = strip_notebook(source.read())
     if stripped is None:
         raise HTTPException(
-            422, f"DataLab couldn't read this notebook, so it isn't exported: {path}"
+            422,
+            f"DataLab can't read this notebook (it isn't a version 4 one), "
+            f"so it isn't exported: {path}",
         )
 
     def open_copy() -> int:
