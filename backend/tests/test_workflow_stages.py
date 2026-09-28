@@ -238,7 +238,8 @@ def finished(client: TestClient, run_id: str) -> dict:
     deadline = time.time() + 10
     while time.time() < deadline:
         run = client.get(f"/api/workflows/runs/{run_id}").json()
-        if run["status"] not in ("queued", "running"):
+        # The delivery is recorded just after the run's own status.
+        if run["status"] not in ("queued", "running") and run.get("delivery_status") != "pending":
             return run
         time.sleep(0.05)
     raise AssertionError("the run didn't finish")
