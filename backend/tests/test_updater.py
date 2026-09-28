@@ -255,7 +255,9 @@ async def test_after_the_switch_the_launcher_gets_the_new_versions_icon(world, t
         "<plist><dict><key>CFBundleIdentifier</key><string>edu.umich.ihs.datalab</string>"
         "</dict></plist>"
     )
-    (bundle / "Contents" / "MacOS" / "DataLab").write_text(f"exec '{world.root}/bin/datalab'\n")
+    (bundle / "Contents" / "MacOS" / "DataLab").write_text(
+        f"#!/bin/sh\nexec osascript - '{world.root}/bin/datalab' <<'OSA'\nOSA\n"
+    )
     seen: list[tuple[str | None, Path | None]] = []
 
     def refresh(branding: Path | None) -> object:

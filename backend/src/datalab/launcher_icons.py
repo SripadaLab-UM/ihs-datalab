@@ -8,11 +8,18 @@ switches `current`, so a new icon in a new version never reached them. This
 copies the running (or newly installed) version's icons over the launcher's,
 when they differ.
 
-Only DataLab's own launchers are touched: on macOS a bundle that isn't a
-link, whose CFBundleIdentifier is DataLab's, and whose launch script runs
-this install's `bin/datalab`; on Windows only the icon files the installer
-put in `<install root>\\icons`. Nothing here needs more rights than the
-person has: a launcher that isn't writable is skipped, with a note in the log.
+Only DataLab's own launchers are touched: on macOS a bundle whose folders
+are no links and this person's own, whose CFBundleIdentifier is DataLab's,
+and whose launch script has the very line the installer writes to run this
+install's `bin/datalab`; on Windows only the icon files the installer put in
+`<install root>\\icons` (no links, junctions included). Every read and
+write goes through an open folder (exports.Folder: dir_fd and O_NOFOLLOW;
+on Windows the folder's identity checked again before each step), and a
+new icon is a file of a random name made with O_EXCL, then renamed over the
+old one, so nothing planted in the bundle can redirect the write.
+
+Nothing here needs more rights than the person has: a launcher that isn't
+writable is skipped, with a note in the log.
 It never raises: an icon is never a reason for an update or a start to fail.
 """
 
@@ -23,10 +30,14 @@ import hashlib
 import logging
 import os
 import plistlib
+import secrets
+import stat
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
+
+from datalab.exports import ExportError, Folder, is_link
 
 log = logging.getLogger(__name__)
 
@@ -81,24 +92,68 @@ def refresh(
     return []
 
 
-def _sha256(path: Path) -> str | None:
-    with contextlib.suppress(OSError):
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    return None
+def _sha256(data: bytes | None) -> str | None:
+    return None if data is None else hashlib.sha256(data).hexdigest()
 
 
-def _replace(source: Path, target: Path) -> bool:
-    """`target` becomes a copy of `source`, by a temporary file and a rename.
-    False (and a note) if it can't be written."""
-    data = source.read_bytes()
-    temporary = target.with_name(f".{target.name}.new")
+def _owner_ok(info: os.stat_result) -> bool:
+    """Made by this person (on a Mac; Windows has no owner ids here)."""
+    getuid = getattr(os, "getuid", None)
+    return getuid is None or info.st_uid == getuid()
+
+
+def _open_dir(parent: Folder | None, path: Path, name: str | None = None) -> Folder:
+    """A folder that isn't a link, opened (by handle where the system can) and
+    owned by this person; ExportError or OSError otherwise."""
+    folder = Folder.at(path) if parent is None else parent.child(name or path.name)
     try:
-        temporary.write_bytes(data)
-        os.replace(temporary, target)
-    except OSError as error:
-        with contextlib.suppress(OSError):
-            temporary.unlink()
-        log.info("left the launcher's icon %s as it is: %s", target, error)
+        info = folder.stat()
+        if not stat.S_ISDIR(info.st_mode) or not _owner_ok(info):
+            raise OSError(f"{folder.path} isn't this person's own folder")
+        if parent is None and is_link(path, os.lstat(path)):
+            raise OSError(f"{folder.path} is a link")
+    except BaseException:
+        folder.close()
+        raise
+    return folder
+
+
+def _read(folder: Folder, name: str, *, owned: bool = True) -> bytes | None:
+    """A file in `folder`, never through a link: None if it isn't a plain file
+    (of this person's, with `owned`)."""
+    try:
+        info = folder.lstat(name)
+        if is_link(folder.path / name, info) or not stat.S_ISREG(info.st_mode):
+            return None
+        fd = folder.open_file(name, os.O_RDONLY)
+    except (OSError, ExportError):
+        return None
+    with os.fdopen(fd, "rb") as file:
+        opened = os.fstat(file.fileno())
+        if not stat.S_ISREG(opened.st_mode) or (owned and not _owner_ok(opened)):
+            return None
+        return file.read()
+
+
+def _replace(folder: Folder, name: str, data: bytes) -> bool:
+    """`name` in `folder` becomes `data`: a new file of a random name, made
+    there (never through a link, never over something already there), then
+    renamed over it. False (and a note) if it can't be written."""
+    temporary = f".{name}.{secrets.token_hex(8)}.new"
+    made = False
+    try:
+        fd = folder.open_file(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        made = True
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        folder.replace(temporary, name)
+    except (OSError, ExportError) as error:
+        if made:
+            with contextlib.suppress(OSError, ExportError):
+                folder.unlink(temporary)
+        log.info("left the launcher's icon %s as it is: %s", folder.path / name, error)
         return False
     return True
 
@@ -106,20 +161,18 @@ def _replace(source: Path, target: Path) -> bool:
 # ------------------------------------------------------------------ macOS
 
 
-def _launches(bundle: Path, root: Path) -> bool:
-    """Whether the bundle's launch script runs this install's bin/datalab (the
-    installer writes it single-quoted, a quote as '\\'')."""
+def _launch_line(root: Path) -> str:
+    """The line installer/macos/install.sh writes in the app's launch script:
+    this install's bin/datalab, single-quoted, a quote as '\\''."""
     shim = str(root / "bin" / "datalab").replace("'", "'\\''")
-    script = bundle / "Contents" / "MacOS" / "DataLab"
-    with contextlib.suppress(OSError, UnicodeDecodeError):
-        return f"'{shim}'" in script.read_text(encoding="utf-8")
-    return False
+    return f"exec osascript - '{shim}' <<'OSA'"
 
 
-def _bundle_id(bundle: Path) -> str | None:
-    with contextlib.suppress(OSError, plistlib.InvalidFileException, ValueError):
-        with (bundle / "Contents" / "Info.plist").open("rb") as file:
-            info = plistlib.load(file)
+def _bundle_id(info_plist: bytes | None) -> str | None:
+    if info_plist is None:
+        return None
+    with contextlib.suppress(plistlib.InvalidFileException, ValueError, TypeError):
+        info = plistlib.loads(info_plist)
         value = info.get("CFBundleIdentifier") if isinstance(info, dict) else None
         return value if isinstance(value, str) else None
     return None
@@ -129,68 +182,98 @@ def _refresh_mac(branding: Path, root: Path, folders: Sequence[Path], run: Run) 
     replaced: list[Path] = []
     for name, bundle_id, icon in MAC_LAUNCHERS:
         source = branding / icon
-        if not source.is_file():
-            continue
         for folder in folders:
             bundle = folder / f"{name}.app"
-            contents = bundle / "Contents"
-            resources = contents / "Resources"
-            if not bundle.is_dir():
-                continue
-            if any(p.is_symlink() for p in (bundle, contents, resources)):
-                log.info("left %s alone: it's a link", bundle)
-                continue
-            if _bundle_id(bundle) != bundle_id or not _launches(bundle, root):
-                log.info("left %s alone: it isn't this DataLab's", bundle)
-                continue
-            target = resources / "DataLab.icns"
-            if target.is_symlink() or not resources.is_dir():
-                log.info("left %s alone: its icon isn't an ordinary file", bundle)
-                continue
-            if _sha256(target) == _sha256(source):
-                continue
-            if not os.access(resources, os.W_OK):
-                log.info("left %s's icon as it is: not writable without an administrator", bundle)
-                continue
-            if not _replace(source, target):
-                continue
-            replaced.append(target)
-            log.info("updated %s's icon", bundle)
-            # So Finder, the Dock and Spotlight notice: a newer bundle, and
-            # LaunchServices told again. Best effort, and time-limited.
-            with contextlib.suppress(OSError):
-                os.utime(bundle)
-            if Path(LSREGISTER).is_file():
-                try:
-                    run(
-                        [LSREGISTER, "-f", str(bundle)],
-                        capture_output=True,
-                        timeout=LSREGISTER_SECONDS,
-                        check=False,
-                    )
-                except (OSError, subprocess.SubprocessError) as error:
-                    log.info("lsregister didn't run for %s: %s", bundle, error)
+            try:
+                if not bundle.is_dir() or bundle.is_symlink():
+                    if bundle.is_symlink():
+                        log.info("left %s alone: it's a link", bundle)
+                    continue
+                if _refresh_bundle(bundle, bundle_id, source, root, run):
+                    replaced.append(bundle / "Contents" / "Resources" / "DataLab.icns")
+            except (OSError, ExportError) as error:
+                log.info("left %s alone: %s", bundle, error)
     return replaced
+
+
+def _refresh_bundle(bundle: Path, bundle_id: str, source: Path, root: Path, run: Run) -> bool:
+    """One app bundle: True if its icon was replaced."""
+    with contextlib.ExitStack() as stack:
+        app = stack.enter_context(_open_dir(None, bundle))
+        contents = stack.enter_context(_open_dir(app, bundle / "Contents"))
+        if _bundle_id(_read(contents, "Info.plist")) != bundle_id:
+            log.info("left %s alone: it isn't this DataLab's", bundle)
+            return False
+        macos = stack.enter_context(_open_dir(contents, bundle / "Contents" / "MacOS"))
+        script = _read(macos, "DataLab")
+        lines = script.decode("utf-8", "replace").splitlines() if script else []
+        if _launch_line(root) not in lines:
+            log.info("left %s alone: it doesn't open this DataLab", bundle)
+            return False
+        resources = stack.enter_context(_open_dir(contents, bundle / "Contents" / "Resources"))
+        new = source.read_bytes()
+        if _sha256(_read(resources, "DataLab.icns", owned=False)) == _sha256(new):
+            return False
+        with contextlib.suppress(ExportError, FileNotFoundError):
+            info = resources.lstat("DataLab.icns")
+            if is_link(resources.path / "DataLab.icns", info) or not stat.S_ISREG(info.st_mode):
+                log.info("left %s alone: its icon isn't an ordinary file", bundle)
+                return False
+        if not os.access(resources.path, os.W_OK):
+            log.info("left %s's icon as it is: not writable without an administrator", bundle)
+            return False
+        if not _replace(resources, "DataLab.icns", new):
+            return False
+    log.info("updated %s's icon", bundle)
+    # So Finder, the Dock and Spotlight notice: a newer bundle, and
+    # LaunchServices told again. Best effort, and time-limited.
+    with contextlib.suppress(OSError, NotImplementedError):
+        os.utime(bundle, follow_symlinks=False)
+    if Path(LSREGISTER).is_file():
+        try:
+            run(
+                [LSREGISTER, "-f", str(bundle)],
+                capture_output=True,
+                timeout=LSREGISTER_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            log.info("lsregister didn't run for %s: %s", bundle, error)
+    return True
 
 
 # ------------------------------------------------------------------ Windows
 
 
 def _refresh_windows(branding: Path, root: Path) -> list[Path]:
-    icons = root / "icons"
-    if not icons.is_dir() or icons.is_symlink():
+    path = root / "icons"
+    try:
+        if not path.is_dir() or is_link(path, os.lstat(path)):
+            return []
+        icons = _open_dir(None, path)
+    except (OSError, ExportError) as error:
+        log.info("left %s alone: %s", path, error)
         return []
     replaced: list[Path] = []
-    for name in WINDOWS_ICONS:
-        source, target = branding / name, icons / name
-        # Only the icons the installer put there: the shortcuts point at them.
-        if not source.is_file() or not target.is_file() or target.is_symlink():
-            continue
-        if _sha256(target) == _sha256(source):
-            continue
-        if _replace(source, target):
-            replaced.append(target)
-            log.info("updated the launcher's icon %s", target)
+    with icons:
+        for name in WINDOWS_ICONS:
+            try:
+                # Only the icons the installer put there: the shortcuts point at them.
+                try:
+                    info = icons.lstat(name)
+                except FileNotFoundError:
+                    continue
+                if is_link(path / name, info) or not stat.S_ISREG(info.st_mode):
+                    log.info("left %s alone: it isn't an ordinary file", path / name)
+                    continue
+                new = (branding / name).read_bytes()
+                if _sha256(_read(icons, name, owned=False)) == _sha256(new):
+                    continue
+                if _replace(icons, name, new):
+                    replaced.append(path / name)
+                    log.info("updated the launcher's icon %s", path / name)
+            except (OSError, ExportError) as error:
+                log.info("left %s as it is: %s", path / name, error)
     if replaced and sys.platform == "win32":
         # Tell Explorer the icons changed (SHCNE_ASSOCCHANGED), so shortcuts redraw.
         with contextlib.suppress(Exception):

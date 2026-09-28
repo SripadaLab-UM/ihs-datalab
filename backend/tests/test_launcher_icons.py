@@ -9,12 +9,16 @@ from __future__ import annotations
 import os
 import plistlib
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 
-from datalab import launcher_icons
+from datalab import exports, launcher_icons
 from datalab.launcher_icons import refresh
+
+# The Mac's checks: links, owners and read-only folders as a Mac has them.
+mac = pytest.mark.skipif(sys.platform == "win32", reason="the Mac's app bundles")
 
 NEW_ICNS, OLD_ICNS = b"new real icns", b"old d. icns"
 NEW_PRACTICE, OLD_PRACTICE = b"new practice icns", b"old practice icns"
@@ -74,6 +78,7 @@ def icon_of(bundle: Path) -> bytes:
     return (bundle / "Contents" / "Resources" / "DataLab.icns").read_bytes()
 
 
+@mac
 def test_our_bundles_get_the_packages_icon_and_launchservices_is_told(
     tmp_path, root, branding, monkeypatch
 ):
@@ -106,6 +111,7 @@ def test_our_bundles_get_the_packages_icon_and_launchservices_is_told(
     assert sorted(p.name for p in (real / "Contents" / "Resources").iterdir()) == ["DataLab.icns"]
 
 
+@mac
 def test_identical_icons_are_left_as_they_are(tmp_path, root, branding):
     bundle = make_bundle(tmp_path, root, icon=NEW_ICNS)
     before = (bundle / "Contents" / "Resources" / "DataLab.icns").stat().st_mtime_ns
@@ -115,15 +121,40 @@ def test_identical_icons_are_left_as_they_are(tmp_path, root, branding):
     assert run.calls == []
 
 
+@mac
 @pytest.mark.parametrize(
     "why",
-    ["another bundle id", "another install's launcher", "no Info.plist", "a real/practice mix"],
+    [
+        "another bundle id",
+        "another install's launcher",
+        "the path only in a comment",
+        "a linked launch script",
+        "a linked Info.plist",
+        "no Info.plist",
+        "a real/practice mix",
+    ],
 )
 def test_a_bundle_that_isnt_this_datalabs_is_left_alone(tmp_path, root, branding, why):
     if why == "another bundle id":
         bundle = make_bundle(tmp_path, root, bundle_id="com.example.datalab")
     elif why == "another install's launcher":
         bundle = make_bundle(tmp_path, tmp_path / "elsewhere")
+    elif why == "the path only in a comment":
+        bundle = make_bundle(tmp_path, tmp_path / "elsewhere")
+        script = bundle / "Contents" / "MacOS" / "DataLab"
+        quoted = str(root / "bin" / "datalab").replace("'", "'\\''")
+        script.write_text(script.read_text() + f"# exec osascript - '{quoted}' <<'OSA' (not)\n")
+    elif why == "a linked launch script":
+        bundle = make_bundle(tmp_path, root)
+        script = bundle / "Contents" / "MacOS" / "DataLab"
+        real = tmp_path / "script-elsewhere"
+        script.rename(real)
+        script.symlink_to(real)
+    elif why == "a linked Info.plist":
+        bundle = make_bundle(tmp_path, root)
+        info = bundle / "Contents" / "Info.plist"
+        info.rename(tmp_path / "Info.plist")
+        info.symlink_to(tmp_path / "Info.plist")
     elif why == "no Info.plist":
         bundle = make_bundle(tmp_path, root)
         (bundle / "Contents" / "Info.plist").unlink()
@@ -133,6 +164,7 @@ def test_a_bundle_that_isnt_this_datalabs_is_left_alone(tmp_path, root, branding
     assert icon_of(bundle) == OLD_ICNS
 
 
+@mac
 def test_a_linked_bundle_is_left_alone(tmp_path, root, branding):
     elsewhere = make_bundle(tmp_path / "elsewhere", root)
     apps = tmp_path / "Applications"
@@ -142,6 +174,7 @@ def test_a_linked_bundle_is_left_alone(tmp_path, root, branding):
     assert icon_of(elsewhere) == OLD_ICNS
 
 
+@mac
 def test_a_linked_icon_is_left_alone(tmp_path, root, branding):
     bundle = make_bundle(tmp_path, root)
     target = tmp_path / "someone-elses.icns"
@@ -153,6 +186,7 @@ def test_a_linked_icon_is_left_alone(tmp_path, root, branding):
     assert target.read_bytes() == OLD_ICNS
 
 
+@mac
 def test_a_bundle_it_cant_write_is_skipped_without_sudo(tmp_path, root, branding, caplog):
     bundle = make_bundle(tmp_path, root)
     resources = bundle / "Contents" / "Resources"
@@ -169,6 +203,94 @@ def test_a_bundle_it_cant_write_is_skipped_without_sudo(tmp_path, root, branding
         resources.chmod(stat.S_IRWXU)
 
 
+@mac
+def test_a_planted_temporary_file_never_redirects_the_write(tmp_path, root, branding, monkeypatch):
+    # Someone who can write the bundle's folder plants a link where the new
+    # icon would be made: it's never followed (O_EXCL, O_NOFOLLOW).
+    bundle = make_bundle(tmp_path / "Applications", root)
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"not DataLab's")
+    monkeypatch.setattr(launcher_icons.secrets, "token_hex", lambda n: "planted")
+    planted = bundle / "Contents" / "Resources" / ".DataLab.icns.planted.new"
+    planted.symlink_to(victim)
+    assert (
+        refresh(branding, root=root, platform="darwin", app_folders=[tmp_path / "Applications"])
+        == []
+    )
+    assert victim.read_bytes() == b"not DataLab's"
+    assert icon_of(bundle) == OLD_ICNS
+    assert planted.is_symlink()  # not ours to remove
+
+
+@mac
+def test_resources_swapped_for_a_link_after_the_check_never_redirects_the_write(
+    tmp_path, root, branding, monkeypatch
+):
+    bundle = make_bundle(tmp_path / "Applications", root)
+    resources = bundle / "Contents" / "Resources"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "DataLab.icns").write_bytes(b"someone else's")
+    access = os.access
+
+    def swap(path, mode):  # between the checks and the write
+        resources.rename(tmp_path / "moved")
+        resources.symlink_to(elsewhere)
+        return access(tmp_path / "moved", mode)
+
+    monkeypatch.setattr(launcher_icons.os, "access", swap)
+    refresh(branding, root=root, platform="darwin", app_folders=[tmp_path / "Applications"])
+    # The write went to the folder that was checked (wherever it is now).
+    assert (elsewhere / "DataLab.icns").read_bytes() == b"someone else's"
+    assert (tmp_path / "moved" / "DataLab.icns").read_bytes() == NEW_ICNS
+
+
+@mac
+@pytest.mark.parametrize("folder", ["", "Contents", "Contents/Resources"])
+def test_a_bundle_owned_by_someone_else_is_left_alone(
+    tmp_path, root, branding, monkeypatch, folder
+):
+    bundle = make_bundle(tmp_path, root)
+    theirs = (bundle / folder).stat().st_ino
+    real_fstat, real_lstat = os.fstat, os.lstat
+
+    def owned_by_another(info):
+        if info.st_ino != theirs:
+            return info
+        values = list(info)
+        values[stat.ST_UID] = info.st_uid + 1
+        return os.stat_result(values)
+
+    monkeypatch.setattr(os, "fstat", lambda fd: owned_by_another(real_fstat(fd)))
+    monkeypatch.setattr(os, "lstat", lambda p, **kw: owned_by_another(real_lstat(p, **kw)))
+    assert refresh(branding, root=root, platform="darwin", app_folders=[tmp_path]) == []
+    assert icon_of(bundle) == OLD_ICNS
+
+
+@mac
+def test_someone_elses_uid_means_no_bundle_is_touched(tmp_path, root, branding, monkeypatch):
+    bundle = make_bundle(tmp_path, root)
+    monkeypatch.setattr(os, "getuid", lambda: os.stat(bundle).st_uid + 1)
+    assert refresh(branding, root=root, platform="darwin", app_folders=[tmp_path]) == []
+    assert icon_of(bundle) == OLD_ICNS
+
+
+@mac
+def test_a_leftover_temporary_file_or_a_missing_icon_never_blocks_the_rest(
+    tmp_path, root, branding
+):
+    real = make_bundle(tmp_path, root)
+    practice = make_bundle(
+        tmp_path, root, name="DataLab (practice)", bundle_id="edu.umich.ihs.datalab.practice"
+    )
+    (real / "Contents" / "Resources" / ".DataLab.icns.0123456789abcdef.new").write_bytes(b"crash")
+    (branding / "DataLab-practice.icns").unlink()  # practice's can't be read
+    replaced = refresh(branding, root=root, platform="darwin", app_folders=[tmp_path])
+    assert replaced == [real / "Contents" / "Resources" / "DataLab.icns"]
+    assert icon_of(real) == NEW_ICNS and icon_of(practice) == OLD_ICNS
+
+
+@mac
 def test_nothing_escapes(tmp_path, root, branding, monkeypatch):
     bundle = make_bundle(tmp_path, root)
     monkeypatch.setattr(launcher_icons, "LSREGISTER", str(tmp_path / "lsregister"))
@@ -205,6 +327,64 @@ def test_windows_icons_beside_bin_are_replaced_when_they_differ(root, branding):
     (icons / "DataLab-practice.ico").unlink()
     assert refresh(branding, root=root, platform="win32") == []
     assert not (icons / "DataLab-practice.ico").exists()
+
+
+@mac  # (making a symlink on Windows needs Developer Mode)
+def test_a_linked_windows_icon_or_icons_folder_is_left_alone(tmp_path, root, branding):
+    icons = root / "icons"
+    icons.mkdir(parents=True)
+    victim = tmp_path / "victim.ico"
+    victim.write_bytes(b"not DataLab's")
+    (icons / "DataLab.ico").symlink_to(victim)
+    assert refresh(branding, root=root, platform="win32") == []
+    assert victim.read_bytes() == b"not DataLab's"
+    (icons / "DataLab.ico").unlink()
+    icons.rmdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "DataLab.ico").write_bytes(b"not DataLab's")
+    icons.symlink_to(elsewhere)
+    assert refresh(branding, root=root, platform="win32") == []
+    assert (elsewhere / "DataLab.ico").read_bytes() == b"not DataLab's"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows's")
+def test_a_junction_for_the_icons_folder_is_never_followed(tmp_path, root, branding):
+    import _winapi  # pyright: ignore[reportMissingImports]
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "DataLab.ico").write_bytes(b"not DataLab's")
+    root.mkdir(parents=True)
+    _winapi.CreateJunction(str(elsewhere), str(root / "icons"))  # pyright: ignore
+    assert refresh(branding, root=root, platform="win32") == []
+    assert (elsewhere / "DataLab.ico").read_bytes() == b"not DataLab's"
+
+
+def test_the_icons_folder_swapped_after_the_check_is_never_written(
+    tmp_path, root, branding, monkeypatch
+):
+    # Windows has no dir_fd: the folder's identity is checked again before
+    # each step. (Elsewhere, the same path is run by turning dir_fd off.)
+    monkeypatch.setattr(exports, "_BY_FD", False)
+    icons = root / "icons"
+    icons.mkdir(parents=True)
+    (icons / "DataLab.ico").write_bytes(b"old real ico")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "DataLab.ico").write_bytes(b"not DataLab's")
+    read = launcher_icons._read
+
+    def swap(folder, name, **kw):  # after the checks, before the write
+        data = read(folder, name, **kw)
+        icons.rename(tmp_path / "moved")
+        elsewhere.rename(icons)
+        return data
+
+    monkeypatch.setattr(launcher_icons, "_read", swap)
+    assert refresh(branding, root=root, platform="win32") == []
+    assert (icons / "DataLab.ico").read_bytes() == b"not DataLab's"
+    assert sorted(p.name for p in icons.iterdir()) == ["DataLab.ico"]
 
 
 def test_windows_without_an_icons_folder_is_a_no_op(root, branding):
