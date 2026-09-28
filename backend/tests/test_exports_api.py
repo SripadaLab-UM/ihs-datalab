@@ -329,6 +329,7 @@ def test_a_notebook_leaves_without_its_outputs_and_only_scripts_leave_from_work(
         cells = json.loads(exported)["cells"]
         assert cells[1] == {
             "cell_type": "code",
+            "id": "cell-2",
             "metadata": {},
             "source": ["df.head()"],
             "outputs": [],
@@ -348,7 +349,12 @@ LEAKY_NOTEBOOK = {
     "nbformat_minor": 5,
     "results": _OUT,
     "metadata": {
-        "kernelspec": {"name": "python3", "language": "python", "extra": MARK},
+        "kernelspec": {
+            "name": "python3",
+            "language": "python",
+            "display_name": MARK,
+            "extra": MARK,
+        },
         "language_info": {"name": "python", "nested": {"x": MARK}},
         "widgets": {"state": MARK},
         "papermill": {"parameters": {"pid": MARK}},
@@ -356,7 +362,7 @@ LEAKY_NOTEBOOK = {
     "cells": [
         {
             "cell_type": "code",
-            "id": "c1",
+            "id": MARK,
             "source": ["df.head()"],
             "execution_count": 3,
             "outputs": _OUT,
@@ -428,15 +434,20 @@ def test_a_notebook_is_rebuilt_from_an_allowlist_wherever_it_is_seen_or_sent(
                 "cells": [
                     {
                         "cell_type": "code",
-                        "id": "c1",
+                        "id": "cell-1",
                         "metadata": {},
                         "source": ["df.head()"],
                         "outputs": [],
                         "execution_count": None,
                     },
-                    {"cell_type": "markdown", "metadata": {}, "source": "![a](attachment:a.png)"},
-                    {"cell_type": "raw", "metadata": {}, "source": "raw"},
-                    {"cell_type": "raw", "metadata": {}, "source": ["print(1)"]},
+                    {
+                        "cell_type": "markdown",
+                        "id": "cell-2",
+                        "metadata": {},
+                        "source": "![a](attachment:a.png)",
+                    },
+                    {"cell_type": "raw", "id": "cell-3", "metadata": {}, "source": "raw"},
+                    {"cell_type": "raw", "id": "cell-4", "metadata": {}, "source": ["print(1)"]},
                 ],
             }
         )

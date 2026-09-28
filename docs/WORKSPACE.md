@@ -293,7 +293,7 @@ The layout is the same for every mode:
     to the practice folder), and the API refuses any other file from
     `/work`. A notebook, from `outputs/` or `scripts/`, is shown and exported
     in one form, rebuilt from an allowlist: `nbformat`, the kernel's and
-    language's names, and each cell's type, source and id, with no outputs,
+    language's names, and each cell's type and source (with a fresh id), with no outputs,
     execution counts, attachments or other metadata. Pre-v4 notebooks and
     ones with `worksheets` are refused.
   - **Code** (built): the scripts, SQL and notebooks the agent created or

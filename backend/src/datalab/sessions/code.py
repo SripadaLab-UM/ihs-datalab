@@ -255,7 +255,7 @@ class Notebook:
         return sum(c.outputs for c in self.cells)
 
 
-_KERNELSPEC_KEYS = ("name", "display_name", "language")
+_KERNELSPEC_KEYS = ("name", "language")  # not display_name: free text, never shown
 _LANGUAGE_INFO_KEYS = ("name", "version", "file_extension", "mimetype")
 
 
@@ -264,7 +264,8 @@ def _load_notebook(data: bytes) -> tuple[dict[str, Any], list[int]] | None:
 
     Only what DataLab shows is kept: `nbformat` and `nbformat_minor`; of the
     metadata, the kernel's and language's names (strings only); and for each
-    cell its type (code, markdown or raw), source, id, and empty metadata. A
+    cell its type (code, markdown or raw), source, a fresh id (cell-1, cell-2…),
+    and empty metadata. A
     code cell gets no outputs and no execution count. Anything else (outputs,
     attachments, unknown keys, nested metadata, papermill parameters) is left
     behind, since any of it can hold data. None if it isn't a notebook DataLab
@@ -300,9 +301,8 @@ def _load_notebook(data: bytes) -> tuple[dict[str, Any], list[int]] | None:
             source = [part for part in source if isinstance(part, str)]
         elif not isinstance(source, str):
             source = ""
-        clean: dict[str, Any] = {"cell_type": kind}
-        if isinstance(cell.get("id"), str) and len(cell["id"]) <= 64:
-            clean["id"] = cell["id"]
+        # A fresh id: the original is free text DataLab never shows.
+        clean: dict[str, Any] = {"cell_type": kind, "id": f"cell-{len(cells) + 1}"}
         clean["metadata"] = {}
         clean["source"] = source
         if kind == "code":
