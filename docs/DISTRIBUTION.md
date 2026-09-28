@@ -57,8 +57,25 @@ It comes from the install page in the app repo. The installer then:
    Settings. The installer refuses to run as root (`sudo`), and so does
    `datalab github sign-in`: the sign-in belongs in the person's own
    keychain.
-5. **Adds a DataLab launcher**: an app in Applications on Mac, and a Start
-   menu entry on Windows. The first launch opens **Connections**, which
+5. **Adds a DataLab launcher**, named for its profile ("DataLab", or
+   "DataLab (practice)") and with that profile's icon (see "Branding"):
+   - Mac: an app in `/Applications` if the person can add to it without
+     `sudo` (an administrator account can), otherwise in `~/Applications`.
+     An app of the same name in `/Applications` that isn't DataLab's (another
+     bundle id) is left alone, and DataLab goes in `~/Applications`; an
+     earlier installer's copy in the other folder is removed. A link to the
+     app goes on the Desktop (`~/Desktop/DataLab`), replacing only a link to
+     a DataLab app of that name. The installer ends by printing where the
+     app, the Desktop shortcut and the program files are, then, only when
+     run from a terminal (not a pipe or script), offers "Show in Finder"
+     (`open -R`) and "Open DataLab now?". `DATALAB_SYSTEM_APPLICATIONS`
+     stands in for `/Applications` in tests.
+   - Windows: a Start menu entry and a Desktop shortcut, the same for both.
+   Both run the launcher's command (`bin/datalab`, `bin\datalab.cmd`), never
+   a version's own folder, so they keep working after an update. The icon is
+   copied out of the package into the app bundle (Mac) or `<app>\icons`
+   (Windows), so removing an old version doesn't take it away.
+   The first launch opens **Connections**, which
    asks for the U-M GPT key and Oracle password and saves them to the
    keychain. It then opens **Safety check** so the user can see everything
    pass.
@@ -279,16 +296,20 @@ bin/datalab           the launcher's command: runs `current` (datalab.cmd on Win
 downloads/<version>/  a release's files while it's being installed
 ```
 
-The launcher (DataLab.app, the Start menu entry) runs `bin/datalab serve`,
-so switching `current` is all an update changes in it. If the version
+The launchers (DataLab.app and its Desktop shortcut, the Start menu entry and
+Desktop shortcut on Windows) run `bin/datalab serve`, so switching `current`
+is all an update changes in them (`tests/test_installer_macos.py` updates and
+prunes a version as the updater does, then opens the app through its Desktop
+shortcut). If the version
 `current` names can't run, the Mac `bin/datalab` falls back to `previous`
 and says so; by hand, `versions/<old>/bin/datalab versions --use <old>`
 (`Scripts\datalab.exe` on Windows) points it back.
 
 **The real and practice DataLabs share all of this**: the versions, `current`
 and `previous`. An update switches both, so it refuses while the other
-profile's DataLab is open. Each has its own launcher on Mac, "DataLab" and
-"DataLab (practice)", so installing one never replaces the other's. An installer from
+profile's DataLab is open. Each has its own launcher, "DataLab" and
+"DataLab (practice)" with icons of their own, so installing one never
+replaces the other's. An installer from
 before this layout used `uv tool install`; that copy can't update itself
 (Updates says so), and the new installer replaces it.
 
@@ -452,7 +473,10 @@ deleted from the Workspace.
 
 ## Uninstalling
 
-The uninstaller removes the app, the launcher, the images, and the keychain
+The uninstaller removes the app, the launchers and their Desktop shortcuts
+(on Mac, `/Applications` copies only if their bundle id is DataLab's, and
+Desktop links only if they point at a DataLab app; on Windows, Desktop
+shortcuts only if they run `bin\datalab.cmd`), the images, and the keychain
 entries. It asks separately, showing sizes, whether to delete the data folder.
 It never touches export destinations. On Windows it also removes what the
 installer left: the after-restart logon task or Startup shortcut, its
@@ -567,9 +591,9 @@ Windows specifics).
     --default-index https://pypi.org/simple -r requirements.txt`, no `UV_*`,
     `PIP_*` or `PYTHONPATH` from the environment, and the package checked
     against its line in `requirements.txt` first (the log says "Checked:
-    SHA-256 of ..."). The Start menu entry ("DataLab", or "DataLab
-    (practice)" with `-Practice`) runs `bin\datalab.cmd`, which opens the
-    version `current` names. A copy an older installer made with
+    SHA-256 of ..."). The Start menu entry and the Desktop shortcut
+    ("DataLab", or "DataLab (practice)" with `-Practice`, each with its own
+    `.ico`) run `bin\datalab.cmd`, which opens the version `current` names. A copy an older installer made with
     `uv tool install` is removed once the new one is in place.
   - Without `-Package`, the installer uses the one
     `datalab-<version>-py3-none-any.whl` in its own folder, so the command in
@@ -615,8 +639,9 @@ Windows specifics).
   - The `docker-users` checks look first (the group, then its members,
     quietly), so the expected cases (no group yet, already a member) don't
     show up in logs as errors.
-  - `uninstall.ps1` removes every installed version and both Start menu
-    entries: only `versions`, `bin`, `current` and `previous` in the app
+  - `uninstall.ps1` removes every installed version, both Start menu
+    entries and both Desktop shortcuts: only `versions`, `bin`, `icons`,
+    `current` and `previous` in the app
     folder (the folder itself only if nothing else is left in it), the
     installer's staging folder and DataLab's own uv. It ends by saying what
     it leaves installed (Docker Desktop, WSL and its Windows features, uv's
@@ -640,6 +665,28 @@ Windows specifics).
   DataLab's versions and the Start menu entry would land where a normal run
   never finds them. On the re-test machine the installer was started as a
   one-off scheduled task for the person's account.
+
+## Branding
+
+The mark is "d." (the wordmark's period) on a square of ink; practice is the
+same letter on cream with an amber period and edge, so the two never look
+alike, even as a 16-pixel favicon. `branding/build.py` holds its geometry and
+writes everything made from it:
+
+| File | Used by |
+| --- | --- |
+| `branding/datalab-mark[-practice].svg`, `-1024.png` | the source, for docs and slides |
+| `frontend/public/favicon[-practice].svg` | the browser tab (light and dark, by `prefers-color-scheme`) |
+| `frontend/public/favicon[-practice]-32.png`, `apple-touch-icon[-practice].png` | browsers without SVG favicons |
+| `backend/src/datalab/branding/DataLab[-practice].icns` | the Mac app (in the package, copied into the app) |
+| `backend/src/datalab/branding/DataLab[-practice].ico` | the Windows shortcuts (copied to `<app>\icons`) |
+
+Regenerate with `uv run --no-project --with pillow python branding/build.py`
+(on a Mac it uses `iconutil` for the `.icns`), and commit what it writes. The
+header draws the same mark in `frontend/src/app/brand.tsx` with the paper
+tokens; on practice it adds a quiet "practice" beside the name, and swaps the
+tab's icon and title for practice's. The prototype's Block M wasn't carried
+over: it's the University's mark, not DataLab's.
 
 ## Connectivity
 

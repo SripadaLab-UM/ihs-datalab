@@ -2,8 +2,8 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File uninstall.ps1 [-DeleteData | -KeepData]
 #
-# Removes DataLab (every version installed side by side), its Start menu
-# entries, its container images, and the keys it saved in Credential Manager,
+# Removes DataLab (every version installed side by side), its Start menu and Desktop
+# shortcuts, its container images, and the keys it saved in Credential Manager,
 # and what the installer left behind (its after-restart task or shortcut, and
 # its progress files). It asks before deleting DataLab's data folder
 # (conversations and query results). It never touches your export folders, and
@@ -147,7 +147,7 @@ if ((Test-Path -LiteralPath $Shim) -and (Test-Path -LiteralPath (Join-Path $Root
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $uninstalled = $true
     # Only what install.ps1 puts there; anything else in the folder stays.
-    foreach ($name in "versions", "bin") { Remove-Tree (Join-Path $Root $name) }
+    foreach ($name in "versions", "bin", "icons") { Remove-Tree (Join-Path $Root $name) }
     foreach ($name in "current", "previous") {
         $file = Join-Path $Root $name
         $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
@@ -174,6 +174,16 @@ $StartMenu = Join-Path $Env:APPDATA "Microsoft\Windows\Start Menu\Programs"
 foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
     $Link = Join-Path $StartMenu $name
     if (Test-Path -LiteralPath $Link) { Remove-Item -LiteralPath $Link }
+}
+# The Desktop shortcuts, only if they're DataLab's (they run bin\datalab.cmd).
+$Desktop = [Environment]::GetFolderPath("Desktop")
+if ($Desktop) {
+    foreach ($name in "DataLab.lnk", "DataLab (practice).lnk") {
+        $Link = Join-Path $Desktop $name
+        if (-not (Test-Path -LiteralPath $Link -PathType Leaf)) { continue }
+        $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($Link)
+        if ("$($Shortcut.Arguments)" -like "*\bin\datalab.cmd*") { Remove-Item -LiteralPath $Link }
+    }
 }
 Write-Host "DataLab has been removed."
 Write-Host ""

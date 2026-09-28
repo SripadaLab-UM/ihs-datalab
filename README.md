@@ -31,16 +31,33 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install-windows.ps1 -Setting
 It installs the `datalab-…whl` package in the same folder. Keep only one
 there, or name it with `-Package <file>`. If Windows needs an administrator
 for WSL or Docker Desktop, the installer says so first, asks once, and then
-carries on by itself after the restart. Add `-Practice` for the practice
-DataLab (synthetic data only).
+carries on by itself after the restart.
+
+Add `--profile practice` on Mac (`-Practice` on Windows) for the practice
+DataLab. Each profile is installed on its own: installing practice doesn't add
+the real DataLab, and the other way round.
 
 The installer asks for your U-M GPT key and the database password, and saves
-them in your computer's keychain. Then open **DataLab** from Applications
-(Mac) or the Start menu (Windows).
+them in your computer's keychain. At the end it says where everything went.
+
+**Where to find it.** Real and practice each get their own app, with their
+own icon: **DataLab** (the "d." mark on ink) and **DataLab (practice)** (the
+same mark on cream, with an amber edge).
+
+- **Mac:** the app is in **/Applications**, or in your own Applications
+  folder (`~/Applications`) if your account can't add to /Applications
+  without an administrator. There's a shortcut to it on your **Desktop**, and
+  Spotlight finds it (Cmd-Space, type DataLab). The installer offers to show
+  it in Finder and to open it.
+- **Windows:** a shortcut on your **Desktop** and an entry in the **Start
+  menu**.
+
+The app and its shortcuts open whichever version is in use, so they keep
+working after DataLab updates itself.
 
 **To remove DataLab**, run `uninstall-macos.sh` or `uninstall-windows.ps1`.
-It asks before deleting DataLab's data folder, and never touches your export
-folders.
+It removes the apps and their shortcuts too, asks before deleting DataLab's
+data folder, and never touches your export folders.
 
 ## What it promises
 
@@ -68,6 +85,7 @@ backend/     the DataLab app (Python): data service, agent tools, API
 frontend/    the web UI (React)
 images/      the agent image, and a small probe image for CI
 installer/   Mac and Windows install and uninstall scripts
+branding/    the DataLab mark, and the script that makes the favicons and app icons
 synthetic/   a fake IHS database for development, tests, and practice mode
 spikes/      throwaway proofs of concept kept as design evidence
 docs/        design and safety documentation

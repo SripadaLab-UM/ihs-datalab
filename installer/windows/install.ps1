@@ -28,7 +28,8 @@
 #      which go into Windows Credential Manager.
 #   7. Offers the GitHub sign-in for the lab's knowledge base and pipelines, then
 #      downloads both. Skipped for the practice profile (-Practice).
-#   8. Adds DataLab to the Start menu ("DataLab", or "DataLab (practice)").
+#   8. Adds DataLab to the Start menu and the Desktop ("DataLab", or "DataLab (practice)",
+#      each with its own icon).
 #
 # Everything after step 1 runs as you, without administrator rights.
 param(
@@ -1279,7 +1280,7 @@ if ($Practice) {
     Say "Skipped. Sign in later in DataLab, under Settings > GitHub."
 }
 
-Step "Step 8 of 8: Adding DataLab to the Start menu"
+Step "Step 8 of 8: Adding DataLab to the Start menu and the Desktop"
 # DataLab runs in a PowerShell window, so it's easy to see it's running and to
 # quit (close the window or press Ctrl-C). It opens the version `current`
 # names, which is what an update switches. Real and practice each have their
@@ -1297,17 +1298,40 @@ if (Test-Path -LiteralPath $Earlier) {
         Say "(Removed the Start menu entry an earlier installer made.)"
     }
 }
-$Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $StartMenu "$LinkName.lnk"))
-$Shortcut.TargetPath = $WindowsPowerShell
-$Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$([System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab))' --profile $DataLabProfile serve`""
-$Shortcut.Description = if ($Practice) { "IHS DataLab (practice: synthetic data only)" } else { "IHS DataLab" }
-$Shortcut.Save()
-Good "Added $LinkName to the Start menu."
+# Each profile has its own icon (practice: the same mark on cream, with an
+# amber edge). It comes with the package, and is copied beside bin\ so an
+# update that later removes this version's folder doesn't take it away.
+$IconName = if ($Practice) { "DataLab-practice.ico" } else { "DataLab.ico" }
+$Icons = Join-Path $Root "icons"
+$Icon = Join-Path $Icons $IconName
+$PackagedIcon = Join-Path $Target "Lib\site-packages\datalab\branding\$IconName"
+if (Test-Path -LiteralPath $PackagedIcon -PathType Leaf) {
+    New-Item -ItemType Directory -Force -Path $Icons | Out-Null
+    Copy-Item -LiteralPath $PackagedIcon $Icon -Force
+}
+# The same entry in the Start menu and on the Desktop. Both run bin\datalab.cmd,
+# never a version's own folder, so they keep working after an update.
+$Desktop = [Environment]::GetFolderPath("Desktop")
+$Links = @(Join-Path $StartMenu "$LinkName.lnk")
+if ($Desktop) { $Links += Join-Path $Desktop "$LinkName.lnk" }
+foreach ($path in $Links) {
+    $Shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
+    $Shortcut.TargetPath = $WindowsPowerShell
+    $Shortcut.Arguments = "-NoProfile -NoExit -Command `"& '$([System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($DataLab))' --profile $DataLabProfile serve`""
+    $Shortcut.Description = if ($Practice) { "IHS DataLab (practice: synthetic data only)" } else { "IHS DataLab" }
+    if (Test-Path -LiteralPath $Icon -PathType Leaf) { $Shortcut.IconLocation = "$Icon,0" }
+    $Shortcut.Save()
+}
+Good "Added $LinkName to the Start menu$(if ($Desktop) { ' and the Desktop' })."
 Remove-Item $ResumeFile -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "All done! DataLab is installed." -ForegroundColor Green
-Say "To open it: Start menu > type $LinkName > press Enter. It opens in your browser."
+Say "Start menu entry:  $(Join-Path $StartMenu "$LinkName.lnk")"
+if ($Desktop) { Say "Desktop shortcut:  $(Join-Path $Desktop "$LinkName.lnk")" }
+Say "Program files:     $Root"
+Say "To open it: double-click $LinkName on your Desktop, or Start menu > type $LinkName"
+Say "> press Enter. It opens in your browser."
 Say "A small window stays open while DataLab runs; close it to quit DataLab."
 Say "(Or run: `"$DataLab`" --profile $DataLabProfile serve)"
 } finally {

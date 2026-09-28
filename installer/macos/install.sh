@@ -20,7 +20,12 @@
 #      which go into your macOS Keychain.
 #   6. Offers the GitHub sign-in for the lab's knowledge base and pipelines, then
 #      downloads both. Skipped for the practice profile.
-#   7. Adds DataLab to your Applications folder ("DataLab (practice)" for practice).
+#   7. Adds the DataLab app ("DataLab (practice)" for practice, with its own icon) to
+#      /Applications, or to ~/Applications if you can't add to /Applications without
+#      sudo, and a shortcut to it on your Desktop. At the end it says where everything
+#      went and offers to show the app in Finder and open it.
+#
+# DATALAB_SYSTEM_APPLICATIONS (for tests) stands in for /Applications.
 set -eu
 
 # Everything goes in your own user account: never run this as root.
@@ -210,38 +215,102 @@ else
 fi
 
 step "7/7 Launcher"
-# Real and practice each have their own launcher, so neither replaces the other.
+# Real and practice each have their own app, name and icon, so neither
+# replaces the other and they're easy to tell apart.
 if [ "$PROFILE" = "practice" ]; then
-  APP="$HOME/Applications/DataLab (practice).app"
   NAME="DataLab (practice)"
   BUNDLE="edu.umich.ihs.datalab.practice"
+  ICON="DataLab-practice.icns"
 else
-  APP="$HOME/Applications/DataLab.app"
   NAME="DataLab"
   BUNDLE="edu.umich.ihs.datalab"
+  ICON="DataLab.icns"
 fi
+# Whether a bundle is this profile's DataLab app (one this installer made).
+ours() { [ -f "$1/Contents/Info.plist" ] && grep -qF "<string>$BUNDLE</string>" "$1/Contents/Info.plist"; }
+# In /Applications, where people look, if you can add to it without sudo (an
+# administrator account can); otherwise in your own Applications folder
+# (~/Applications, which Finder, Spotlight and Launchpad also show). Something
+# else already called "$NAME.app" in /Applications is left alone.
+SYSTEM_APPS="${DATALAB_SYSTEM_APPLICATIONS:-/Applications}"
+USER_APPS="$HOME/Applications"
+if [ -d "$SYSTEM_APPS" ] && [ -w "$SYSTEM_APPS" ] && [ ! -L "$SYSTEM_APPS/$NAME.app" ] \
+  && { [ ! -e "$SYSTEM_APPS/$NAME.app" ] || ours "$SYSTEM_APPS/$NAME.app"; }; then
+  APPS="$SYSTEM_APPS"
+else
+  APPS="$USER_APPS"
+fi
+APP="$APPS/$NAME.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# The icon comes with the package. The app keeps its own copy, so an update
+# that later removes this version's folder doesn't take the icon with it.
+ICONFILE=""
+for found in "$TARGET"/lib/python*/site-packages/datalab/branding/"$ICON"; do
+  if [ -f "$found" ] && cp "$found" "$APP/Contents/Resources/DataLab.icns"; then ICONFILE="DataLab"; fi
+done
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>CFBundleName</key><string>$NAME</string>
+  <key>CFBundleDisplayName</key><string>$NAME</string>
   <key>CFBundleIdentifier</key><string>$BUNDLE</string>
   <key>CFBundleExecutable</key><string>DataLab</string>
   <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleIconFile</key><string>$ICONFILE</string>
 </dict></plist>
 PLIST
 # DataLab runs in a Terminal window, so it's easy to see it's running and to quit
-# (close the window or press Ctrl-C). It opens the version `current` names, which
-# is what an update switches.
+# (close the window or press Ctrl-C). It runs bin/datalab, never a version's own
+# folder: that opens the version `current` names, which is what an update
+# switches, so the app (and the Desktop shortcut to it) keeps working.
 cat > "$APP/Contents/MacOS/DataLab" <<LAUNCH
 #!/bin/sh
 osascript -e 'tell application "Terminal" to activate' \\
   -e 'tell application "Terminal" to do script "\"$DATALAB\" --profile $PROFILE serve"'
 LAUNCH
 chmod +x "$APP/Contents/MacOS/DataLab"
-echo "Added $NAME to $HOME/Applications."
+touch "$APP" # so Finder picks up the icon
+echo "Added $NAME to $APPS."
+# An earlier installer's copy in the other Applications folder would be a
+# second, stale "$NAME".
+for other in "$USER_APPS/$NAME.app" "$SYSTEM_APPS/$NAME.app"; do
+  if [ "$other" != "$APP" ] && [ ! -L "$other" ] && ours "$other"; then
+    rm -rf "$other" && echo "(Removed the copy an earlier installer put in $(dirname "$other").)"
+  fi
+done
+# A shortcut on the Desktop: a link to the app. One already there is replaced
+# only if it's a link to a DataLab app of this name.
+DESKTOP_LINK=""
+LINK="$HOME/Desktop/$NAME"
+if [ -d "$HOME/Desktop" ]; then
+  if [ -L "$LINK" ] || [ ! -e "$LINK" ]; then
+    case "$(readlink "$LINK" 2>/dev/null || echo "/$NAME.app")" in
+      */"$NAME.app")
+        if rm -f "$LINK" && ln -s "$APP" "$LINK" 2>/dev/null; then
+          DESKTOP_LINK="$LINK"
+          echo "Added a shortcut to $NAME on your Desktop."
+        else
+          echo "A Desktop shortcut couldn't be added (macOS may not let Terminal use the Desktop)."
+        fi ;;
+      *) echo "Your Desktop already has a shortcut called $NAME to something else; it was left alone." ;;
+    esac
+  else
+    echo "Your Desktop already has something called $NAME; it was left alone."
+  fi
+fi
 
 step "Done"
-echo "Open $NAME from your Applications folder (or run: \"$DATALAB\" --profile $PROFILE serve)."
+echo "$NAME is installed."
+echo "  The app:           $APP"
+if [ -n "$DESKTOP_LINK" ]; then echo "  Desktop shortcut:  $DESKTOP_LINK"; fi
+echo "  Program files:     $ROOT"
+echo "Open it with the Desktop shortcut, from Applications in Finder, or with Spotlight"
+echo "(Cmd-Space, then type $NAME). It opens a Terminal window, then your browser."
+echo "(Or run: \"$DATALAB\" --profile $PROFILE serve)"
+# Only with someone at the keyboard: not when this runs from a pipe or a script.
+if [ -t 0 ] && [ -t 1 ]; then
+  if ask "Show $NAME in Finder? [Y/n]"; then open -R "$APP" || true; fi
+  if ask "Open $NAME now? [Y/n]"; then open "$APP" || true; fi
+fi
