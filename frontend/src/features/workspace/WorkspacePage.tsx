@@ -10,7 +10,7 @@ import { SHOW_STEP } from "@/components/chat/showStep";
 import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { settingsLink } from "@/features/settings/highlight";
-import { useConnections } from "@/features/toolbar/ConnectionShortcuts";
+import { useConnections, whilePracticeDatabaseStarts } from "@/features/toolbar/ConnectionShortcuts";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
 import { DeleteConversation } from "./DeleteConversation";
@@ -283,15 +283,7 @@ export function WorkspacePage() {
  */
 function WelcomeNotes() {
   const connections = useConnections().data;
-  const health = useQuery({
-    queryKey: ["health"],
-    queryFn: api.health,
-    // While practice's database starts, ask again every few seconds.
-    refetchInterval: (query) => {
-      const database = query.state.data?.practice_database;
-      return database && database !== "ready" && database !== "problem" ? 3000 : false;
-    },
-  });
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: whilePracticeDatabaseStarts });
   const noKey = connections?.model.key === "missing";
   const database = health.data?.practice_database;
   if (!noKey && (!database || database === "ready")) return null;

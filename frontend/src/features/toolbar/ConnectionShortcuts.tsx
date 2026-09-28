@@ -37,6 +37,12 @@ export function useConnectionTest() {
   };
 }
 
+/** While practice's database is starting, health is asked again every few seconds. */
+export function whilePracticeDatabaseStarts(query: { state: { data?: Health } }): number | false {
+  const database = query.state.data?.practice_database;
+  return database && database !== "ready" && database !== "problem" ? 3000 : false;
+}
+
 type Tone = "good" | "attn" | undefined;
 interface Standing {
   /** Words for the state ("connected", "password missing"). */
@@ -97,7 +103,7 @@ export function DatabaseShortcut() {
   const test = useConnectionTest();
   const shown = connections.data;
   const result = test.result?.database;
-  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health, refetchInterval: whilePracticeDatabaseStarts });
   const standing = databaseStanding(shown, result, health.data?.practice_database);
   const practice = shown?.oracle.practice;
   return (
