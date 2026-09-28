@@ -11,12 +11,15 @@ from pathlib import Path
 from typing import Any
 
 from datalab.config import load_settings
+from datalab.docker_path import ensure_docker_on_path
 
 
 def main(argv: list[str] | None = None) -> int:
     from datalab import __version__
 
     _console_never_fails()
+    # Docker Desktop's `docker`, when its link isn't on PATH (docker_path.py).
+    ensure_docker_on_path()
 
     parser = argparse.ArgumentParser(prog="datalab")
     parser.add_argument("--version", action="version", version=f"datalab {__version__}")

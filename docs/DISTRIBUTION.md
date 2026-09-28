@@ -32,9 +32,11 @@ tested.
 The user pastes **one command** into Terminal on Mac or PowerShell on Windows.
 It comes from the install page in the app repo. The installer then:
 
-1. **Checks Docker Desktop.** If it's missing, the installer downloads and
-   installs it. This asks for an administrator password on Mac, and on
-   Windows it enables WSL2 and may need one restart.
+1. **Checks Docker Desktop.** If it's missing, the installer offers to
+   download and install it, and starts it if it isn't running. On Mac the
+   person accepts Docker's agreement in Docker's own first-run window (see
+   "Mac: Docker Desktop" below); on Windows it enables WSL2 and may need one
+   restart.
 2. **Installs DataLab** from the latest release into a user-level folder,
    using `uv`. `uv` brings its own Python, so there is no Python or Node setup
    to do, and no admin rights are needed for this step. Each version gets a
@@ -515,7 +517,79 @@ It never touches export destinations. On Windows it also removes what the
 installer left: the after-restart logon task or Startup shortcut, its
 progress files, and the elevated part's result folder in `%ProgramData%`. It
 leaves Docker Desktop, WSL and `docker-users` membership as they are (see
-Windows specifics).
+Windows specifics). On Mac it leaves Docker Desktop too, including one the
+installer added; Docker's own Troubleshoot → Uninstall removes it (with its
+containers, images and volumes).
+
+## Mac: Docker Desktop
+
+Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
+
+- **Finding it.** Docker Desktop is looked for in `/Applications` and
+  `~/Applications`, and its `docker` command on PATH, then inside the app
+  (`Docker.app/Contents/Resources/bin/docker`) and in `~/.docker/bin`, so a
+  missing `/usr/local/bin/docker` link doesn't matter. The command found is
+  used by its full path, and its folder goes first on PATH for the rest of
+  the install (it also holds Docker's credential helpers, which `docker
+  pull` uses). DataLab does the same each time it starts
+  (`datalab/docker_path.py`, called from `datalab.cli.main`), so the app
+  launched from Finder or the Desktop works without the link too.
+- **Running already:** nothing is done. **Installed but stopped:** it opens
+  the app and waits until `docker info` answers (up to 5 minutes, saying
+  every 30 seconds that it's still waiting; each `docker info` is given 20
+  seconds). An existing Docker Desktop is never reinstalled, upgraded, reset
+  or reconfigured; the installer never prunes or removes containers, images
+  or volumes, and never touches Docker's settings or data
+  (`~/Library/Group Containers/group.com.docker`).
+- **Missing:** it says what it will do and asks
+  `Download and install Docker Desktop? [y/N]` (no answer, or no terminal,
+  means no; `--install-docker` answers yes beforehand). Before asking it
+  checks the Mac: Apple silicon (`sysctl -n hw.optional.arm64` is 1, which is
+  also true under Rosetta, where `uname -m` says x86_64) or Intel; macOS 14
+  or newer (Docker supports the current and two previous major releases; 14
+  is Docker Desktop 4.93's own minimum); and about 6 GB free. Then:
+  1. Downloads `https://desktop.docker.com/mac/main/<arm64|amd64>/Docker.dmg`
+     (https only, resumable: a partial download in
+     `~/Library/Caches/DataLab/docker-desktop/` is continued next time).
+  2. Attaches it read-only at a private mount point (not `/Volumes`), and
+     checks the app inside before anything from it runs: `codesign --verify
+     --deep --strict`, `spctl -a -vv -t exec` accepting it as notarized
+     Developer ID from `Docker Inc (9BNSXJN65R)`, and `codesign -dv` showing
+     team `9BNSXJN65R` and identifier `com.docker.docker`. It also checks the
+     app's own `LSMinimumSystemVersion` against this Mac. Any failure: the
+     image is detached, the download deleted, and nothing installed.
+  3. Copies the app with `ditto` (which keeps its signature) to
+     `/Applications` if the account can add to it without `sudo`, otherwise
+     `~/Applications` (Docker works from there; the first-run window then
+     needs "Use advanced settings" with the command line tools set to
+     "User" if there's no administrator password). The copy goes under a
+     temporary name, is checked again, then renamed, so a half-done copy is
+     never taken for Docker Desktop. Then the image is detached and the
+     download deleted.
+  4. Opens Docker Desktop and prints what its first-run window asks: the
+     Docker Subscription Service Agreement, which the person reads and
+     accepts themselves (the installer never accepts it for them), "Use
+     recommended settings" (and the Mac password, for Docker's helper), and
+     that signing in is optional (Skip). It waits up to 15 minutes for `docker
+     info`, then the DataLab install carries on by itself.
+- **When it stops**, it says why and what to do, and that running the
+  installer again carries on from there: download failed (resumed next
+  time), download damaged or not signed by Docker (deleted), the person
+  said no, the copy was blocked (MDM or permissions: install from the
+  organisation's Self Service or ask IT), Docker quit before it was ready
+  (usually the agreement declined), Docker didn't start in time (answer its
+  window, or Restart from its whale menu), not enough disk space, an
+  unsupported processor, or macOS too old. Ctrl-C says the same. Nothing is
+  done twice on a re-run: an installed Docker Desktop is found and started.
+- The prompt says Docker Desktop's license terms apply to its use and that
+  an organisation may have its own guidance; it doesn't say what a
+  particular organisation's license status is.
+- Tests (`backend/tests/test_installer_macos.py`) run the real script
+  against stand-ins for `docker`, `open`, `curl`, `hdiutil`, `codesign`,
+  `spctl`, `sw_vers`, `sysctl`, `uname`, `df`, `pgrep` and `sleep`.
+  `DATALAB_DOCKER_WAIT_SECONDS` and `DATALAB_DOCKER_POLL_SECONDS` change the
+  wait; `DATALAB_INSTALL_STOP_AFTER_DOCKER=1` stops once Docker is ready,
+  before anything is installed.
 
 ## Windows specifics
 
