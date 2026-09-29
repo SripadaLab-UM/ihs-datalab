@@ -28,5 +28,16 @@ Workflow:
 5. Summarize assumptions, filters, missing-data handling, and the paths of
    the files you created.
 
+Correctness checks (AGENTS.md has them in full):
+
+- Person-days: state the day rule (local date, UTC date, or start date) and
+  count participant-dates, never distinct timestamps; check for repeated
+  participant-days before coverage or a daily join.
+- One cohort, one row per participant, for every numerator and denominator;
+  check for IDs outside it and duplicate cohort IDs.
+- Combine per-source aggregates in R or Python, and say whenever a result
+  is bounded (a sample or preview never stands in for the full result).
+- Record the day rule and the cohort rule in the plan and the report.
+
 Useful commands: `profile-data`, `render-report`, `rg`, `jq`, `sqlite3`,
 `pandoc`, `pdftotext`, `tesseract`.

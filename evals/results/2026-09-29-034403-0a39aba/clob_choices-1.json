@@ -1,0 +1,46 @@
+{
+  "task": "clob_choices",
+  "mode": "extraction",
+  "prompt": "In the 2025 cohort's survey dictionary, what distinct sets of answer choices are there, and how many dictionary rows use each?",
+  "tests": "a CLOB column grouped (TO_CHAR first)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "answer-choice sets and their rows",
+      "passed": true,
+      "detail": "two sets: the PHQ-9 choices on 90 rows and the substance-use choices on 20 (of 110)"
+    }
+  ],
+  "answer": "I understood the request as: in the 2025 cohort survey dictionary, group exact `ANSWERCHOICES` sets and count how many dictionary rows use each.\n\nResult: 2 distinct answer-choice sets across 110 dictionary rows.\n\n| Answer choices | Dictionary rows |\n|---|---:|\n| `0=Not at all|1=Several days|2=More than half the days|3=Nearly every day` | 90 |\n| `0=Never|1=Once or Twice|2=Monthly|3=Weekly|4=Daily or Almost Daily` | 20 |\n\nFiles:\n- Dataset: `/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets.csv`\n- Data dictionary: `/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets_dictionary.md`\n\nCatalog evidence: `search_catalog` identified `IHS_2025.STG_SURVEYDICTIONARY` with `ANSWERCHOICES`, `QUESTIONTEXT`, `ANSWERFORMAT`, and survey metadata columns. `describe_table` confirmed `ANSWERCHOICES` is a `CLOB`, so I converted it with `TO_CHAR(SUBSTR(..., 1, 1000))` before grouping.\n\nSQL run:\n```sql\nSELECT COUNT(*) AS total_rows,\n       COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n       SUM(CASE WHEN ANSWERCHOICES IS NULL THEN 1 ELSE 0 END) AS rows_without_answerchoices,\n       MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length,\n       MIN(LENGTH(ANSWERCHOICES)) AS min_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY\n```\nPurpose: profile source rows and confirm conversion would not truncate. Row count: 1 summary row.\n\n```sql\nSELECT TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000)) AS answer_choices,\n       COUNT(*) AS dictionary_rows\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))\nORDER BY COUNT(*) DESC, TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))\n```\nPurpose: final extraction. Row count: 2 rows.\n\nAssumptions and caveats: this treats answer-choice sets as exact stored strings, with no relabeling or normalization. This is a dictionary-row count, not participant responses. The local knowledge base was not available in `/work/kb`, so I relied on the live catalog/schema checks.",
+  "finished": true,
+  "seconds": 54.83210587501526,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT COUNT(*) AS total_rows,\n       COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n       SUM(CASE WHEN ANSWERCHOICES IS NULL THEN 1 ELSE 0 END) AS rows_without_answerchoices,\n       MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length,\n       MIN(LENGTH(ANSWERCHOICES)) AS min_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY",
+    "SELECT TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000)) AS answer_choices,\n       COUNT(*) AS dictionary_rows\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))\nORDER BY COUNT(*) DESC, TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 152047,
+        "inputTokens": 149155,
+        "cachedInputTokens": 91136,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2892,
+        "reasoningOutputTokens": 872
+      },
+      "last": {
+        "totalTokens": 18485,
+        "inputTokens": 17637,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 848,
+        "reasoningOutputTokens": 314
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_7c26c8c2b9ada086",
+  "attempt": 1
+}

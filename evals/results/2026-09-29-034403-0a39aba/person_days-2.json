@@ -1,0 +1,53 @@
+{
+  "task": "person_days",
+  "mode": "extraction",
+  "prompt": "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? A person-day is one participant on one day, from any source; include every participant in the view.",
+  "tests": "text timestamps: several a day, some after midnight or another date in UTC",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one person-day per participant-date",
+      "passed": true,
+      "detail": "expected 19,198 (RECORD_DATE's local date), 21,951 (its UTC date) or 21,870 (STARTDATE's date); 25,132 counts each timestamp as a day"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day, and in what time zone"
+    }
+  ],
+  "answer": "Using the 2025 HealthKit resting heart rate view, I count **19,198 person-days**.\n\nI understood the request as: include every participant appearing in `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE`; define a person-day as one `PARTICIPANTIDENTIFIER` on one local `RECORD_DATE` day; collapse across all sources.\n\nCatalog evidence: `search_catalog` found `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE` as a view. `describe_table` confirmed `PARTICIPANTIDENTIFIER`, `RECORD_DATE`, `STARTDATE`, `VALUE`, and source fields exist; `RECORD_DATE` is `VARCHAR2(26)`, so I used `SUBSTR(RECORD_DATE, 1, 10)` as the local day rule. The KB was not mounted at `/work/kb`, so I relied on live catalog metadata.\n\nFiles:\n`/work/outputs/ihs_2025_healthkit_resting_hr_person_days.csv`\n`/work/outputs/ihs_2025_healthkit_resting_hr_person_days_dictionary.md`\n\nSQL I ran:\n\n```sql\nSELECT COUNT(*) AS row_count, COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n       COUNT(RECORD_DATE) AS rows_with_record_date, COUNT(STARTDATE) AS rows_with_startdate,\n       COUNT(VALUE) AS rows_with_value\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: missingness/profile check. Result row count: 1 summary row; all 25,132 rows had participant, record date, start date, and value.\n\n```sql\nSELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n       MIN(SUBSTR(RECORD_DATE, 1, 10)) AS min_local_record_day,\n       MAX(SUBSTR(RECORD_DATE, 1, 10)) AS max_local_record_day,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || RECORD_DATE) AS participant_timestamps,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || SUBSTR(RECORD_DATE, 1, 10)) AS participant_local_days\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL AND RECORD_DATE IS NOT NULL\n```\nPurpose: timestamp-vs-day correctness check. Result row count: 1 summary row; 66 participants, date range 2025-04-02 to 2026-07-01, 25,132 participant-timestamps versus 19,198 participant-days.\n\n```sql\nWITH participant_days AS (\n  SELECT PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10) AS local_record_day,\n         COUNT(*) AS rows_per_participant_day,\n         COUNT(DISTINCT SOURCEIDENTIFIER) AS source_identifiers_per_day,\n         COUNT(DISTINCT SOURCENAME) AS source_names_per_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10)\n)\nSELECT COUNT(*) AS participant_local_days,\n       SUM(CASE WHEN rows_per_participant_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_multiple_rows,\n       MAX(rows_per_participant_day) AS max_rows_per_participant_day,\n       SUM(CASE WHEN source_identifiers_per_day > 1 OR source_names_per_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_multiple_sources\nFROM participant_days\n```\nPurpose: duplicate/source collapse check. Result row count: 1 summary row; multiple rows per participant-day are present, so row counts would overcount person-days.\n\n```sql\nWITH person_days AS (\n  SELECT PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10) AS local_record_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10)\n)\nSELECT COUNT(*) AS person_days\nFROM person_days\n```\nPurpose: final count. Result row count: 1 row, column `PERSON_DAYS`, value **19,198**.\n\nCaveat to double-check: I used local `RECORD_DATE` day, not UTC day or `STARTDATE`. I also suggested a KB update noting that this view can have multiple rows/sources per participant-day, so person-day analyses should collapse by participant and local date.",
+  "finished": true,
+  "seconds": 87.27873516082764,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(STARTDATE) AS rows_with_startdate,\n  COUNT(VALUE) AS rows_with_value\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  MIN(SUBSTR(RECORD_DATE, 1, 10)) AS min_local_record_day,\n  MAX(SUBSTR(RECORD_DATE, 1, 10)) AS max_local_record_day,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || RECORD_DATE) AS participant_timestamps,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || SUBSTR(RECORD_DATE, 1, 10)) AS participant_local_days\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\nWHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  AND RECORD_DATE IS NOT NULL",
+    "WITH participant_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(RECORD_DATE, 1, 10) AS local_record_day,\n    COUNT(*) AS rows_per_participant_day,\n    COUNT(DISTINCT SOURCEIDENTIFIER) AS source_identifiers_per_day,\n    COUNT(DISTINCT SOURCENAME) AS source_names_per_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10)\n)\nSELECT\n  COUNT(*) AS participant_local_days,\n  SUM(CASE WHEN rows_per_participant_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_multiple_rows,\n  MAX(rows_per_participant_day) AS max_rows_per_participant_day,\n  SUM(CASE WHEN source_identifiers_per_day > 1 OR source_names_per_day > 1 THEN 1 ELSE 0 END) AS participant_days_with_multiple_sources\nFROM participant_days",
+    "WITH person_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(RECORD_DATE, 1, 10) AS local_record_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10)\n)\nSELECT COUNT(*) AS person_days\nFROM person_days"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 225319,
+        "inputTokens": 220219,
+        "cachedInputTokens": 114688,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5100,
+        "reasoningOutputTokens": 1761
+      },
+      "last": {
+        "totalTokens": 22329,
+        "inputTokens": 20879,
+        "cachedInputTokens": 10240,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1450,
+        "reasoningOutputTokens": 430
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_f33d632baab22c4c",
+  "attempt": 2
+}

@@ -13,8 +13,11 @@ import math
 import statistics
 
 import oracledb
+from datalab.config import PRACTICE_ORACLE
 
-SYNTHETIC_DSN = "localhost:1522/FREEPDB1"
+# The synthetic database practice DataLab uses: 127.0.0.1:1522, or
+# DATALAB_PRACTICE_DB_PORT (a second copy beside the first), as the app does.
+SYNTHETIC_DSN = PRACTICE_ORACLE.dsn
 INTERN_START = "2025-07-01"
 INTERN_END = "2026-07-01"
 
@@ -162,6 +165,8 @@ def compute() -> dict[str, dict]:
         )
         suicidality = {int(value): count for value, count in cursor}
 
+        correctness = _correctness(one)
+
     sd = statistics.stdev(changes)
     return {
         "enrolled_count": {
@@ -204,6 +209,125 @@ def compute() -> dict[str, dict]:
             "all_rows_mean": float(phq_all),
         },
         "small_cells": {"suic1_counts": suicidality},
+        **correctness,
+    }
+
+
+RHR = "IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE"  # the V* view renders its dates as text
+VRHR = "IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE"
+# A person-day under each reasonable day rule, and the wrong one: every
+# distinct timestamp counted as a day (the text RECORD_DATE holds a time too).
+DAY_RULES = {
+    "local_record_date": "SUBSTR(h.RECORD_DATE, 1, 10)",  # the date prefix: local date
+    "utc_record_date": "TO_CHAR(SYS_EXTRACT_UTC(TO_TIMESTAMP_TZ(h.RECORD_DATE, "
+    "'YYYY-MM-DD HH24:MI:SS TZH:TZM')), 'YYYY-MM-DD')",
+    "local_start_date": "SUBSTR(h.STARTDATE, 1, 10)",
+}
+RAW_TIMESTAMP = "h.RECORD_DATE"
+COHORT = (
+    "SELECT PARTICIPANTIDENTIFIER, COUNT(*) N FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY "
+    "WHERE STUDY_PARTICIPANT_ID IS NOT NULL GROUP BY PARTICIPANTIDENTIFIER"
+)
+
+
+def _correctness(one) -> dict[str, dict]:
+    """The correctness cases (synthetic/README.md): person-days from text
+    timestamps, a coverage share against a cohort with an out-of-cohort
+    participant and a duplicate cohort row, a CLOB lookup, and an age from
+    the quoted "Bdate" column."""
+
+    def days(rule: str, where: str = "") -> int:
+        return one(
+            f"SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER || '|' || {rule}) FROM {VRHR} h {where}"
+        )[0]
+
+    rows, people = one(f"SELECT COUNT(*), COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM {VRHR}")
+    person_days = {
+        "rows": rows,
+        "participants": people,
+        "raw_timestamps": days(RAW_TIMESTAMP),
+        **{name: days(rule) for name, rule in DAY_RULES.items()},
+    }
+
+    in_cohort = f"WHERE h.PARTICIPANTIDENTIFIER IN (SELECT PARTICIPANTIDENTIFIER FROM ({COHORT}))"
+    cohort_n, cohort_rows, duplicated = one(
+        f"SELECT COUNT(*), SUM(N), COUNT(CASE WHEN N > 1 THEN 1 END) FROM ({COHORT})"
+    )
+    (covered,) = one(f"SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) FROM {RHR} h {in_cohort}")
+    (all_sources,) = one(f"SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM {RHR}")
+    (outside,) = one(
+        f"SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) FROM {RHR} h WHERE NOT EXISTS "
+        "(SELECT 1 FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY s "
+        "WHERE s.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER)"
+    )
+    (in_summary,) = one(
+        f"SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) FROM {RHR} h WHERE EXISTS "
+        "(SELECT 1 FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY s "
+        "WHERE s.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER)"
+    )
+    # Wrong numerators (the whole table; everyone in the summary, enrolled or
+    # not) and the wrong denominator (the cohort's rows, duplicate included).
+    trap_pcts = {
+        100 * numerator / denominator
+        for numerator in (covered, all_sources, in_summary)
+        for denominator in (cohort_n, cohort_rows)
+    } - {100 * covered / cohort_n}
+    coverage = {
+        "cohort_n": cohort_n,
+        "cohort_rows": cohort_rows,  # the trap denominator: a participant counted twice
+        "duplicated_ids": duplicated,
+        "covered": covered,
+        "covered_pct": 100 * covered / cohort_n,
+        "all_source_ids": all_sources,  # the trap numerator: the whole table
+        "outside_summary_ids": outside,
+        "in_summary_ids": in_summary,
+        "trap_pcts": sorted(trap_pcts),
+        **{f"days_{name}": days(rule, in_cohort) for name, rule in DAY_RULES.items()},
+        # Joining the cohort's rows, duplicate included, counts that person's days twice.
+        **{
+            f"inflated_{name}": one(
+                f"SELECT SUM(d) FROM (SELECT c.N * COUNT(DISTINCT {rule}) d FROM {VRHR} h "
+                f"JOIN ({COHORT}) c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER "
+                "GROUP BY h.PARTICIPANTIDENTIFIER, c.N)"
+            )[0]
+            for name, rule in DAY_RULES.items()
+        },
+    }  # fmt: skip
+
+    phq, substances = (
+        one(
+            "SELECT COUNT(*) FROM IHS_2025.STG_SURVEYDICTIONARY "
+            f"WHERE ANSWERCHOICES LIKE '{choices}'"
+        )[0]
+        for choices in ("0=Not at all|%", "0=Never|%")
+    )
+    (dictionary_rows,) = one("SELECT COUNT(*) FROM IHS_2025.STG_SURVEYDICTIONARY")
+
+    exact, whole, n_age, n_all = one(
+        'SELECT AVG(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN MONTHS_BETWEEN(STARTDATE0, "Bdate") / 12 END), '
+        'AVG(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN FLOOR(MONTHS_BETWEEN(STARTDATE0, "Bdate") / 12) END), '
+        'COUNT(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN "Bdate" END), COUNT("Bdate") '
+        "FROM IHS_2025.VW_BASELINE_SURVEY WHERE STARTDATE0 IS NOT NULL"
+    )  # fmt: skip
+    (all_exact,) = one(
+        'SELECT AVG(MONTHS_BETWEEN(STARTDATE0, "Bdate") / 12) FROM IHS_2025.VW_BASELINE_SURVEY '
+        "WHERE STARTDATE0 IS NOT NULL"
+    )
+    return {
+        "person_days": person_days,
+        "cohort_coverage": coverage,
+        "clob_choices": {
+            "phq9_rows": phq,
+            "substance_rows": substances,
+            "rows": dictionary_rows,
+        },
+        "bdate_age": {
+            "enrolled_n": n_age,
+            "mean_age": float(exact),
+            "mean_whole_years": float(whole),
+            "all_rows_n": n_all,
+            "all_rows_mean_age": float(all_exact),
+        },
     }
 
 
@@ -238,6 +362,21 @@ def check(e: dict) -> list[str]:
         problems.append("IHS_2026 Garmin HRV isn't an empty table beside real Garmin users")
     if e["cross_cohort"]["shared_identifiers"] or e["oura_2024"]["oura_objects"]:
         problems.append("the cross-cohort or missing-table trap is gone")
+    d = e["person_days"]
+    rights = [d[name] for name in DAY_RULES]
+    if min(abs(d["raw_timestamps"] - r) for r in rights) < 0.05 * d["raw_timestamps"]:
+        problems.append("counting raw timestamps no longer overcounts person-days")
+    c = e["cohort_coverage"]
+    if not c["outside_summary_ids"] or not c["duplicated_ids"]:
+        problems.append("no out-of-cohort participant or no duplicate cohort row")
+    if min(abs(c["covered_pct"] - t) for t in c["trap_pcts"]) < 0.2:
+        problems.append("a trap coverage share is within 2x the 0.1-point tolerance")
+    inflated = [c[f"inflated_{name}"] for name in DAY_RULES]
+    if set(inflated) & {c[f"days_{name}"] for name in DAY_RULES}:
+        problems.append("a join-inflated person-day total equals a right one")
+    b = e["bdate_age"]
+    if b["enrolled_n"] == b["all_rows_n"]:
+        problems.append("no non-enrolled baseline rows with a date of birth")
     return problems
 
 

@@ -1,0 +1,46 @@
+{
+  "task": "clob_choices",
+  "mode": "extraction",
+  "prompt": "In the 2025 cohort's survey dictionary, what distinct sets of answer choices are there, and how many dictionary rows use each?",
+  "tests": "a CLOB column grouped (TO_CHAR first)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "answer-choice sets and their rows",
+      "passed": true,
+      "detail": "two sets: the PHQ-9 choices on 90 rows and the substance-use choices on 20 (of 110)"
+    }
+  ],
+  "answer": "I understood the request as: for the 2025 cohort survey dictionary, list the distinct `ANSWERCHOICES` sets and count how many dictionary rows use each.\n\nCatalog evidence: `search_catalog` found `IHS_2025.STG_SURVEYDICTIONARY` with `ANSWERCHOICES`; `describe_table` confirmed `ANSWERCHOICES` is a CLOB, so I converted it before grouping. The knowledge base directory was not present at `/work/kb`, so I relied on live catalog metadata.\n\n**Result**\n\n| Answer choices | Dictionary rows |\n|---|---:|\n| `0=Not at all|1=Several days|2=More than half the days|3=Nearly every day` | 90 |\n| `0=Never|1=Once or Twice|2=Monthly|3=Weekly|4=Daily or Almost Daily` | 20 |\n\nDelivered files:\n`/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets.csv`  \n`/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets_dictionary.md`\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS total_dictionary_rows,\n  COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n  SUM(CASE WHEN ANSWERCHOICES IS NULL THEN 1 ELSE 0 END) AS rows_without_answerchoices,\n  MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY\n```\n\nPurpose: profiling. Returned 1 row: 110 dictionary rows, all 110 with answer choices, maximum answer-choice length 72.\n\n```sql\nSELECT\n  TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 4000)) AS answer_choices,\n  COUNT(*) AS dictionary_row_count\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 4000))\nORDER BY dictionary_row_count DESC, answer_choices\n```\n\nPurpose: final extraction. Returned 2 rows with columns `ANSWER_CHOICES` and `DICTIONARY_ROW_COUNT`.\n\nCaveat: this counts exact stored answer-choice strings in the dictionary, not unique survey questions or participant responses. Since the longest value was 72 characters, the CLOB conversion did not truncate the grouped values.",
+  "finished": true,
+  "seconds": 108.70186710357666,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_dictionary_rows,\n  COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n  SUM(CASE WHEN ANSWERCHOICES IS NULL THEN 1 ELSE 0 END) AS rows_without_answerchoices,\n  MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY",
+    "SELECT\n  TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 4000)) AS answer_choices,\n  COUNT(*) AS dictionary_row_count\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 4000))\nORDER BY dictionary_row_count DESC, answer_choices"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 149107,
+        "inputTokens": 146108,
+        "cachedInputTokens": 70656,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2999,
+        "reasoningOutputTokens": 981
+      },
+      "last": {
+        "totalTokens": 18225,
+        "inputTokens": 17511,
+        "cachedInputTokens": 15872,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 714,
+        "reasoningOutputTokens": 221
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_c5afd9f833972ea5",
+  "attempt": 1
+}

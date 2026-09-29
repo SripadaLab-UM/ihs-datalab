@@ -215,6 +215,38 @@ counts each one.
 | Numbers stored as text | HealthKit VALUE, MOOD_SCORE, ANSWERS, STG SURVEYVERSION |
 | Phone-counted HealthKit steps for some non-Apple-Watch iPhone users, so one participant-day can come from two devices | HEALTHKITSTATISTICS_DAILYSTEPS |
 | Survey version 2 for about half of Q1 respondents (2025+) | SURVEYRESULTS, dictionary |
+| Several text timestamps a day per participant; HealthKit device data from people outside the roster; a participant twice in the summary (see "Correctness cases") | VHEALTHKITSAMPLES_RESTINGHEARTRATE, HealthKit tables, VW_IHS_PARTICIPANT_SUMMARY (IHS_2025) |
+
+## Correctness cases (IHS_2025)
+
+Three mistakes an analysis can make and still finish, each with data that
+shows it. `generate.py` (`write_cases`) writes them after everything else,
+from their own random stream, so every other row is exactly what it was
+without them; `verify` counts each one, and the evals `person_days` and
+`cohort_coverage` grade answers against them.
+
+- **Text timestamps, several a day.** `VHEALTHKITSAMPLES_RESTINGHEARTRATE`
+  gives RECORD_DATE as text, a local date plus time and offset
+  (`2025-11-15 23:30:00 -05:00`), and a participant often has more than one
+  sample on a date, some ending after midnight. Counting distinct
+  RECORD_DATE values counts timestamps, not days: a person-day needs a day
+  rule (the text's date prefix, its UTC date, or the sample's start date).
+  One enrolled Apple Watch user (the first with data through the window)
+  also has four fixed samples recorded in Eastern Standard Time:
+  `2025-11-15 08:00` and `21:15` (one person-day), `23:30 -05:00` (04:30
+  UTC on the 16th) and one from `23:30` to `2025-11-16 00:20` (starts on
+  the 15th, ends on the 16th).
+- **People outside the cohort.** `SYN25-0151`, `SYN25-0152` and
+  `SYN25-0153` have HealthKit data (steps, resting HR, HRV, sleep,
+  activity) but are in neither STUDYPARTICIPANTS nor
+  VW_IHS_PARTICIPANT_SUMMARY, like test accounts or people taken off the
+  roster. With the screened-but-not-enrolled people, a whole-table count
+  of participants with data isn't a count within the cohort.
+- **A duplicate cohort row.** The same user is in
+  VW_IHS_PARTICIPANT_SUMMARY twice, identical but for PHONE (a new phone,
+  in a view with a row per phone). Counting its rows overstates the
+  cohort by one, and joining it to daily data counts that person's days
+  twice.
 
 The data also carry a mild intern-year effect: from `internship_start`,
 participants sleep less, take fewer steps, report lower mood, and have

@@ -20,7 +20,7 @@ import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from importlib import resources
 from zoneinfo import ZoneInfo
 
@@ -100,7 +100,7 @@ def cohort_columns(obj: dict, cohort: str) -> list[tuple[str, str]]:
 # ----------------------------------------------------------- time utils ----
 
 
-def at(d: date, hours: float, tz: ZoneInfo) -> datetime:
+def at(d: date, hours: float, tz: tzinfo) -> datetime:
     """Local wall-clock time `hours` after midnight of `d` in `tz` (may roll past midnight)."""
     return datetime(d.year, d.month, d.day, tzinfo=tz) + timedelta(hours=hours)
 
@@ -1053,7 +1053,8 @@ def generate_cohort(
     waves = config["survey_waves"]
     survey_keys = {(s, v): rng.randbytes(16) for _, s, _ in waves for v in (1, 2)}
     write_dictionary(co, survey_keys)
-    for p in make_people(rng, name, c, config, has_oura="OURADAILYACTIVITY" in tables):
+    people = make_people(rng, name, c, config, has_oura="OURADAILYACTIVITY" in tables)
+    for p in people:
         simulate_days(rng, p, c["internship_start"])
         vendor = {"Fitbit": write_fitbit, "Garmin": write_garmin, "Oura": write_oura}.get(p.device)
         if vendor:
@@ -1061,7 +1062,96 @@ def generate_cohort(
         write_healthkit(co, p)  # Apple Watch users, plus iPhone-sourced rows for others
         write_mood(co, p)
         write_participant(co, p, write_surveys(co, p, waves, survey_keys))
+    if name in CASES:
+        write_cases(seed, co, people)
     return co.rows
+
+
+# ------------------------------------------------------ correctness cases ----
+# Extra rows for three mistakes a finished analysis can still make (see
+# synthetic/README.md, "Correctness cases"). Written after everything else,
+# from their own random stream, so every row above is exactly what it was
+# without them.
+
+CASES = {"IHS_2025"}
+# People with HealthKit data who are in neither STUDYPARTICIPANTS nor
+# VW_IHS_PARTICIPANT_SUMMARY: outside the cohort, however it's defined.
+ORPHANS = ("SYN25-0151", "SYN25-0152", "SYN25-0153")
+# Resting-HR samples at the edges of a day, recorded in Eastern Standard Time.
+EDGE_DAY = date(2025, 11, 15)
+EST = timezone(timedelta(hours=-5))
+EDGE_SAMPLES = (  # (start, end) in hours after midnight of EDGE_DAY, EST
+    (0 + 5 / 60, 8.0),  # 08:00 and 21:15 on the same date: one person-day
+    (8.0, 21.25),
+    (21.25, 23.5),  # 23:30 -05:00 is 04:30 UTC the next day
+    (23.5, 24 + 20 / 60),  # ends at 00:20 the next day: started on EDGE_DAY
+)
+
+
+def case_participant(people: list[Person]) -> Person:
+    """The enrolled Apple Watch user the cases attach to: the first one with
+    data to the end of the cohort's window."""
+    return next(
+        p
+        for p in people
+        if p.device == "AppleWatch"
+        and p.study_id is not None
+        and p.withdraw is None
+        and p.end > EDGE_DAY + timedelta(days=1)
+        and p.enroll < EDGE_DAY
+    )
+
+
+def write_cases(seed: int, co: Cohort, people: list[Person]) -> None:
+    co.rng = r = random.Random(f"{seed}:{co.name}:cases")
+    c = co.c
+    # 1. Out-of-cohort device data (QUIRK): test accounts, or people taken off
+    # the roster, whose HealthKit feed kept arriving.
+    for pid in ORPHANS:
+        home = ZoneInfo(r.choice(ZONES))
+        orphan = Person(
+            pid=pid,
+            study_id=None,
+            internal_id=f"{r.getrandbits(128):032x}",
+            device="AppleWatch",
+            phone=r.choice(IPHONES),
+            watch=r.choice(WATCH_MODELS),
+            fitbit=None,
+            old_watch=False,
+            hk_third_party=False,
+            enroll=c["window_start"] + timedelta(days=r.randint(0, 45)),
+            end=c["data_end"] - timedelta(days=r.randint(0, 120)),
+            withdraw=None,
+            zones=[(date.min, home)],
+            sex=r.choice([1, 2]),
+        )
+        simulate_days(r, orphan, c["internship_start"])
+        write_healthkit(co, orphan)
+    # 2. A duplicate row in the cohort-defining summary (QUIRK): the person
+    # registered a new phone, and the view has one row per phone.
+    p = case_participant(people)
+    summary = next(
+        s for s in co.rows["VW_IHS_PARTICIPANT_SUMMARY"] if s["PARTICIPANTIDENTIFIER"] == p.pid
+    )
+    co.add(
+        "VW_IHS_PARTICIPANT_SUMMARY",
+        {**summary, "PHONE": next(m for m in IPHONES if m != p.phone)},
+    )
+    # 3. Several resting-HR timestamps on one date, one late enough to be the
+    # next day in UTC, and one that ends after midnight (QUIRK).
+    rhr = next((d.rhr for d in p.days if d.d == EDGE_DAY), 60)
+    for start, end in EDGE_SAMPLES:
+        hk_sample(
+            co,
+            p,
+            "HEALTHKITSAMPLES_RESTINGHEARTRATE",
+            at(EDGE_DAY, start, EST),
+            at(EDGE_DAY, end, EST),
+            rhr + r.randint(-2, 2),
+            "count/min",
+            "Apple Watch",
+            p.watch,
+        )
 
 
 # ------------------------------------------------------------- Oracle ----

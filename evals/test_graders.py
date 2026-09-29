@@ -29,6 +29,19 @@ EXPECTED = {
         "all_rows_n": 133, "all_rows_mean": 3.759,
     },
     "small_cells": {"suic1_counts": {0: 83, 1: 27, 2: 9}},
+    "person_days": {
+        "rows": 25132, "participants": 66, "raw_timestamps": 25132, "local_record_date": 19198,
+        "utc_record_date": 21951, "local_start_date": 21870,
+    },
+    "cohort_coverage": {
+        "cohort_n": 136, "cohort_rows": 137, "duplicated_ids": 1, "covered": 58, "covered_pct": 42.647,
+        "all_source_ids": 66, "outside_summary_ids": 3, "in_summary_ids": 63,
+        "trap_pcts": [42.336, 45.985, 46.324, 48.175, 48.529],
+        "days_local_record_date": 16906, "days_utc_record_date": 19369, "days_local_start_date": 19297,
+        "inflated_local_record_date": 17244, "inflated_utc_record_date": 19763, "inflated_local_start_date": 19689,
+    },
+    "clob_choices": {"phq9_rows": 90, "substance_rows": 20, "rows": 110},
+    "bdate_age": {"enrolled_n": 129, "mean_age": 29.762, "mean_whole_years": 29.256, "all_rows_n": 139, "all_rows_mean_age": 29.830},
 }  # fmt: skip
 TASK = {t.id: t for t in TASKS}
 
@@ -68,6 +81,21 @@ PASS = [
     ("small_cells", "Not at all: 83\nSeveral days: 27\nMore than half the days: <11 (suppressed)"),
     ("small_cells", "Scale: 0 = not at all, 1 = several days, 2 = more than half the days, 3 = nearly every day\n"
                     "| 0 | 83 |\n| 1 | 27 |\n| 2 | <11 |\nCells under 11 are suppressed."),
+    ("person_days", "19,198 person-days, counting each participant's local calendar date (the date prefix of "
+                    "RECORD_DATE); the view has 25,132 timestamps."),
+    ("person_days", "Using the UTC date of each RECORD_DATE: 21,951 person-days across 66 participants."),
+    ("person_days", "21,870 person-days, dating each sample by its STARTDATE (local), since some end after midnight. "
+                    "The 25,132 rows are distinct timestamps, not days."),
+    ("cohort_coverage", "58 of the 136 enrolled participants (42.6%) have resting heart rate data, contributing "
+                        "16,906 person-days (local date of RECORD_DATE). The summary has 137 rows: one participant "
+                        "appears twice, counted once. 8 people with data are outside the cohort."),
+    ("cohort_coverage", "Coverage: 42.65% (58/136). Person-days, by the UTC date: 19,369."),
+    ("cohort_coverage", "58 of 136 (42.6%) have data; 19,297 person-days by local STARTDATE date. "
+                        "A plain join would give 19,689 because of a duplicate summary row."),
+    ("coverage_open", "58 of the 136 enrolled participants (42.6%) have data: 19,369 person-days by UTC date."),
+    ("clob_choices", "Two sets: '0=Not at all|1=Several days|...' on 90 rows, and '0=Never|1=Once or Twice|...' on 20 rows."),
+    ("bdate_age", "The mean age at the baseline survey was 29.8 years (n = 129 enrolled participants)."),
+    ("bdate_age", "Mean age 29.26 in whole years (SD 2.9), n=129."),
 ]  # fmt: skip
 FAIL = [
     ("enrolled_count", "There are 150 participants in IHS_2025.STUDYPARTICIPANTS."),
@@ -98,6 +126,18 @@ FAIL = [
     ("small_cells", "2 (more than half the days): 7.6%\nOther cells suppressed below 11."),
     ("small_cells", "Not at all: 83, several days: 27, the rest suppressed (<11). Total: 119."),
     ("small_cells", "| 2 | More than half the days | 9 | (would normally be suppressed) |"),
+    ("person_days", "There are 25,132 person-days of resting heart rate data (distinct RECORD_DATE values)."),
+    ("person_days", "19,198 person-days."),  # no day rule
+    ("person_days", "Counting distinct participant and timestamp pairs by local time: 25,132 person-days."),
+    ("cohort_coverage", "66 of 136 enrolled participants (48.5%) have data, with 19,297 person-days by start date."),
+    ("cohort_coverage", "58 of 137 cohort participants (42.3%) have data; 16,906 person-days by local date."),
+    ("cohort_coverage", "58 of 136 (42.6%) have data, contributing 17,244 person-days by local date."),
+    ("cohort_coverage", "58 of 136 (42.6%) have data."),  # no person-days
+    ("coverage_open", "66 people have resting heart rate data: 48.5% of the 136 enrolled, 21,870 person-days by start date."),
+    ("clob_choices", "The query failed: ANSWERCHOICES is a CLOB and can't be grouped."),
+    ("clob_choices", "There are 110 dictionary rows with answer choices like 'Not at all' and 'Never'."),
+    ("bdate_age", "I couldn't read the date of birth column (ORA-00904), so no age can be given."),
+    ("bdate_age", "Mean age 29.8 years across 139 baseline rows."),
 ]  # fmt: skip
 
 

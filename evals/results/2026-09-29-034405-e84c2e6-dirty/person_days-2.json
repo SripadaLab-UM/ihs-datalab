@@ -1,0 +1,53 @@
+{
+  "task": "person_days",
+  "mode": "extraction",
+  "prompt": "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? A person-day is one participant on one day, from any source; include every participant in the view.",
+  "tests": "text timestamps: several a day, some after midnight or another date in UTC",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one person-day per participant-date",
+      "passed": true,
+      "detail": "expected 19,198 (RECORD_DATE's local date), 21,951 (its UTC date) or 21,870 (STARTDATE's date); 25,132 counts each timestamp as a day"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day, and in what time zone"
+    }
+  ],
+  "answer": "The 2025 HealthKit resting heart rate view contains **21,870 person-days** of resting heart rate data.\n\nI understood \u201cperson-day\u201d as one distinct `PARTICIPANTIDENTIFIER` plus one calendar day from `STARTDATE`, collapsing across all sources in `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE`.\n\nOutput files:\n`/work/outputs/resting_heart_rate_person_days_2025.csv`\n`/work/outputs/resting_heart_rate_person_days_2025_dictionary.md`\n\nCatalog/schema evidence: `search_catalog` found `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE` as a view. `describe_table` showed `PARTICIPANTIDENTIFIER`, `STARTDATE`, `RECORD_DATE`, `VALUE`, source/device fields, and that `STARTDATE`/`RECORD_DATE` are `VARCHAR2(26)`, not date/timestamp types. `/work/kb` was not present in this workspace, so I relied on live catalog/schema checks.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n  COUNT(STARTDATE) AS startdate_nonnull,\n  COUNT(RECORD_DATE) AS record_date_nonnull,\n  COUNT(VALUE) AS value_nonnull\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: completeness profile. Returned 1 row; all four key fields were populated for all 25,132 rows.\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS startdate_begins_yyyy_mm_dd,\n  COUNT(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS record_date_begins_yyyy_mm_dd,\n  MIN(LENGTH(STARTDATE)) AS min_startdate_length,\n  MAX(LENGTH(STARTDATE)) AS max_startdate_length,\n  MIN(LENGTH(RECORD_DATE)) AS min_record_date_length,\n  MAX(LENGTH(RECORD_DATE)) AS max_record_date_length\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: date-format profile. Returned 1 row; all date strings were length 26 and began with `YYYY-MM-DD`.\n\n```sql\nSELECT\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  COUNT(DISTINCT SUBSTR(STARTDATE, 1, 10)) AS distinct_start_days,\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: coverage profile. Returned 1 row: 66 participants, 455 distinct start days, from 2025-04-02 to 2026-06-30.\n\n```sql\nSELECT COUNT(*) AS person_days\nFROM (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS sample_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n)\n```\nPurpose: final person-day count. Returned 1 row: **21,870**.\n\nCaveat to double-check: I used `STARTDATE` as the sample day. That matches the \u201cdata on a day\u201d wording, but if your convention is upload/record date instead, the count should be recomputed using `RECORD_DATE`.\n\nI also suggested a KB update documenting that this 2025 view exposes HealthKit RHR dates as ISO-prefixed text rather than true date/timestamp columns.",
+  "finished": true,
+  "seconds": 78.25355815887451,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS participantidentifier_nonnull,\n  COUNT(STARTDATE) AS startdate_nonnull,\n  COUNT(RECORD_DATE) AS record_date_nonnull,\n  COUNT(VALUE) AS value_nonnull\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS startdate_begins_yyyy_mm_dd,\n  COUNT(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS record_date_begins_yyyy_mm_dd,\n  MIN(LENGTH(STARTDATE)) AS min_startdate_length,\n  MAX(LENGTH(STARTDATE)) AS max_startdate_length,\n  MIN(LENGTH(RECORD_DATE)) AS min_record_date_length,\n  MAX(LENGTH(RECORD_DATE)) AS max_record_date_length\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  COUNT(DISTINCT SUBSTR(STARTDATE, 1, 10)) AS distinct_start_days,\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT COUNT(*) AS person_days\nFROM (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS sample_day\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n)"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 248613,
+        "inputTokens": 244012,
+        "cachedInputTokens": 119808,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4601,
+        "reasoningOutputTokens": 1458
+      },
+      "last": {
+        "totalTokens": 22733,
+        "inputTokens": 21632,
+        "cachedInputTokens": 11264,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1101,
+        "reasoningOutputTokens": 229
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_f4d97e21595e879d",
+  "attempt": 2
+}
