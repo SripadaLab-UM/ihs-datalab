@@ -123,6 +123,7 @@ const made: FileProvenance = {
   turn: 2,
   in_review: false,
   turn_not_saved: false,
+  express: false,
   commands: [
     { id: "c2", command: "python /work/analysis.py", exit_code: 0, names_file: false, via_script: "analysis.py", seen_in_output: false },
     { id: "c1", command: "ls /data/oracle", exit_code: 0, names_file: false, via_script: null, seen_in_output: true },

@@ -224,7 +224,10 @@ function History({ conversation }: { conversation: Conversation }) {
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-start justify-between gap-2">
-                <span className="font-sans text-[13.5px] font-medium">{checkpoint.label}</span>
+                <span className="flex flex-wrap items-baseline gap-2 font-sans text-[13.5px] font-medium">
+                  {checkpoint.label}
+                  {checkpoint.express && <Chip title="That turn was asked with Express on">Express</Chip>}
+                </span>
                 <Button
                   variant="ghost"
                   className="shrink-0 px-2 py-0.5 text-xs"

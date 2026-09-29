@@ -222,6 +222,48 @@ validation, and its findings can be wrong in either direction.
 - The review's findings appear under the answer. The agent fixes what it can
   and reports the rest.
 
+### Express (toggle) (built)
+
+What this guarantees: the agent works quickly; it may read exactly what it
+could without Express. It is a way of working, not a mode, and not a
+lower-access tier.
+
+- An **Express** switch in the conversation header, beside **Rigor review**
+  (and in the docked chats' header, which has no rigor switch). **Off** in a
+  new conversation, in every mode. It can't be on together with the rigor
+  review: switching one on switches the other off (`PATCH
+  /api/conversations/{id}`; the store enforces it, and asking for both is
+  refused).
+- With it on, each message goes to the agent with DataLab's Express note in
+  front of it (`sessions/modes.py`: `EXPRESS`): answer directly; no plan, no
+  pilot-then-ask, no "shall I proceed?"; ask only when a question is
+  genuinely ambiguous, otherwise take the obvious reading and say which;
+  the number or table first, one line on how, no long report unless asked.
+  The first message after it's switched off carries `EXPRESS_OFF`. It's
+  per message, not in the mode's developer instructions, so a switch takes
+  effect on the next message without restarting the container or the
+  thread. The base `AGENTS.md` says what the notes mean.
+- **Tools.** For a turn asked with Express on, DataLab's data tools refuse
+  `propose_plan` and `ask_research_helper` (`tokens.EXPRESS_OFF_TOOLS`),
+  server-side, whatever the mode: both stop the turn to wait for the
+  person, and the research helper's review of the question before it goes
+  online is a safety check, so the tool goes rather than the check. Every
+  other tool of the mode is unchanged, `query` included (participant-level
+  rows, read-only, the SQL check, Data accessed log, results files and
+  export rules as always). The turn's Express state is set as the turn
+  starts, so switching mid-turn applies from the next message.
+- **Effort.** Quick (low) unless the person picks another while it's on;
+  their usual choice comes back when it's switched off. (The API also
+  treats a message with no effort as low while Express is on.)
+- In the modes whose work a person reviews before it's saved or run (SQL
+  drafting, Pipelines, Workflow authoring, Knowledge writing), that review
+  is untouched: the note adds that the proposal is prepared as usual and
+  only the words about it are short.
+- Each question's event records `express: true` when it was asked with it
+  on. The chat labels those answers **Express** (under the question, and in
+  "How this answer was made"), and so do History (the checkpoint after the
+  turn) and a file's **How was this made?**.
+
 ### Research helpers carried over from the prototype
 
 These ship in the agent image as app skills with bundled scripts, or as

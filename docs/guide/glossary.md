@@ -44,6 +44,8 @@ Data engineering are [data sessions](#data-session); Research is a
 [research session](#research-session). Two more open only from the tab that
 docks them: Workflow authoring (Workflows tab) and Knowledge writing
 (Knowledge tab), both data sessions.
+The [Express](#express) switch works in every mode: it changes how the agent
+works, not the mode.
 
 ## Plan
 
@@ -81,6 +83,26 @@ justified, sample sizes are given before and after exclusions, estimates come
 with uncertainty, the right measures were used, no group of fewer than 11
 participants is shown or can be worked out, and nothing is overstated. See
 [Read an answer](reading-an-answer.md#the-rigor-review).
+
+## Express
+
+Quick answers: low effort, no plans or confirmations. Same data access and
+checks.
+
+The **Express** switch is in a conversation's header, beside **Rigor
+review**, in every mode; it's off in a new conversation. With it on, the
+agent answers directly: the number or table first, one line on how it got
+it, the queries folded underneath. It doesn't propose a plan, stop after a
+pilot, or ask "shall I go on?", and asks only when a question could mean
+materially different things (otherwise it says which reading it took). The
+research helper is off meanwhile. It thinks at the Quick effort unless you
+pick another. What it may read doesn't change: the same data, participant
+level included, the same SQL check, Data accessed log and export rules. In
+the tabs whose work you review before it's saved (Pipelines, Workflows,
+Knowledge, the SQL Playground) that review stays; Express only makes the
+agent brief. Express and the rigor review can't both be on: switching one
+on switches the other off. Answers made with Express on are labelled
+**Express**, in the chat, in History and in **How was this made?**
 
 ## Trace and provenance
 

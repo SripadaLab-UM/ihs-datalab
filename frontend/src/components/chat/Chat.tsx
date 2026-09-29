@@ -76,7 +76,7 @@ export function Chat({
   // Follow new steps only while the person is at the bottom: scrolling up to
   // read something shouldn't be undone by the next step arriving.
   const [following, setFollowing] = useState(true);
-  const [effort, setEffort] = useEffortChoice();
+  const [effort, setEffort] = useExpressEffort(conversation, useEffortChoice());
   const queryClient = useQueryClient();
   // A typed message or a starter question (sent as it is, so the agent starts at once).
   const send = useMutation({
@@ -192,7 +192,12 @@ export function Chat({
             model={conversation.model}
             effort={effort}
             onEffort={setEffort}
-            actions={headerActions}
+            actions={
+              <>
+                <ExpressSwitch conversation={conversation} compact />
+                {headerActions}
+              </>
+            }
           />
         ) : (
           <ChatHeader
@@ -205,6 +210,7 @@ export function Chat({
             actions={
               <>
                 {conversation.kind === "data" && <ProposeUpdateButton conversation={conversation} />}
+                <ExpressSwitch conversation={conversation} />
                 {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
                 {headerActions}
               </>
@@ -467,28 +473,81 @@ export function Title({ conversation, compact = false }: { conversation: Convers
 }
 
 function RigorSwitch({ conversation }: { conversation: Conversation }) {
+  return (
+    <ConversationSwitch
+      label="Rigor review"
+      term="rigor-review"
+      on={conversation.rigor_review}
+      change={() => api.setRigorReview(conversation.id, !conversation.rigor_review)}
+    />
+  );
+}
+
+// What the Express label says on hover.
+const EXPRESS_TITLE = "Asked with Express on: low effort, no plans or confirmations. Same data access and checks.";
+
+/**
+ * Express: quick answers in any mode (low effort, no plans or confirmations;
+ * the same data access and checks). DataLab switches the rigor review off
+ * when it's switched on, and the other way round.
+ */
+function ExpressSwitch({ conversation, compact = false }: { conversation: Conversation; compact?: boolean }) {
+  return (
+    <ConversationSwitch
+      label="Express"
+      term="express"
+      on={conversation.express}
+      change={() => api.setExpress(conversation.id, !conversation.express)}
+      compact={compact}
+    />
+  );
+}
+
+/** An answer asked with Express on says so, under its question. */
+function ExpressTag() {
+  return (
+    <p className="-mt-2 flex">
+      <Chip title={EXPRESS_TITLE}>Express</Chip>
+    </p>
+  );
+}
+
+/** A switch in a conversation's header (Express, Rigor review), with what it means. */
+function ConversationSwitch({
+  label,
+  term,
+  on,
+  change,
+  compact = false,
+}: {
+  label: string;
+  term: "express" | "rigor-review";
+  on: boolean;
+  change: () => Promise<unknown>;
+  compact?: boolean;
+}) {
   const queryClient = useQueryClient();
   const toggle = useMutation({
-    mutationFn: () => api.setRigorReview(conversation.id, !conversation.rigor_review),
+    mutationFn: change,
+    // Both switches come back: one switched on may have switched the other off.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   return (
     <span className="flex items-center gap-1">
-      <label className="flex items-center gap-2 font-sans text-[13px] text-muted hover:text-ink has-[:disabled]:cursor-not-allowed">
-        <input
-          type="checkbox"
-          className="peer sr-only"
-          checked={conversation.rigor_review}
-          onChange={() => toggle.mutate()}
-          disabled={toggle.isPending}
-        />
+      <label
+        className={clsx(
+          "flex items-center gap-2 font-sans text-muted hover:text-ink has-[:disabled]:cursor-not-allowed",
+          compact ? "text-[12px]" : "text-[13px]",
+        )}
+      >
+        <input type="checkbox" className="peer sr-only" checked={on} onChange={() => toggle.mutate()} disabled={toggle.isPending} />
         <span
           aria-hidden="true"
           className="relative h-4 w-7 rounded-full bg-line transition-colors peer-checked:bg-ink peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-ink peer-disabled:opacity-70 after:absolute after:top-0.5 after:left-0.5 after:size-3 after:rounded-full after:bg-surface after:transition-transform peer-checked:after:translate-x-3"
         />
-        Rigor review
+        {label}
       </label>
-      <InfoTip term="rigor-review" align="end" />
+      <InfoTip term={term} align="end" />
     </span>
   );
 }
@@ -714,6 +773,7 @@ function TurnView({
   return (
     <article className={clsx("flex flex-col", compact ? "gap-3" : "gap-5")} data-question-seq={turn.seq}>
       {turn.userText && <Question text={turn.userText} continues={turn.continues} />}
+      {turn.express && <ExpressTag />}
       {!finished && folded > 0 && (
         <button
           type="button"
@@ -768,7 +828,7 @@ function TurnView({
       )}
       {finished && <MadeHere items={turn.items} conversationId={conversationId} />}
       {finished && (
-        <HowItWasMade rows={storyRows} shown={shown}>
+        <HowItWasMade rows={storyRows} shown={shown} express={turn.express}>
           <ShownStepContext value={shown}>
             <Story rows={storyRows} renderRow={renderRow} />
           </ShownStepContext>
@@ -827,7 +887,18 @@ function MadeHere({ items, conversationId }: { items: Item[]; conversationId: st
  * amounted to. Failed steps and the plan are named on the row itself, so
  * folding never hides them.
  */
-function HowItWasMade({ rows, shown, children }: { rows: Row[]; shown: ShownStep | null; children: ReactNode }) {
+function HowItWasMade({
+  rows,
+  shown,
+  express = false,
+  children,
+}: {
+  rows: Row[];
+  shown: ShownStep | null;
+  /** Asked with Express on. */
+  express?: boolean;
+  children: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   // Asked to show one of its steps (from the Code tab): open onto it.
   useEffect(() => {
@@ -861,6 +932,7 @@ function HowItWasMade({ rows, shown, children }: { rows: Row[]; shown: ShownStep
             {facts.map((fact) => (
               <Chip key={fact}>{fact}</Chip>
             ))}
+            {express && <Chip title={EXPRESS_TITLE}>Express</Chip>}
             {planChip && <Chip tone={planChip.tone}>{planChip.text}</Chip>}
             {failedChip && <Chip tone={failedChip.tone}>{failedChip.text}</Chip>}
           </span>
@@ -1453,6 +1525,24 @@ export function useEffortChoice(): [Effort, (effort: Effort) => void] {
     }
   };
   return [effort, choose];
+}
+
+/**
+ * The effort for this conversation's next message: with Express on it's Quick
+ * unless the person picks another while it's on; otherwise their usual choice.
+ */
+function useExpressEffort(
+  conversation: Conversation,
+  [chosen, choose]: [Effort, (effort: Effort) => void],
+): [Effort, (effort: Effort) => void] {
+  // Picked with Express on, for this conversation; forgotten once it's switched off.
+  const [picked, setPicked] = useState<{ conversation: string; effort: Effort } | null>(null);
+  useEffect(() => {
+    if (!conversation.express) setPicked(null);
+  }, [conversation.express]);
+  if (!conversation.express) return [chosen, choose];
+  const effort = picked?.conversation === conversation.id ? picked.effort : "low";
+  return [effort, (next) => setPicked({ conversation: conversation.id, effort: next })];
 }
 
 function EffortSelect({ effort, onChange }: { effort: Effort; onChange: (effort: Effort) => void }) {

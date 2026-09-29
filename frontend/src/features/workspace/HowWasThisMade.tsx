@@ -23,6 +23,11 @@ export function HowWasThisMade({
     <section aria-label="How was this made?" className="font-sans text-[13.5px] leading-relaxed">
       <h3 className="dl-label">How was this made?</h3>
       <p className="mt-1 max-w-[62ch]">{provenance.summary}</p>
+      {provenance.express && (
+        <p className="mt-1 flex items-baseline gap-2 text-[12.5px] text-muted">
+          <Chip>Express</Chip> Turn {provenance.turn} was asked with Express on: low effort, no plans or confirmations.
+        </p>
+      )}
       {provenance.found && (
         <>
           {provenance.commands.length > 0 && (

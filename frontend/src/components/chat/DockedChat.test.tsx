@@ -46,7 +46,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 const conversation = (id: string, title = "New conversation"): Conversation => ({
   id, kind: "data", mode: "extraction", title, model: "gpt-5.5",
-  created_at: "", updated_at: "", rigor_review: false, busy: false,
+  created_at: "", updated_at: "", rigor_review: false, express: false, busy: false,
 }); // prettier-ignore
 
 const query: ChatContext = { label: "The query in the SQL editor", text: "SELECT 1 FROM dual", language: "sql" };

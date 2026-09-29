@@ -10,7 +10,7 @@ vi.mock("@/api/client", () => ({ api: { deleteConversation: vi.fn() } }));
 
 const conversation = (busy: boolean): Conversation => ({
   id: "c1", kind: "data", mode: "analysis", title: "Sleep and mood", model: "gpt-5.5",
-  created_at: "", updated_at: "", rigor_review: false, busy,
+  created_at: "", updated_at: "", rigor_review: false, express: false, busy,
 }); // prettier-ignore
 
 function show(busy: boolean, onDeleted = vi.fn()) {

@@ -67,6 +67,7 @@ const made: FileProvenance = {
   turn: 2,
   in_review: false,
   turn_not_saved: false,
+  express: false,
   commands: [],
   more_commands: 0,
   edited_directly: false,

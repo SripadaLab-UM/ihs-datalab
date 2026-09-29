@@ -12,6 +12,7 @@ export const TOOLTIP_TERMS = [
   "data-session",
   "research-session",
   "rigor-review",
+  "express",
   "plan",
   "trace-and-provenance",
   "checkpoint",

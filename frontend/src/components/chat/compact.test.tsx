@@ -39,7 +39,7 @@ const MODES = [
 
 const conversation = (id: string, mode = "sql"): Conversation => ({
   id, kind: "data", mode, title: "Steps in March", model: "gpt-5.5",
-  created_at: "", updated_at: "", rigor_review: false, busy: false,
+  created_at: "", updated_at: "", rigor_review: false, express: false, busy: false,
 }); // prettier-ignore
 
 let listed: Conversation[] = [];

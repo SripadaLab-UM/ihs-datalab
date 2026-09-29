@@ -39,7 +39,7 @@ const edit = (more: Partial<KbEdit> = {}): KbEdit => ({
   created_at: "", updated_at: "", origin: null, result: null, commit: null, decided_by: null, before: "…", head: "abc1234",
   upstream_changed: false, theirs: null, theirs_state: "text", ...more,
 }); // prettier-ignore
-const conversation = { id: "c_1", kind: "data", mode: "analysis", title: "t", model: "m", created_at: "", updated_at: "", rigor_review: false, busy: false } as Conversation;
+const conversation = { id: "c_1", kind: "data", mode: "analysis", title: "t", model: "m", created_at: "", updated_at: "", rigor_review: false, express: false, busy: false } as Conversation;
 
 function Where() {
   const location = useLocation();

@@ -91,6 +91,8 @@ export interface Turn {
   model?: ModelStatus;
   /** Started by Continue: it picks up the turn before, which failed or was stopped. */
   continues?: boolean;
+  /** Asked with Express on (quick answers: low effort, no plans or confirmations). */
+  express?: boolean;
   /** The question's event, for tabs that link to a turn (the SQL Playground's "How this SQL was created"). */
   seq?: number;
   /** The agent has begun the turn (turn_started): before that, DataLab is starting its sandbox. */
@@ -194,7 +196,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
-        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true, seq: event.seq };
+        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true, express: data.express === true, seq: event.seq };
         turns.push(turn);
         byId.clear();
         break;
