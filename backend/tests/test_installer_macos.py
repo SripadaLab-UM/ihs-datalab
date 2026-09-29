@@ -127,6 +127,7 @@ def install(
     signin: int = 0,
     practice_db: int = 0,
     pinned: bool = True,
+    answers: list[str] | None = None,
     **extra_env: str,
 ) -> subprocess.CompletedProcess[str]:
     wheel = f"datalab-{version}-py3-none-any.whl"
@@ -148,8 +149,11 @@ def install(
         "DATALAB_TEST_UVLOG": str(machine["uvlog"]),
         "DATALAB_SYSTEM_APPLICATIONS": str(machine["apps"]),
     }
+    command = ["sh", str(INSTALLER), "--package", str(package), *args]
+    if answers is not None:
+        return in_terminal(command, env, answers)
     return subprocess.run(
-        ["sh", str(INSTALLER), "--package", str(package), *args],
+        command,
         env=env,
         capture_output=True,
         text=True,
@@ -158,6 +162,50 @@ def install(
         start_new_session=True,
         stdin=subprocess.DEVNULL,
     )
+
+
+def in_terminal(
+    command: list[str], env: dict[str, str], answers: list[str], timeout: float = 60
+) -> subprocess.CompletedProcess[str]:
+    """Run the installer in a terminal of its own, as a person would, typing
+    `answers` in turn at its questions (lines ending in "]"), then pressing
+    Return at any others. Output and typing come back as stdout."""
+    import pty
+    import select
+
+    pid, fd = pty.fork()
+    if pid == 0:  # the child: the terminal is its own
+        try:
+            os.execve("/bin/sh", command, env)
+        finally:
+            os._exit(127)
+    pending = list(answers)
+    out = b""
+    asked = 0  # questions answered so far
+    deadline = time.monotonic() + timeout
+    while True:
+        if time.monotonic() > deadline:
+            os.kill(pid, 9)
+            os.waitpid(pid, 0)
+            raise AssertionError("installer didn't finish:\n" + out.decode(errors="replace"))
+        ready, _, _ = select.select([fd], [], [], 0.2)
+        if not ready:
+            continue
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:  # the installer has finished: its terminal is closed
+            break
+        if not chunk:
+            break
+        out += chunk
+        questions = out.count(b"] ")
+        while asked < questions and out.endswith(b"] "):
+            os.write(fd, ((pending.pop(0) if pending else "") + "\n").encode())
+            asked += 1
+    os.close(fd)
+    _, status = os.waitpid(pid, 0)
+    text = out.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    return subprocess.CompletedProcess(command, os.waitstatus_to_exitcode(status), text, "")
 
 
 def root(machine) -> Path:
@@ -835,11 +883,14 @@ def mac(machine, tmp_path) -> dict[str, Path]:
     return {**machine, "dmg": dmg, "detached": detached, "state": tmp_path / "docker-state", **logs}
 
 
-def docker_install(mac, *args: str, **env: str) -> subprocess.CompletedProcess[str]:
+def docker_install(
+    mac, *args: str, answers: list[str] | None = None, **env: str
+) -> subprocess.CompletedProcess[str]:
     return install(
         mac,
         "0.1.0a3",
         *args,
+        answers=answers,
         DATALAB_TEST_STATE=str(mac["state"]),
         DATALAB_TEST_OPENLOG=str(mac["open"]),
         DATALAB_TEST_CURLLOG=str(mac["curl"]),
@@ -928,6 +979,29 @@ def test_the_command_in_your_docker_folder_is_found(mac):
     assert f"DataLab finds it in {folder}" in done.stdout
 
 
+def test_pressing_return_at_the_docker_question_installs_it(mac):
+    """In a terminal, the question's default is yes: pressing Return installs."""
+    done = docker_install(mac, answers=[""])
+    assert done.returncode == 0, done.stdout
+    assert "Download and install Docker Desktop? [Y/n]" in done.stdout
+    assert len(lines(mac["curl"])) == 1
+    assert (mac["apps"] / "Docker.app" / "Contents" / "fake-signer").is_file()
+    assert "7/7 Launcher" in done.stdout
+
+
+@pytest.mark.parametrize("answer", ["n", "N", "no", "NO"])
+def test_typing_n_at_the_docker_question_changes_nothing(mac, answer):
+    done = docker_install(mac, answers=[answer])
+    refused(done, mac, "Download and install Docker Desktop? [Y/n]", "wasn't installed")
+    assert lines(mac["curl"]) == [] and not cache(mac).exists()
+
+
+def test_typing_y_at_the_docker_question_installs_it(mac):
+    done = docker_install(mac, answers=["y"])
+    assert done.returncode == 0, done.stdout
+    assert (mac["apps"] / "Docker.app" / "Contents" / "fake-signer").is_file()
+
+
 def test_a_fresh_mac_gets_docker_desktop_downloaded_checked_and_installed(mac):
     done = docker_install(mac, "--install-docker")
     assert done.returncode == 0, done.stdout + done.stderr
@@ -993,9 +1067,9 @@ def refused(done: subprocess.CompletedProcess[str], mac, *phrases: str) -> None:
     assert "2/7 uv" not in done.stdout  # it stops at the Docker step
 
 
-def test_saying_no_changes_nothing_and_running_again_carries_on(mac):
-    done = docker_install(mac)  # no terminal to answer: no
-    refused(done, mac, "Download and install Docker Desktop? [y/N]", "wasn't installed")
+def test_no_terminal_to_answer_changes_nothing_and_running_again_carries_on(mac):
+    done = docker_install(mac)  # no terminal to answer: no, whatever the default
+    refused(done, mac, "Download and install Docker Desktop? [Y/n]", "wasn't installed")
     assert "drag Docker to Applications" in done.stdout
     assert lines(mac["curl"]) == [] and not cache(mac).exists()
     again = docker_install(mac, "--install-docker")
@@ -1285,7 +1359,7 @@ def staging_copy(mac) -> Path:
 def test_a_half_done_docker_install_isnt_taken_for_one(mac):
     app = staging_copy(mac)
     done = docker_install(mac, DATALAB_TEST_MDFIND=str(app), DATALAB_TEST_ALIVE=str(app))
-    refused(done, mac, "Download and install Docker Desktop? [y/N]")
+    refused(done, mac, "Download and install Docker Desktop? [Y/n]")
     assert lines(mac["open"]) == []
     again = docker_install(mac, "--install-docker", DATALAB_TEST_MDFIND=str(app))
     assert again.returncode == 0, again.stdout + again.stderr
@@ -1296,7 +1370,7 @@ def test_a_docker_command_linked_into_a_half_done_install_isnt_followed(mac):
     app = staging_copy(mac)
     (mac["tools"] / "docker").symlink_to(app / "Contents" / "Resources" / "bin" / "docker")
     done = docker_install(mac)
-    refused(done, mac, "isn't answering", "Download and install Docker Desktop? [y/N]")
+    refused(done, mac, "isn't answering", "Download and install Docker Desktop? [Y/n]")
     assert lines(mac["open"]) == []
 
 
@@ -1312,7 +1386,7 @@ def test_spotlight_finding_only_leftovers_means_an_install_is_offered(mac, tmp_p
         place.mkdir(parents=True)
         found.append(str(fake_docker_app(place)))
     done = docker_install(mac, DATALAB_TEST_MDFIND="\n".join(found))
-    refused(done, mac, "Download and install Docker Desktop? [y/N]")
+    refused(done, mac, "Download and install Docker Desktop? [Y/n]")
     assert lines(mac["open"]) == []
 
 
