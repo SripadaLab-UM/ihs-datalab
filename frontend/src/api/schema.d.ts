@@ -3239,12 +3239,14 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "fixed" | "declined" | "still-refused" | "busy" | "not-needed" | "unsupported";
+            outcome: "fixed" | "declined" | "still-refused" | "busy" | "not-needed" | "working" | "restart-failed" | "unsupported";
             /**
              * State
              * @enum {string}
              */
             state: "unsupported" | "ready" | "not-installed" | "stopped" | "starting" | "vm-refused" | "unknown";
+            /** Failed Step */
+            failed_step?: ("stop" | "terminate" | "start" | "ready") | null;
         };
         /** DockerStatusOut */
         DockerStatusOut: {
@@ -3255,6 +3257,8 @@ export interface components {
             state: "unsupported" | "ready" | "not-installed" | "stopped" | "starting" | "vm-refused" | "unknown";
             /** Fixing */
             fixing: boolean;
+            /** Phase */
+            phase?: ("prompt" | "restarting") | null;
             /** Admin Access Url */
             admin_access_url: string | null;
         };

@@ -409,7 +409,15 @@ def create_app(
     # Docker on Windows: how it stands, and the fixes the page offers (api/docker.py).
     docker_doctor = docker_doctor or DockerDoctor()
     app.state.docker_doctor = docker_doctor
-    app.include_router(build_docker_router(settings, docker_doctor))
+    app.include_router(
+        build_docker_router(
+            settings,
+            docker_doctor,
+            # The fix restarts Docker Desktop, which would stop what's working.
+            # (Not gate.in_flight: that counts this very request.)
+            working=lambda: busy_reason(connection, sessions.any_busy) is not None,
+        )
+    )
     app.add_middleware(RefuseNonText)
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     app.add_middleware(UpdateGateMiddleware, gate=gate)

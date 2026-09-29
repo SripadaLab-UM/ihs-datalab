@@ -11,11 +11,14 @@
   every few seconds.
 - `POST /api/docker/start` opens Docker Desktop if it's closed.
 - `POST /api/docker/fix` shows Windows' administrator prompt and puts back
-  the right Docker's virtual machine needs, then restarts Docker Desktop; only
-  when the last check found the VM refused. It answers once the prompt has
-  been answered. Nothing is ever done without the person pressing the
-  button: a policy decides when the right goes, but only the person decides
-  when an administrator prompt appears.
+  the right Docker's virtual machine needs, then restarts Docker Desktop (its
+  own processes ended, its WSL distribution stopped, opened again) and waits
+  up to 4 minutes for it; only when the last check found the VM refused, and
+  never while something in DataLab is working, since the restart would stop
+  it. It answers once that's done, saying which step failed, if one did.
+  Nothing is ever done without the person pressing the button: a policy
+  decides when the right goes, but only the person decides when an
+  administrator prompt appears.
 
 Like every /api route, these need the sign-in cookie, and each POST must be
 JSON from DataLab's own page (web.py ApiProtection; test_docker_api.py pins it).
@@ -24,33 +27,44 @@ JSON from DataLab's own page (web.py ApiProtection; test_docker_api.py pins it).
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from datalab.config import Settings
-from datalab.windows_vm import DockerDoctor, DockerState, FixOutcome
+from datalab.windows_vm import DockerDoctor, DockerState, FixOutcome, FixPhase, RestartStep
 
 
 class DockerStatusOut(BaseModel):
     state: DockerState
-    # An administrator prompt from DataLab is showing now.
+    # A fix from DataLab is under way, and where: "prompt" (Windows' box is
+    # showing) or "restarting" (Docker Desktop is being closed and reopened).
     fixing: bool
+    phase: FixPhase | None = None
     admin_access_url: str | None
 
 
 class DockerFixOut(BaseModel):
     outcome: FixOutcome
     state: DockerState
+    # With "restart-failed": which step of restarting Docker Desktop didn't work.
+    failed_step: RestartStep | None = None
 
 
-def build_docker_router(settings: Settings, doctor: DockerDoctor) -> APIRouter:
+def build_docker_router(
+    settings: Settings, doctor: DockerDoctor, *, working: Callable[[], bool] = lambda: False
+) -> APIRouter:
+    """`working`: whether something in DataLab is going (a conversation's turn,
+    a query, a workflow run, an export). Fix it restarts Docker Desktop, which
+    would stop it, so the fix waits for it."""
     router = APIRouter(prefix="/api/docker", tags=["docker"])
 
     def status(state: DockerState) -> DockerStatusOut:
         return DockerStatusOut(
             state=state,
             fixing=doctor.fixing,
+            phase=doctor.phase,
             admin_access_url=settings.windows.admin_access_url,
         )
 
@@ -68,7 +82,13 @@ def build_docker_router(settings: Settings, doctor: DockerDoctor) -> APIRouter:
 
     @router.post("/fix")
     async def fix() -> DockerFixOut:
-        outcome = await asyncio.to_thread(doctor.fix)
-        return DockerFixOut(outcome=outcome, state=await asyncio.to_thread(doctor.state))
+        if await asyncio.to_thread(working):
+            return DockerFixOut(outcome="working", state=await asyncio.to_thread(doctor.state))
+        result = await asyncio.to_thread(doctor.fix)
+        return DockerFixOut(
+            outcome=result.outcome,
+            state=await asyncio.to_thread(doctor.state),
+            failed_step=result.failed_step,
+        )
 
     return router

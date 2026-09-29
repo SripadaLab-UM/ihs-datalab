@@ -29,12 +29,16 @@ asked once in DataLab's window couldn't wait for.
 from __future__ import annotations
 
 import base64
+import contextlib
+import csv
+import io
 import os
 import subprocess
 import sys
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -112,8 +116,38 @@ DockerState = Literal[
 # because the temporary administrator access isn't on yet), or when the change
 # itself didn't go through; "still-refused" when it went through but Windows
 # still won't let the virtual machine sign in; "busy" when a prompt is already
-# showing; "not-needed" unless the last check found the VM refused.
-FixOutcome = Literal["fixed", "declined", "still-refused", "busy", "not-needed", "unsupported"]
+# showing; "not-needed" unless the last check found the VM refused; "working"
+# while something in DataLab is (api/docker.py: the restart would stop it);
+# "restart-failed" when the right is back but Docker Desktop didn't come back
+# (FixResult.failed_step says which step of the restart).
+FixOutcome = Literal[
+    "fixed",
+    "declined",
+    "still-refused",
+    "busy",
+    "not-needed",
+    "working",
+    "restart-failed",
+    "unsupported",
+]
+# The steps of restarting Docker Desktop after the fix (restart_docker).
+RestartStep = Literal["stop", "terminate", "start", "ready"]
+# Where a fix under way is (DockerDoctor.phase): Windows' box showing, or the restart.
+FixPhase = Literal["prompt", "restarting"]
+# Docker Desktop's own processes, which run as the person: the ones a restart
+# ends. Never its Windows service (com.docker.service, which runs as SYSTEM).
+DOCKER_DESKTOP_IMAGES = (
+    "Docker Desktop.exe",
+    "com.docker.backend.exe",
+    "com.docker.build.exe",
+    "docker-sandbox.exe",
+)
+
+
+@dataclass(frozen=True)
+class FixResult:
+    outcome: FixOutcome
+    failed_step: RestartStep | None = None
 
 
 def system_dir() -> Path:
@@ -209,20 +243,138 @@ def grant(run: Run = subprocess.run) -> bool:
         return False
 
 
-def restart_docker(run: Run = subprocess.run, popen: Callable = subprocess.Popen) -> None:
-    """Docker Desktop doesn't try its engine again by itself once it's stuck,
-    so it's restarted (or started, if it isn't running)."""
+def current_user() -> str | None:
+    """This process's account as Windows names it ("DOMAIN\\name"), from
+    Windows itself rather than the environment; None when it can't say."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    size = ctypes.c_ulong(256)
+    buffer = ctypes.create_unicode_buffer(size.value)
+    secur32 = ctypes.windll.secur32  # type: ignore[attr-defined]
+    # NameSamCompatible (2): "UMHS\ataxali", the form tasklist's USERNAME filter takes.
+    if not secur32.GetUserNameExW(2, buffer, ctypes.byref(size)):
+        return None
+    return buffer.value
+
+
+def own_pids(image: str, user: str, run: Run = subprocess.run) -> list[int] | None:
+    """The processes of one program (by its exact file name) that run as
+    `user`: never another account's, nor SYSTEM's. None when tasklist can't say."""
     try:
-        restarted = run(
-            ["docker", "desktop", "restart", "--detach"], capture_output=True, timeout=60
+        listed = run(
+            [
+                str(system_dir() / "tasklist.exe"),
+                "/FI",
+                f"IMAGENAME eq {image}",
+                "/FI",
+                f"USERNAME eq {user}",
+                "/FO",
+                "CSV",
+                "/NH",
+            ],
+            capture_output=True,
+            timeout=15,
         )
-        if restarted.returncode == 0:
-            return
     except (OSError, subprocess.TimeoutExpired):
-        pass
-    app = docker_desktop()
-    if app.exists():
-        popen([str(app)], close_fds=True)
+        return None
+    if listed.returncode != 0:
+        return None
+    text = (listed.stdout or b"").decode("utf-8", errors="replace")
+    pids = []
+    for row in csv.reader(io.StringIO(text)):
+        # No match is one line, "INFO: No tasks are running which match…".
+        if len(row) >= 2 and row[0].lower() == image.lower() and row[1].isdigit():
+            pids.append(int(row[1]))
+    return pids
+
+
+def stop_docker_desktop(
+    user: str, run: Run = subprocess.run, sleep: Callable = time.sleep, gone_seconds: int = 15
+) -> bool:
+    """End Docker Desktop's own processes (DOCKER_DESKTOP_IMAGES, this
+    account's only), by process id. False if any is still there after
+    `gone_seconds`: taskkill /F answers before a process has quite gone.
+
+    A Docker Desktop started elevated (as an administrator, e.g. through
+    CyberArk EPM) may list with no user name, so it isn't found here: it's left
+    running, and the restart then fails honestly at "ready"."""
+    for image in DOCKER_DESKTOP_IMAGES:
+        pids = own_pids(image, user, run)
+        if pids is None:
+            return False
+        for pid in pids:
+            # The same filters as the listing, beside the id: a process id
+            # Windows has handed to another program since isn't ended ("INFO:
+            # No tasks running with the specified criteria.", exit 0), and
+            # neither is one that has ended already.
+            with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                run(
+                    [
+                        str(system_dir() / "taskkill.exe"),
+                        "/F",
+                        "/FI",
+                        f"IMAGENAME eq {image}",
+                        "/FI",
+                        f"USERNAME eq {user}",
+                        "/PID",
+                        str(pid),
+                    ],
+                    capture_output=True,
+                    timeout=15,
+                )
+    for _ in range(gone_seconds):
+        sleep(1)
+        if all(own_pids(image, user, run) == [] for image in DOCKER_DESKTOP_IMAGES):
+            return True
+    return False
+
+
+def terminate_docker_vm(run: Run = subprocess.run) -> bool:
+    """Stop Docker's own WSL distribution, and nothing else of WSL's (never
+    `wsl --shutdown`). One that isn't there counts as stopped."""
+    try:
+        done = run(
+            [str(system_dir() / "wsl.exe"), "--terminate", "docker-desktop"],
+            capture_output=True,
+            timeout=60,
+            env={**os.environ, "WSL_UTF8": "1"},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    said = wsl_text(done.stdout or b"") + wsl_text(done.stderr or b"")
+    return done.returncode == 0 or "WSL_E_DISTRO_NOT_FOUND" in said
+
+
+def restart_docker(
+    user: str | None,
+    run: Run = subprocess.run,
+    popen: Callable = subprocess.Popen,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable = time.sleep,
+    ready_seconds: float = 240,
+) -> RestartStep | None:
+    """Restart Docker Desktop after the fix, and wait until its engine answers.
+    None when it did; otherwise the step that didn't work.
+
+    Once its engine has given up waiting for a virtual machine Windows
+    refused, Docker Desktop never tries again, and `docker desktop restart`
+    left its stuck backend running (seen on the Michigan Medicine laptop,
+    0.3.0b3): so its processes are ended, its VM stopped, and it's opened afresh.
+    """
+    if user is None or not stop_docker_desktop(user, run, sleep):
+        return "stop"
+    if not terminate_docker_vm(run):
+        return "terminate"
+    if not start_docker(popen):
+        return "start"
+    deadline = clock() + ready_seconds
+    while clock() < deadline:
+        if docker_answers(run):
+            return None
+        sleep(5)
+    return "ready"
 
 
 def docker_desktop_running(run: Run = subprocess.run) -> bool:
@@ -296,24 +448,39 @@ class DockerDoctor:
         popen: Callable = subprocess.Popen,
         platform: str = sys.platform,
         clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+        user: Callable[[], str | None] = current_user,
     ) -> None:
         self._run = run
         self._popen = popen
         self._platform = platform
         self._clock = clock
+        self._sleep = sleep
+        self._user = user
         self._checking = threading.Lock()
         self._fixing = threading.Lock()
         self._state: DockerState | None = None
         self._checked = 0.0
         self._vm_started: float | None = None
+        self._phase: FixPhase | None = None
 
     @property
     def fixing(self) -> bool:
-        """Whether an administrator prompt is showing now."""
+        """Whether the fix is under way (its prompt showing, or the restart after it)."""
         return self._fixing.locked()
+
+    @property
+    def phase(self) -> FixPhase | None:
+        """Where the fix is: "prompt" (Windows' box is showing) or "restarting"
+        (Docker Desktop is being closed and opened again); None when no fix is."""
+        return self._phase if self.fixing else None
 
     def state(self, *, fresh: bool = False) -> DockerState:
         """The last few seconds' answer, or a new one (`fresh`: now)."""
+        if self.phase == "restarting":
+            # Docker Desktop's processes are down on purpose: not "stopped", or
+            # the page would offer to open it in the middle of the restart.
+            return "starting"
         if not self._checking.acquire(blocking=self._state is None):
             return self._state  # type: ignore[return-value]  # a check is running
         try:
@@ -339,30 +506,37 @@ class DockerDoctor:
 
     def start(self) -> DockerState:
         """Open Docker Desktop if it's closed; how Docker stands then."""
+        if self.fixing:
+            # The fix closes and reopens Docker Desktop itself: opening it in
+            # between would look to the restart as if it wouldn't close.
+            return self.state()
         if self.state(fresh=True) == "stopped":
             start_docker(self._popen)
         return self.state(fresh=True)
 
-    def fix(self) -> FixOutcome:
+    def fix(self) -> FixResult:
         """Show the administrator prompt and put the right back, then restart
-        Docker Desktop. Waits until the prompt is answered. Only when the last
-        check found the virtual machine refused: never while Docker works."""
+        Docker Desktop and wait until it's ready. Waits until the prompt is
+        answered. Only when the last check found the virtual machine refused:
+        never while Docker works."""
         if self._platform != "win32":
-            return "unsupported"
+            return FixResult("unsupported")
         if self.state() != "vm-refused":
-            return "not-needed"
+            return FixResult("not-needed")
         if not self._fixing.acquire(blocking=False):
-            return "busy"
+            return FixResult("busy")
+        self._phase = "prompt"
         try:
             # False also when the change itself didn't go through (the script
             # failed, or the prompt was left unanswered for 10 minutes).
             if not grant(self._run):
-                return "declined"
+                return FixResult("declined")
             if probe(self._run) == "refused":
-                return "still-refused"
+                return FixResult("still-refused")
             self._vm_started = self._clock()
-            restart_docker(self._run, self._popen)
-            return "fixed"
+            self._phase = "restarting"
+            failed = restart_docker(self._user(), self._run, self._popen, self._clock, self._sleep)
+            return FixResult("fixed") if failed is None else FixResult("restart-failed", failed)
         finally:
             self._fixing.release()
             with self._checking:
