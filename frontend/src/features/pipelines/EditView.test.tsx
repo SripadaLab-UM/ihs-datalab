@@ -66,7 +66,6 @@ vi.mock("@/components/editor/DiffView", () => ({
     </div>
   ),
 }));
-Element.prototype.scrollIntoView = vi.fn();
 
 const STEPS = "ihsDataR/R/steps.R";
 const R = "weekly_steps <- function(x) x\n";

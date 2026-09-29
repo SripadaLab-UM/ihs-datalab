@@ -324,238 +324,241 @@ function Editor({
   };
 
   return (
-    <section aria-label="Your edit" className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 pt-4 pb-8">
-      <Heading edit={edit} dirty={dirty} unchanged={unchanged} />
-      <p className="-mt-2 font-sans text-[13px] text-muted">
-        On <span className="font-mono text-[12px]">{edit.base.slice(0, 7)}</span> of main, started {when(edit.created_at)}.
-        Checked and tested as the assistant's proposals are, and shared only when you choose Save &amp; share.
-      </p>
-      {edit.origin && (
-        <p className="rounded-[3px] border border-line bg-sunken px-3 py-2 font-sans text-[12.5px] text-muted">
-          <span className="text-ink">From a change suggested by the assistant</span> in “
-          {edit.origin.conversation_title ?? edit.origin.conversation_id}”, which this edit replaces.{" "}
-          {onOpenProposal && (
-            <button
-              type="button"
-              onClick={() => onOpenProposal(edit.origin!.proposal_id)}
-              className="text-ink underline decoration-faint underline-offset-2 hover:decoration-ink"
-            >
-              See what it suggested
-            </button>
-          )}
+    <section aria-label="Your edit" data-edit-scroll className="min-h-0 flex-1 overflow-y-auto px-5 pt-4 pb-8">
+      {/* Not the scrolling box itself: in it, a flex column would squash the tabs to nothing. */}
+      <div className="flex flex-col gap-4">
+        <Heading edit={edit} dirty={dirty} unchanged={unchanged} />
+        <p className="-mt-2 font-sans text-[13px] text-muted">
+          On <span className="font-mono text-[12px]">{edit.base.slice(0, 7)}</span> of main, started {when(edit.created_at)}.
+          Checked and tested as the assistant's proposals are, and shared only when you choose Save &amp; share.
         </p>
-      )}
-      {restored !== null && (
-        <p role="status" className="font-sans text-[12.5px] text-attn">
-          Restored changes you hadn't kept yet, from this browser.
-        </p>
-      )}
-      {olderUnkept !== null && (
-        <p role="status" className="flex flex-wrap items-baseline gap-x-2 font-sans text-[12.5px] text-attn">
-          This browser has changes you hadn't kept, typed over an older version of this draft (it was kept since, in
-          another window). This is the newer draft.
-          <Button
-            variant="ghost"
-            className="px-1 py-0 text-[12.5px] underline"
-            onClick={() => {
-              setTexts(onlyKnown(olderUnkept, kept));
-              setOlderUnkept(null);
-            }}
-          >
-            Put back my unkept changes
-          </Button>
-          <Button
-            variant="ghost"
-            className="px-1 py-0 text-[12.5px]"
-            onClick={() => {
-              writeUnsaved(edit.id, null);
-              setOlderUnkept(null);
-            }}
-          >
-            Forget them
-          </Button>
-        </p>
-      )}
-      {edit.upstream_changed && (
-        <Conflict
-          edit={edit}
-          texts={texts}
-          keepFirst={keepNow}
-          onMoved={(next) => {
-            onEdit(next);
-            setTexts(Object.fromEntries(next.files.map((f) => [f.path, f.text])));
-            writeUnsaved(next.id, null);
-          }}
-        />
-      )}
-
-      <Tabs
-        tabs={[
-          { id: "edit" as const, label: "Edit" },
-          { id: "review" as const, label: "Review changes" },
-        ]}
-        value={view}
-        onChange={setView}
-      />
-
-      {view === "edit" && file && (
-        <div className="flex flex-col gap-2">
-          {paths.length > 1 && (
-            <div role="group" aria-label="Files in this edit" className="flex flex-wrap gap-1.5">
-              {paths.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  aria-pressed={p === active}
-                  onClick={() => setActive(p)}
-                  className={clsx(
-                    "rounded-[3px] px-2 py-0.5 font-mono text-[12px]",
-                    p === active ? "bg-surface text-ink shadow-[inset_0_0_0_1px_var(--color-line)]" : "text-muted hover:text-ink",
-                  )}
-                >
-                  {p.split("/").pop()}
-                  {texts[p] !== kept[p] ? " •" : ""}
-                </button>
-              ))}
-            </div>
-          )}
-          <p className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12.5px]">
-            <span className="text-ink">{active}</span>
-            {file.new && <span className="font-sans text-muted">new file</span>}
-            {paths.length > 1 && open && !busy && (
-              <Button variant="ghost" className="px-1 py-0 text-[12px]" onClick={() => leaveOut(active)}>
-                Leave this file out
-              </Button>
+        {edit.origin && (
+          <p className="rounded-[3px] border border-line bg-sunken px-3 py-2 font-sans text-[12.5px] text-muted">
+            <span className="text-ink">From a change suggested by the assistant</span> in “
+            {edit.origin.conversation_title ?? edit.origin.conversation_id}”, which this edit replaces.{" "}
+            {onOpenProposal && (
+              <button
+                type="button"
+                onClick={() => onOpenProposal(edit.origin!.proposal_id)}
+                className="text-ink underline decoration-faint underline-offset-2 hover:decoration-ink"
+              >
+                See what it suggested
+              </button>
             )}
           </p>
-          {file.source_note && (
-            <p className="font-sans text-[12.5px] text-attn">
-              Not edited by hand: {file.source_note} It's shared as it is here.
-            </p>
-          )}
-          {text === null ? (
-            <p className="font-sans text-[13px] text-muted">This change deletes {active}.</p>
-          ) : (
-            <CodeEditor
-              label={`${active}: your edit`}
-              language={languageOf(active)}
-              value={text}
-              onChange={(value) => setTexts({ ...texts, [active]: value })}
-              readOnly={readOnly || !open || busy}
-              diagnostics={diagnostics}
-              className="h-[min(60vh,36rem)]"
-            />
-          )}
-          <CheckLine findings={findings.filter((f) => f.path === active)} checking={checking} />
-        </div>
-      )}
-      {view === "review" && (
-        <div className="flex flex-col gap-5">
-          <p className="font-sans text-[12.5px] text-muted">Against where you started (−), what Save &amp; share would commit (+).</p>
-          {paths.map((p) => {
-            const f = edit.files.find((x) => x.path === p)!;
-            return (
-              <div key={p}>
-                <p className="mb-1.5 flex items-center gap-2 font-mono text-[12.5px]">
-                  <span className="text-ink">{p}</span>
-                  <span className="text-muted">{f.new ? "added" : texts[p] === null ? "deleted" : "modified"}</span>
-                </p>
-                <DiffView
-                  label={`${p}: your changes`}
-                  original={f.before ?? ""}
-                  modified={texts[p] ?? ""}
-                  language={languageOf(p)}
-                  layout="unified"
-                  className="max-h-[32rem] overflow-auto"
-                />
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <section aria-labelledby={`${edit.id}-tests`} className="border-t border-line pt-4">
-        <h3 id={`${edit.id}-tests`} className="dl-label mb-2">
-          Tests
-        </h3>
-        <TestResults test={edit.test} />
-        {dirty && edit.test && edit.test.status !== "running" && (
-          <p className="mt-1 font-sans text-[12.5px] text-muted">These ran on the kept draft, before your latest changes.</p>
         )}
-        {open && edit.test?.status !== "running" && (
-          <Button className="mt-3" onClick={() => test.mutate()} disabled={busy || unchanged}>
-            <Icon name="check" size={13} /> {edit.test ? "Run the tests again" : "Run the tests"}
-          </Button>
-        )}
-      </section>
-
-      {findings.length > 0 && (
-        <section aria-labelledby={`${edit.id}-check`} className="border-t border-line pt-4">
-          <h3 id={`${edit.id}-check`} className="dl-label mb-2">
-            Check
-          </h3>
-          <Findings findings={findings} confirmed={confirmed} onConfirm={setConfirmed} disabled={!open || busy} yours />
-        </section>
-      )}
-
-      {edit.status === "saving" && (
-        <p className="font-sans text-[13.5px] text-muted" aria-live="polite">
-          <span className="dl-breathe mr-2 inline-block size-[6px] rounded-full bg-ink" />
-          Saving: {edit.test?.status === "running" ? "the tests are running first." : "checking and sharing it."}
-        </p>
-      )}
-      {result && edit.status !== "draft" && edit.status !== "saving" && (
-        <p role="alert" className={clsx("font-sans text-[13px]", edit.status === "conflict" || edit.status === "check_failed" ? "text-attn" : "text-danger")}>
-          {result.message}
-        </p>
-      )}
-      {notice && !dirty && (
-        <p role="status" className="font-sans text-[13px] text-muted">
-          {notice}
-        </p>
-      )}
-      {(keep.error || share.error || discard.error || test.error) && (
-        <p role="alert" className="font-sans text-[13px] text-danger">
-          {(keep.error ?? share.error ?? discard.error ?? test.error)?.message}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-2 border-t border-line pt-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" onClick={onClose} disabled={keep.isPending || share.isPending}>
-            Close
-          </Button>
-          {discarding ? (
-            <Button variant="danger" onClick={() => discard.mutate()} disabled={busy}>
-              Discard this edit
-            </Button>
-          ) : (
-            <Button variant="ghost" onClick={() => setDiscarding(true)} disabled={busy}>
-              <Icon name="trash" size={13} /> Discard…
-            </Button>
-          )}
-          <span className="flex-1" />
-          <Button onClick={() => keep.mutate()} disabled={busy || !dirty}>
-            {keep.isPending ? "Keeping…" : "Keep as a draft on this computer"}
-          </Button>
-          <InfoTip term="save--share" align="end" />
-          <Button variant="primary" onClick={() => share.mutate()} disabled={busy || blocker !== null}>
-            <Icon name="send" size={13} />{" "}
-            {share.isPending || edit.status === "saving" ? "Saving and sharing…" : edit.status === "failed" ? "Try again" : "Save & share"}
-          </Button>
-        </div>
-        {blocker && blocker !== "Checking…" && <p className="text-right font-sans text-[12.5px] text-muted">{blocker}</p>}
-        {!signedIn && (
-          <p className="text-right font-sans text-[12.5px]">
-            <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4">
-              Open Settings to sign in
-            </Link>
+        {restored !== null && (
+          <p role="status" className="font-sans text-[12.5px] text-attn">
+            Restored changes you hadn't kept yet, from this browser.
           </p>
         )}
-        <p className="text-right font-sans text-[12px] text-faint">
-          A draft stays in DataLab on this computer only. Save &amp; share runs the tests first, checks it again, commits
-          it as you, and pushes it to the lab's pipelines repo on GitHub.
-        </p>
+        {olderUnkept !== null && (
+          <p role="status" className="flex flex-wrap items-baseline gap-x-2 font-sans text-[12.5px] text-attn">
+            This browser has changes you hadn't kept, typed over an older version of this draft (it was kept since, in
+            another window). This is the newer draft.
+            <Button
+              variant="ghost"
+              className="px-1 py-0 text-[12.5px] underline"
+              onClick={() => {
+                setTexts(onlyKnown(olderUnkept, kept));
+                setOlderUnkept(null);
+              }}
+            >
+              Put back my unkept changes
+            </Button>
+            <Button
+              variant="ghost"
+              className="px-1 py-0 text-[12.5px]"
+              onClick={() => {
+                writeUnsaved(edit.id, null);
+                setOlderUnkept(null);
+              }}
+            >
+              Forget them
+            </Button>
+          </p>
+        )}
+        {edit.upstream_changed && (
+          <Conflict
+            edit={edit}
+            texts={texts}
+            keepFirst={keepNow}
+            onMoved={(next) => {
+              onEdit(next);
+              setTexts(Object.fromEntries(next.files.map((f) => [f.path, f.text])));
+              writeUnsaved(next.id, null);
+            }}
+          />
+        )}
+
+        <Tabs
+          tabs={[
+            { id: "edit" as const, label: "Edit" },
+            { id: "review" as const, label: "Review changes" },
+          ]}
+          value={view}
+          onChange={setView}
+        />
+
+        {view === "edit" && file && (
+          <div className="flex flex-col gap-2">
+            {paths.length > 1 && (
+              <div role="group" aria-label="Files in this edit" className="flex flex-wrap gap-1.5">
+                {paths.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    aria-pressed={p === active}
+                    onClick={() => setActive(p)}
+                    className={clsx(
+                      "rounded-[3px] px-2 py-0.5 font-mono text-[12px]",
+                      p === active ? "bg-surface text-ink shadow-[inset_0_0_0_1px_var(--color-line)]" : "text-muted hover:text-ink",
+                    )}
+                  >
+                    {p.split("/").pop()}
+                    {texts[p] !== kept[p] ? " •" : ""}
+                  </button>
+                ))}
+              </div>
+            )}
+            <p className="flex flex-wrap items-baseline gap-x-3 font-mono text-[12.5px]">
+              <span className="text-ink">{active}</span>
+              {file.new && <span className="font-sans text-muted">new file</span>}
+              {paths.length > 1 && open && !busy && (
+                <Button variant="ghost" className="px-1 py-0 text-[12px]" onClick={() => leaveOut(active)}>
+                  Leave this file out
+                </Button>
+              )}
+            </p>
+            {file.source_note && (
+              <p className="font-sans text-[12.5px] text-attn">
+                Not edited by hand: {file.source_note} It's shared as it is here.
+              </p>
+            )}
+            {text === null ? (
+              <p className="font-sans text-[13px] text-muted">This change deletes {active}.</p>
+            ) : (
+              <CodeEditor
+                label={`${active}: your edit`}
+                language={languageOf(active)}
+                value={text}
+                onChange={(value) => setTexts({ ...texts, [active]: value })}
+                readOnly={readOnly || !open || busy}
+                diagnostics={diagnostics}
+                className="h-[min(60vh,36rem)]"
+              />
+            )}
+            <CheckLine findings={findings.filter((f) => f.path === active)} checking={checking} />
+          </div>
+        )}
+        {view === "review" && (
+          <div className="flex flex-col gap-5">
+            <p className="font-sans text-[12.5px] text-muted">Against where you started (−), what Save &amp; share would commit (+).</p>
+            {paths.map((p) => {
+              const f = edit.files.find((x) => x.path === p)!;
+              return (
+                <div key={p}>
+                  <p className="mb-1.5 flex items-center gap-2 font-mono text-[12.5px]">
+                    <span className="text-ink">{p}</span>
+                    <span className="text-muted">{f.new ? "added" : texts[p] === null ? "deleted" : "modified"}</span>
+                  </p>
+                  <DiffView
+                    label={`${p}: your changes`}
+                    original={f.before ?? ""}
+                    modified={texts[p] ?? ""}
+                    language={languageOf(p)}
+                    layout="unified"
+                    className="max-h-[32rem] overflow-auto"
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <section aria-labelledby={`${edit.id}-tests`} className="border-t border-line pt-4">
+          <h3 id={`${edit.id}-tests`} className="dl-label mb-2">
+            Tests
+          </h3>
+          <TestResults test={edit.test} />
+          {dirty && edit.test && edit.test.status !== "running" && (
+            <p className="mt-1 font-sans text-[12.5px] text-muted">These ran on the kept draft, before your latest changes.</p>
+          )}
+          {open && edit.test?.status !== "running" && (
+            <Button className="mt-3" onClick={() => test.mutate()} disabled={busy || unchanged}>
+              <Icon name="check" size={13} /> {edit.test ? "Run the tests again" : "Run the tests"}
+            </Button>
+          )}
+        </section>
+
+        {findings.length > 0 && (
+          <section aria-labelledby={`${edit.id}-check`} className="border-t border-line pt-4">
+            <h3 id={`${edit.id}-check`} className="dl-label mb-2">
+              Check
+            </h3>
+            <Findings findings={findings} confirmed={confirmed} onConfirm={setConfirmed} disabled={!open || busy} yours />
+          </section>
+        )}
+
+        {edit.status === "saving" && (
+          <p className="font-sans text-[13.5px] text-muted" aria-live="polite">
+            <span className="dl-breathe mr-2 inline-block size-[6px] rounded-full bg-ink" />
+            Saving: {edit.test?.status === "running" ? "the tests are running first." : "checking and sharing it."}
+          </p>
+        )}
+        {result && edit.status !== "draft" && edit.status !== "saving" && (
+          <p role="alert" className={clsx("font-sans text-[13px]", edit.status === "conflict" || edit.status === "check_failed" ? "text-attn" : "text-danger")}>
+            {result.message}
+          </p>
+        )}
+        {notice && !dirty && (
+          <p role="status" className="font-sans text-[13px] text-muted">
+            {notice}
+          </p>
+        )}
+        {(keep.error || share.error || discard.error || test.error) && (
+          <p role="alert" className="font-sans text-[13px] text-danger">
+            {(keep.error ?? share.error ?? discard.error ?? test.error)?.message}
+          </p>
+        )}
+
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={keep.isPending || share.isPending}>
+              Close
+            </Button>
+            {discarding ? (
+              <Button variant="danger" onClick={() => discard.mutate()} disabled={busy}>
+                Discard this edit
+              </Button>
+            ) : (
+              <Button variant="ghost" onClick={() => setDiscarding(true)} disabled={busy}>
+                <Icon name="trash" size={13} /> Discard…
+              </Button>
+            )}
+            <span className="flex-1" />
+            <Button onClick={() => keep.mutate()} disabled={busy || !dirty}>
+              {keep.isPending ? "Keeping…" : "Keep as a draft on this computer"}
+            </Button>
+            <InfoTip term="save--share" align="end" />
+            <Button variant="primary" onClick={() => share.mutate()} disabled={busy || blocker !== null}>
+              <Icon name="send" size={13} />{" "}
+              {share.isPending || edit.status === "saving" ? "Saving and sharing…" : edit.status === "failed" ? "Try again" : "Save & share"}
+            </Button>
+          </div>
+          {blocker && blocker !== "Checking…" && <p className="text-right font-sans text-[12.5px] text-muted">{blocker}</p>}
+          {!signedIn && (
+            <p className="text-right font-sans text-[12.5px]">
+              <Link {...settingsLink("connections", "connection-github")} className="text-ink underline decoration-faint underline-offset-4">
+                Open Settings to sign in
+              </Link>
+            </p>
+          )}
+          <p className="text-right font-sans text-[12px] text-faint">
+            A draft stays in DataLab on this computer only. Save &amp; share runs the tests first, checks it again, commits
+            it as you, and pushes it to the lab's pipelines repo on GitHub.
+          </p>
+        </div>
       </div>
     </section>
   );
@@ -626,8 +629,14 @@ function Conflict({
 }) {
   const [resolutions, setResolutions] = useState<Record<string, string> | null>(null);
   const box = useRef<HTMLElement>(null);
+  // Shown when Save & share found it, at the bottom: brought into view within the
+  // editor's own scrolling box (scrollIntoView would scroll the whole page too).
   useEffect(() => {
-    box.current?.scrollIntoView?.({ block: "start", behavior: "smooth" });
+    const el = box.current;
+    const scroller = el?.closest<HTMLElement>("[data-edit-scroll]");
+    if (el && scroller) {
+      scroller.scrollTop += el.getBoundingClientRect().top - scroller.getBoundingClientRect().top - 16;
+    }
   }, []);
   const reapply = useMutation({
     mutationFn: async (own?: Record<string, string>) => {
