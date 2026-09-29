@@ -694,5 +694,17 @@ def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]
     if method == "thread/tokenUsage/updated":
         return "usage", params.get("tokenUsage") or params
     if method == "error":
-        return "error", {"message": (params.get("error") or {}).get("message") or str(params)}
+        message = (params.get("error") or {}).get("message") or str(params)
+        if params.get("willRetry") is True:
+            # Codex is retrying by itself, typically a model stream that
+            # dropped ("Reconnecting... 1/2"). Not a turn error: if the retries
+            # run out, Codex sends another error with willRetry false.
+            return "notice", {"tone": "info", "text": retrying_note(message), "retry": True}
+        return "error", {"message": message}
     return None
+
+
+def retrying_note(message: str) -> str:
+    """What the chat says while Codex retries a model request by itself."""
+    note = "The connection to the model dropped for a moment; the agent is trying again"
+    return f"{note} ({message})."

@@ -31,6 +31,30 @@ describe("buildTranscript", () => {
     expect(finalAnswer(turn)).toBe("150 participants.");
   });
 
+  it("Codex reconnecting a dropped model stream is a note, not a turn error", () => {
+    // The event 0.3.0b2 stored, from the Windows acceptance run, and what a
+    // newer DataLab stores for the same app-server notification (willRetry).
+    const [turn] = buildTranscript([
+      e("user_message", { text: "How many?" }),
+      e("error", { message: "Reconnecting... 1/2" }),
+      e("notice", { tone: "info", retry: true, text: "The connection to the model dropped for a moment; the agent is trying again (Reconnecting... 2/2)." }),
+      e("answer", { id: "m", phase: "final_answer", text: "139." }),
+      e("turn_finished", { status: "completed" }),
+    ]);
+    const notices = turn.items.filter((i) => i.kind === "notice");
+    expect(notices).toEqual([
+      { kind: "notice", tone: "info", text: "The connection to the model dropped for a moment; the agent is trying again (Reconnecting... 1/2)." },
+      { kind: "notice", tone: "info", text: "The connection to the model dropped for a moment; the agent is trying again (Reconnecting... 2/2)." },
+    ]);
+    // Anything else is still an error.
+    const [failed] = buildTranscript([
+      e("user_message", { text: "How many?" }),
+      e("error", { message: "Reconnecting... then gave up" }),
+      e("turn_finished", { status: "completed" }),
+    ]);
+    expect(failed.items).toEqual([{ kind: "notice", tone: "error", text: "Reconnecting... then gave up" }]);
+  });
+
   it("keeps a turn running until it finishes", () => {
     const [turn] = buildTranscript([e("user_message", { text: "hi" }), e("answer_delta", { id: "m", text: "Hel" })]);
     expect(turn.status).toBe("running");

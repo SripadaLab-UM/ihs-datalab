@@ -54,7 +54,9 @@ numbers" only when that's all it said, otherwise its own words. Then how many
 steps failed along the way, and for which a later step of the same kind (on
 the same tables or files) worked; the rest are unresolved. Errors DataLab
 reported during the turn are listed too: DataLab can't tell whether they
-were dealt with. The rigor review is the agent checking its own work, so it
+were dealt with. A dropped connection to the model that the agent retried by
+itself ("the agent is trying again (Reconnecting... 1/2)") is a note in the
+steps, not an error; if the retries run out, that is an error. The rigor review is the agent checking its own work, so it
 can disagree with DataLab's check; a line says so. Go by DataLab's check.
 
 A match means the number appears in something the turn produced. It doesn't
