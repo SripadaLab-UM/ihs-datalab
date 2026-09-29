@@ -1,10 +1,9 @@
 # Scientific workspace
 
-Status: **partly implemented** (milestone 3). Each feature below is marked
-**built** (implemented and covered by automated tests), **partial**, or
-**planned**. "Built" doesn't mean accepted: acceptance needs the end-to-end
-journeys and scientific evaluations in [ARCHITECTURE.md](ARCHITECTURE.md)
-(Milestone 3 acceptance).
+Status: **implemented**, except where a feature is marked **planned** or
+**not built**. "Built" means implemented and covered by automated tests, not
+accepted: readiness is tracked in [PRODUCT.md](../PRODUCT.md), "v1
+readiness", which also has the modes' policy matrix.
 
 The workspace is where researchers work with the agent. It is built on top of
 the safety platform ([SAFETY.md](SAFETY.md)) and the lab knowledge base
@@ -32,11 +31,13 @@ can make one themselves with **Propose a Knowledge update** over the
 conversation. See [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), "Suggested
 Knowledge updates".
 
-Two more modes open only from the tab that docks them, not from **New**
-(built):
+Four more modes open only from the tab that docks them, not from **New
+conversation** (built):
 
 | Mode | Session | Docked in | The agent's priorities |
 |---|---|---|---|
+| **SQL drafting** | 🔒 Data | SQL Playground | Find the tables and check every column, run only small profiling queries, and propose one query into the editor with `propose_sql` (its binds, assumptions, and the tables and pages it used). It never runs the final query; the person does. No attachments. |
+| **Pipelines** | 🔒 Data | Pipelines tab | Data engineering's rules, for the code the tab shows: explain, edit and test it in its copy of the pipelines repo (`/work/pipelines`). Its changes become a Pipelines proposal. The catalog, `query`, `check_workflow` and the research helper; no analysis plans, no attachments. |
 | **Workflow authoring** | 🔒 Data | Workflows tab | Draft or change workflow files in its copy of the pipelines repo (`/work/pipelines/workflows/`), following [WORKFLOWS.md](WORKFLOWS.md): declared `reads:`, QC with `small_cells` on every delivered CSV, destination keys. It checks each draft with `check_workflow`, DataLab's own workflow check. Its changes become a Pipelines proposal, which a person reviews, tests, and saves there; the agent never saves. The database tools as in Data extraction, read-only. |
 | **Knowledge writing** | 🔒 Data | Knowledge tab | Write or tidy a page or lab skill in `/work/kb`, in the layout and page format of [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), as proposed-edit cards. Never sets `reviewed_by`, `reviewed_on`, or a page's status. The catalog tools only (metadata): its session token allows just `search_catalog`, `describe_table`, `join_paths` and `find_concept`, DataLab refuses every other data tool, and Codex doesn't list them. Nothing can be attached (a file could hold study data); the page open in the tab can go with a message. |
 
@@ -81,10 +82,10 @@ Everything uses native Codex mechanisms, arranged in four layers:
 | (new) `sql-extraction` | App skill | The good parts of the prototype's SQL Playground mode: catalog first, check columns, profiling separate from delivery, show the SQL. |
 | (new) `research-helper` | App skill | When to ask, how to phrase a question that contains no data, and to ask sparingly. |
 
-Until the knowledge base exists (milestone 5), `statistical-review` and
-`academic-figures` ship in the agent image as app skills, adjusted for v1's
-folders and for previews with scripts off. They move to the knowledge base
-then, so the lab can edit them.
+`statistical-review` and `academic-figures` still ship in the agent image as
+app skills (`images/agent/skills`), adjusted for v1's folders and for
+previews with scripts off. Moving them to the knowledge base, so the lab can
+edit them, is planned.
 
 The prototype's mode prompts contain careful scientific guidance worth keeping
 nearly word for word: pilot-first, estimands, within-person versus
@@ -280,8 +281,9 @@ lower-access tier.
 
 ### Research helpers carried over from the prototype
 
-These ship in the agent image as app skills with bundled scripts, or as
-extra `ihs-data` tools. They are all metadata-only or work on local files:
+These ship in the agent image as app skills with bundled scripts
+(`images/agent/bin`), or as `ihs-data` tools. They are all metadata-only or
+work on local files:
 
 - **`profile-data`**: a quick profile of a data file (columns, types,
   missingness).
@@ -291,11 +293,8 @@ extra `ihs-data` tools. They are all metadata-only or work on local files:
   conventions.
 - **Concept lookup**: from a plain-language concept to candidate tables and
   columns.
-- **Cohort plan draft**: criteria, tables, and open ambiguities for a cohort
-  request, before any query runs.
-- **Survey dictionary search**: the wording of survey questions and their
-  answer codes, from the public data dictionaries. The dictionaries are also
-  added to the knowledge base's `generated/` folder.
+- **Cohort plan draft** and **survey dictionary search**: not built as
+  tools (deferred); their content can live in the knowledge base.
 
 ## Tools
 
@@ -308,11 +307,16 @@ others. Its tools:
   - `query`: read-only SQL. It returns a preview and writes the full result
     as a CSV to `/data/oracle`. SQL checks, warnings, and guardrails are
     built in.
-- **Metadata helpers:** join paths, concept lookup, cohort plan draft, and
-  survey dictionary search (see above).
+- **Metadata helpers:** `join_paths` and `find_concept` (see above).
 - **`propose_plan`:** an analysis plan for you to approve.
 - **`ask_research_helper`:** the approval-gated lookup described in
   [SAFETY.md](SAFETY.md).
+- **`check_workflow`:** DataLab's own workflow-file check.
+- **Opt-in:** `propose_sql` (SQL drafting only: one query for the editor)
+  and `suggest_kb_update` (Analysis, Data extraction, Data engineering).
+
+Each mode's token allows only its own list (PRODUCT.md, "Modes and their
+policy"); DataLab refuses the rest, and Codex doesn't list them.
 
 These tools are served **directly by the DataLab app** through Codex's native
 support for HTTP MCP servers. Nothing extra runs in the container. Each
@@ -332,11 +336,12 @@ times.)
 | Tab | Main content | Docked chat |
 |---|---|---|
 | **Workspace** | Conversations, inputs, outputs, history | Full-width chat, any mode |
-| **SQL Playground** | Your own SQL editor, results preview, catalog browser | Data extraction mode, seeded with the current query |
-| **Workflows** | Routines, runs, batches, destinations | Workflow authoring mode |
+| **SQL Playground** | Your own SQL editor, results preview, catalog browser | SQL drafting mode: proposes one query into the editor |
+| **Workflows** | Workflows, runs, destinations, New workflow | Workflow authoring mode |
 | **Pipelines** | `ihsDataR` code browser, agent-proposed changes to review, tests | Pipelines mode: Data engineering's rules, to explain, edit and test the open file |
 | **Knowledge** | Knowledge pages, lab skills, change history | Knowledge writing mode: helps write or tidy a page or skill |
-| **Settings & Safety** | Connections, GitHub sign-in, export destinations, Safety check | none |
+| **Settings & Safety** | Connections (with GitHub), Appearance, Export folders, Updates, Storage, Safety, About | none |
+| **Help** | The guide from `docs/guide/`, searchable, on the current screen's topic | none |
 
 Each docked chat is compact: a one-line title ("SQL assistant", "Workflow
 assistant", "Pipelines assistant", "Knowledge assistant"), a sentence, one or
@@ -349,8 +354,8 @@ hidden. The Workspace keeps its full presentation.
 
 The layout is the same for every mode:
 
-- **Left:** conversations (saved and searchable), plus a **New** button that
-  asks for mode and session type.
+- **Left:** saved conversations, plus **New conversation**, which asks for
+  the mode (and so the session type) and offers the model.
 - **Centre:** the chat. It shows streamed answers, collapsible reasoning and
   commands, inline charts, and **Stop**. Cards appear inline for research
   helper approvals and proposed knowledge edits.
@@ -393,9 +398,11 @@ The layout is the same for every mode:
     checkpointed; the screen lists any that can't be restored.
   - **Queries** (the Data accessed log): every query the agent ran in this conversation (tables,
     time, rows, result file). Metadata only. See [SAFETY.md](SAFETY.md).
-- **Header:** session badge (🔒 or 🌐), mode, model and reasoning level,
-  **Export conversation**, and an "Open research session" button in data
-  sessions.
+- **Header:** session badge (🔒 or 🌐), mode, model and effort, the
+  **Express** and (data sessions) **Rigor review** switches, **Propose a
+  Knowledge update** (data sessions), and **Export** (the conversation as a
+  report, with files). An "Open research session" button in data sessions is
+  planned.
 
 ### Carried over from the prototype UI
 
@@ -421,17 +428,20 @@ offline in any browser. The report contains:
 
 It uses the normal export flow: only the user can export it, to a
 destination they choose. A report from a data session carries a visible
-"contains study data" banner. It will be rebuilt on the shared chat
-component, not ported from the prototype's 1,100-line exporter.
+"contains study data" banner. It's rendered from the shared chat
+component's own transcript, not ported from the prototype's 1,100-line
+exporter.
 
-## Lab skills, made friendly
+## Lab skills, made friendly (planned)
 
-Editing skills needs no knowledge of files or YAML:
+Today a lab skill is edited like any page (Knowledge → **Edit page** or
+**Edit with agent**). The plan is that editing skills needs no knowledge of
+files or YAML:
 
 - In the Knowledge tab, each skill is a card with a plain name, "When should
   the agent use this?", and the instructions in a simple editor.
-- **Teach the agent this:** after a good conversation, the agent drafts a
-  skill from what worked. You review it and save it.
+- **Teach the agent this** (deferred to v1.1): after a good conversation, the
+  agent drafts a skill from what worked. You review it and save it.
 - **Try it:** opens a quick test conversation that uses the draft skill,
   before you share it.
 - Saving uses the same reviewed **Save & share** flow as knowledge pages

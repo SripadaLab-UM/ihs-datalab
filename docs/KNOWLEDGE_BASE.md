@@ -1,10 +1,13 @@
 # Lab knowledge base
 
-Status: **implemented** (milestone 5, 2026-09-27): sign-in, the clone, each
-conversation's copy, proposed edits, Save & share, and the check; in the app,
-Settings → GitHub, the proposed-edit cards in the chat, and the Knowledge
-tab (reading pages, skills and recent changes). Reverting, editing a page
-directly, and the move of the Spine's content come next.
+Status: **implemented**: sign-in, the clone, each conversation's copy,
+proposed edits, Save & share, and the check; in the app, Settings →
+Connections → GitHub, the proposed-edit cards in the chat, the Knowledge tab
+(pages, skills and recent changes), editing a page directly or with the
+agent, and Suggested Knowledge updates. **Not built:** reverting from the
+app (use git or GitHub) and the friendly skill cards. The Spine's content
+comes from `scripts/convert-spine` (tested in CI); what's left of moving it
+is tracked in [PRODUCT.md](../PRODUCT.md).
 
 The knowledge base holds the lab's shared, durable knowledge about IHS data:
 what tables and variables mean, device quirks, cleaning and QC rules, how
@@ -150,7 +153,9 @@ pages), we can add a local search tool then. Not before.
 5. People can also edit pages directly in DataLab's knowledge base view, with
    no agent involved, using the same save flow (see "Editing a page
    directly" below).
-6. Any change can be reverted from the history view in DataLab or on GitHub.
+6. Any change can be reverted on GitHub (git keeps every commit). The
+   Knowledge tab's **Recent changes** shows the history; reverting from
+   DataLab isn't built.
 
 Other sessions only see a change after it has been saved and pushed. That is
 also what keeps data-session material from reaching research sessions
@@ -225,7 +230,7 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   last synced, from the clone's objects (never its working tree), and only
   paths in the layout: not `generated/schema/` or `.github/`. The tables are
   migration 0007.
-- **In the app.** Settings → GitHub signs in (the code, GitHub's device
+- **In the app.** Settings → Connections → GitHub signs in (the code, GitHub's device
   page, and polling until it's entered) and out. Each proposal is a card
   under the turn's answer, never folded away: the files with a diff each,
   the check (possible participant data is ticked off one by one before
