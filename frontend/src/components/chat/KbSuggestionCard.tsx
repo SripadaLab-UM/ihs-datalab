@@ -143,7 +143,8 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
           onClick={() => setOpen(!open)}
           aria-expanded={open}
           aria-controls={detailId}
-          className={clsx("group flex min-w-0 flex-1 items-start text-left", compact ? "gap-2 py-1.5" : "gap-3 py-2")}
+          // Room for the title first: on a narrow screen, Accept wraps below it.
+          className={clsx("group flex min-w-0 flex-1 basis-64 items-start text-left", compact ? "gap-2 py-1.5" : "gap-3 py-2")}
         >
           <Marker tone="done" open={open} />
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -161,7 +162,7 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
             </span>
           </span>
         </button>
-        <div className={clsx("flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-[12.5px]", compact ? "py-1" : "py-2", compact && "w-full pl-[15px]")}>
+        <div className={clsx("flex flex-wrap items-center gap-x-2 gap-y-1 font-sans text-[12.5px]", compact ? "w-full py-1 pl-[15px]" : "ml-auto py-2")}>
           {state === "open" && !open && (
             <>
               {!available && status.data && <span className="text-faint">{REAL_ONLY}</span>}
