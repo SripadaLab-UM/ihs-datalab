@@ -137,6 +137,12 @@ function isQuery(item: Item): item is Extract<Item, { kind: "tool" }> {
   return item.kind === "tool" && item.tool === "query";
 }
 
+function queryTables(item: Extract<Item, { kind: "tool" }>): string[] {
+  const s = item.summary ?? {};
+  const listed = list<string>(s.tables).filter((t) => typeof t === "string").map((t) => t.toUpperCase());
+  return listed.length ? listed : tablesIn(str(((item.arguments ?? {}) as Record<string, unknown>).sql));
+}
+
 function queryFailed(item: Extract<Item, { kind: "tool" }>): boolean {
   return item.status === "failed" || Boolean(item.error) || Boolean(item.failure);
 }
@@ -387,8 +393,16 @@ function fold(rows: Row[]): Row[] {
 /** A turn's rows, in order. The final answer isn't one: it's shown on its own. */
 export function activityRows(items: Item[], running: boolean): Row[] {
   const rows: Row[] = [];
-  // A failed query that a later query of the same turn got past: "recovered".
-  const lastGoodQuery = items.findLastIndex((i) => isQuery(i) && i.status === "completed" && !queryFailed(i));
+  // A failed query is "recovered" only when a later query of the same turn
+  // worked and read at least one of the same tables: another table's query
+  // working says nothing about this one.
+  const recovered = (index: number, failed: Extract<Item, { kind: "tool" }>) => {
+    const wanted = new Set(queryTables(failed));
+    return items.some(
+      (later, i) =>
+        i > index && isQuery(later) && later.status === "completed" && !queryFailed(later) && queryTables(later).some((t) => wanted.has(t)),
+    );
+  };
   items.forEach((item, index) => {
     switch (item.kind) {
       case "message":
@@ -396,7 +410,7 @@ export function activityRows(items: Item[], running: boolean): Row[] {
         break;
       case "tool": {
         const step = toolStep(item, running);
-        if (step && isQuery(item) && queryFailed(item) && index < lastGoodQuery) {
+        if (step && isQuery(item) && queryFailed(item) && recovered(index, item)) {
           step.chips.push({ text: "recovered", tone: "good" });
         }
         if (step) rows.push({ type: "step", step });

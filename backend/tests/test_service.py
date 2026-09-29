@@ -190,6 +190,7 @@ async def test_a_database_that_cant_be_reached_fails_the_query(tmp_path, log, mo
     assert record.status == "failed"
     # Every failed attempt keeps how long it took, and names its query.
     assert record.elapsed_ms is not None and info.value.query_id == record.id
+    assert "wait_ms" in audit_entries(tmp_path)[-1]
     assert list((tmp_path / "r").iterdir()) == []
 
 

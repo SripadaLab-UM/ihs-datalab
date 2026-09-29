@@ -229,14 +229,46 @@ def check_sql(
 
     try:
         return _check(sql, allowed_schemas, columns)
+    except SqlRejected:
+        raise
     except RecursionError as error:
         # Too deep for the parser or the column check (nested calls or set
         # operations): refused, never run unchecked.
         raise SqlRejected(TOO_COMPLEX, rule="too_complex") from error
+    except Exception as error:
+        # A bug in the check, or something sqlglot can't handle: refused
+        # (fail closed), and logged, so every query has its verdict.
+        log.exception("The SQL check failed on a query; the query is refused.")
+        raise SqlRejected(
+            "DataLab's SQL check couldn't finish checking this query, so it wasn't run. "
+            "Try a simpler query.",
+            rule="too_complex",
+        ) from error
+
+
+# Beyond these the column check (sqlglot's qualify) grows quadratically:
+# a 64 KB `SELECT N+N+...+N` took over a minute. Real queries stay far below:
+# an 800-term OR chain is depth ~800 and 4,000 nodes.
+MAX_NODES = 20_000
+MAX_DEPTH = 1_000
+
+
+def _require_size(statement: exp.Expr) -> None:
+    """Refuse a parsed query too large or deep to check in reasonable time,
+    before the column check. Walked without recursion."""
+    stack = [(statement, 1)]
+    nodes = 0
+    while stack:
+        node, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_NODES or depth > MAX_DEPTH:
+            raise SqlRejected(TOO_COMPLEX, rule="too_complex")
+        stack.extend((child, depth + 1) for child in node.iter_expressions())
 
 
 def _check(sql: str, allowed_schemas: frozenset[str], columns: ColumnIndex | None) -> CheckedSql:
     statement = _parse_single_statement(sql)
+    _require_size(statement)
     if not isinstance(statement, _SELECT_ROOTS):
         raise SqlRejected("Only SELECT queries (optionally with WITH) are allowed.")
 

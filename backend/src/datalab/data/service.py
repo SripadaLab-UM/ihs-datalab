@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import secrets
 import threading
 import time
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +27,10 @@ from datalab.data.catalog import Catalog
 from datalab.data.catalog_source import CatalogSource
 from datalab.data.oracle import ExtractResult, QueryCancelled, QueryFailed
 from datalab.data.sqlcheck import SqlRejected, TableRef, check_sql
+
+# The SQL check runs here, not on the default executor: a large query takes
+# it a while, and it mustn't hold up extract_to_csv or the catalog.
+_CHECKS = ThreadPoolExecutor(max_workers=2, thread_name_prefix="datalab-sqlcheck")
 
 
 class Database(Protocol):
@@ -134,11 +140,14 @@ class DataService:
         try:
             # In a thread: a large query takes the check a moment, and the
             # event loop (every other request) mustn't wait for it.
-            checked = await asyncio.to_thread(
-                check_sql,
-                sql,
-                allowed_schemas=self._allowed_schemas,
-                columns=self._catalog.column_index(),
+            checked = await asyncio.get_running_loop().run_in_executor(
+                _CHECKS,
+                functools.partial(
+                    check_sql,
+                    sql,
+                    allowed_schemas=self._allowed_schemas,
+                    columns=self._catalog.column_index(),
+                ),
             )
             _check_binds(checked.binds, binds)
             if allowed_tables is not None:
@@ -167,13 +176,18 @@ class DataService:
             result_path=out_path,
         )
         cancel = threading.Event()
-        started = time.monotonic()
+        queued = time.monotonic()
+        started: float | None = None  # when it got a slot: its time in the database
 
         def elapsed_ms() -> int:
-            return round((time.monotonic() - started) * 1000)
+            return round((time.monotonic() - (started or queued)) * 1000)
+
+        def wait_ms() -> int:
+            return round(((started or time.monotonic()) - queued) * 1000)
 
         try:
             async with self._slots:
+                started = time.monotonic()
                 work = asyncio.to_thread(
                     self._database.extract_to_csv,
                     checked.sql,
@@ -193,6 +207,7 @@ class DataService:
                 message=str(error),
                 reason="stopped",
                 elapsed_ms=error.elapsed_ms,
+                wait_ms=wait_ms(),
             )
             raise
         except QueryFailed as error:
@@ -205,6 +220,7 @@ class DataService:
                 message=str(error),
                 elapsed_ms=error.elapsed_ms,
                 reason=getattr(error, "reason", None),
+                wait_ms=wait_ms(),
             )
             raise
         except asyncio.CancelledError:
@@ -235,6 +251,7 @@ class DataService:
             bytes_written=result.bytes_written,
             elapsed_ms=round(result.elapsed_seconds * 1000),
             result_path=out_path,
+            wait_ms=wait_ms(),
         )
         return QueryOutcome(
             query_id=query_id,

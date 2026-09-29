@@ -94,12 +94,16 @@ describe("activityRows", () => {
     expect(queryRefusal(null)).toBe("it didn't run");
   });
 
-  it("marks a failed query recovered when a later query in the turn succeeded", () => {
+  it("marks a failed query recovered when a later query of the same tables succeeded", () => {
     const failed = { ...(tool("query", { sql: "SELECT 1" }, null, "failed") as object), id: "a", error: "x", failure: { category: "timeout", code: "call_timeout", queryId: null } } as Item; // prettier-ignore
-    const good = { ...(tool("query", { sql: "SELECT 2" }, { row_count: 1 }) as object), id: "b" } as Item;
+    const good = { ...(tool("query", { sql: "SELECT 2 FROM IHS_2025.X" }, { row_count: 1, tables: ["IHS_2025.X"] }) as object), id: "b" } as Item; // prettier-ignore
+    const other = { ...(tool("query", { sql: "SELECT 2 FROM IHS_2025.Y" }, { row_count: 1, tables: ["IHS_2025.Y"] }) as object), id: "c" } as Item; // prettier-ignore
     const chips = (rows: ReturnType<typeof activityRows>) => rows.map((r) => (r.type === "step" ? r.step.chips.map((c) => c.text) : []));
-    expect(chips(activityRows([failed, good], false))[0]).toEqual(["query timed out", "recovered"]);
-    expect(chips(activityRows([good, failed], false))[1]).toEqual(["query timed out"]);
+    const failedOnX = { ...(failed as object), arguments: { sql: "SELECT DISTINCT Q FROM ihs_2025.x" } } as Item;
+    expect(chips(activityRows([failedOnX, good], false))[0]).toEqual(["query timed out", "recovered"]);
+    expect(chips(activityRows([good, failedOnX], false))[1]).toEqual(["query timed out"]);
+    // A later query of another table working says nothing about this one.
+    expect(chips(activityRows([failedOnX, other], false))[0]).toEqual(["query timed out"]);
   });
 
   it("marks a failed query, and a running step as live", () => {

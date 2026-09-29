@@ -5,11 +5,12 @@ and DataLab's own explanation of what to change, never Oracle's text: that
 text can quote values (23ai says which string wasn't a number), or name the
 database's objects and setup. The one thing taken from it is the identifier
 ORA-00904 names, and only when the query itself contains it, so it's a name
-the query already wrote. Any other error keeps the first line of Oracle's
-message, as before: it names the problem without echoing data values. The
-exceptions are errors whose first line names the server: ORA-12801 (a
-parallel query server, host and SID) is explained by the error it wraps, and
-errors reaching the database (DPY-6005, ORA-12514, …) say only the code.
+the query already wrote. Any other error shows only its code and a general
+sentence: Oracle's text for it isn't passed on, since newer versions quote
+values in it and some name the server (ORA-12801 names a parallel query
+server's host and SID; it's explained by the error it wraps). Not reaching
+the database (DPY-6005, ORA-12514, …) says only the code, and a refused
+sign-in what to do about it.
 
 Each error also has a category, which travels with it to the agent and the
 chat: validation (DataLab's SQL check), sql, permission, timeout,
@@ -118,7 +119,16 @@ _INVALID_IDENTIFIER = re.compile(r'ORA-00904: ("[^"\r\n]{1,128}"(?:\."[^"\r\n]{1
 _ANY_CODE = re.compile(r"\b((?:ORA|DPY|DPI)-\d{4,5})\b")
 # Wraps the real error, and names the parallel server (host and SID).
 _PARALLEL = "ORA-12801"
-_PERMISSION = frozenset({"ORA-00942", "ORA-01031", "ORA-28000", "ORA-01017", "ORA-28001"})
+_PERMISSION = frozenset({"ORA-00942", "ORA-01031"})
+# Signing in refused: the password, or the account.
+SIGN_IN = {
+    "ORA-01017": "the saved password was refused. Update it in Settings → Connections",
+    "ORA-01005": "the saved password was refused. Update it in Settings → Connections",
+    "ORA-28000": "the account is locked. Ask the database's administrator to unlock it",
+    "ORA-28001": "the account's password has expired. Change it, then update it in Settings",
+}
+# The database ended DataLab's session while the query ran.
+_SESSION_ENDED = frozenset({"ORA-00028", "ORA-01012", "ORA-02396", "ORA-01089"})
 # Not reaching the database, or losing it: the first line can name the host.
 _CONNECTION_PREFIXES = ("DPY-6", "ORA-12", "ORA-03113", "ORA-03114", "ORA-03135", "DPY-4011")
 _SQL_ERRORS_IN_12 = frozenset({"ORA-12899", _PARALLEL})
@@ -148,6 +158,8 @@ def category(code: str | None) -> str:
         return "timeout"
     if code in _PERMISSION:
         return "permission"
+    if code in SIGN_IN or code in _SESSION_ENDED:
+        return "connection"
     if code.startswith(_CONNECTION_PREFIXES) and code not in _SQL_ERRORS_IN_12:
         return "connection"
     return "sql"
@@ -163,24 +175,45 @@ def connection_message(code: str | None) -> str:
     )
 
 
+def sign_in_message(code: str) -> str:
+    return f"DataLab couldn't sign in to the database ({code}): {SIGN_IN[code]}."
+
+
 def explain(error: oracledb.Error, sql: str | None = None) -> str:
     """The message a failed query shows: to the agent, in Queries, in the chat."""
     code = oracle_code(error)
+    if code in SIGN_IN:
+        return sign_in_message(code)
+    if code in _SESSION_ENDED:
+        return (
+            f"The database ended DataLab's session ({code}) while the query ran. "
+            "Try again in a moment."
+        )
     if category(code) == "connection":
         return connection_message(code)
     if code == _PARALLEL:
         return f"{_PARALLEL}: a parallel query server failed. Try again, or narrow the query."
     explanation = EXPLANATIONS.get(code or "")
-    if code is None or explanation is None:
-        # The first line of an Oracle error names the problem (e.g. ORA-00942:
-        # table or view does not exist) without echoing data values.
-        return str(error).splitlines()[0][:300] if str(error) else type(error).__name__
+    if code is None:
+        return "Oracle refused the query, without an error code DataLab recognises."
+    if explanation is None:
+        # Oracle's own text isn't shown (it can quote values or name the
+        # server): the code alone, to look up.
+        wrapped = " (inside ORA-12801, a parallel query server's error)" if _wrapped(error) else ""
+        return (
+            f"{code}: Oracle refused the query{wrapped}. DataLab has no explanation of "
+            "this code, and doesn't show Oracle's own text for it (it can quote data)."
+        )
     name = ""
     if code == "ORA-00904" and sql:
         found = _INVALID_IDENTIFIER.search(str(error))
         if found and _written_in(found.group(1), sql):
             name = f": {found.group(1)}"
     return f"{code}: {explanation.format(name=name)}"
+
+
+def _wrapped(error: oracledb.Error) -> bool:
+    return str(error).startswith(_PARALLEL)
 
 
 def _written_in(identifier: str, sql: str) -> bool:

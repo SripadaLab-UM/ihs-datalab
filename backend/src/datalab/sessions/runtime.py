@@ -615,7 +615,11 @@ def tool_failure(item: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
         text = error
     if not text:
         return error, None
-    shown, failure = read_tag(text[-20_000:])
+    # Only the query tool's errors carry a failure tag (data/failures.py).
+    if item.get("tool") == "query" and item.get("server") == "ihs-data":
+        shown, failure = read_tag(text[-20_000:])
+    else:
+        shown, failure = text, None
     shown = _TOOL_ERROR_PREFIX.sub("", shown.strip())[:MAX_TOOL_ERROR]
     found = (
         {"category": failure.category, "code": failure.code, "query_id": failure.query_id}
