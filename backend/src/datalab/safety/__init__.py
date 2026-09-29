@@ -828,6 +828,13 @@ def _result(check_id: str, promise: str, label: str, ok: bool, detail: str) -> C
     return CheckResult(check_id, promise, label, "pass" if ok else "fail", detail)
 
 
+# Windows reparse tags with this bit set are links of some kind ("name
+# surrogates": symlinks, junctions, WSL's Linux symlinks, 0xA000001D). Others
+# are regular files with extra handling, such as OneDrive's cloud placeholders
+# (0x9000xx1A), which the secret scans should still read.
+_NAME_SURROGATE = 0x20000000
+
+
 def _files(root: Path) -> list[Path]:
     """The regular files under `root`, as they are (links not followed). What
     can't be read is skipped: on Windows, a Linux symlink made in a container
@@ -840,7 +847,7 @@ def _files(root: Path) -> list[Path]:
             info = path.lstat()
         except OSError:
             continue
-        if stat.S_ISREG(info.st_mode) and not getattr(info, "st_reparse_tag", 0):
+        if stat.S_ISREG(info.st_mode) and not getattr(info, "st_reparse_tag", 0) & _NAME_SURROGATE:
             found.append(path)
     return found
 
