@@ -48,6 +48,9 @@ document in the same change. Don't start new plan documents; update these.
   environment-specific details.
 - Formatting: no prettier (the repo keeps its own formatting). Don't run
   `npx tsc -b`.
+- Line endings: `.gitattributes` keeps text files LF on every platform (a
+  Windows checkout too). A test that reads a source or Help file as text
+  still normalizes `\r\n`, for checkouts made before it.
 
 ## Checks
 

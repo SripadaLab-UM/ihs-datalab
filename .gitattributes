@@ -1,0 +1,33 @@
+# Text files are stored and checked out with LF line endings on every
+# platform, so a Windows checkout (core.autocrlf) matches the Mac and Linux
+# ones and the tests that read files as text see the same bytes.
+* text=auto eol=lf
+
+# Windows' own script formats keep CRLF (none are committed today).
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Binary: never converted or diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.tgz binary
+*.whl binary
+*.xlsx binary
+*.docx binary
+*.parquet binary
+*.rds binary
+*.RData binary
+*.sqlite binary
+*.db binary

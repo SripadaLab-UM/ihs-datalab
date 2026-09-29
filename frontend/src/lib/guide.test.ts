@@ -10,6 +10,8 @@ import { SETTINGS_SECTIONS, settingsPath } from "@/features/settings/sectionIds"
 import { GLOSSARY, glossaryTerm, headings, PAGES, pageBySlug, parseGlossary, parsePage, plain, resolveGuideLink, searchGuide, slug, topicFor } from "./guide";
 
 const GUIDE = resolve(__dirname, "../../../docs/guide");
+// As the bundle has them: a Windows checkout may have CRLF line endings.
+const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n/g, "\n");
 const SRC = resolve(__dirname, "..");
 
 describe("the guide, bundled", () => {
@@ -20,7 +22,7 @@ describe("the guide, bundled", () => {
       expect(page.title, page.file).not.toBe("");
       expect(page.summary, page.file).not.toBe("");
       // The bundled text is the file's, word for word.
-      expect(readFileSync(join(GUIDE, page.file), "utf8")).toContain(page.body.trim());
+      expect(read(join(GUIDE, page.file))).toContain(page.body.trim());
     }
   });
 
@@ -64,7 +66,7 @@ describe("the guide, bundled", () => {
   });
 
   it("is listed in docs/USER_GUIDE.md, page for page, in Help's order", () => {
-    const guide = readFileSync(resolve(GUIDE, "../USER_GUIDE.md"), "utf8");
+    const guide = read(resolve(GUIDE, "../USER_GUIDE.md"));
     const listed = [...guide.matchAll(/^\d+\. \[[^\]]+\]\(guide\/([\w-]+\.md)\)$/gm)].map((m) => m[1]);
     expect(listed).toEqual(PAGES.map((p) => p.file));
   });
@@ -107,7 +109,7 @@ describe("tooltips", () => {
         const path = join(dir, entry.name);
         if (entry.isDirectory()) walk(path);
         else if (/\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name)) {
-          for (const [, term] of readFileSync(path, "utf8").matchAll(/<InfoTip\b[^>]*?\bterm="([^"]+)"/g)) used.push(term);
+          for (const [, term] of read(path).matchAll(/<InfoTip\b[^>]*?\bterm="([^"]+)"/g)) used.push(term);
         }
       }
     };
@@ -136,6 +138,9 @@ describe("parsing", () => {
   it("reads front matter, and a term's first paragraph as plain text", () => {
     const page = parsePage("x/README.md", "---\ntitle: T\nsummary: S\norder: 3\nscreens: /a, /b/*\n---\n\n# Heading\n");
     expect(page).toMatchObject({ slug: "", title: "T", summary: "S", order: 3, screens: ["/a", "/b/*"] });
+    // The same from a Windows checkout's CRLF line endings.
+    const crlf = parsePage("x/README.md", "---\r\ntitle: T\r\nsummary: S\r\norder: 3\r\n---\r\n\r\n# Heading\r\n");
+    expect(crlf).toMatchObject({ title: "T", summary: "S", order: 3, body: "\n# Heading\n" });
     const [term] = parseGlossary("## Plan\n\nA **plan** you [approve](plans.md), with `code`.\n\nMore.");
     expect(term).toMatchObject({ id: "plan", term: "Plan", short: "A plan you approve, with code." });
     expect(plain("*one* and _two_")).toBe("one and two");
