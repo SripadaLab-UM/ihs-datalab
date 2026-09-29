@@ -183,9 +183,12 @@ body {
   }
   /* Disabled: the arrow with a bar, faded to 75% (ink text stays above
      5.9:1, muted and faint text above 3:1, on every surface in both themes:
-     styles/cursor.test.tsx), and no hover change: components use
-     enabled:hover: for theirs. */
-  :where(button, select, input, textarea, [role="button"], [role="tab"], [role="switch"]):where(:disabled, [aria-disabled="true"]) {
+     styles/cursor.test.tsx; any fainter and some text drops below that), and
+     no hover change: components use enabled:hover: for theirs. :is(), not
+     :where(): preflight's `button, input, select, textarea { opacity: 1 }`
+     outranks a zero-specificity rule, so the fade never showed. Still in the
+     base layer, so a component's own utility wins. */
+  :is(button, select, input, textarea, [role="button"], [role="tab"], [role="switch"]):where(:disabled, [aria-disabled="true"]) {
     cursor: not-allowed;
     opacity: 0.75;
   }
