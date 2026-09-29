@@ -26,6 +26,9 @@ vi.mock("@/api/pipelines", () => ({
     accept: vi.fn(),
     reject: vi.fn(),
     testLog: vi.fn(),
+    edits: vi.fn(async () => []),
+    startEdit: vi.fn(),
+    editProposal: vi.fn(),
   },
 }));
 vi.mock("@/api/client", () => ({ api: { conversations: vi.fn(async () => []) } }));
@@ -35,6 +38,7 @@ vi.mock("@/components/chat/DockedChat", () => ({
 
 const status: PipelinesStatus = {
   available: true,
+  practice: false,
   repo: "in sync",
   name: "SripadaLab-UM/ihs-pipelines",
   signed_in: true,
@@ -112,7 +116,10 @@ beforeEach(() => {
     ],
     more_files: 0,
   });
-  vi.mocked(pipelinesApi.file).mockResolvedValue({ path: "ihsDataR/R/steps.R", head: "abc1234def", size: 7, text: "x <- 1\n", too_large: false });
+  vi.mocked(pipelinesApi.file).mockResolvedValue({
+    path: "ihsDataR/R/steps.R", head: "abc1234def", size: 7, text: "x <- 1\n", too_large: false,
+    editable: true, source_note: null, draft: null,
+  }); // prettier-ignore
   vi.mocked(pipelinesApi.proposals).mockResolvedValue([proposal]);
 });
 
@@ -142,7 +149,7 @@ it("says where the repo stands, and how each change and its tests went", () => {
   expect(testLine({ ...passed, status: "failed", message: "2 of 5 tests failed." }).tone).toBe("bad");
 });
 
-it("browses the package read-only, lists the changes to review, and docks the Pipelines assistant", async () => {
+it("browses the package, offers to edit a file by hand, lists the changes to review, and docks the Pipelines assistant", async () => {
   sessionStorage.setItem("datalab:pipelines:chat-open", "open");
   render(
     <QueryClientProvider client={client()}>
@@ -153,11 +160,11 @@ it("browses the package read-only, lists the changes to review, and docks the Pi
   expect(screen.getByText("The pipelines chat")).toBeInTheDocument();
   fireEvent.click(await screen.findByRole("button", { name: "steps.R" }));
   await waitFor(() => expect(pipelinesApi.file).toHaveBeenCalledWith("ihsDataR/R/steps.R"));
-  expect(await screen.findByText(/Read-only: ask the agent to change it/)).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: /Edit manually/ })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "Changes (1)" }));
   const list = screen.getByRole("button", { name: /to review/ });
   expect(within(list).getByText("ihsDataR/R/steps.R")).toBeInTheDocument();
-  expect(within(list).getByText(/Weekly steps/)).toBeInTheDocument();
+  expect(within(list).getByText(/Suggested by the assistant in Weekly steps/)).toBeInTheDocument();
 });
 
 it("asks the person to sign in when GitHub isn't signed in", async () => {

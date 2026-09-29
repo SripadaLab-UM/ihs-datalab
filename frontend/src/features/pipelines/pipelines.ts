@@ -1,6 +1,6 @@
 // What the Pipelines tab says about the repo, a proposal, and its tests. Kept
 // apart from the components so the wording can be checked on its own.
-import type { PipelineProposal, PipelinesStatus, PipelineTest } from "@/api/pipelines";
+import type { PipelineEditSummary, PipelineProposal, PipelinesStatus, PipelineTest } from "@/api/pipelines";
 import type { EditorLanguage } from "@/components/editor/CodeEditor";
 
 export function languageOf(path: string): EditorLanguage {
@@ -9,6 +9,9 @@ export function languageOf(path: string): EditorLanguage {
   if (extension === "yaml" || extension === "yml") return "yaml";
   if (extension === "md" || extension === "rmd" || extension === "qmd") return "markdown";
   if (extension === "sql") return "sql";
+  if (extension === "py") return "python";
+  if (extension === "sh") return "shell";
+  if (extension === "json") return "json";
   return "text";
 }
 
@@ -99,6 +102,36 @@ export function proposalChip(proposal: PipelineProposal): { text: string; tone: 
     case "withdrawn":
       return { text: "undone", tone: undefined };
   }
+}
+
+/** A person's edit's state, for its chip. */
+export function editChip(edit: Pick<PipelineEditSummary, "status">): { text: string; tone: Tone } {
+  switch (edit.status) {
+    case "draft":
+      return { text: "draft · not shared", tone: "you" };
+    case "saving":
+      return { text: "saving", tone: undefined };
+    case "saved":
+      return { text: "saved", tone: "good" };
+    case "conflict":
+      return { text: "changed on GitHub", tone: "attn" };
+    case "check_failed":
+      return { text: "check", tone: "attn" };
+    case "tests_failed":
+      return { text: "tests failed", tone: "bad" };
+    case "failed":
+      return { text: "not saved", tone: "bad" };
+    case "discarded":
+      return { text: "discarded", tone: undefined };
+  }
+}
+
+/** A person's edits a person may still act on. */
+export const EDIT_OPEN = new Set(["draft", "conflict", "check_failed", "tests_failed", "failed"]);
+
+/** What an edit changes, in a few words. */
+export function editTitle(paths: string[]): string {
+  return paths.length === 1 ? paths[0] : `${paths.length} files`;
 }
 
 export const ACTIONABLE = new Set(["open", "conflict", "check_failed", "tests_failed", "failed"]);

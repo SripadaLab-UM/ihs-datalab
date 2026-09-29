@@ -12,9 +12,19 @@ import { TestResults } from "./TestResults";
 /**
  * One proposed change to the pipelines repo: what the agent changed, file by
  * file; the package's tests on it; the check; and Save & share or Discard.
- * Nothing here edits the change: to change it, ask the agent.
+ * To change it, ask the agent, or Edit before accepting: it becomes the
+ * person's own edit (EditView), and this proposal is replaced by it.
  */
-export function ProposalView({ id, onBack }: { id: string; onBack: () => void }) {
+export function ProposalView({
+  id,
+  onBack,
+  onEdit,
+}: {
+  id: string;
+  onBack: () => void;
+  /** Open a person's edit: this proposal's, once they choose Edit before accepting. */
+  onEdit?: (editId: string) => void;
+}) {
   const queryClient = useQueryClient();
   const detail = useQuery({
     queryKey: ["pipeline-proposal", id],
@@ -31,7 +41,18 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
   const test = useMutation({ mutationFn: () => pipelinesApi.test(id), onSuccess: settle });
   const accept = useMutation({ mutationFn: () => pipelinesApi.accept(id, [...confirmed]), onSuccess: settle });
   const reject = useMutation({ mutationFn: () => pipelinesApi.reject(id), onSuccess: settle });
-  const failed = test.error ?? accept.error ?? reject.error;
+  // Edit before accepting: the proposal becomes the person's edit, and this one is replaced.
+  const edit = useMutation({
+    mutationFn: () => pipelinesApi.editProposal(id),
+    onSuccess: (made) => {
+      void queryClient.invalidateQueries({ queryKey: ["pipeline-proposal", id] });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline-proposals"] });
+      void queryClient.invalidateQueries({ queryKey: ["pipeline-edits"] });
+      queryClient.setQueryData(["pipeline-edit", made.id], made);
+      onEdit?.(made.id);
+    },
+  });
+  const failed = test.error ?? accept.error ?? reject.error ?? edit.error;
 
   if (!detail.data) {
     return (
@@ -43,7 +64,7 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
   const { proposal, files, findings } = detail.data;
   const chip = proposalChip(proposal);
   const actionable = ACTIONABLE.has(proposal.status);
-  const working = busy(proposal) || test.isPending || accept.isPending || reject.isPending;
+  const working = busy(proposal) || test.isPending || accept.isPending || reject.isPending || edit.isPending;
   const errors = findings.filter((f) => f.severity === "error");
   const unconfirmed = findings.filter((f) => f.severity !== "error" && !confirmed.has(f.id));
   const canSave = actionable && !working && files.length > 0 && errors.length === 0 && unconfirmed.length === 0;
@@ -61,6 +82,7 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
         <h2 className="font-serif text-[21px] leading-tight">
           {files.length === 1 ? `A change to ${files[0].path.split("/").pop()}` : `A change to ${files.length} files`}
         </h2>
+        <Chip>Suggested by the assistant</Chip>
         <Chip tone={chip.tone}>{chip.text}</Chip>
       </header>
       <p className="mt-1 font-sans text-[13px] text-muted">
@@ -69,6 +91,17 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
       </p>
 
       <Outcome detail={detail.data} />
+      {proposal.status === "superseded" && proposal.result?.edit && onEdit && (
+        <p className="mt-2 font-sans text-[13px]">
+          <button
+            type="button"
+            onClick={() => onEdit(proposal.result!.edit!)}
+            className="text-ink underline decoration-faint underline-offset-2 hover:decoration-ink"
+          >
+            Open your edit of it
+          </button>
+        </p>
+      )}
 
       <section aria-labelledby={`${id}-tests`} className="mt-5 border-t border-line pt-4">
         <h3 id={`${id}-tests`} className="dl-label mb-2">
@@ -97,6 +130,15 @@ export function ProposalView({ id, onBack }: { id: string; onBack: () => void })
             <Icon name="send" size={13} /> Save &amp; share
           </Button>
           <InfoTip term="save--share" />
+          {onEdit && (
+            <Button
+              onClick={() => edit.mutate()}
+              disabled={working || files.length === 0 || files.some((f) => f.binary)}
+              title="Open its files in the editor as your own edit, to change before sharing. This proposal is replaced by it."
+            >
+              <Icon name="pen" size={13} /> Edit before accepting
+            </Button>
+          )}
           {discarding ? (
             <span role="group" aria-label="Discard this change?" className="flex flex-wrap items-center gap-2">
               <span className="font-sans text-[13px] text-ink">Discard it? Nothing is shared, and it can't be undone.</span>
@@ -224,16 +266,20 @@ function Outcome({ detail }: { detail: PipelineProposalDetail }) {
   );
 }
 
-function Findings({
+/** The check's findings: errors to fix, and data and code findings to confirm one by one. */
+export function Findings({
   findings,
   confirmed,
   onConfirm,
   disabled,
+  yours = false,
 }: {
   findings: PipelineFinding[];
   confirmed: Set<string>;
   onConfirm: (next: Set<string>) => void;
   disabled: boolean;
+  /** The person's own edit: they change it themselves, not the agent. */
+  yours?: boolean;
 }) {
   const errors = findings.filter((f) => f.severity === "error");
   const data = findings.filter((f) => f.severity === "data");
@@ -268,7 +314,7 @@ function Findings({
         <div className="flex flex-col gap-1.5">
           <p className="text-attn">
             This may be participant data. Look at each one, and confirm it isn't before saving (rows made up for the
-            tests are fine); otherwise ask the agent to take it out.
+            tests are fine); otherwise {yours ? "take it out" : "ask the agent to take it out"}.
           </p>
           <Confirmable items={data} confirmed={confirmed} onToggle={toggle} disabled={disabled} agree="I've checked: it isn't participant data." />
         </div>
