@@ -43,7 +43,8 @@ a tool that controls your terminal or browser, so this is a rule for people.
 
 ## What practice needs
 
-The practice DataLab needs Docker Desktop, and nothing from the lab: no
+The practice DataLab needs Docker Desktop (on a Mac the installer offers to
+install it if it's missing), and nothing from the lab: no
 database password, no VPN and no GitHub account. Its installer sets up the
 synthetic database for you (a few minutes, the first time), and the database
 runs in Docker on your computer only, where nothing else can reach it.

@@ -8,7 +8,12 @@ Intern Health Study data.
 
 ## Installing (pre-release)
 
-You need **Docker Desktop**, installed and started once. From a release
+DataLab needs **Docker Desktop**. On a Mac the installer finds it (even if its
+`docker` command isn't on your PATH) and starts it; if it's missing, it offers
+to download Docker's official Docker Desktop for your Mac, checks it's signed
+by Docker Inc, installs it, and waits while you finish Docker's first-run
+window (its agreement, which you accept yourself, and its settings). On
+Windows the installer sets up WSL and Docker Desktop. From a release
 (Releases on GitHub), download into one folder:
 - the `datalab-…whl` package;
 - `requirements.txt` (every dependency the package needs, pinned by hash);
