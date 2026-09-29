@@ -339,7 +339,11 @@ it("shows a docked conversation in the panel's own sizes: the question as a mess
   const question = screen.getByText("What does this page claim?");
   expect(question.tagName).toBe("P");
   expect(question).toHaveClass("text-[17px]");
-  expect(screen.getByText("SELECT 1 FROM dual")).toBeInTheDocument();
+  // The answer's SQL shows as plain text at once and is highlighted once the
+  // parser's chunk has loaded, which splits it into tokens. Wait for that, then
+  // read the block whole: asserting on the plain text raced the import.
+  await waitFor(() => expect(document.querySelector("code .tok-keyword")).not.toBeNull());
+  expect(document.querySelector("code .tok-keyword")!.closest("code")).toHaveTextContent("SELECT 1 FROM dual");
 });
 
 it("folds a proposed knowledge edit in a docked chat, and opens it on request", async () => {
