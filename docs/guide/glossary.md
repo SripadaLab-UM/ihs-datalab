@@ -41,9 +41,10 @@ questions, and decides whether it's a data or a research session.
 
 A mode is a starting point, not a restriction. Analysis, Data extraction and
 Data engineering are [data sessions](#data-session); Research is a
-[research session](#research-session). Two more open only from the tab that
-docks them: Workflow authoring (Workflows tab) and Knowledge writing
-(Knowledge tab), both data sessions.
+[research session](#research-session). Four more open only from the tab
+that docks them, all data sessions: SQL drafting (SQL Playground), Pipelines
+(Pipelines tab), Workflow authoring (Workflows tab) and Knowledge writing
+(Knowledge tab).
 The [Express](#express) switch works in every mode: it changes how the agent
 works, not the mode.
 
@@ -51,7 +52,7 @@ works, not the mode.
 
 A short written plan the agent proposes before it looks at outcome data. You
 edit and approve it; it's then frozen with a time and a fingerprint, and
-later work is labelled as following it or exploratory.
+the agent labels later work as following it or exploratory.
 
 A plan is a record of what you agreed to do, not a lock: nothing stops the
 agent running an off-plan query. It's asked to label such work "exploratory
@@ -75,7 +76,8 @@ A second pass after the answer, in which the same model checks its own work
 against a checklist. It's a second opinion to prompt your own judgement, not
 proof: its findings can be wrong in either direction.
 
-The **Rigor review** switch is in the header of a data session. It's on by
+The **Rigor review** switch is in the header of a data session in the
+Workspace (the tabs' docked chats don't have it). It's on by
 default in Analysis mode and off in the other modes, and it roughly doubles
 the time and cost of each answer. The checklist asks whether numbers are
 traced, the plan was followed and off-plan work labelled, causal language is
@@ -145,8 +147,7 @@ A separate DataLab with only made-up (synthetic) data, for learning, demos
 and trying things out. It can't reach the real study database, attach your
 own files, sign in to GitHub, or export anywhere but its own practice folder.
 
-The practice DataLab shows **practice · synthetic data** at the top right of
-every screen. Settings it can't change are marked **Fixed on the practice
+The practice DataLab says **practice** in the header of every screen. Settings it can't change are marked **Fixed on the practice
 DataLab**. See [Practice and real data](practice-and-real.md).
 
 ## Proposal

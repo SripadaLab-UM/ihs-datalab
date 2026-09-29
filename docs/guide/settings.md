@@ -14,14 +14,25 @@ narrow window): **Connections**, **Appearance**, **Export folders**,
 such as `/settings/updates`, and Settings opens on the section you used last,
 or on Connections the first time.
 
-Two entries at the top right of every screen lead here too:
+The shortcuts at the top right of every screen, beside **Help**, lead here
+too:
 
+- **Database** and **U-M GPT key** say how each connection stands, with a
+  link to [Connections](#connections).
+- **GitHub** shows your GitHub account, or that you need to sign in, and
+  opens [Connections](#connections). The practice DataLab never signs in to
+  GitHub, so it doesn't show this. **Export folders** opens your
+  [export folders](#export-folders). On a narrower window these two are in
+  the **More** menu.
 - **Update available** appears when a newer DataLab is out (DataLab checks
   when it starts and about once an hour while it's open), and opens
   [Updates](#updates).
-- **GitHub** shows your GitHub account, or **Sign in**, and opens
-  [Connections](#connections). The practice DataLab never signs in to GitHub,
-  so it doesn't show this.
+- **More** also holds the appearance and **Send feedback…**, which makes a
+  bug report or suggestion for the maintainer. DataLab adds its own
+  diagnostics (no study data, keys or passwords), and you see everything in
+  the report before it's saved or sent. Don't put participant data in it.
+- **Session** has **End session…**, which signs every DataLab window in this
+  browser out. To get back in, quit DataLab and start it again.
 
 The practice DataLab can't change some settings. They are still shown, marked
 **Fixed on the practice DataLab**, so you can see what the real DataLab would

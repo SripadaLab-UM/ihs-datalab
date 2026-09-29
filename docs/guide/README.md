@@ -18,8 +18,8 @@ This guide is the same text as DataLab's own Help and its tooltips. It's written
 ## If you're new
 
 1. Read [What DataLab will and won't do](safety.md). It takes two minutes.
-2. Open the practice DataLab, which has only made-up data, and take the
-   tour. See [Practice and real data](practice-and-real.md).
+2. Open the practice DataLab, which has only made-up data, and try things
+   there first. See [Practice and real data](practice-and-real.md).
 3. [Ask your first question](first-question.md), then learn to
    [read an answer](reading-an-answer.md).
 
