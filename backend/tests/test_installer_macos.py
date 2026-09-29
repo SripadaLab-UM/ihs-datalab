@@ -1558,3 +1558,15 @@ def test_sudo_is_only_ever_dockers_installer_without_accepting_its_license():
     assert "accept-license" not in text and "sudo -S" not in text
     calls = [line.strip() for line in text.splitlines() if line.strip().startswith("sudo ")]
     assert calls == ['sudo "$installer_command" --user "$(id -un)" || status=$?']
+
+
+def test_ctrl_c_at_the_optional_questions_after_done_just_ends(machine):
+    # Ctrl-C (typed in the terminal: ETX) at "Show DataLab in Finder? [Y/n]",
+    # once the install has finished, ends it quietly and successfully.
+    done = install(machine, "0.1.0a3", "--no-github", answers=["\x03"])
+    assert done.returncode == 0, done.stdout
+    assert "DataLab is installed." in done.stdout and "Finder? [Y/n]" in done.stdout
+    assert "OK." in done.stdout
+    assert "Stopped. Run this installer again" not in done.stdout
+    assert "Open DataLab now?" not in done.stdout
+    assert (root(machine) / "current").read_text() == "0.1.0a3\n"

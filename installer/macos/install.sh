@@ -1010,7 +1010,11 @@ echo "Open it with the Desktop shortcut, from Applications in Finder, or with Sp
 echo "(Cmd-Space, then type $NAME). It opens a Terminal window, then your browser."
 echo "(Or run: \"$DATALAB\" --profile $PROFILE serve)"
 # Only with someone at the keyboard: not when this runs from a pipe or a script.
+# The install is finished by now, so Ctrl-C at these two optional questions
+# just ends it, quietly and successfully (not "Stopped. Run this installer
+# again ...", which is for an install that didn't finish).
 if [ -t 0 ] && [ -t 1 ]; then
+  trap 'echo; echo "OK."; exit 0' INT TERM HUP
   if ask "Show $NAME in Finder? [Y/n]"; then open -R "$APP" || true; fi
   if ask "Open $NAME now? [Y/n]"; then open "$APP" || true; fi
 fi

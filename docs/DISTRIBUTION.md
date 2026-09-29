@@ -96,7 +96,10 @@ in the README. The installer then:
      so a home folder like `/Users/o'brien` works. The installer ends by printing where the
      app, the Desktop shortcut and the program files are, then, only when
      run from a terminal (not a pipe or script), offers "Show in Finder"
-     (`open -R`) and "Open DataLab now?". `DATALAB_SYSTEM_APPLICATIONS`
+     (`open -R`) and "Open DataLab now?". The install has finished by then,
+     so Ctrl-C at either just ends it ("OK.", exit 0), not with the
+     "Stopped. Run this installer again" message an unfinished install
+     gets. (Windows asks nothing after "All done!".) `DATALAB_SYSTEM_APPLICATIONS`
      stands in for `/Applications` in tests.
    - Windows: a Start menu entry and a Desktop shortcut, the same for both.
      A Desktop shortcut of that name that doesn't run this `bin\datalab.cmd`
