@@ -1,10 +1,10 @@
 # Architecture
 
-Status: **draft** for v1. This is the proposed design; it has not been
-implemented yet.
-
-This document describes how DataLab is built. For *what* it does and *why*,
-see [PRODUCT.md](../PRODUCT.md) and the other docs in this folder.
+Status: **as built**, 0.3.0b1 and `main` (2026-09-29). Where something
+isn't built yet it says so. What DataLab does, and how ready each part is,
+is in [PRODUCT.md](../PRODUCT.md); this document is how it's built. It names
+each module's responsibility rather than every file, so it stays true when
+large files are split.
 
 ## Principles
 
@@ -57,36 +57,58 @@ see [PRODUCT.md](../PRODUCT.md) and the other docs in this folder.
 
 | Choice | Why |
 |---|---|
-| Python 3.12, FastAPI, uvicorn | Same language as the prototype. The ecosystem covers what we need: `python-oracledb`, the official MCP SDK, `keyring`, `sqlglot` |
+| Python 3.13 (`requires-python = ">=3.13"`), FastAPI, uvicorn | Same language as the prototype. The ecosystem covers what we need: `python-oracledb`, the official MCP SDK, `keyring`, `sqlglot` |
 | SQLite, with plain numbered `.sql` migrations applied at startup | One file, no server. Migrations let data survive updates. The mechanism is small enough to read in a minute |
 | Pydantic models for every API shape | Validation, and the OpenAPI schema the frontend types are generated from |
 | Docker driven through the `docker` CLI, as async subprocesses | Transparent and debuggable. It works the same on Mac and Windows, and `docker exec -i` gives clean stdio pipes to `codex app-server` |
 | `uv` for dependencies (`uv.lock`) | Exact, reproducible installs, and it's the same tool the installer uses |
 
-Modules:
+Modules (`backend/src/datalab/`), by responsibility:
 
 ```
-src/datalab/
-  app.py            app factory, startup and shutdown, serves the built frontend
-  config.py         the ~15 settings; defaults plus the user's settings file
-  db/               SQLite connection, migrations/*.sql, small query helpers
-  api/              one router per area: conversations, sql, workflows,
-                    pipelines, knowledge, exports, settings, safety
-  sessions/         container lifecycle, Codex app-server adapter, event log,
-                    checkpoints, workspace files
-  relay/            model relay: session tokens, request validation, key injection
-  gateway/          per-session network setup; gateway config templates
-  data/             Oracle client, SQL check, catalog, audit log, MCP server,
-                    synthetic backend
-  helper/           research helper: approval queue, temporary research run
-  repos/            git sync for ihs-knowledge and ihs-pipelines; Save & share;
-                    GitHub App sign-in
-  workflows/        workflow file model and validation, runner, run records
-  exports/          destinations, manifests, conversation report renderer
-  safety/           the Safety check tests
-  connect/          outside-tool connector: tokens, scopes, MCP server
-  credentials.py    keychain get/set
-  datalock.py       one DataLab per data folder (see below)
+app.py, web.py      app factory, startup and shutdown, local API protection,
+                    serves the built frontend
+cli.py, setup.py    the `datalab` command (serve, setup, practice-db, github,
+                    repos, versions, backup, rollback, safety-check, catalog,
+                    kb-check, …) and the install steps shared by both installers
+config.py           settings: defaults plus the profile's settings.toml
+db/                 SQLite connection, numbered migrations, backups, rollback
+api/                one router per area: conversations, files, code, inputs,
+                    provenance, sql, workflows, pipelines, knowledge, github,
+                    exports, settings, safety, support
+sessions/           conversations: container lifecycle (containers.py, with
+                    gateway.conf and squid.conf), the Codex app-server
+                    adapter and turn runtime, the conversation manager and
+                    event store, modes, session tokens, approvals (research
+                    helper, plans), checkpoints, tracing, provenance, the
+                    rigor review, the Code tab's files, after-turn hooks
+relay/              model relay: request policy, key injection, busy retries
+data/               Oracle client and errors, SQL check, catalog (and where
+                    it comes from), audit log, the `ihs-data` agent tools,
+                    metadata helpers, SQL Playground drafts
+playground.py       the SQL Playground's own queries and results
+knowledge/          the knowledge base: each conversation's copy, proposals,
+                    page edits, suggestions, the check, Save & share
+pipelines/          the pipelines repo: proposals, a person's edits, tests
+                    in a no-network container, Save & share
+repos/              git clones and sync, GitHub App sign-in, credential helper
+workflows/          workflow file model and validation, the runner, QC and
+                    small-cell suppression, run records, drafts, stages,
+                    practice built-ins
+exports.py, export_folders.py, htmlclean.py
+                    export folders, exporting files and conversation reports
+safety/             the Safety check and canaries
+practice_db/        the synthetic database: generator, guard, verify, and
+                    the practice database's container lifecycle
+releases.py, updates.py, updater.py, update_gate.py, signing.py, release_keys.py
+                    update checks, signed releases, installing an update
+storage.py, diagnostics.py, support.py
+                    the Storage view, Copy diagnostics, support reports
+credentials.py, secret_prompt.py
+                    keychain get/set; masked prompts at setup
+datalock.py         one DataLab per data folder (see below)
+launcher_icons.py, windows_vm.py, docker_path.py
+                    platform helpers
 ```
 
 **Seams for the parallel milestones.** So that milestones 4 to 7 can be
@@ -98,7 +120,7 @@ own slot, and the shared modules offer extension points:
   `build_<name>_router(services)` under `/api/<name>`, registered once in
   `create_app`. `services` is a small frozen dataclass in the same module
   (`SqlServices`, `KnowledgeServices`, …) holding what that area uses. Each
-  starts with only `GET /api/<name>/status`.
+  has a `GET /api/<name>/status`.
 - **Query origin.** `DataService.run_query(..., origin=)` and the access log
   record what a query was for: `conversation` (the default), `playground`,
   or `run`. `session_id` stays the owner: a conversation id, a `pg_…`
@@ -136,9 +158,9 @@ own slot, and the shared modules offer extension points:
     conversation's folder), and no root may hold the data folder. Nor can a
     home folder, a dot-folder in it, or a credentials file. The resolved
     path is what's mounted.
-- **Migrations** are numbered per area, so branches don't collide: 0007
-  knowledge, 0008 workflow runs, 0009 update metadata (see
-  `db/migrations/README.md`).
+- **Migrations** are numbered, one per change (0001 to 0014 on `main`; see
+  `db/migrations/README.md`), and CI upgrades a data folder from the
+  previous release through them.
 - **Data-folder lock.** `serve` (and `try` and `safety-check`) take an
   exclusive lock on `<data folder>/.lock` before anything else (`fcntl.flock`
   on Mac and Linux, `msvcrt.locking` on Windows, and a process-id check where
@@ -266,6 +288,16 @@ own slot, and the shared modules offer extension points:
   be stopped like a turn. (Codex 0.157 answers `review/start` with a
   different turn id than the one it runs, so the runtime takes the id from
   `turn/started`.)
+- **Express** (`sessions/modes.py`, `sessions/tokens.py`). A
+  per-conversation switch, stored with the conversation (migration 0014),
+  never on together with the rigor review. It isn't a mode: DataLab puts a
+  short note in front of each message asked with it on (and an "Express is
+  off again" note in front of the first one after), so a switch applies from
+  the next message without restarting the thread. The token refuses
+  `propose_plan` and `ask_research_helper` for its turns; data access and
+  checks don't change. Each question's event records the switches and the
+  effort it began with, and the turn's review follows that record.
+  WORKSPACE.md, "Express", has the detail.
 
 ### 3. Workspace and checkpoints
 
@@ -433,11 +465,16 @@ own slot, and the shared modules offer extension points:
   it, delete `<data_dir>/catalog` and start DataLab again.
 - **Audit log.** Every query appends one metadata-only row (see
   [SAFETY.md](SAFETY.md)). The same rows feed the Data accessed panel.
-- **Agent tools (`/mcp`).** The official MCP Python SDK, with streamable HTTP.
-  It exposes `search_catalog`, `describe_table`, `query`,
-  `ask_research_helper`, and `propose_plan`, plus the metadata helpers: join
-  paths, concept lookup, cohort plan draft, and survey dictionary search. The
-  session token decides which workspace results land in.
+- **Agent tools (`/mcp`, `data/agent_tools.py`).** The official MCP Python
+  SDK, with streamable HTTP. The `ihs-data` server exposes
+  `search_catalog`, `describe_table`, `join_paths`, `find_concept`, `query`,
+  `check_workflow`, `propose_plan`, `ask_research_helper`, and the opt-in
+  `propose_sql` (SQL drafting only) and `suggest_kb_update`. The session
+  token carries the mode's tool list (PRODUCT.md, "Modes and their policy")
+  and decides which workspace results land in; any other tool is refused,
+  and so are `propose_plan` and `ask_research_helper` on a turn asked with
+  Express on. A failed call returns a failure category and code
+  (`data/failures.py`), which the chat turns into its own words.
 - **Backends.** `oracle` (real) and `synthetic`. The synthetic backend is an
   **Oracle Database Free** container seeded by our generator, so the SQL
   dialect matches reality. It is used for development, CI, evals, and
@@ -492,6 +529,12 @@ own slot, and the shared modules offer extension points:
   - **Replay** reruns the processing on the original inputs.
 - Each run gets a folder and a run record in SQLite. A run keeps going if the
   browser closes.
+- **Making a workflow.** Save as workflow and Turn this into a workflow are
+  drafted by DataLab's own code from the SQL (`workflows/drafts.py`), with
+  no model. New workflow runs a Workflow authoring conversation and shows
+  its newest draft as three editable stages (`workflows/stages.py`: edits
+  are made from the workflow model, never by editing the YAML text); a test
+  run on practice uses the same runner. See WORKFLOWS.md.
 
 ### 8. Repos and Save & share
 
@@ -527,6 +570,11 @@ own slot, and the shared modules offer extension points:
   comments, and parameter defaults could contain IDs.
 - If another person changed the same lines, a plain two-version screen appears
   instead.
+- **A person's own edits** (Knowledge's Edit page, Pipelines' Edit
+  manually) are drafts kept in SQLite on this computer (migrations 0012 and
+  0013), checked as they're typed, and shared through the same Save & share,
+  with a three-way view (theirs, GitHub's, where they started) when GitHub
+  moved on.
 
 ### 9. Frontend (`frontend/`)
 
@@ -536,13 +584,19 @@ own slot, and the shared modules offer extension points:
 | React Router | One route per tab and per conversation, so links and the back button work |
 | TanStack Query | Server state, caching, and retries without hand-written fetch plumbing |
 | Generated API types (`openapi-typescript`) | The frontend can't drift from the backend |
-| A small in-repo component set (shadcn/ui-style, Radix-based) | Accessible primitives, so the long inline class strings go away |
+| A small in-repo component set (`components/ui`) | Accessible primitives on the "paper" design tokens (docs/DESIGN.md) |
 | CodeMirror 6 | One editor for SQL, R, YAML, and Markdown, with diff view |
 | react-markdown and vega-embed | Chat rendering and inline charts, carried over from the prototype |
 
-- Structure: `app/` (shell, routes), `components/` (shared), and
-  `features/<tab>/` (one folder per tab).
-- **The chat component is built once** and used by every tab.
+- Structure: `app/` (shell, routes), `api/` (typed clients and the generated
+  `schema.d.ts`), `components/` (shared: `chat/`, `editor/`, `ui/`), `lib/`
+  (including the bundled guide), and `features/<tab>/` (workspace, sql,
+  workflows, pipelines, knowledge, settings, toolbar, help).
+- **The chat component is built once** and used by every tab: the Workspace
+  shows it in full, and the other tabs dock a compact version
+  (`DockedChat`) in their own mode.
+- **Help** is `docs/guide/*.md`, bundled at build time (`lib/guide.ts`):
+  the Help tab, its search, and the glossary's tooltips.
 - **The browser is part of the boundary.** Content made by the agent must not
   be able to send data out when a user views it:
   - **An app-wide Content Security Policy** allows network requests only to
@@ -585,64 +639,130 @@ own slot, and the shared modules offer extension points:
   - the base `AGENTS.md` and the app skills.
 
   One image serves conversations, research sessions, and workflow R steps.
-- **Gateway images.** Stock nginx and Squid, pinned, plus our config
-  templates.
-- CI builds all images and publishes them to the public GitHub Container
-  Registry. Each release lists their digests.
+- **Gateway and research proxy.** Upstream nginx and Squid images, pinned by
+  digest in `sessions/containers.py`, with DataLab's config mounted
+  read-only.
+- **Probe image** (`images/probe`): a small image for CI's Safety check.
+- The release workflow builds the agent image (reusing it when `images/agent`
+  is unchanged) and publishes it to the public GitHub Container Registry.
+  Each release's `images.json` lists every image by digest.
+- The practice profile also runs **Oracle Database Free**, pinned by digest
+  in `practice_db`.
 
-### 11. Profiles and outside connectors
+### 11. Profiles and outside connectors (connectors not built)
 
 - **Profiles.** `datalab` runs with a profile. **real** (the default) uses
   Oracle. **practice** uses the synthetic backend only. Each profile has its
   own data folder, port, and keychain namespace, and they never share state.
   Practice mode for new colleagues is simply the practice profile.
-- **Connectors.** An MCP server (`/connect/mcp`) and a `datalab` CLI let
-  outside AI tools, such as Claude Code or a host-side Codex, drive DataLab
+- **Connectors (planned, not built).** An MCP server (`/connect/mcp`) and a
+  `datalab` CLI would let outside AI tools, such as Claude Code or a host-side Codex, drive DataLab
   through the same API as the UI. Their tools cover:
   - conversations: start, send, read events, stop;
   - SQL Playground queries;
   - workflows: run and read run records;
   - knowledge pages;
   - the Safety check and diagnostics.
-- **Scopes.** Connector tokens are created in Settings and carry a scope. A
-  single dependency on every API route enforces it. **In v1, connectors exist
-  only in the practice profile** (scope `full`). Real-profile access with a
+- **Scopes (planned).** Connector tokens would be created in Settings and
+  carry a scope, enforced by a single dependency on every API route. **In v1,
+  connectors are for the practice profile only** (scope `full`). Real-profile access with a
   `metadata` scope is deferred until its exact fields and error handling are
-  specified. This is also how we build and test DataLab: an outside agent
-  drives the practice instance end to end, including the UI in a browser.
+  specified. Until they exist, outside agents that build and test DataLab
+  drive the practice instance through its UI in a browser, and only the
+  practice instance.
 - **Practice really is synthetic-only.** In the practice profile:
   - you can't attach host files or folders; bundled synthetic fixtures are
     available instead;
   - export destinations are limited to a disposable practice exports folder;
   - Dropbox and the lab repos' write access are unavailable.
   So nothing real can find its way in.
-- The connector MCP endpoint is distinct from the agent-facing `/mcp`. The
-  agent-facing endpoint is reachable only through a session's gateway. The
-  connector endpoint is reachable only on the host loopback.
+- The connector MCP endpoint would be distinct from the agent-facing
+  `/mcp`, which is reachable only through a session's gateway; the connector
+  endpoint would be reachable only on the host loopback.
+
+### 12. SQL Playground
+
+- The person's own queries (`playground.py`, `api/sql.py`) go through
+  `DataService.run_query` with `origin="playground"`: the same SQL check,
+  caps and logging as the agent's. Results stay in
+  `<data_dir>/playground/<pg_id>/results/`, outside every conversation.
+- Its chat is a SQL drafting conversation. `propose_sql`
+  (`data/sql_drafts.py`) checks the query with the editor's check and
+  records a `sql_proposed` event; the editor offers the turn's latest one.
+  A proposal is never run: the person runs it.
+
+### 13. Updates and releases
+
+- **Releases** (`.github/workflows/release.yml`) run CI, build the agent
+  image, the package and `requirements.txt` (pinned by hash), gather the
+  installers, write `images.json` and `SHA256SUMS`, and sign `SHA256SUMS`
+  (Ed25519, `signing.py`; the private key is only in the release
+  environment's secret).
+- **Checking** (`releases.py`): the host asks GitHub's Releases API, without
+  signing in, at start and about once an hour (`HourlyCheck`), and on
+  **Check now**. Only a release whose files match the signed `SHA256SUMS`
+  and GitHub's own checksums is offered, verified against the key pinned in
+  `release_keys.py`.
+- **Installing** (`updater.py`, `update_gate.py`, `updates.py`): nothing new
+  may start while an update runs; the database is backed up; the new version
+  is installed beside the current one; the launcher switches; DataLab
+  restarts. An interrupted update is finished or undone at the next start.
+  `datalab versions --use` and `datalab rollback` go back. See
+  DISTRIBUTION.md.
+
+### 14. Installers and the practice database
+
+- `installer/macos/install.sh` and `installer/windows/install.ps1` install
+  Docker Desktop if needed, `uv`, and DataLab into a per-version folder in
+  the person's account, then call the shared steps: `datalab pull-images`,
+  `datalab setup` (the lab's settings and the keys), and either GitHub
+  sign-in and `datalab repos sync` (real) or `datalab practice-db setup`
+  (practice). The lab's install page provides the command with the lab's
+  settings; the manual path passes `--settings <file>`.
+- **The practice database** (`practice_db/`): Oracle Database Free in a
+  labelled container and volume on this computer, loaded once by DataLab's
+  generator, started by practice DataLab when it opens, reset only when
+  asked. A marker table only the synthetic database has is checked before
+  every practice query. Practice builds its catalog from the database's
+  catalog views the first time (`data/autocatalog.py`).
+
+### 15. Support reports and diagnostics
+
+- **Copy diagnostics** (`diagnostics.py`) and **Send feedback**
+  (`support.py`, `api/support.py`) collect an allowlist of metadata only:
+  versions, check results, recent operation ids and statuses, scrubbed
+  error templates. A report is shown in full before it's saved or sent. See
+  [SUPPORT.md](SUPPORT.md).
 
 ## Repository layout
 
 ```
 ihs_datalab/
-  README.md  PRODUCT.md  docs/
+  README.md  PRODUCT.md  AGENTS.md  docs/ (guide/ is the Help)
   backend/     pyproject.toml, uv.lock, src/datalab/, tests/
   frontend/    package.json, package-lock.json, src/
-  images/      agent/ (Dockerfile, AGENTS.md, skills/), gateway/
+  images/      agent/ (Dockerfile, AGENTS.md, skills/, bin/), probe/
+  installer/   macos/ and windows/: install and uninstall scripts
   synthetic/   db.sh and the synthetic database's README (generator: backend/src/datalab/practice_db)
-  installer/   macos.sh, windows.ps1, uninstallers
-  .github/     ci.yml, release.yml
+  evals/       the scientific evaluation set and its results
+  kb/          the check workflow for the ihs-knowledge repo
+  scripts/     release build and signing, parity, Spine conversion, CI helpers
+  branding/    the marks and the icon build
+  spikes/      throwaway proofs of concept kept as design evidence
+  .github/     workflows/ci.yml, workflows/release.yml
 ```
 
-**Size target.** About 10k lines each for the backend and the frontend,
-excluding tests. The prototype was roughly 29k and 23k.
 
 ## Testing
 
 - **Unit:** backend (pytest), frontend (Vitest), plus the knowledge base and
   workflow checks.
 - **Integration, in CI:** the real app against a synthetic Oracle Free
-  container and real Docker. A scripted Codex conversation exercises every
-  tool.
+  container and real Docker (the `oracle` job). Codex itself is stood in for
+  by `tests/fake_app_server.py`, which speaks the app-server protocol; tests
+  at that boundary use the live notification shapes (for example
+  `test_the_live_app_server_shape_of_a_failed_query_keeps_its_reason` in
+  `tests/test_runtime.py`).
 - **Safety:** the Safety check suite, plus the adversarial test. Both run in
   CI on every change, not only at release. The adversarial test attempts to:
   - escape the network, including DNS lookups watched with tcpdump;
@@ -655,140 +775,37 @@ excluding tests. The prototype was roughly 29k and 23k.
   release, rolls it back, and checks that nothing is lost.
 - **Prototype comparison (release check):** the 8 default workflows and
   `daily_metrics_2025` run in both the prototype and v1, and their outputs
-  must match. This is a one-off validation, not a feature.
-- **Evals:** a dozen representative research tasks on synthetic data. They
-  are run manually before releases and after any change to prompts, skills, or
-  the Codex version.
+  must match (`scripts/parity/`, [acceptance/2026-09-27-parity.md](acceptance/2026-09-27-parity.md)).
+  This is a one-off validation, not a feature.
+- **Evals** (`evals/`): 19 representative research tasks on synthetic data,
+  with mechanical graders (tested in CI). They are run by hand on the
+  practice profile before releases and after any change to prompts, skills,
+  the model, or the Codex version; results are kept in `evals/results/`.
 
-## Build order
+## How it was built
 
-v1 is one release, built through internal milestones. Each milestone ends in
-something we can use end to end ourselves.
+v1 is one release, built through internal milestones and pre-releases.
+Readiness against the definition of done is tracked in
+[PRODUCT.md](../PRODUCT.md), "v1 readiness"; this is only the history.
 
-0. **Spike** ✅ done 2026-09-26, on Mac. It confirmed:
-   - app-server with Codex 0.157.1;
-   - the nginx gateway, the DNS lockdown, and host reachability;
-   - elicitation approvals, including decline and stop;
-   - resume after a restart;
-   - the Squid research proxy.
-
-   It also found the hosted-tool bypass, fixed by the relay, and the
-   interrupt-doesn't-kill-commands issue, fixed in the adapter. Evidence is
-   in [spikes/2026-09-26-codex-gateway](../spikes/2026-09-26-codex-gateway/README.md).
-1. **Foundations** ✅ done 2026-09-26.
-   - Repo, CI, and lockfiles.
-   - The synthetic dataset: 3 cohorts on Oracle Free, with a write role that
-     mirrors the real account's.
-   - The data service: SQL check, read-only-roles sessions, guardrails, the
-     Data accessed log and audit log, the catalog, and the `ihs-data` MCP
-     tools.
-   - Verified against both the synthetic and the real database.
-   - The metadata helpers and the frontend skeleton move to milestone 2.
-2. **First data session, installed on both platforms.** A conversation
-   starts a container, Codex answers a question about synthetic data, and the
-   chat streams in the new UI. The Safety check and adversarial test run in
-   CI. A **minimal installer and upgrade rehearsal on Mac and Windows** is
-   included, since Windows Docker networking could break the design and we
-   should find out early.
-   - 2a–2c done 2026-09-26: the runtime, the conversations API, and the
-     web UI.
-   - 2d done 2026-09-26:
-     - the Safety check (Settings & Safety screen, `datalab safety-check`,
-       and CI);
-     - research sessions with internet through Squid;
-     - a CI test that the check catches a deliberately leaky sandbox.
-     Added in 3g: the tcpdump DNS leak test in CI, a preview containment
-     row, and browser-side Markdown and chart leak tests.
-3. **Complete workspace.**
-   - Inputs, outputs, checkpoints, and rollback. (3a done 2026-09-26:
-     checkpoints and rollback, the Outputs and History panels, the file
-     viewer, and HTML previews. 3b done the same day: attaching files and
-     folders through the native picker, read-only mounts, and practice
-     samples. 3c done the same day: export folders, exporting outputs with
-     a manifest, and "Export conversation" as one self-contained page.
-     3d done the same day: the four modes' full instructions and starter
-     prompts, the sql-extraction, statistical-review, and academic-figures
-     skills, and the model picker, with the relay allowing only approved
-     models. 3e done the same day: the research helper, from the
-     approval card to the throwaway research container. 3f done the same
-     day: analysis plans, claim tracing, and the rigor review. 3g done the
-     same day: the join_paths and find_concept metadata tools, confirmed
-     external links, and the leak tests above.)
-   - Export destinations and conversation export.
-   - Modes and skills, the Data accessed panel.
-   - Research sessions and the research helper.
-   - **Status: implemented, tested, and demonstrated (3h, 2026-09-26);
-     acceptance pending the lab's review.** 3h recorded, on the practice
-     profile, against a commit:
-     - the journey discover tables → approve a plan → analyse → inspect a
-       chart → revise it → restore a checkpoint → export exactly the
-       reviewed version, through the UI, including a Stop and a restart;
-     - the research helper approved, edited, declined, and cancelled;
-     - a first scientific evaluation set with answers calculated
-       independently from the synthetic data: participant counts,
-       missingness, cross-cohort joins, duplicate rows, empty tables, and
-       within- versus between-person analyses, checking denominators,
-       exclusions, uncertainty, and interpretation. Re-run when prompts,
-       skills, the model, or the Codex version change.
-   - **Since 3h (2026-09-26 to 27):**
-     - the "paper" look for the Workspace (docs/DESIGN.md), answer-first
-       finished turns, and drawers for narrow windows;
-     - analysis plans by type from one registry, with revisions and sending
-       a plan back as another type (PRs #2 and #3; WORKSPACE.md, "Analysis
-       plans");
-     - the number check leaves out citations and list numbering, and checks
-       numbers at the start of a line or bullet;
-     - fixes: an export during a turn no longer splits it; a turn cut off
-       by a shutdown or crash is ended at the next start; a conversation's
-       Docker network is removed when its containers stop (they used up
-       Docker's address pools after about 30 conversations);
-     - PRs #4 and #5: each plan records which queries had already returned
-       data when it was proposed, drafts survive a reload, and five
-       evaluation tasks check the plan type chosen.
-   - Evaluations on the result (9e9e432, gpt-5.5, two runs each):
-     25 of 28 passed ([results](../evals/results/2026-09-27-103049-9e9e432/SUMMARY.md)).
-     All five plan-type tasks passed.
-     - `small_cells` failed once: the agent hid a count as "<11" but showed
-       the total and the other cells, so it could be worked out by
-       subtraction. The agent's instructions and the rigor review now cover
-       that.
-     - `mood_change` failed twice:
-       - it counted people screened but never enrolled, which is the open
-         question of what "the 2025 cohort" means (PRODUCT.md);
-       - once, the causal-claim check misread a disclaimer ("should not be
-         read as proof…"). The check is now fixed.
-
-   | Milestone | Implemented | Tested automatically | Demonstrated end to end | Accepted |
-   |---|---|---|---|---|
-   | 0 Spike | yes | n/a | yes (Mac) | yes |
-   | 1 Foundations | yes | yes | yes | yes |
-   | 2 First data session, both platforms | yes | yes (CI, Linux) | Mac only; Windows fresh install pending | no |
-   | 3 Complete workspace | yes | yes | yes, 2026-09-26 ([acceptance](acceptance/2026-09-26-milestone-3.md), [evals](../evals/results/)) | pending the lab's review |
-4. **SQL Playground.**
-5. **Knowledge.**
-   - GitHub App sign-in and repo sync.
-   - The Knowledge tab, proposed-edit cards, and Save & share.
-   - The check script, and moving the Spine content over.
-   - 5a done 2026-09-27 (backend): sign-in, the clone and sync, each
-     conversation's copy and its proposals, Save & share, the check
-     (`datalab kb-check`, and a workflow template for `ihs-knowledge`), the
-     kb-* skills, and a Safety check row for the GitHub token. To come: the
-     Knowledge tab and cards, and the Spine's content.
-6. **Workflows and Pipelines.**
-   - The runner and both tabs.
-   - Moving `ihsDataR` over, with its history.
-   - The default workflows.
-7. **Distribution polish.** Complete the installers, updates and rollback
-   with database backup, the uninstaller, and the release pipeline. Test on
-   the Windows machine.
-   - Data side done 2026-09-27: backups before migrating, `datalab rollback`,
-     the update marker and recovery from an interrupted update, the CI
-     upgrade-and-rollback test, and `images.json` and `SHA256SUMS` in each
-     release (docs/DISTRIBUTION.md, "How updating keeps the database safe").
-     Still to do: the updater itself, the Updates pill, the Storage view,
-     "Copy diagnostics", signing, and the Windows test.
-8. **Finish.** Evals (growing from 3h's set), full claim-to-evidence
-   provenance (each number linked to its query, script, and output, and the
-   "How was this made?" view; milestone 3 only checks that numbers appear in
-   the turn's outputs), the USER_GUIDE, a dry run with one or two
-   colleagues, and the definition of done.
+0. **Spike** (2026-09-26, Mac): app-server with Codex 0.157.1, the nginx
+   gateway, the DNS lockdown, elicitation approvals, resume, the Squid
+   research proxy. It found the hosted-tool bypass (fixed by the relay) and
+   that interrupt doesn't kill commands (fixed in the adapter).
+   [spikes/2026-09-26-codex-gateway](../spikes/2026-09-26-codex-gateway/README.md).
+1. **Foundations** (2026-09-26): repo, CI, lockfiles, the synthetic
+   dataset, the data service and the `ihs-data` tools.
+2. **First data session** (2026-09-26): the runtime, conversations API and
+   web UI; the Safety check in the app and CI; research sessions.
+3. **Complete workspace** (2026-09-26 to 27): inputs, outputs, checkpoints
+   and rollback, exports, modes and skills, the research helper, plans,
+   tracing and the rigor review. Demonstrated end to end
+   ([acceptance](acceptance/2026-09-26-milestone-3.md)); acceptance is the
+   lab's.
+4. to 7. **SQL Playground, Knowledge, Workflows and Pipelines, Distribution**
+   (2026-09-27 to 29): built side by side on the seams above, released as
+   `v0.2.0-beta.1` to `v0.2.0-beta.8` and `v0.3.0-beta.1`. Since then on
+   `main`: Express (#24), Knowledge suggestion rows (#25), live failed-query
+   reasons (#26), and the hourly update check (#27).
+8. **Finish**: the definition of done on fresh Mac and Windows machines,
+   with colleagues (PRODUCT.md).
