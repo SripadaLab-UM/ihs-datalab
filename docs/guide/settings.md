@@ -41,7 +41,9 @@ too:
 To quit DataLab, press Ctrl-C in the window it opened when it started (a
 Terminal window on a Mac, a small PowerShell window on Windows), or close
 that window. After Ctrl-C it tidies up (conversations stop and their
-workspaces close) and says **DataLab stopped.**
+workspaces close) and says **DataLab stopped.** Pressing Ctrl-C again while
+it tidies up stops it at once; it says so, and tidies up the next time it
+starts.
 
 The practice DataLab can't change some settings. They are still shown, marked
 **Fixed on the practice DataLab**, so you can see what the real DataLab would

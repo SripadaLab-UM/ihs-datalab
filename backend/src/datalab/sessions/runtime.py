@@ -62,6 +62,7 @@ class SessionRuntime:
         approvals: Approvals | None = None,
         tools: frozenset[str] | None = None,
         tools_off: tuple[str, ...] = (),
+        mode_label: str | None = None,
     ) -> None:
         self.session_id = session_id
         self.kind: SessionKind = kind
@@ -73,6 +74,7 @@ class SessionRuntime:
         self._tool_timeout = tool_timeout_seconds
         self._tools = tools
         self._tools_off = tools_off
+        self._mode_label = mode_label
         self._emit = emit
         self._client: AppServerClient | None = None
         self._thread_id: str | None = self._saved_thread_id()
@@ -287,6 +289,7 @@ class SessionRuntime:
                 kind=self.kind,
                 results_dir=self.paths.oracle_results,
                 tools=self._tools,
+                mode_label=self._mode_label,
             )
         )
         self.paths.create()

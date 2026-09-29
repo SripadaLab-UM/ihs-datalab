@@ -172,8 +172,12 @@ own slot, and the shared modules offer extension points:
   the app down (the lifespan stops sessions, containers and keepers), then
   re-raises the Ctrl-C, which `cli._run_until_stopped` turns into one line,
   "DataLab stopped.", and exit code 0 (a deliberate quit, not a failure; the
-  launchers don't treat it as one). The hourly update check is stopped
-  however it ends.
+  launchers don't treat it as one). A second Ctrl-C during the graceful
+  wait (a tab's event stream still open) sets uvicorn's `force_exit` and
+  skips the app's shutdown: then it says "DataLab stopped without tidying
+  up; it cleans up when it next starts." (startup removes this data folder's
+  leftover containers), and the requests it cancels aren't logged as
+  errors. The hourly update check is stopped however it ends.
 
 ### 2. Sessions and the Codex adapter
 

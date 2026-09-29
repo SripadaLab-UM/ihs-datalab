@@ -31,7 +31,11 @@ export function useConnectionTest() {
   const test = useMutation({
     mutationKey: CONNECTION_TEST,
     mutationFn: settingsApi.testConnections,
-    onSuccess: (result) => client.setQueryData(CONNECTION_TEST, result),
+    onSuccess: async (result) => {
+      // A GET of the last result still on its way mustn't overwrite this newer one.
+      await client.cancelQueries({ queryKey: CONNECTION_TEST });
+      client.setQueryData(CONNECTION_TEST, result);
+    },
   });
   const running = useIsMutating({ mutationKey: CONNECTION_TEST }) > 0;
   return {

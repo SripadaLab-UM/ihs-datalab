@@ -188,6 +188,33 @@ it("database and key: one test updates both shortcuts", async () => {
   expect(screen.getByRole("button", { name: "Database: connected" })).toBeInTheDocument();
 });
 
+it("database: a test's result isn't overwritten by an older last-result request still on its way", async () => {
+  let answerLast: (value: null) => void = () => {};
+  vi.mocked(settingsApi.lastConnectionTest)
+    .mockResolvedValueOnce(null)
+    .mockImplementation(() => new Promise((resolve) => (answerLast = resolve)));
+  vi.mocked(settingsApi.testConnections).mockResolvedValue({
+    database: { ok: true, message: "Connected, read-only.", enabled_roles: [], read_only: true },
+    model: { ok: true, message: "ok" },
+    checked_at: new Date().toISOString(),
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <DatabaseShortcut />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Database: set up, not tested yet" }));
+  void client.refetchQueries({ queryKey: ["connection-test"] }); // a GET, still pending
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  expect(await screen.findByRole("button", { name: "Database: connected" })).toBeInTheDocument();
+  answerLast(null); // the older answer arrives late
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.getByRole("button", { name: "Database: connected" })).toBeInTheDocument();
+});
+
 // ------------------------------------------------------------ U-M GPT key
 
 it("key: saved is quiet, and the panel never shows the key, only where it is", async () => {

@@ -512,21 +512,24 @@ def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
     if access is None or access.kind != "data":
         raise ToolError("This session isn't allowed to query data.")
     if not access.allows(tool):
+        where = access.mode_label or "this mode"
         if tool == "propose_sql":
             raise ToolError(
-                "propose_sql isn't available in this mode: it's for the SQL Playground's "
+                f"propose_sql isn't available in {where}: it's for the SQL Playground's "
                 "chat. Show the SQL in your answer instead."
             )
         if tool == "suggest_kb_update":
             raise ToolError(
-                "suggest_kb_update isn't available in this mode: it's for Analysis, Data "
+                f"suggest_kb_update isn't available in {where}: it's for Analysis, Data "
                 "extraction and Data engineering conversations."
             )
-        raise ToolError(
-            f"{tool} isn't available in this mode. Knowledge writing has the catalog tools "
-            "only (metadata, no rows): write any SQL a page needs and say it needs checking "
-            "in a Data extraction conversation."
-        )
+        if not access.allows("query"):
+            raise ToolError(
+                f"{tool} isn't available in {where}: it has the catalog tools only "
+                "(metadata, no rows). Write any SQL that's needed and say it needs checking "
+                "in a Data extraction conversation."
+            )
+        raise ToolError(f"{tool} isn't available in {where}.")
     if tokens.express_refuses(access, tool):
         raise ToolError(
             f"{tool} is off: the person switched Express on for this message, so there "

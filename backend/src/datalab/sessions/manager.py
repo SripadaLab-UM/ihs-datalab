@@ -489,6 +489,7 @@ class SessionManager:
                 approvals=self._approvals,
                 tools=mode.allowed_tools if mode.kind == "data" else mode.tools,
                 tools_off=mode.tools_off,
+                mode_label=mode.label,
             )
             self._runtimes[conversation.id] = runtime
         return runtime

@@ -1008,3 +1008,45 @@ def test_practice_never_reads_the_real_profiles_settings(monkeypatch, tmp_path):
     assert set(loaded) == {"practice"}
     assert practice_db.target_from_env().port == PRACTICE_ORACLE.port
     assert practice_db.target_from_env().dsn.startswith("127.0.0.1:")
+
+
+def test_reset_refuses_when_something_on_the_port_doesnt_answer(monkeypatch, tmp_path, capsys):
+    """It may be a busy practice DataLab on another data folder: reset fails
+    closed. Setup, which only starts what's missing, goes ahead."""
+    import threading
+
+    scratch_folder(monkeypatch, tmp_path)
+    silent = socket.socket()
+    silent.bind(("127.0.0.1", 0))
+    silent.listen(8)  # takes connections, never answers
+    held: list[socket.socket] = []
+    stop = threading.Event()
+
+    def accept() -> None:
+        silent.settimeout(0.2)
+        while not stop.is_set():
+            try:
+                held.append(silent.accept()[0])
+            except OSError:
+                continue
+
+    threading.Thread(target=accept, daemon=True).start()
+    try:
+        (tmp_path / "settings.toml").write_text(
+            f"port = {silent.getsockname()[1]}\n", encoding="utf-8"
+        )
+        resets = []
+        monkeypatch.setattr(practice_db.PracticeDatabase, "reset", lambda *a, **k: resets.append(1))
+        monkeypatch.setattr(
+            practice_db.PracticeDatabase, "ensure", lambda self, say, **k: Outcome("all set")
+        )
+        with pytest.raises(SystemExit, match="didn't answer"):
+            cli.main(["--profile", "practice", "practice-db", "reset", "--yes"])
+        assert resets == []
+        assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 0
+        assert "all set" in capsys.readouterr().out
+    finally:
+        stop.set()
+        for connection in held:
+            connection.close()
+        silent.close()

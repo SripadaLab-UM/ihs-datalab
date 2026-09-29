@@ -38,7 +38,7 @@ server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=int(sys.argv[
 def stop_hourly():
     print("hourly check stopped", flush=True)
 
-sys.exit(cli._run_until_stopped(server.run, on_exit=stop_hourly))
+sys.exit(cli._run_until_stopped(server.run, on_exit=stop_hourly, forced=lambda: server.force_exit))
 """
 
 
@@ -97,3 +97,67 @@ def test_another_failure_is_not_hidden():
     with pytest.raises(RuntimeError):
         cli._run_until_stopped(broken, on_exit=lambda: stopped.append(1))
     assert stopped == [1]
+
+
+def test_a_forced_stop_says_it_didnt_tidy_up(capsys):
+    # A second Ctrl-C during uvicorn's graceful wait sets force_exit, and the
+    # app's shutdown (sessions, containers) is skipped.
+    def interrupted() -> None:
+        raise KeyboardInterrupt
+
+    stopped = []
+    code = cli._run_until_stopped(
+        interrupted, on_exit=lambda: stopped.append(1), forced=lambda: True
+    )
+    assert code == 0 and stopped == [1]
+    assert capsys.readouterr().out == (
+        "DataLab stopped without tidying up; it cleans up when it next starts.\n"
+    )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGINT to a child process is POSIX-only")
+def test_a_second_ctrl_c_during_the_graceful_wait_says_so():
+    """A request that never ends (a browser tab's event stream) keeps uvicorn
+    waiting; a second Ctrl-C forces it out."""
+    port = free_port()
+    hanging = SCRIPT.replace(
+        '    await send({"type": "http.response.start", "status": 200, "headers": []})',
+        "    import asyncio\n"
+        '    await send({"type": "http.response.start", "status": 200, "headers": []})\n'
+        '    await send({"type": "http.response.body", "body": b"x", "more_body": True})\n'
+        "    await asyncio.sleep(3600)",
+    ).replace('log_level="warning"', 'log_level="warning", timeout_graceful_shutdown=30')
+    child = subprocess.Popen(
+        [sys.executable, "-c", hanging, str(port)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    stream = None
+    try:
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                stream = urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=5)
+                stream.read(1)
+                break
+            except OSError:
+                if time.monotonic() > deadline or child.poll() is not None:
+                    raise
+                time.sleep(0.1)
+        child.send_signal(signal.SIGINT)
+        time.sleep(1)
+        assert child.poll() is None  # still waiting for the open request
+        child.send_signal(signal.SIGINT)
+        out, _ = child.communicate(timeout=20)
+    finally:
+        if stream is not None:
+            stream.close()
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+    assert child.returncode == 0, out
+    assert "Traceback" not in out
+    assert out.strip().splitlines()[-1] == (
+        "DataLab stopped without tidying up; it cleans up when it next starts."
+    )

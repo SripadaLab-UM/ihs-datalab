@@ -279,23 +279,46 @@ def _serve(settings, *, open_browser: bool) -> int:
         server.should_exit = True
 
     app.state.shutdown = shutdown
-    return _run_until_stopped(server.run, on_exit=hourly.stop)
+    return _run_until_stopped(
+        server.run, on_exit=hourly.stop, forced=lambda: bool(server.force_exit)
+    )
 
 
-def _run_until_stopped(run, *, on_exit) -> int:
+class _QuietCancelledRequests:
+    """A logging filter: drops the record of a request that was cancelled."""
+
+    def filter(self, record) -> bool:
+        error = record.exc_info[1] if record.exc_info else None
+        return not isinstance(error, asyncio.CancelledError)
+
+
+def _run_until_stopped(run, *, on_exit, forced=lambda: False) -> int:
     """Runs the server until it quits. Ctrl-C is the normal way to quit
     DataLab, so it ends with one line and exit code 0, not a traceback.
     uvicorn has already shut the app down (sessions, containers, keepers) by
-    the time it re-raises the Ctrl-C as KeyboardInterrupt; `on_exit` (the
-    hourly update check's stop) runs however it ends."""
+    the time it re-raises the Ctrl-C as KeyboardInterrupt, unless a second
+    Ctrl-C during its graceful wait (an open event stream, say) forced it out
+    first (`forced`): then the app's shutdown was skipped, and the next start
+    cleans up. `on_exit` (the hourly update check's stop) runs however it ends."""
+    import logging
+
+    # A forced stop cancels the requests still open (a tab's event stream);
+    # uvicorn would log each as "Exception in ASGI application" with a
+    # traceback, though cancelling them is the point.
+    uvicorn_errors = logging.getLogger("uvicorn.error")
+    quiet = _QuietCancelledRequests()
+    uvicorn_errors.addFilter(quiet)
     interrupted = False
     try:
         run()
     except KeyboardInterrupt:
         interrupted = True
     finally:
+        uvicorn_errors.removeFilter(quiet)
         on_exit()
-    if interrupted:
+    if interrupted and forced():
+        print("DataLab stopped without tidying up; it cleans up when it next starts.", flush=True)
+    elif interrupted:
         print("DataLab stopped.", flush=True)
     return 0
 
@@ -473,10 +496,19 @@ def _practice_db(settings, args) -> int:
         from datalab.datalock import refuse_second_instance
 
         refuse_second_instance(settings.data_dir, settings.profile)
-        if _practice_datalab_answers(settings.port):
+        # Fails closed: something that takes the connection but doesn't answer
+        # clearly may be a busy practice DataLab on another data folder.
+        port = _practice_port(settings.port)
+        if port == "practice":
             sys.exit(
                 f"Practice DataLab is running on port {settings.port}. Quit it first, then "
                 "reset its database, or use Reset practice data… in its Settings → Connections."
+            )
+        if port == "unclear":
+            sys.exit(
+                f"Something on port {settings.port} (practice DataLab's) didn't answer, so "
+                "DataLab can't tell whether practice DataLab is running there. Quit it, or "
+                "wait a moment, then reset again."
             )
         if not args.yes:
             print(
@@ -511,6 +543,30 @@ def _practice_running(settings) -> bool:
     from datalab import datalock
 
     return datalock.in_use(settings.data_dir) or _practice_datalab_answers(settings.port)
+
+
+def _practice_port(port: int) -> str:
+    """What's on 127.0.0.1:`port`: "free" (the connection is refused),
+    "practice" (a practice DataLab's health check), "other" (something else
+    answered clearly: another program, or a real DataLab), or "unclear" (it
+    took the connection but didn't answer in time, or not in HTTP)."""
+    import socket
+
+    import httpx
+
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        if probe.connect_ex(("127.0.0.1", port)) != 0:
+            return "free"
+    try:
+        response = httpx.get(f"http://127.0.0.1:{port}/api/health", timeout=3, trust_env=False)
+    except httpx.HTTPError:
+        return "unclear"
+    try:
+        profile = response.json().get("profile") if response.status_code == 200 else None
+    except (ValueError, AttributeError):
+        profile = None
+    return "practice" if profile == "practice" else "other"
 
 
 def _practice_datalab_answers(port: int) -> bool:

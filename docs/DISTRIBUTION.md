@@ -75,7 +75,10 @@ in the README. The installer then:
    the database up, or starts it, each time it opens. While a practice
    DataLab is running (this data folder's lock, or a practice DataLab's
    `/api/health` answering on its port) `setup` leaves the database to it
-   and `reset` refuses; another program on that port doesn't count. GitHub is skipped for
+   and `reset` refuses; another program on that port doesn't count. `reset`
+   also refuses when something takes the connection but doesn't answer (it
+   may be a busy practice DataLab), and goes ahead only when the port is
+   free or a clear answer isn't a practice DataLab's. GitHub is skipped for
    the practice profile, when the lab's settings don't name the repos, or with
    `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
    Settings. The installer refuses to run as root (`sudo`), and so does
