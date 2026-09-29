@@ -71,7 +71,8 @@ Connections says why, with **Try again**.
 
 The made-up data is kept when DataLab is updated or installed again. To start
 over from scratch, use **Reset practice data…** in Settings → Connections (it
-asks first), or run `datalab --profile practice practice-db reset`. Your
+asks first), or quit the practice DataLab and run
+`datalab --profile practice practice-db reset`. Your
 practice conversations and exports aren't touched. Uninstalling DataLab asks
 whether to delete the practice database too.
 

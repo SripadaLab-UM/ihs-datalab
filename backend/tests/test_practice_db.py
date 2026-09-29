@@ -5,6 +5,8 @@ data kept across reinstalls, reset only when asked, on 127.0.0.1 only."""
 from __future__ import annotations
 
 import json
+import socket
+from pathlib import Path
 
 import pytest
 
@@ -656,8 +658,21 @@ def test_the_keeper_says_when_it_adopted_one(docker, oracle):
 # -------------------------------------------------------------------- cli
 
 
+def scratch_folder(monkeypatch, folder: Path) -> int:
+    """A practice data folder of the test's own, on a free port of its own, so
+    nothing running on this computer (a practice DataLab on 8766, say) changes
+    what the command does."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "settings.toml").write_text(f"port = {port}\n", encoding="utf-8")
+    monkeypatch.setenv("DATALAB_DATA_DIR", str(folder))
+    return port
+
+
 def test_practice_db_refuses_the_real_profile(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     called = []
     monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", lambda *a, **k: called.append(1))
     assert cli.main(["--profile", "real", "practice-db", "setup"]) == 2
@@ -666,7 +681,7 @@ def test_practice_db_refuses_the_real_profile(monkeypatch, tmp_path, capsys):
 
 
 def test_practice_db_setup_runs_the_setup(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     seen = []
 
     def ensure(self, say, **k):
@@ -682,7 +697,7 @@ def test_practice_db_setup_runs_the_setup(monkeypatch, tmp_path, capsys):
 def test_practice_db_setup_leaves_it_to_a_running_practice_datalab(monkeypatch, tmp_path, capsys):
     from datalab import datalock
 
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     called = []
     monkeypatch.setattr(practice_db.PracticeDatabase, "ensure", lambda *a, **k: called.append(1))
     monkeypatch.setattr(datalock, "in_use", lambda folder: folder == tmp_path)
@@ -696,7 +711,7 @@ def test_practice_db_problems_are_one_line_not_a_traceback(monkeypatch, tmp_path
 
     from datalab.practice_db.guard import NotTheSyntheticDatabase
 
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     for error in (
         NotTheSyntheticDatabase("Refusing to run: not Oracle Free."),
         oracledb.DatabaseError("ORA-12514: listener does not know of service"),
@@ -711,14 +726,14 @@ def test_practice_db_problems_are_one_line_not_a_traceback(monkeypatch, tmp_path
         out = capsys.readouterr().out.strip()
         assert len(out.splitlines()) == 1 and "Traceback" not in out
     monkeypatch.undo()  # the real ensure again
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     monkeypatch.setenv("DATALAB_PRACTICE_DB_CONTAINER", "-bad")
     assert cli.main(["--profile", "practice", "practice-db", "status"]) == 1
     assert "isn't usable" in capsys.readouterr().out
 
 
 def test_practice_db_reset_asks_first(monkeypatch, tmp_path, capsys):
-    monkeypatch.setenv("DATALAB_DATA_DIR", str(tmp_path))
+    scratch_folder(monkeypatch, tmp_path)
     resets = []
     monkeypatch.setattr(
         practice_db.PracticeDatabase,
@@ -730,6 +745,66 @@ def test_practice_db_reset_asks_first(monkeypatch, tmp_path, capsys):
     assert resets == [] and "Nothing was changed." in capsys.readouterr().out
     assert cli.main(["--profile", "practice", "practice-db", "reset", "--yes"]) == 0
     assert resets == [1]
+
+
+def serve_health(body: bytes) -> tuple[int, object]:
+    """Something answering GET /api/health on a free port, until shut down."""
+    import http.server
+    import threading
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server.server_address[1], server
+
+
+def test_another_app_on_practices_port_doesnt_stop_setup_or_reset(monkeypatch, tmp_path, capsys):
+    """Only a practice DataLab counts as running: not any listener on its port."""
+    port = scratch_folder(monkeypatch, tmp_path)
+    other, server = serve_health(b'{"hello": "not DataLab"}')
+    try:
+        (tmp_path / "settings.toml").write_text(f"port = {other}\n", encoding="utf-8")
+        monkeypatch.setattr(
+            practice_db.PracticeDatabase, "ensure", lambda self, say, **k: Outcome("all set")
+        )
+        monkeypatch.setattr(
+            practice_db.PracticeDatabase, "reset", lambda self, say, **k: Outcome("reset")
+        )
+        assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 0
+        assert "all set" in capsys.readouterr().out
+        assert cli.main(["--profile", "practice", "practice-db", "reset", "--yes"]) == 0
+        assert "reset" in capsys.readouterr().out
+    finally:
+        server.shutdown()
+    assert port != other
+
+
+def test_a_practice_datalab_on_its_port_is_left_to_look_after_it(monkeypatch, tmp_path, capsys):
+    scratch_folder(monkeypatch, tmp_path)
+    port, server = serve_health(b'{"profile": "practice", "version": "0.3.0b3"}')
+    try:
+        (tmp_path / "settings.toml").write_text(f"port = {port}\n", encoding="utf-8")
+        called = []
+        monkeypatch.setattr(
+            practice_db.PracticeDatabase, "ensure", lambda *a, **k: called.append(1)
+        )
+        monkeypatch.setattr(practice_db.PracticeDatabase, "reset", lambda *a, **k: called.append(1))
+        assert cli.main(["--profile", "practice", "practice-db", "setup"]) == 0
+        assert "looks after its database itself" in capsys.readouterr().out
+        with pytest.raises(SystemExit, match="Quit it first"):
+            cli.main(["--profile", "practice", "practice-db", "reset", "--yes"])
+        assert called == []
+    finally:
+        server.shutdown()
 
 
 class PullRun:

@@ -72,7 +72,10 @@ in the README. The installer then:
    the labelled volume `datalab-practice-oracle-data`, loaded only when it
    has none, so a reinstall or update keeps it (synthetic/README.md, "In
    practice DataLab"). It never stops the install: practice DataLab sets
-   the database up, or starts it, each time it opens. GitHub is skipped for
+   the database up, or starts it, each time it opens. While a practice
+   DataLab is running (this data folder's lock, or a practice DataLab's
+   `/api/health` answering on its port) `setup` leaves the database to it
+   and `reset` refuses; another program on that port doesn't count. GitHub is skipped for
    the practice profile, when the lab's settings don't name the repos, or with
    `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
    Settings. The installer refuses to run as root (`sudo`), and so does
