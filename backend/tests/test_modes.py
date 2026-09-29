@@ -50,11 +50,22 @@ def test_workflow_authoring_queries_like_data_extraction():
     workflows, extraction = MODES["workflows"], MODES["extraction"]
     assert (workflows.kind, workflows.queries) == (extraction.kind, extraction.queries)
     assert (workflows.kind, workflows.queries) == ("data", True)
-    # Only Data extraction suggests Knowledge updates.
-    assert workflows.tools_off == ("propose_sql", "suggest_kb_update")
+    # Pipelines' tools: no analysis plans (a workflow's review is New
+    # workflow's stages, test and Save), and only Data extraction suggests
+    # Knowledge updates. Nothing is attached: no flow in the Workflows tab
+    # attaches files. The session's token carries the list, so DataLab's data
+    # tools refuse propose_plan (test_express covers every mode).
+    assert workflows.allowed_tools == MODES["pipelines"].allowed_tools
+    assert workflows.allowed_tools == CATALOG_TOOLS | {
+        "query",
+        "check_workflow",
+        "ask_research_helper",
+    }
+    assert workflows.tools_off == ("propose_plan", "propose_sql", "suggest_kb_update")
+    assert (workflows.attachments, workflows.tab_only) == (False, True)
     assert extraction.tools_off == ("propose_sql",)
     server = config("workflows")["mcp_servers"]["ihs-data"]
-    assert server["disabled_tools"] == ["propose_sql", "suggest_kb_update"]
+    assert server["disabled_tools"] == ["propose_plan", "propose_sql", "suggest_kb_update"]
     assert config("workflows")["web_search"] == "disabled"
 
 
@@ -90,7 +101,7 @@ def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
     # Every other mode keeps its tools and attachments, all but the SQL tab's own.
-    for other in set(MODES) - {"knowledge", "sql", "pipelines"}:
+    for other in set(MODES) - {"knowledge", "sql", "pipelines", "workflows"}:
         assert MODES[other].tools is None and "propose_sql" in MODES[other].tools_off
         assert set(MODES[other].tools_off) <= {"propose_sql", "suggest_kb_update"}
         assert MODES[other].queries and MODES[other].attachments

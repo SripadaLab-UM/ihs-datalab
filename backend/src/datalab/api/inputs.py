@@ -101,9 +101,8 @@ def build_inputs_router(
         if mode is None or not mode.attachments:
             raise HTTPException(
                 403,
-                f"Files can't be attached in {mode.label if mode else 'this'} mode: it works "
-                "with the catalog and the knowledge base only. Send the page with your message, "
-                "or attach files in another mode.",
+                f"Files can't be attached in {mode.label if mode else 'this'} mode. "
+                "Attach them in a Workspace conversation instead.",
             )
         if sessions.is_busy(conversation_id):
             raise HTTPException(409, "Wait for the agent to finish, or stop it, then attach.")

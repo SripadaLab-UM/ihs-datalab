@@ -16,6 +16,7 @@ beforeEach(() => {
   vi.mocked(api.inputs).mockResolvedValue([]);
   vi.mocked(api.modes).mockResolvedValue([
     { id: "knowledge", label: "Knowledge writing", kind: "data", description: "", starters: [], tab_only: true, queries: false, attachments: false, question: "?" },
+    { id: "workflows", label: "Workflow authoring", kind: "data", description: "", starters: [], tab_only: true, queries: true, attachments: false, question: "?" },
     { id: "extraction", label: "Data extraction", kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "?" },
   ]); // prettier-ignore
 });
@@ -31,6 +32,12 @@ function show(mode: string) {
 it("offers nothing to attach in a mode that takes no attachments", async () => {
   show("knowledge");
   expect(await screen.findByText("Nothing can be attached here")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Attach/ })).toBeNull();
+});
+
+it("says why a tab's chat that queries takes no attachments", async () => {
+  show("workflows");
+  expect(await screen.findByText(/Workflow authoring works from the database and its tab's own files/)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /Attach/ })).toBeNull();
 });
 

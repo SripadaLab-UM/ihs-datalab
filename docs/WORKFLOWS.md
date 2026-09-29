@@ -371,7 +371,8 @@ by the Workflow authoring agent. The docked chat opens in Workflow
 authoring mode (sessions/modes.py): the agent drafts in its copy of the repo,
 checks each draft with the `check_workflow` tool (the same check as the tab
 and every run, with pipelines as on `main`), and its changes become a
-Pipelines proposal to review and save there.
+Pipelines proposal to review and save there. It has Pipelines' data tools
+(no `propose_plan`) and takes no attachments.
 
 ## As built (Pipelines)
 

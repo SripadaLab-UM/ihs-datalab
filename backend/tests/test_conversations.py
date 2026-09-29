@@ -371,9 +371,10 @@ def test_a_conversations_mode_sets_its_sessions_data_access(app):
         pipelines = sessions._runtime(store.get(made["pipelines"]["id"]))
     assert knowledge._tools == CATALOG_TOOLS
     assert set(knowledge._tools_off) == set(DATA_TOOLS) - CATALOG_TOOLS
+    # Workflow authoring: Pipelines' tools, no analysis plans.
     assert (workflows._tools, workflows._tools_off) == (
-        frozenset(DATA_TOOLS) - {"propose_sql", "suggest_kb_update"},
-        ("propose_sql", "suggest_kb_update"),
+        frozenset(DATA_TOOLS) - {"propose_plan", "propose_sql", "suggest_kb_update"},
+        ("propose_plan", "propose_sql", "suggest_kb_update"),
     )
     assert "Knowledge writing mode" in knowledge._instructions
     assert "Workflow authoring mode" in workflows._instructions

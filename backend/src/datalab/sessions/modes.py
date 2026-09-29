@@ -690,6 +690,14 @@ MODES = {
                 "Check the workflow files for missing QC before delivery.",
                 "Which workflows deliver counts without a small-cell check?",
             ),
+            # Pipelines' tools: the catalog, small checks, the workflow check
+            # and the research helper. No analysis plans (propose_plan): a
+            # workflow's review is New workflow's three stages, test and Save.
+            # It's only opened from the Workflows tab (the chat and New
+            # workflow), and nothing there attaches files (Turn this into a
+            # workflow is DataLab's own draft, with no agent), so none can be.
+            tools=CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"},
+            attachments=False,
             tab_only=True,
             question="What should this workflow do?",
         ),

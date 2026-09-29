@@ -37,11 +37,12 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
   const blocked = conversation.busy || attach.isPending;
 
   if (mode && !mode.attachments) {
-    // Knowledge writing: the catalog and the knowledge base only (DataLab refuses to attach, too).
+    // The tabs' own chats (Knowledge writing, Workflow authoring, ...): DataLab refuses to attach, too.
     return (
       <EmptyNote icon="attach" title="Nothing can be attached here">
-        {mode.label} works with the database catalog and the knowledge base only, so files can't be attached. Send
-        the page with your message, or attach files in another mode.
+        {mode.queries
+          ? `${mode.label} works from the database and its tab's own files, so files can't be attached. Attach files in an Analysis, Data extraction or Data engineering conversation.`
+          : `${mode.label} works with the database catalog and the knowledge base only, so files can't be attached. Send the page with your message, or attach files in another mode.`}
       </EmptyNote>
     );
   }

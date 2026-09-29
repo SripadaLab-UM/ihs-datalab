@@ -103,4 +103,7 @@ The chat is in Workflow authoring mode, a
 [data session](glossary.md#data-session). It works in its own copy of the
 repository and checks each draft with DataLab's workflow check. Its changes
 become a proposal in the Pipelines tab, which you review, test and save
-there; the agent never saves.
+there; the agent never saves. It doesn't write an
+[analysis plan](plans.md) first (you review the workflow itself, as its
+three stages), and files can't be attached to it; attach them in a
+Workspace conversation instead.

@@ -178,3 +178,18 @@ async def test_no_turn_starts_while_inputs_change(settings, catalog):
         with pytest.raises(Busy):
             await manager.send(conversation, "hi", None)
     assert not manager.is_busy(conversation.id)
+
+
+def test_nothing_can_be_attached_in_workflow_authoring(settings, catalog):
+    """It's opened only from the Workflows tab, which attaches nothing."""
+    app = make_app(settings, catalog)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "workflows"}).json()["id"]
+        refused = client.post(
+            f"/api/conversations/{cid}/inputs", json={"source": "sample", "sample": "r_helpers"}
+        )
+        assert refused.status_code == 403
+        assert refused.json()["detail"] == (
+            "Files can't be attached in Workflow authoring mode. "
+            "Attach them in a Workspace conversation instead."
+        )

@@ -80,7 +80,7 @@ the opt-in `propose_sql` and `suggest_kb_update`.
 | Data engineering | data | Workspace | all + `suggest_kb_update` | yes | Balanced | off | as Analysis | `/work/pipelines` changes become a Pipelines proposal; `/work/kb` edits |
 | SQL drafting | data | SQL Playground's chat | catalog + `query`, `propose_sql`, `ask_research_helper` | no | Balanced | off (docked chats have no switch) | brief; no research helper; the proposal is prepared as usual | the person uses, edits and runs the proposed query |
 | Pipelines | data | Pipelines' chat | catalog + `query`, `check_workflow`, `ask_research_helper` | no | Balanced | off | brief; no research helper; the proposal as usual | the proposal is reviewed, tested and saved in Pipelines |
-| Workflow authoring | data | Workflows' chat, New workflow | all | yes (from the Workspace) | Balanced | off | as Pipelines, and it never guesses a destination or small-cell rule | a Pipelines proposal, or New workflow's review, test and Save |
+| Workflow authoring | data | Workflows' chat, New workflow | catalog + `query`, `check_workflow`, `ask_research_helper` (no analysis plans) | no | Balanced | off | as Pipelines, and it never guesses a destination or small-cell rule | a Pipelines proposal, or New workflow's review, test and Save |
 | Knowledge writing | data | Knowledge's chat, Edit with agent | catalog only | no | Balanced | off | brief; the proposal as usual | proposed-edit cards, then Save & share |
 | Research | research | Workspace | none: web search and the research proxy instead | yes (may reach the internet) | Balanced | n/a | its own note: brief, cite sources, no claims about the study's data | nothing is shared from it |
 
