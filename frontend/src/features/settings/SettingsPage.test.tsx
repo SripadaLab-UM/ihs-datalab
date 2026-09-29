@@ -32,6 +32,7 @@ vi.mock("@/api/settings", async (original) => ({
   settingsApi: {
     connections: vi.fn(),
     testConnections: vi.fn(),
+    lastConnectionTest: vi.fn(async () => null),
     storage: vi.fn(() => new Promise(() => {})),
     updates: vi.fn(() => new Promise(() => {})),
     updateCheck: vi.fn(() => new Promise(() => {})),

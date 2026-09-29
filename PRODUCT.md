@@ -146,7 +146,8 @@ draft", "How this SQL was created").
 profile icons, and the uninstallers; in-app updates of signed releases
 (`SHA256SUMS.sig`), checked at start and about once an hour; database
 backups, `datalab rollback` and `datalab versions --use`; Connections
-(keychain), GitHub App sign-in, export folders with Dropbox detection;
+(keychain; the last Test connection is kept by DataLab, so the toolbar and
+Settings agree whichever ran it), GitHub App sign-in, export folders with Dropbox detection;
 Storage; Copy diagnostics; Send feedback (support reports,
 [docs/SUPPORT.md](docs/SUPPORT.md)); on Windows, a banner while Docker can't
 run (opening a closed Docker Desktop) and a guided fix, after the person turns

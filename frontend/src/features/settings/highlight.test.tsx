@@ -46,6 +46,7 @@ vi.mock("@/api/settings", async (original) => ({
       read_only_because: null,
     })), // prettier-ignore
     testConnections: vi.fn(),
+    lastConnectionTest: vi.fn(async () => null),
     storage: vi.fn(() => new Promise(() => {})),
     updates: vi.fn(),
     updateCheck: vi.fn(),

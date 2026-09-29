@@ -18,7 +18,11 @@ The shortcuts at the top right of every screen, beside **Help**, lead here
 too:
 
 - **Database** and **U-M GPT key** say how each connection stands, with a
-  link to [Connections](#connections).
+  link to [Connections](#connections). They show the last **Test
+  connection** since DataLab started, whichever window or Settings ran it,
+  and when it ran ("Tested 5 min ago"). After DataLab starts again nothing
+  has been tested yet ("set up, not tested yet"); on the practice DataLab
+  that reads "synthetic, running" once its database is up.
 - **GitHub** shows your GitHub account, or that you need to sign in, and
   opens [Connections](#connections). The practice DataLab never signs in to
   GitHub, so it doesn't show this. **Export folders** opens your
@@ -62,7 +66,9 @@ do about it.
 
 The key and the password are kept in your computer's keychain. You can save
 or replace them here, but DataLab never shows them again, and the agent never
-sees them. **Test connection** checks both the database and U-M GPT.
+sees them. **Test connection** checks both the database and U-M GPT, and
+"Last tested …" says when it last ran. Saving a new key or password clears
+that result, since it may no longer hold.
 
 The installer from the lab's install page sets up the database connection
 for you, with the lab's settings included. If this section says no database

@@ -30,6 +30,8 @@ export const settingsApi = {
   saveModelKey: (key: string) =>
     request<void>("/api/settings/connections/model-key", { method: "PUT", body: JSON.stringify({ key }) }),
   testConnections: () => request<ConnectionTest>("/api/settings/connections/test", { method: "POST" }),
+  /** The last Test connection's result since DataLab started (from any window, or the API), or null. */
+  lastConnectionTest: () => request<ConnectionTest | null>("/api/settings/connections/test"),
   /** Practice only: its synthetic database, which DataLab sets up and starts itself. */
   practiceDatabase: () => request<PracticeDatabase>("/api/settings/practice-database"),
   startPracticeDatabase: () => request<PracticeDatabase>("/api/settings/practice-database/start", { method: "POST" }),
