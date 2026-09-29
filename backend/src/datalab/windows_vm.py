@@ -145,9 +145,11 @@ def wsl_text(raw: bytes) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def docker_answers(run: Run = subprocess.run, timeout: float = 20) -> bool:
+def docker_answers(run: Run = subprocess.run, timeout: float = 10) -> bool:
     """Whether Docker's engine answers. A stuck one can leave `docker` waiting
-    for ever, so this gives up after `timeout` seconds."""
+    for ever, so this gives up after `timeout` seconds: a working engine
+    answers in one or two, and each check a stuck one gets (the page asks
+    every half minute) waits the whole time (20 s made Check again spin 20 s)."""
     try:
         return run(["docker", "info"], capture_output=True, timeout=timeout).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
@@ -177,16 +179,23 @@ def probe(run: Run = subprocess.run, timeout: float = 90) -> Probe:
     return "refused" if LOGON_REFUSED in said.lower() else "unknown"
 
 
-def elevated_command() -> list[str]:
+def elevated_command(program: str | None = None) -> list[str]:
     """PowerShell that shows the administrator prompt and runs GRANT_SCRIPT
-    behind it, passing on its exit code (1 if the prompt was declined)."""
+    behind it, passing on its exit code: 1 if the prompt was declined.
+
+    A declined prompt is only a non-terminating error to Start-Process, which
+    left `$p` empty and `exit $p.ExitCode` exiting 0 (seen with CyberArk EPM's
+    request box, cancelled): so errors stop the starter, and no process is 1.
+    `program` is what's started elevated (tests start one that isn't there).
+    """
     encoded = base64.b64encode(GRANT_SCRIPT.encode("utf-16-le")).decode("ascii")
     ps = powershell()
     starter = (
-        f"$p = Start-Process '{ps}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden "
+        "$ErrorActionPreference = 'Stop'; "
+        f"$p = Start-Process '{program or ps}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden "
         "-ArgumentList '-NoProfile -NonInteractive -ExecutionPolicy Bypass "
         f"-EncodedCommand {encoded}'; "
-        "exit $p.ExitCode"
+        "if (-not $p) { exit 1 }; exit $p.ExitCode"
     )
     return [ps, "-NoProfile", "-NonInteractive", "-Command", starter]
 

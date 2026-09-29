@@ -227,7 +227,7 @@ export function DockerFixDialog({
           {outcome.text}
         </p>
       )}
-      {!fix.data && recheck.data && (
+      {!fix.data && !waiting && recheck.data && (
         <p role="status" className="mt-3 text-sm font-medium">
           {vmStarts
             ? "Docker's virtual machine can start again."

@@ -125,3 +125,16 @@ it("says when Docker Desktop isn't installed", async () => {
   expect(await screen.findByRole("status")).toHaveTextContent("Run the DataLab installer again");
   expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });
+
+it("while Windows asks, the dialog says only that: not an older Check again result", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue(refused);
+  vi.mocked(dockerApi.check).mockResolvedValue(refused);
+  vi.mocked(dockerApi.fix).mockReturnValue(new Promise(() => {}));
+  banner();
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Check again" }));
+  expect(await within(dialog).findByText(/Still blocked/)).toBeInTheDocument();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Fix it" }));
+  expect(await within(dialog).findByText(/Windows is asking for permission/)).toBeInTheDocument();
+  expect(within(dialog).queryByText(/Still blocked/)).not.toBeInTheDocument();
+});

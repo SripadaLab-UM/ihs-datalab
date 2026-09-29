@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,31 @@ def test_the_administrator_prompt_runs_only_the_fixed_text():
     assert "-Verb RunAs" in starter and "exit $p.ExitCode" in starter
     encoded = re.search(r"-EncodedCommand ([A-Za-z0-9+/=]+)", starter).group(1)
     assert base64.b64decode(encoded).decode("utf-16-le") == windows_vm.GRANT_SCRIPT
+    # A declined prompt must not look like success (next test, on Windows).
+    assert starter.startswith("$ErrorActionPreference = 'Stop'; ")
+    assert "if (-not $p) { exit 1 }" in starter
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="runs Windows PowerShell")
+def test_a_prompt_that_fails_to_start_the_fix_is_never_taken_for_success():
+    """Found on the Michigan Medicine laptop (0.3.0b3): cancelling CyberArk
+    EPM's administrator request made the starter exit 0, so DataLab said "That
+    didn't fix it. Restart Windows" instead of "Windows didn't give
+    permission". Start-Process fails the same way, with no prompt, for a
+    program that isn't there."""
+    command = windows_vm.elevated_command(program=r"C:\DataLab\no-such-program.exe")
+    assert subprocess.run(command, capture_output=True, timeout=60).returncode == 1
+    fake = FakeWindows()
+    doctor = doctor_for(fake)
+
+    def real_powershell(command, **options):
+        if Path(command[0]).name.lower() == "powershell.exe":
+            failing = windows_vm.elevated_command(program=r"C:\DataLab\no-such-program.exe")
+            return subprocess.run(failing, capture_output=True, timeout=60)
+        return fake.run(command, **options)
+
+    doctor._run = real_powershell
+    assert doctor.fix() == "declined"
 
 
 # ------------------------------------------------------------ finding out
