@@ -2,9 +2,13 @@
 what may be participant data, and code that would run on colleagues' computers.
 
 - **Errors** stop a save: a path outside `ihsDataR/` and `workflows/`, or in
-  `.github/` (proposals.py), and a workflow file that fails DataLab's
+  `.github/` (proposals.py), a workflow file that fails DataLab's
   workflow check (with the real profile's small-cell rule, and pipelines as
-  in the change's own tree).
+  in the change's own tree), and a pipeline's `pipeline.yaml` that fails
+  the pipeline file's check (a workflow naming it wouldn't find it). Only
+  real pipeline folders are checked: `inst/pipelines/_<anything>/` (a
+  template, say) is skipped, and a folder whose name isn't a pipeline name
+  (lower case letters, digits and _) is told so, since no workflow can use it.
 - **Data** findings wait for the person to confirm each one isn't
   participant data: the knowledge base's scan (knowledge/check.py:
   `data_findings`, `name_findings`), and, since fixtures are where real
@@ -126,6 +130,8 @@ def check(files: Mapping[str, bytes | None], workflows: WorkflowCheck | None = N
         report.findings += [_from_kb(f) for f in kb.data_findings(path, text)]
         if workflows is not None and is_workflow_file(path):
             report.findings += _workflow_findings(path, workflows(text))
+        if (name := pipeline_spec_name(path)) is not None:
+            report.findings += pipeline_spec_findings(path, name, text)
         if is_data_file(path):
             report.findings += data_file_findings(path, text)
         elif "/tests/" in f"/{path}":
@@ -142,6 +148,65 @@ def is_workflow_file(path: str) -> bool:
         and not name.startswith(".")
         and name.lower().endswith((".yaml", ".yml"))
     )
+
+
+_PIPELINE_SPEC = re.compile(r"ihsDataR/inst/pipelines/([^/]+)/pipeline\.yaml")
+
+
+def pipeline_spec_name(path: str) -> str | None:
+    """The pipeline a `pipeline.yaml` is for (its folder's name), or None:
+    not one, or a folder starting with _ (a template, not a pipeline)."""
+    found = _PIPELINE_SPEC.fullmatch(path)
+    return found.group(1) if found and not found.group(1).startswith("_") else None
+
+
+def pipeline_spec_findings(path: str, name: str, text: str) -> list[Finding]:
+    """A pipeline file as workflows will read it (workflows/source.py,
+    `pipelines_in`): it must pass the pipeline file's check, and be named
+    as its folder."""
+    from datalab.workflows.model import (
+        Problem,
+        WorkflowInvalid,
+        load_pipeline_file,
+        problem_positions,
+    )
+    from datalab.workflows.source import PIPELINE_NAME
+
+    if not PIPELINE_NAME.fullmatch(name):
+        return [
+            Finding(
+                path,
+                "pipeline",
+                "error",
+                f"{name!r} isn't a pipeline name (lower case letters, digits and _, starting "
+                "with a letter), so no workflow can use this pipeline. Rename its folder, or "
+                "start the name with _ for a template.",
+            )
+        ]
+    try:
+        spec = load_pipeline_file(text)
+    except WorkflowInvalid as error:
+        problems = error.problems or [Problem("", str(error))]
+    else:
+        problems = (
+            []
+            if spec.name == name
+            else [
+                Problem("name", f"it's {spec.name!r}, but its folder is {name!r}: they must match.")
+            ]
+        )
+    shown = problems[:MAX_WORKFLOW_FINDINGS]
+    positions = problem_positions(text, [p.path for p in shown])
+    return [
+        Finding(
+            path,
+            "pipeline",
+            "error",
+            f"The pipeline check: {p}",
+            (positions.get(p.path) or (None,))[0],
+        )
+        for p in shown
+    ]
 
 
 def _workflow_findings(path: str, problems: list[str]) -> list[Finding]:

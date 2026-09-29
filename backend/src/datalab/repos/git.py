@@ -173,6 +173,12 @@ _WINDOWS_CHARACTERS = set('<>:"|?*\\')
 _TOP_LEVEL_GIT_NAMES = (".gitignore", ".github")
 
 
+# Windows' 260-character limit applies to the whole path on disk, the clone's
+# folder included: a lab repo's own paths stay well under it.
+MAX_PATH_BYTES = 180
+MAX_NAME_BYTES = 100
+
+
 def name_problem(path: str) -> str | None:
     """Why a path can't go into a lab repo, or None if it can: it must be a
     plain relative path every disk and git take as it is."""
@@ -185,8 +191,12 @@ def name_problem(path: str) -> str | None:
         return "its name has characters other than plain ASCII"
     if any(c in _WINDOWS_CHARACTERS for c in path):
         return "its name has a character Windows can't use (< > : \" | ? * \\)"
+    if len(path.encode()) > MAX_PATH_BYTES:
+        return f"it's longer than {MAX_PATH_BYTES} characters, too long for some computers"
     parts = path.split("/")
     for number, part in enumerate(parts):
+        if len(part.encode()) > MAX_NAME_BYTES:
+            return f"a name in it is longer than {MAX_NAME_BYTES} characters"
         if part in ("", ".", ".."):
             return "it has an empty, . or .. part"
         if part.endswith((".", " ")) or part.startswith(" "):
@@ -204,6 +214,12 @@ def name_problem(path: str) -> str | None:
 def clone_path(data_dir: Path, repo: str) -> Path:
     """Where a lab repo (`owner/name`) is cloned: `<data_dir>/repos/<name>`."""
     return data_dir / "repos" / repo.split("/")[1]
+
+
+def _parents(path: str) -> list[str]:
+    """Each folder `path` is in, without a trailing slash: a/b/c -> a, a/b."""
+    parts = path.split("/")[:-1]
+    return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
 
 def safe_path(path: str) -> bool:
@@ -442,9 +458,20 @@ class Clone:
                 self.git("read-tree", base, env=env)
                 existing = self.ls_tree(base)
                 records = []
+                # What stays of the base: a file can't also be a folder, or git
+                # would silently drop one of them.
+                kept = {p for p in existing if files.get(p, b"") is not None}
+                kept |= {p for p, c in files.items() if c is not None}
+                folders = {f for p in kept for f in _parents(p)}
                 for path, content in files.items():
                     if not safe_path(path):
                         raise GitError(f"{path!r} can't be committed.")
+                    if content is not None:
+                        clash = next((f for f in _parents(path) if f in kept), None)
+                        if clash is not None:
+                            raise GitError(f"{path!r} can't be committed: {clash} is a file.")
+                        if path in folders:
+                            raise GitError(f"{path!r} can't be committed: it's a folder.")
                     if content is None:
                         records.append(f"0 {_ZERO}\t{path}")
                         continue

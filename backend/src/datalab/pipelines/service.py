@@ -31,7 +31,7 @@ import os
 import secrets
 import threading
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Collection, Coroutine, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +41,7 @@ from datalab.knowledge import check as kb
 from datalab.knowledge.proposals import Base, Change, Workspace, fingerprint
 from datalab.pipelines import share
 from datalab.pipelines.check import Report, WorkflowCheck, check
+from datalab.pipelines.edits import PipelineEdits
 from datalab.pipelines.proposals import (
     ACTIONABLE,
     PipelineStore,
@@ -177,6 +178,8 @@ class Pipelines:
             self._prune_quietly()
             sessions.register_workspace_seed(SEED, self._seed, into=INTO, modes=MODES)
             sessions.register_after_turn(self._after_turn)
+        # A person's own edits (edits.py), on this clone, check and tests.
+        self.edits = PipelineEdits(self, database)
 
     @property
     def available(self) -> bool:
@@ -191,7 +194,12 @@ class Pipelines:
 
     def status(self) -> dict[str, Any]:
         if self.repo is None:
-            return {"available": False, "repo": "not configured", "message": self.unavailable}
+            return {
+                "available": False,
+                "repo": "not configured",
+                "message": self.unavailable,
+                "practice": self._settings.profile == "practice",
+            }
         return self.repo.status()
 
     def sync(self) -> dict[str, Any]:
@@ -402,8 +410,11 @@ class Pipelines:
         """The check, as Save & share would run it first."""
         return check(self.shared_files(proposal), self.workflow_check(proposal.commit))
 
-    def workflow_check(self, commit: str) -> WorkflowCheck:
-        """DataLab's workflow check, with pipelines as in `commit`'s tree and
+    def workflow_check(
+        self, commit: str, overlay: Mapping[str, bytes | None] | None = None
+    ) -> WorkflowCheck:
+        """DataLab's workflow check, with pipelines as in `commit`'s tree (or
+        in `overlay`, files as the person has them now, not yet committed) and
         the real profile's small-cell rule: these files are shared with the
         lab, and run there."""
         clone = self._repo().clone
@@ -411,6 +422,8 @@ class Pipelines:
 
         def read(path: str) -> bytes | None:
             nonlocal entries
+            if overlay is not None and path in overlay:
+                return overlay[path]
             with clone.lock:
                 if entries is None:
                     entries = clone.ls_tree(commit)
@@ -452,14 +465,19 @@ class Pipelines:
         proposal = await asyncio.to_thread(self._actionable, proposal_id)
         if not proposal.files:
             raise NotActionable("There's nothing in this proposal to test.")
-        running = self._testing.get(proposal.tree)
+        return await self.start_tests_on(proposal.commit, proposal.tree, proposal.id)
+
+    async def start_tests_on(
+        self, commit: str, tree: str, proposal_id: str | None = None
+    ) -> TestRun:
+        """Run the package's tests on a tree (a proposal's, or a person's
+        edit's) in the background, unless they're running on it already."""
+        running = self._testing.get(tree)
         if running is not None and not running.done():
-            found = await asyncio.to_thread(self.store.latest_test, proposal.tree)
+            found = await asyncio.to_thread(self.store.latest_test, tree)
             assert found is not None
             return found
-        run = await asyncio.to_thread(
-            self.tests.begin, proposal.commit, proposal.tree, proposal_id=proposal.id
-        )
+        run = await asyncio.to_thread(self.tests.begin, commit, tree, proposal_id=proposal_id)
         self._start_test(run)
         return run
 
@@ -551,6 +569,12 @@ class Pipelines:
             )
 
         await asyncio.to_thread(finish)
+
+    def _track_save(self, key: str, work: Coroutine[Any, Any, None]) -> None:
+        """A save going on in the background (a person's edit's: edits.py)."""
+        task = asyncio.create_task(work)
+        self._saving[key] = task
+        task.add_done_callback(lambda _: self._saving.pop(key, None))
 
     # A workflow file saved from outside a conversation's copy -----------------
 

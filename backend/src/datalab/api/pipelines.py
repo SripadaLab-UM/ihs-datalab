@@ -14,6 +14,14 @@ Pipelines tab lists. See pipelines/service.py.
   it runs the tests first if they haven't passed) and `POST …/reject`. The
   tab polls a proposal while it's being tested or saved.
 - `GET /tests/{id}/log`: the end of a test run's log.
+- A person's own edits (Edit manually, New file, and Edit before accepting:
+  pipelines/edits.py): `POST /edits` starts one (or finds the file's open
+  one), `POST /proposals/{id}/edit` turns a proposal into one, `PUT
+  /edits/{id}` keeps the draft on this computer, `POST …/check` runs the
+  proposal's check on the editor's text, `POST …/tests` the package's
+  tests, `POST …/reapply` moves it onto GitHub's newer version, `POST
+  …/share` is Save & share (in the background, as a proposal's), and `POST
+  …/discard`.
 """
 
 from __future__ import annotations
@@ -29,6 +37,13 @@ from pydantic import BaseModel
 
 from datalab.config import Settings
 from datalab.knowledge.proposals import unified_diff
+from datalab.pipelines.edits import (
+    Edit,
+    EditNotFound,
+    EditRefused,
+    editable_problem,
+    source_note,
+)
 from datalab.pipelines.proposals import Proposal, TestRun
 from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
 from datalab.repos.git import GitError, safe_path
@@ -69,6 +84,8 @@ class PipelineAccountOut(BaseModel):
 
 class PipelinesStatus(BaseModel):
     available: bool
+    # Practice DataLab: no lab repos, so nothing here is available.
+    practice: bool = False
     repo: RepoState
     name: str | None = None
     signed_in: bool = False
@@ -100,6 +117,12 @@ class PipelineFileOut(BaseModel):
     # None when it's binary or too large to show.
     text: str | None
     too_large: bool = False
+    # Whether a person can change it in DataLab (Edit manually); if not, why
+    # and where to change it instead.
+    editable: bool = False
+    source_note: str | None = None
+    # The open edit of it on this computer, if there is one.
+    draft: str | None = None
 
 
 class PipelineFindingOut(BaseModel):
@@ -130,6 +153,8 @@ class PipelineSaveResultOut(BaseModel):
     conflicts: list[str] = []
     after_rebase: bool = False
     test: str | None = None
+    # A proposal replaced by the person's edit of it (Edit before accepting).
+    edit: str | None = None
 
 
 class PipelineTestFileOut(BaseModel):
@@ -212,6 +237,107 @@ class PipelineAcceptIn(BaseModel):
     confirmed: list[str] = []
 
 
+EditState = Literal[
+    "draft", "saving", "saved", "conflict", "check_failed", "tests_failed", "failed", "discarded"
+]  # fmt: skip
+
+
+class PipelineEditOriginOut(BaseModel):
+    # Edit before accepting: the assistant's proposal it began from.
+    proposal_id: str
+    conversation_id: str
+    conversation_title: str | None = None
+
+
+class PipelineEditFileOut(BaseModel):
+    path: str
+    # The person's text; None: the edit deletes the file.
+    text: str | None
+    new: bool
+    # At the edit's base ("where you started"); None: not there.
+    before: str | None
+    diff: str
+    # Changed on GitHub's main (as last synced) since the edit's base: a
+    # conflict to resolve before Save & share. `theirs` is the version now.
+    upstream_changed: bool = False
+    theirs: str | None = None
+    theirs_state: Literal["text", "deleted", "not text"] = "text"
+    # Why it can't be changed by hand (a file roxygen2 writes), if so.
+    source_note: str | None = None
+
+
+class PipelineEditOut(BaseModel):
+    id: str
+    status: EditState
+    base: str
+    # GitHub's main as last synced.
+    head: str | None
+    created_at: str
+    # Also the draft's version: pass it back when keeping or sharing.
+    updated_at: str
+    files: list[PipelineEditFileOut]
+    origin: PipelineEditOriginOut | None = None
+    result: PipelineSaveResultOut | None = None
+    commit: str | None = None  # what was pushed, once saved
+    decided_by: str | None = None
+    # The newest run of the tests on the kept draft.
+    test: PipelineTestOut | None = None
+    # The check on the kept draft, as Save & share runs it first.
+    findings: list[PipelineFindingOut]
+    upstream_changed: bool = False
+
+
+class PipelineEditSummaryOut(BaseModel):
+    id: str
+    status: EditState
+    paths: list[str]
+    created_at: str
+    updated_at: str
+    from_proposal: str | None = None
+
+
+class PipelineStartEditIn(BaseModel):
+    path: str
+    # A file that isn't in the repo yet.
+    new: bool = False
+
+
+class PipelineKeepEditIn(BaseModel):
+    # The edit's files as the person has them (None: deleted). A file left
+    # out is left out of the edit.
+    files: dict[str, str | None]
+    # The draft's updated_at as the person opened it.
+    version: str
+
+
+class PipelineCheckEditIn(BaseModel):
+    # The file in the editor, and its text now; the kept draft if not given.
+    path: str | None = None
+    text: str | None = None
+
+
+class PipelineEditCheckOut(BaseModel):
+    findings: list[PipelineFindingOut]
+
+
+class PipelineShareEditIn(BaseModel):
+    confirmed: list[str] = []
+    version: str
+
+
+class PipelineReapplyIn(BaseModel):
+    version: str
+    # Texts the person wrote to keep, by file; the rest are merged.
+    resolutions: dict[str, str] = {}
+
+
+class PipelineReapplyOut(BaseModel):
+    edit: PipelineEditOut
+    # The files that didn't merge cleanly: their text with the overlapping
+    # lines marked, to resolve (the edit itself is unchanged).
+    merged: dict[str, str] = {}
+
+
 class PipelineTestLogOut(BaseModel):
     id: str
     text: str
@@ -264,6 +390,10 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(502, str(error)) from None
         except GitError as error:
             raise HTTPException(502, str(error)) from None
+        except EditRefused as error:
+            raise HTTPException(409, str(error)) from None
+        except EditNotFound as error:
+            raise HTTPException(404, str(error)) from None
 
     def summary(proposal: Proposal) -> PipelineProposalOut:
         made = conversations.get(proposal.conversation_id)
@@ -309,8 +439,23 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
     async def file(path: str) -> PipelineFileOut:
         if not safe_path(path):
             raise HTTPException(404, "No such file.")
-        head, text, size, too_large = await run(lambda: pipelines.read(path))
-        return PipelineFileOut(path=path, head=head, size=size, text=text, too_large=too_large)
+
+        def read() -> PipelineFileOut:
+            head, text, size, too_large = pipelines.read(path)
+            note = source_note(path, text)
+            open_edit = pipelines.edits.store.open_for(path)
+            return PipelineFileOut(
+                path=path,
+                head=head,
+                size=size,
+                text=text,
+                too_large=too_large,
+                editable=text is not None and note is None and editable_problem(path) is None,
+                source_note=note,
+                draft=open_edit.id if open_edit else None,
+            )
+
+        return await run(read)
 
     @router.get("/proposals")
     async def proposals(conversation_id: str | None = None) -> list[PipelineProposalOut]:
@@ -336,6 +481,122 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
     @router.post("/proposals/{proposal_id}/reject")
     async def reject(proposal_id: str) -> PipelineProposalDetail:
         return await run(lambda: detail(pipelines.reject(proposal_id)))
+
+    # A person's own edits ------------------------------------------------------
+
+    edits = pipelines.edits
+
+    def edit_detail(edit: Edit) -> PipelineEditOut:
+        upstream = edits.upstream(edit)
+        origin = None
+        if edit.origin.get("proposal_id"):
+            made = conversations.get(str(edit.origin.get("conversation_id")))
+            origin = PipelineEditOriginOut(
+                proposal_id=str(edit.origin["proposal_id"]),
+                conversation_id=str(edit.origin.get("conversation_id") or ""),
+                conversation_title=made.title if made else None,
+            )
+        report = edits.check(edit) if edit.status not in ("saved", "discarded") else None
+        files = []
+        for path, file in edit.files.items():
+            up = upstream[path]
+            files.append(
+                PipelineEditFileOut(
+                    path=path,
+                    text=file.text,
+                    new=file.new,
+                    before=up.before,
+                    diff=unified_diff(path, up.before, file.text),
+                    upstream_changed=up.changed,
+                    theirs=up.theirs if up.changed else None,
+                    theirs_state=up.theirs_state,
+                    source_note=source_note(path, up.before if up.before is not None else file.text)
+                    if path.startswith("ihsDataR/")
+                    else None,
+                )
+            )
+        return PipelineEditOut(
+            id=edit.id,
+            status=edit.status,
+            base=edit.base,
+            head=edits.head(),
+            created_at=edit.created_at,
+            updated_at=edit.updated_at,
+            files=files,
+            origin=origin,
+            result=PipelineSaveResultOut(**edit.result) if edit.result.get("message") else None,
+            commit=edit.saved_commit,
+            decided_by=edit.decided_by,
+            test=_test(edits.latest_test(edit)),
+            findings=[PipelineFindingOut(**f.to_dict()) for f in report.findings] if report else [],
+            upstream_changed=any(u.changed for u in upstream.values()),
+        )
+
+    @router.get("/edits")
+    async def open_edits() -> list[PipelineEditSummaryOut]:
+        def listed() -> list[PipelineEditSummaryOut]:
+            pipelines._repo()
+            return [
+                PipelineEditSummaryOut(
+                    id=e.id,
+                    status=e.status,
+                    paths=list(e.files),
+                    created_at=e.created_at,
+                    updated_at=e.updated_at,
+                    from_proposal=e.origin.get("proposal_id"),
+                )
+                for e in edits.store.list_recent()
+            ]
+
+        return await run(listed)
+
+    @router.post("/edits")
+    async def start_edit(body: PipelineStartEditIn) -> PipelineEditOut:
+        return await run(lambda: edit_detail(edits.start(body.path, new=body.new)))
+
+    @router.post("/proposals/{proposal_id}/edit")
+    async def edit_proposal(proposal_id: str) -> PipelineEditOut:
+        return await run(lambda: edit_detail(edits.from_proposal(proposal_id)))
+
+    @router.get("/edits/{edit_id}")
+    async def get_edit(edit_id: str) -> PipelineEditOut:
+        return await run(lambda: edit_detail(edits.get(edit_id)))
+
+    @router.put("/edits/{edit_id}")
+    async def keep_edit(edit_id: str, body: PipelineKeepEditIn) -> PipelineEditOut:
+        return await run(lambda: edit_detail(edits.keep(edit_id, body.files, body.version)))
+
+    @router.post("/edits/{edit_id}/check")
+    async def check_edit(edit_id: str, body: PipelineCheckEditIn) -> PipelineEditCheckOut:
+        def work() -> PipelineEditCheckOut:
+            report = edits.check(edits.get(edit_id), body.path, body.text)
+            return PipelineEditCheckOut(
+                findings=[PipelineFindingOut(**f.to_dict()) for f in report.findings]
+            )
+
+        return await run(work)
+
+    @router.post("/edits/{edit_id}/tests")
+    async def test_edit(edit_id: str) -> PipelineEditOut:
+        await guarded(edits.start_tests(edit_id))
+        return await run(lambda: edit_detail(edits.get(edit_id)))
+
+    @router.post("/edits/{edit_id}/share")
+    async def share_edit(edit_id: str, body: PipelineShareEditIn) -> PipelineEditOut:
+        await guarded(edits.share(edit_id, body.confirmed, body.version))
+        return await run(lambda: edit_detail(edits.get(edit_id)))
+
+    @router.post("/edits/{edit_id}/reapply")
+    async def reapply_edit(edit_id: str, body: PipelineReapplyIn) -> PipelineReapplyOut:
+        def work() -> PipelineReapplyOut:
+            edit, merged = edits.reapply(edit_id, body.version, body.resolutions)
+            return PipelineReapplyOut(edit=edit_detail(edit), merged=merged)
+
+        return await run(work)
+
+    @router.post("/edits/{edit_id}/discard")
+    async def discard_edit(edit_id: str) -> PipelineEditOut:
+        return await run(lambda: edit_detail(edits.discard(edit_id)))
 
     @router.get("/tests/{test_id}/log")
     async def test_log(test_id: str) -> PipelineTestLogOut:

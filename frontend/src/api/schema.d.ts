@@ -1766,6 +1766,144 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pipelines/edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Open Edits */
+        get: operations["open_edits_api_pipelines_edits_get"];
+        put?: never;
+        /** Start Edit */
+        post: operations["start_edit_api_pipelines_edits_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/proposals/{proposal_id}/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Edit Proposal */
+        post: operations["edit_proposal_api_pipelines_proposals__proposal_id__edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Edit */
+        get: operations["get_edit_api_pipelines_edits__edit_id__get"];
+        /** Keep Edit */
+        put: operations["keep_edit_api_pipelines_edits__edit_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Edit */
+        post: operations["check_edit_api_pipelines_edits__edit_id__check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Edit */
+        post: operations["test_edit_api_pipelines_edits__edit_id__tests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}/share": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Share Edit */
+        post: operations["share_edit_api_pipelines_edits__edit_id__share_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}/reapply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reapply Edit */
+        post: operations["reapply_edit_api_pipelines_edits__edit_id__reapply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pipelines/edits/{edit_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Edit */
+        post: operations["discard_edit_api_pipelines_edits__edit_id__discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/pipelines/tests/{test_id}/log": {
         parameters: {
             query?: never;
@@ -3880,6 +4018,107 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** PipelineCheckEditIn */
+        PipelineCheckEditIn: {
+            /** Path */
+            path?: string | null;
+            /** Text */
+            text?: string | null;
+        };
+        /** PipelineEditCheckOut */
+        PipelineEditCheckOut: {
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+        };
+        /** PipelineEditFileOut */
+        PipelineEditFileOut: {
+            /** Path */
+            path: string;
+            /** Text */
+            text: string | null;
+            /** New */
+            new: boolean;
+            /** Before */
+            before: string | null;
+            /** Diff */
+            diff: string;
+            /**
+             * Upstream Changed
+             * @default false
+             */
+            upstream_changed: boolean;
+            /** Theirs */
+            theirs?: string | null;
+            /**
+             * Theirs State
+             * @default text
+             * @enum {string}
+             */
+            theirs_state: "text" | "deleted" | "not text";
+            /** Source Note */
+            source_note?: string | null;
+        };
+        /** PipelineEditOriginOut */
+        PipelineEditOriginOut: {
+            /** Proposal Id */
+            proposal_id: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Conversation Title */
+            conversation_title?: string | null;
+        };
+        /** PipelineEditOut */
+        PipelineEditOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "saving" | "saved" | "conflict" | "check_failed" | "tests_failed" | "failed" | "discarded";
+            /** Base */
+            base: string;
+            /** Head */
+            head: string | null;
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** Files */
+            files: components["schemas"]["PipelineEditFileOut"][];
+            origin?: components["schemas"]["PipelineEditOriginOut"] | null;
+            result?: components["schemas"]["PipelineSaveResultOut"] | null;
+            /** Commit */
+            commit?: string | null;
+            /** Decided By */
+            decided_by?: string | null;
+            test?: components["schemas"]["PipelineTestOut"] | null;
+            /** Findings */
+            findings: components["schemas"]["PipelineFindingOut"][];
+            /**
+             * Upstream Changed
+             * @default false
+             */
+            upstream_changed: boolean;
+        };
+        /** PipelineEditSummaryOut */
+        PipelineEditSummaryOut: {
+            /** Id */
+            id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "saving" | "saved" | "conflict" | "check_failed" | "tests_failed" | "failed" | "discarded";
+            /** Paths */
+            paths: string[];
+            /** Created At */
+            created_at: string;
+            /** Updated At */
+            updated_at: string;
+            /** From Proposal */
+            from_proposal?: string | null;
+        };
         /** PipelineFileChange */
         PipelineFileChange: {
             /** Path */
@@ -3923,6 +4162,15 @@ export interface components {
              * @default false
              */
             too_large: boolean;
+            /**
+             * Editable
+             * @default false
+             */
+            editable: boolean;
+            /** Source Note */
+            source_note?: string | null;
+            /** Draft */
+            draft?: string | null;
         };
         /** PipelineFindingOut */
         PipelineFindingOut: {
@@ -3946,6 +4194,15 @@ export interface components {
              * @default
              */
             text: string;
+        };
+        /** PipelineKeepEditIn */
+        PipelineKeepEditIn: {
+            /** Files */
+            files: {
+                [key: string]: string | null;
+            };
+            /** Version */
+            version: string;
         };
         /** PipelineProposalDetail */
         PipelineProposalDetail: {
@@ -3987,6 +4244,29 @@ export interface components {
             decided_by?: string | null;
             test?: components["schemas"]["PipelineTestOut"] | null;
         };
+        /** PipelineReapplyIn */
+        PipelineReapplyIn: {
+            /** Version */
+            version: string;
+            /**
+             * Resolutions
+             * @default {}
+             */
+            resolutions: {
+                [key: string]: string;
+            };
+        };
+        /** PipelineReapplyOut */
+        PipelineReapplyOut: {
+            edit: components["schemas"]["PipelineEditOut"];
+            /**
+             * Merged
+             * @default {}
+             */
+            merged: {
+                [key: string]: string;
+            };
+        };
         /** PipelineRefusedOut */
         PipelineRefusedOut: {
             /** Path */
@@ -4021,6 +4301,28 @@ export interface components {
             after_rebase: boolean;
             /** Test */
             test?: string | null;
+            /** Edit */
+            edit?: string | null;
+        };
+        /** PipelineShareEditIn */
+        PipelineShareEditIn: {
+            /**
+             * Confirmed
+             * @default []
+             */
+            confirmed: string[];
+            /** Version */
+            version: string;
+        };
+        /** PipelineStartEditIn */
+        PipelineStartEditIn: {
+            /** Path */
+            path: string;
+            /**
+             * New
+             * @default false
+             */
+            new: boolean;
         };
         /** PipelineTestFailureOut */
         PipelineTestFailureOut: {
@@ -4142,6 +4444,11 @@ export interface components {
         PipelinesStatus: {
             /** Available */
             available: boolean;
+            /**
+             * Practice
+             * @default false
+             */
+            practice: boolean;
             /**
              * Repo
              * @enum {string}
@@ -8864,6 +9171,323 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PipelineProposalDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    open_edits_api_pipelines_edits_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditSummaryOut"][];
+                };
+            };
+        };
+    };
+    start_edit_api_pipelines_edits_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineStartEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    edit_proposal_api_pipelines_proposals__proposal_id__edit_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_edit_api_pipelines_edits__edit_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    keep_edit_api_pipelines_edits__edit_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineKeepEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_edit_api_pipelines_edits__edit_id__check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineCheckEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_edit_api_pipelines_edits__edit_id__tests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    share_edit_api_pipelines_edits__edit_id__share_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineShareEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reapply_edit_api_pipelines_edits__edit_id__reapply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineReapplyIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineReapplyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_edit_api_pipelines_edits__edit_id__discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineEditOut"];
                 };
             };
             /** @description Validation Error */

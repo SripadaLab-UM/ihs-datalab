@@ -914,3 +914,37 @@ def test_an_alias_bomb_in_a_proposal_is_refused_by_its_check_and_save(lab):
     assert "anchors or aliases" in error["message"]
     done = accept(lab, proposal)["proposal"]
     assert done["status"] == "check_failed" and lab.remote.head() == before
+
+
+def test_a_proposals_pipeline_file_gets_the_pipeline_check(lab):
+    synced(lab)
+    cid = conversation(lab)
+    bad = "name: steps\nreads: []\noutputs: {}\n"
+    proposal = turn(
+        lab,
+        cid,
+        {
+            "ihsDataR/inst/pipelines/steps/pipeline.yaml": bad,
+            # A template isn't a pipeline: not checked.
+            "ihsDataR/inst/pipelines/_template/pipeline.yaml": "name: <name>\n",
+            # No workflow can name this one: said so plainly.
+            "ihsDataR/inst/pipelines/Weekly-Steps/pipeline.yaml": bad,
+        },
+    )
+    assert proposal is not None
+    findings = lab.client.get(f"/api/pipelines/proposals/{proposal.id}").json()["findings"]
+    pipeline = [f for f in findings if f["rule"] == "pipeline"]
+    by_path = {f["path"] for f in pipeline}
+    assert by_path == {
+        "ihsDataR/inst/pipelines/steps/pipeline.yaml",
+        "ihsDataR/inst/pipelines/Weekly-Steps/pipeline.yaml",
+    }
+    assert all(f["severity"] == "error" for f in pipeline)
+    reads = next(f for f in pipeline if "reads" in f["message"])
+    assert reads["line"] == 2  # where `reads:` is
+    named = next(f for f in pipeline if "Weekly-Steps" in f["path"])
+    assert "isn't a pipeline name" in named["message"]
+    done = accept(lab, proposal)["proposal"]
+    assert done["status"] == "check_failed"
+    assert {f["rule"] for f in done["result"]["findings"]} >= {"pipeline"}
+    assert lab.sandbox.steps == []
