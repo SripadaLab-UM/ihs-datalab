@@ -1,11 +1,13 @@
 # Installing, updating, and running DataLab
 
-Status: **draft** for v1. This is a proposal under discussion. Implemented so
-far: the installers, with versions side by side and the GitHub steps; the
-update check, the **Update available** pill and the updater (Mac tried;
-Windows covered by unit tests only, see "Windows specifics"); and the data
-side of updating (database backups, `datalab rollback`, and recovering from
-an interrupted update; see "How updating keeps the database safe" below).
+Status: **implemented**: the installers (versions side by side, Docker
+Desktop, the GitHub steps, the practice database), the update check (at
+start and about once an hour), **Update available** and the in-app updater
+of signed releases, and the data side of updating (database backups,
+`datalab rollback`, recovering from an interrupted update). Tried on a Mac;
+on Windows the updater was tried once and the current installer still needs
+a re-test (see "Windows specifics"). Readiness is in
+[PRODUCT.md](../PRODUCT.md).
 
 Goal: a colleague with no technical background can install DataLab in about
 15 minutes, and after that never needs a terminal.
@@ -17,7 +19,8 @@ Goal: a colleague with no technical background can install DataLab in about
 | Docker Desktop | Runs the sealed agent containers | Docker, installed or checked by the installer |
 | DataLab app | The host program: web UI, data service, and orchestration. One folder per version, side by side | A GitHub release, with exact pinned versions |
 | Agent image | Codex, R, Python, and the curated toolkit | Pulled pre-built from the org's container registry, pinned by digest |
-| Gateway image | The small network allowlist and key-injecting gateway | Same registry, pinned by digest |
+| Gateway and research proxy images | Stock nginx (routes a session's traffic; holds no key) and Squid (research sessions' internet) | Upstream images, pinned by digest in `sessions/containers.py` |
+| Oracle Database Free image | The practice DataLab's synthetic database | Oracle's registry, pinned by digest in `practice_db` (practice only) |
 | Git | Syncs the lab repos | Checked and installed by the installer if missing |
 | Lab repos | `ihs-knowledge` and `ihs-pipelines` | Cloned from GitHub into DataLab's data folder |
 | Credentials | U-M GPT key, Oracle password, GitHub sign-in | OS keychain (Keychain on Mac, Credential Manager on Windows) |
@@ -30,7 +33,10 @@ tested.
 ## Installing
 
 The user pastes **one command** into Terminal on Mac or PowerShell on Windows.
-It comes from the install page in the app repo. The installer then:
+It comes from the lab's install page (maintained outside this repo), which
+includes the lab's settings, so no settings file is needed. The manual path,
+from a release's files with `--settings <file>` (`-Settings` on Windows), is
+in the README. The installer then:
 
 1. **Checks Docker Desktop.** If it's missing, the installer offers to
    download and install it, and starts it if it isn't running. On Mac the
@@ -106,10 +112,10 @@ It comes from the install page in the app repo. The installer then:
    writable without an administrator, then `lsregister -f` so Finder and the
    Dock notice; on Windows only the `.ico` files already in `<app>\icons`.
    It never stops an update or a start.
-   The first launch opens **Connections**, which
-   asks for the U-M GPT key and Oracle password and saves them to the
-   keychain. It then opens **Safety check** so the user can see everything
-   pass.
+   The keys are asked for during install (`datalab setup`). The first launch
+   opens the Workspace, which says if no U-M GPT key is saved; Settings →
+   Connections saves or replaces the key and password, and Settings → Safety
+   runs the Safety check.
 
 After install, DataLab is started by double-clicking. It opens in the browser
 at a local address, and quitting from the app stops everything, including its
@@ -117,8 +123,8 @@ containers.
 
 ## Updating
 
-- On startup, DataLab checks GitHub for a newer release. If there is one, a
-  pill says **Update available**; it opens Settings → **Updates**, which has
+- At startup, and about once an hour while it's open, DataLab checks GitHub
+  for a newer release. If there is one, a pill says **Update available**; it opens Settings → **Updates**, which has
   the release notes and **Install update**.
 - **Install update** asks the person to confirm, then installs the new
   version alongside the current one, pulls the new images, restarts, and
@@ -196,7 +202,8 @@ never makes this call, and containers can't: the check runs only in the host.
   log says why, or Updates when it's the newest) and the newest of the rest
   is offered.
 - **Nothing at all while updates aren't set up**: until the lab's public key
-  is pinned in the package (`release_keys.py` holds a placeholder), DataLab
+  is pinned in the package (`release_keys.py`; the lab's key has been pinned
+  since 2026-09-27), DataLab
   trusts no release, doesn't ask GitHub, and Updates says so. New versions
   are then installed with the installer.
 - The release notes are shown as text, never as HTML.
@@ -488,18 +495,25 @@ datalab.sqlite         conversations, workflow runs, settings
 backups/<version>/     database backup taken before each update's migration
 sessions/<id>/         each conversation's workspace, checkpoints, and query results
 runs/<id>/             each workflow run's files and run record
+playground/<pg_id>/    the SQL Playground's results, outside every conversation
 repos/ihs-knowledge/   the lab knowledge base (git)
 repos/ihs-pipelines/   the lab pipelines and workflows (git)
+support/<report-id>/   saved support reports (Send feedback)
+catalog/               the practice DataLab's catalog, built from its database
+practice-exports/      the practice DataLab's only export folder
 logs/                  metadata only, never data
 ```
 
-**Export destinations** are the only other places DataLab writes. They are
-named folders set up in Settings:
+**Export folders** are the only other places DataLab writes. They are
+named folders the person adds in Settings → Export folders, each chosen in
+the computer's own folder picker (`export_folders.py`):
 
-- **Exports** (default): `~/Documents/DataLab Exports`.
-- **Dropbox**: detected automatically from the Dropbox desktop app's own
-  settings file (`info.json`), so the user just picks a subfolder. If
-  Dropbox isn't installed, the option says so.
+- **Dropbox** (and OneDrive, Box, Google Drive, iCloud Drive): found by
+  name in the home folder and, on a Mac, `~/Library/CloudStorage`, so the
+  picker can open there; the person picks a subfolder. If none is found,
+  the section says so.
+- The practice DataLab exports only to its own `practice-exports` folder in
+  its data folder.
 
 **Nothing is deleted automatically.** Settings has a **Storage** view that
 shows disk use: the database, each conversation (workspace, checkpoints,

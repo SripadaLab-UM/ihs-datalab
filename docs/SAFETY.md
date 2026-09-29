@@ -4,7 +4,7 @@ Status: **implemented** for v1, except the connectors for outside AI tools
 (the outside-tool MCP server, and the connector tokens and per-route scopes
 described under "Outside AI connectors"), which aren't built yet. The agent's
 own tool server (`/mcp`, used by Codex inside DataLab) is built. Implemented isn't accepted:
-acceptance is tracked in [ARCHITECTURE.md](ARCHITECTURE.md).
+readiness is tracked in [PRODUCT.md](../PRODUCT.md), "v1 readiness".
 
 DataLab lets you use an AI agent (OpenAI Codex on U-M GPT) with sensitive IHS
 data. This page says what DataLab promises, how it keeps each promise, and how
@@ -346,6 +346,10 @@ access. It never gains it.
   data transfers. The container is then destroyed.
 - There is no auto-approval in v1. Every question gets a human decision, and
   every decision is logged in the conversation.
+- With **Express** on, the tool is refused server-side for that turn
+  (`sessions/tokens.py`, `EXPRESS_OFF_TOOLS`), rather than skipping the
+  person's review. Express changes nothing else here: the same tools, the
+  same SQL check, log and export rules.
 
 ### Data access log
 
