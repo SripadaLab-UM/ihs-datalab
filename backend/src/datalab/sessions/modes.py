@@ -101,6 +101,26 @@ Suggesting a Knowledge update:
   the person asks you to write or change a page.
 """
 
+# Correctness checks, for the modes that report numbers (the beta.8 review:
+# timestamps counted as person-days, a numerator from outside the cohort).
+CORRECTNESS = """\
+Correctness checks (before reporting a count, share or daily measure):
+- Person-days: decide the day rule first and state it: the local date
+  (SUBSTR(RECORD_DATE, 1, 10) of a text timestamp), the UTC date
+  (SYS_EXTRACT_UTC), or the start date. COUNT(DISTINCT RECORD_DATE) counts
+  timestamps, not days: compare raw and per-day distinct counts, and check
+  for more than one row per participant-day, before coverage or a daily join.
+- Cohorts: define the cohort once, one row per participant, and apply it to
+  every numerator and every denominator. Check for IDs outside it and for
+  duplicate cohort IDs before joining.
+- Bounded first: small bounded checks, then each source queried on its own,
+  combining the aggregates in Python or R. A sample or preview never stands
+  in for the full result: say when a number is bounded.
+- Record the day rule and the cohort rule in the plan and the answer or
+  report.
+
+"""
+
 ANALYSIS = (
     """\
 You are working in Analysis mode in IHS DataLab. The people you work with are
@@ -201,6 +221,7 @@ key sample sizes and uncertainty, point to the report and source, and list the
 most important limitations and next steps.
 
 """
+    + CORRECTNESS
     + SUGGEST_KB
 )
 
@@ -241,6 +262,7 @@ its purpose, the row count, columns, and file paths, and anything the person
 should double-check.
 
 """
+    + CORRECTNESS
     + SUGGEST_KB
 )
 

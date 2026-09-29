@@ -82,6 +82,27 @@ decides. It never changes the knowledge base by itself.
     figure. A count of 0 can be shown; it's the counts from 1 to 10 that
     are hidden.
 
+## Correctness checks
+
+A turn that finishes can still give a wrong number. Before reporting a count,
+share or daily measure:
+
+- **Person-days.** Decide the day rule first, and state it: the local date
+  (`SUBSTR(RECORD_DATE, 1, 10)` of a text timestamp, `TRUNC(CAST(col AS
+  DATE))` of a `TIMESTAMP WITH TIME ZONE`), the UTC date (`SYS_EXTRACT_UTC`),
+  or the sample's start date. A text timestamp holds a time as well, so
+  `COUNT(DISTINCT RECORD_DATE)` counts timestamps, not days. Compare the raw
+  and per-day distinct counts, and look for more than one row per
+  participant-day, before computing coverage or joining daily measures.
+- **Cohorts.** Define the cohort once, one row per participant, and apply
+  that same list to every numerator and every denominator. Before joining,
+  check how many IDs in each source are outside it and whether any cohort
+  ID appears twice (a join to a duplicate row counts that person twice).
+- **Bounded first.** Small bounded checks first, then query each source on
+  its own and combine the aggregates in Python or R. A sample or a preview
+  never stands in for the full result: say so whenever a number is bounded.
+- Write the day rule and the cohort rule in the plan and the report.
+
 ## Tools installed
 
 - R with the tidyverse, data.table, lubridate, ggplot2, testthat, rmarkdown,

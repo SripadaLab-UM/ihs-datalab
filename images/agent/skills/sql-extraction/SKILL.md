@@ -45,7 +45,37 @@ Query the IHS database carefully and show your work.
     `TRIM` and `||` still return a CLOB. Convert first:
     `TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000))` is ordinary text of up to 1,000
     characters. To count them, use `COUNT(LENGTH(col))`.
-12. If a query is rejected (it isn't a single SELECT, or it's too large), read
+12. Correctness checks (AGENTS.md), in Oracle SQL. Timestamps against days,
+    and repeated days, before any person-day count:
+
+    ```sql
+    SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || RECORD_DATE) AS timestamps,
+           COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || SUBSTR(RECORD_DATE, 1, 10)) AS local_days
+    FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE
+    ```
+
+    The UTC date of a text timestamp is `TO_CHAR(SYS_EXTRACT_UTC(
+    TO_TIMESTAMP_TZ(RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')), 'YYYY-MM-DD')`.
+    The cohort once, checked, then used for numerator and denominator alike:
+
+    ```sql
+    WITH cohort AS (
+      SELECT DISTINCT PARTICIPANTIDENTIFIER FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY
+      WHERE STUDY_PARTICIPANT_ID IS NOT NULL)
+    SELECT (SELECT COUNT(*) FROM cohort) AS cohort_n,
+           (SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER)
+              FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h
+              JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER) AS with_data,
+           (SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER)
+              FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h
+              WHERE h.PARTICIPANTIDENTIFIER NOT IN (SELECT PARTICIPANTIDENTIFIER FROM cohort))
+             AS outside_cohort
+    FROM DUAL
+    ```
+
+    Duplicate cohort IDs: `GROUP BY PARTICIPANTIDENTIFIER HAVING COUNT(*) > 1`
+    on the cohort's source, before `DISTINCT` hides them.
+13. If a query is rejected (it isn't a single SELECT, or it's too large), read
     the message, narrow the query, and try again. If the database refuses it,
     the message gives the Oracle code and what to change. Don't try to get
     around a limit; ask the person instead.
