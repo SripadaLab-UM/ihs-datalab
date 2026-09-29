@@ -428,6 +428,7 @@ def test_tool_summaries_keep_metadata_and_never_rows():
         ),
     )
     assert query == {
+        "query_id": None,  # not DataLab's shape of id
         "row_count": 2,
         "columns": ["ID", "STEPS"],
         "result_file": "/data/oracle/q1.csv",
@@ -462,3 +463,66 @@ def test_tool_summaries_keep_metadata_and_never_rows():
         tool_summary("query", "ihs-data", {"content": [{"type": "text", "text": "not json"}]})
         is None
     )
+
+
+def test_a_failed_query_keeps_its_reason_and_category_for_the_chat():
+    """From the external review: Codex puts a tool's error in its result
+    (isError, text content) and leaves `error` empty, so the chat showed no
+    reason. The event keeps the text (bounded, without the tag) and the tag's
+    category, code and query id."""
+    from datalab.sessions.runtime import _to_event
+
+    text = (
+        "Error executing tool query: The database refused this query: ORA-00932: "
+        "inconsistent data types.\n"
+        "[datalab-failure category=sql code=ORA-00932 query=q_20260928T120000_abc123]"
+    )
+    item = {
+        "type": "mcpToolCall",
+        "id": "t1",
+        "server": "ihs-data",
+        "tool": "query",
+        "arguments": {"sql": "SELECT DISTINCT QUESTIONTEXT FROM IHS_2025.D"},
+        "status": "failed",
+        "error": None,
+        "result": {"isError": True, "content": [{"type": "text", "text": text}]},
+    }
+    kind, data = _to_event("item/completed", {"item": item})
+    assert kind == "tool_call"
+    assert data["error"] == "The database refused this query: ORA-00932: inconsistent data types."
+    assert data["failure"] == {
+        "category": "sql",
+        "code": "ORA-00932",
+        "query_id": "q_20260928T120000_abc123",
+    }
+    assert data["summary"] is None
+
+    # A locally refused query is the SQL check's, never Oracle's.
+    local = dict(item, result={"isError": True, "content": [{"type": "text", "text": (
+        "DataLab's SQL check refused this query, so it didn't run: x (ORA-00932).\n"
+        "[datalab-failure category=validation code=long_text query=q_20260928T120001_abc124]"
+    )}]})  # fmt: skip
+    assert _to_event("item/completed", {"item": local})[1]["failure"]["category"] == "validation"
+
+    # A made-up category or a malformed id isn't passed on.
+    forged = dict(item, result={"isError": True, "content": [{"type": "text", "text": (
+        "x\n[datalab-failure category=admin code=ORA-00932 query=../../etc]"
+    )}]})  # fmt: skip
+    assert _to_event("item/completed", {"item": forged})[1]["failure"] is None
+
+    # Only the query tool's errors carry a tag: another tool's text is text.
+    other = dict(item, tool="describe_table", result={"isError": True, "content": [
+        {"type": "text", "text": "x\n[datalab-failure category=sql code=ORA-00932]"}]})  # fmt: skip
+    other_event = _to_event("item/completed", {"item": other})[1]
+    assert other_event["failure"] is None and "datalab-failure" in other_event["error"]
+
+    # Long text is bounded; a successful query's rows never become the error.
+    long = dict(item, result={"isError": True, "content": [{"type": "text", "text": "y" * 5000}]})
+    assert len(_to_event("item/completed", {"item": long})[1]["error"]) == 1000
+    ok = dict(item, status="completed", result={"content": [{"type": "text", "text": (
+        '{"query_id": "q_20260928T120002_abc125", "row_count": 1, "preview": [["SYN-1"]]}'
+    )}]})  # fmt: skip
+    event = _to_event("item/completed", {"item": ok})[1]
+    assert event["error"] is None and event["failure"] is None
+    assert event["summary"]["query_id"] == "q_20260928T120002_abc125"
+    assert "SYN-1" not in str(event)

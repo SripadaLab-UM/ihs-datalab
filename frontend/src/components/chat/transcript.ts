@@ -13,6 +13,35 @@ export interface ConversationEvent {
   data: Record<string, unknown>;
 }
 
+/** A failed query's kind (backend data/failures.py CATEGORIES), code and Queries entry. */
+export interface ToolFailure {
+  category: FailureCategory;
+  code: string | null;
+  queryId: string | null;
+}
+
+export type FailureCategory = "validation" | "sql" | "permission" | "timeout" | "connection" | "cancelled" | "result_limit";
+const CATEGORIES: readonly FailureCategory[] = ["validation", "sql", "permission", "timeout", "connection", "cancelled", "result_limit"];
+
+/** The event's failure, checked field by field (it comes through the agent's container). */
+export function toolFailure(value: unknown): ToolFailure | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const category = CATEGORIES.find((c) => c === v.category);
+  if (!category) return null;
+  const code = typeof v.code === "string" && /^(?:(?:ORA|DPY|DPI)-\d{4,5}|[a-z_]{1,30})$/.test(v.code) ? v.code : null;
+  const queryId = typeof v.query_id === "string" && /^q_\d{8}T\d{6}_[0-9a-f]{6}$/.test(v.query_id) ? v.query_id : null;
+  return { category, code, queryId };
+}
+
+/** A tool call's error as text: a string as it is, else its message, else the JSON. */
+function errorText(error: unknown): string | null {
+  if (!error) return null;
+  if (typeof error === "string") return error;
+  if (typeof error === "object" && typeof (error as { message?: unknown }).message === "string") return (error as { message: string }).message;
+  return JSON.stringify(error);
+}
+
 export type Item =
   | { kind: "message"; id: string; phase: "commentary" | "final_answer" | null; text: string }
   | { kind: "reasoning"; text: string }
@@ -25,6 +54,8 @@ export type Item =
       status: string;
       arguments: unknown;
       error: string | null;
+      /** Why a failed call failed (backend data/failures.py), read strictly. */
+      failure?: ToolFailure | null;
       /** What the tool returned, metadata only (backend runtime.tool_summary). Untrusted: render as text. */
       summary: Record<string, unknown> | null;
     }
@@ -265,7 +296,8 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           server: text(data.server),
           status: text(data.status),
           arguments: data.arguments,
-          error: data.error ? JSON.stringify(data.error) : null,
+          error: errorText(data.error),
+          failure: toolFailure(data.failure),
           summary: data.summary && typeof data.summary === "object" ? (data.summary as Record<string, unknown>) : null,
         });
         break;

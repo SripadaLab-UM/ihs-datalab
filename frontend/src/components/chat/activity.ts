@@ -7,7 +7,7 @@
 // rendered as text (and Markdown, for guides), never as HTML.
 
 import type { Approval } from "./ApprovalCard";
-import { finalAnswer, type Item, type KbProposalItem, type Turn } from "./transcript";
+import { finalAnswer, type Item, type KbProposalItem, type ToolFailure, type Turn } from "./transcript";
 
 export type IconName =
   | "book" | "search" | "table" | "link" | "db" | "code" | "chart" | "shield"
@@ -23,7 +23,7 @@ export type Detail =
   | { kind: "tables"; searched: string; tables: { table: string; comment: string; columns: string[] }[] }
   | { kind: "columns"; table: string; comment: string; count: number; columns: { name: string; type: string; comment: string }[]; alsoIn: string[] }
   | { kind: "join"; tables: string[]; shared: { column: string; role: string; note: string }[]; notes: string[] }
-  | { kind: "query"; sql: string; rows: number | null; columns: string[]; file: string; warnings: string[]; error: string | null }
+  | { kind: "query"; sql: string; rows: number | null; columns: string[]; file: string; warnings: string[]; error: string | null; failure: ToolFailure | null; queryId: string | null }
   | { kind: "command"; command: string; output: string; exitCode: number | null }
   | { kind: "files"; paths: string[] }; // prettier-ignore
 
@@ -77,10 +77,80 @@ function more(items: string[], shown = 3): Chip[] {
   return chips;
 }
 
+// Why a query didn't run, for its chip: from the failure's category and code
+// (backend data/failures.py), in DataLab's own words. Nothing is read from
+// the error's text, which comes through the agent's container.
+const DATES = "a value couldn't be read as a date";
+const TOO_LONG = "a text result is too long";
+const UNREADABLE = "Oracle couldn't read the SQL";
+const LONG_TEXT = "long-text column can't be sorted, grouped or compared";
+const ORACLE_REASONS: Record<string, string> = {
+  "ORA-00904": "unknown column: check its spelling and quotes",
+  "ORA-00932": "data types don't match (often a long-text column)",
+  "ORA-22848": LONG_TEXT,
+  "ORA-22849": "long-text column can't be used in that function",
+  "ORA-22835": TOO_LONG, "ORA-64203": TOO_LONG,
+  "ORA-00942": "no such table in that cohort, or no access",
+  "ORA-01722": "text that isn't a number was read as one",
+  "ORA-01858": DATES, "ORA-01861": DATES, "ORA-01841": DATES, "ORA-01843": DATES, "ORA-01847": DATES, "ORA-01839": DATES, "ORA-01830": DATES, "ORA-01840": DATES,
+  "ORA-01476": "division by zero",
+  "ORA-00979": "not a GROUP BY expression",
+  "ORA-00937": "a column beside an aggregate needs GROUP BY",
+  "ORA-00934": "an aggregate isn't allowed there",
+  "ORA-01427": "a one-value subquery returned more than one row",
+  "ORA-00918": "a column name is in more than one table",
+  "ORA-12899": TOO_LONG, "ORA-01489": TOO_LONG,
+  "ORA-00933": UNREADABLE, "ORA-00936": UNREADABLE, "ORA-00907": UNREADABLE,
+  "ORA-01652": "the query needed too much temporary space",
+}; // prettier-ignore
+const CHECK_REASONS: Record<string, string> = {
+  spelling: "column needs quoting",
+  long_text: LONG_TEXT,
+  too_complex: "the query is too complex to check",
+};
+
+/** The chip for a failed query: who stopped it, and why. */
+export function queryRefusal(failure: ToolFailure | null | undefined): string {
+  if (!failure) return "it didn't run";
+  const code = failure.code ?? "";
+  switch (failure.category) {
+    case "validation":
+      return CHECK_REASONS[code] ? `the SQL check refused it: ${CHECK_REASONS[code]}` : "the SQL check refused it";
+    case "sql":
+    case "permission": {
+      if (!code) return failure.category === "permission" ? "the database refused it: no access" : "the database refused it";
+      const why = ORACLE_REASONS[code];
+      return why ? `the database refused it: ${code} — ${why}` : `the database refused it: ${code}`;
+    }
+    case "timeout":
+      return "query timed out";
+    case "connection":
+      return "couldn't reach the database";
+    case "cancelled":
+      return "stopped";
+    case "result_limit":
+      return "result too large";
+  }
+}
+
+function isQuery(item: Item): item is Extract<Item, { kind: "tool" }> {
+  return item.kind === "tool" && item.tool === "query";
+}
+
+function queryTables(item: Extract<Item, { kind: "tool" }>): string[] {
+  const s = item.summary ?? {};
+  const listed = list<string>(s.tables).filter((t) => typeof t === "string").map((t) => t.toUpperCase());
+  return listed.length ? listed : tablesIn(str(((item.arguments ?? {}) as Record<string, unknown>).sql));
+}
+
+function queryFailed(item: Extract<Item, { kind: "tool" }>): boolean {
+  return item.status === "failed" || Boolean(item.error) || Boolean(item.failure);
+}
+
 function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | null {
   const args = (item.arguments ?? {}) as Record<string, unknown>;
   const s = item.summary ?? {};
-  const failed = item.status === "failed" || Boolean(item.error);
+  const failed = queryFailed(item);
   const tone: Step["tone"] = failed ? "error" : live && item.status !== "completed" ? "now" : "done";
   const base = { key: `tool-${item.id}`, tone };
   const error = failed ? [{ text: "didn't work", tone: "bad" as const }] : [];
@@ -141,7 +211,7 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
         icon: "db",
         title: tables.length ? `Queried ${tables.map(shortTable).slice(0, 2).join(" and ")}` : "Ran a query",
         chips: failed
-          ? [{ text: "the database refused it", tone: "bad" }]
+          ? [{ text: queryRefusal(item.failure), tone: "bad" }]
           : rows === null
             ? []
             : [{ text: plural(rows, "row") }, { text: "read-only", tone: "good" }],
@@ -153,6 +223,8 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
           file: str(s.result_file),
           warnings: list(s.warnings),
           error: item.error,
+          failure: item.failure ?? null,
+          queryId: item.failure?.queryId ?? (typeof s.query_id === "string" ? s.query_id : null),
         },
       };
     }
@@ -321,6 +393,16 @@ function fold(rows: Row[]): Row[] {
 /** A turn's rows, in order. The final answer isn't one: it's shown on its own. */
 export function activityRows(items: Item[], running: boolean): Row[] {
   const rows: Row[] = [];
+  // A failed query is "recovered" only when a later query of the same turn
+  // worked and read at least one of the same tables: another table's query
+  // working says nothing about this one.
+  const recovered = (index: number, failed: Extract<Item, { kind: "tool" }>) => {
+    const wanted = new Set(queryTables(failed));
+    return items.some(
+      (later, i) =>
+        i > index && isQuery(later) && later.status === "completed" && !queryFailed(later) && queryTables(later).some((t) => wanted.has(t)),
+    );
+  };
   items.forEach((item, index) => {
     switch (item.kind) {
       case "message":
@@ -328,6 +410,9 @@ export function activityRows(items: Item[], running: boolean): Row[] {
         break;
       case "tool": {
         const step = toolStep(item, running);
+        if (step && isQuery(item) && queryFailed(item) && recovered(index, item)) {
+          step.chips.push({ text: "recovered", tone: "good" });
+        }
         if (step) rows.push({ type: "step", step });
         break;
       }

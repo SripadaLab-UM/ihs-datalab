@@ -230,6 +230,34 @@ access. It never gains it.
   - Refused because the column check can't follow them: PIVOT and UNPIVOT
     (use conditional aggregation), and a select-list alias in HAVING (Oracle
     before 23ai would look for a function of that name).
+  - Names match as Oracle matches them: an unquoted name is upper-cased, and
+    a quoted one must match exactly, so a column stored as `"Bdate"` is only
+    found as `"Bdate"`. A name that matches only by letter case is refused
+    with the spelling to use.
+  - Also refused, to spare a round trip Oracle would refuse anyway: a CLOB,
+    NCLOB or BLOB (by the catalog's types, through `SUBSTR`, `UPPER`, `||`,
+    CTEs and subqueries) in `SELECT DISTINCT`, `GROUP BY`, `ORDER BY`,
+    `PARTITION BY`, `UNION`/`INTERSECT`/`MINUS`, a comparison, or
+    `MIN`/`MAX`/`COUNT` and the like (`data/sql_lobs.py`). The fix offered is
+    `TO_CHAR(SUBSTR(col, 1, 1000))`, since package calls such as
+    `DBMS_LOB.SUBSTR` stay refused, with how to tell whether it cuts a value.
+    The work is linear in the query's size, with a budget: a query too deep
+    or large for the check (over 20,000 parse-tree nodes or 1,000 levels,
+    measured before the column check) is refused, never run unchecked, and
+    so is any query the check itself fails on.
+- **What Oracle's refusals show.** For the errors a query commonly runs into
+  (ORA-00904, 00932, 00942, 01722, date formats, …) the agent, Queries and
+  the chat get the Oracle code and DataLab's own explanation, not Oracle's
+  text, which in 23ai can quote a value (`data/oracle_errors.py`). The one
+  part kept is the identifier ORA-00904 names, when the query itself wrote
+  it. Any other code is shown alone, with a general sentence: Oracle's own
+  text isn't passed on (it can quote values, and ORA-12801's names a
+  parallel query server's host and SID; that one is explained by the error
+  it wraps). Not reaching the database (DPY-6005, ORA-12514, …) says only
+  the code; a refused sign-in says what to do about it. Each failure carries a category (validation, sql, permission,
+  timeout, connection, cancelled, result_limit) to the agent and the chat
+  (`data/failures.py`), so the chat never labels the SQL check's refusal as
+  Oracle's; the chat shows DataLab's own words for it, never the result's rows.
 - **Guardrails protect the database and the laptop:**
   - an end-to-end deadline that really cancels the query in Oracle;
   - caps on rows and bytes per extraction, which only the user, not the

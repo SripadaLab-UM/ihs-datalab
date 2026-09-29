@@ -113,10 +113,13 @@ class AccessLog:
         result_path: Path | None = None,
         message: str | None = None,
         reason: str | None = None,
+        wait_ms: int | None = None,
     ) -> None:
         """How a query ended. `reason` says why a cancelled one was, for the
         audit log: `stopped` (Stop was pressed, or its request ended) or
-        `datalab_stopped` (DataLab itself ended before the query did)."""
+        `datalab_stopped` (DataLab itself ended before the query did); for
+        a timeout, `call_timeout` or `deadline`. `wait_ms` (audit log only) is
+        how long it waited for a free slot before `elapsed_ms` started."""
         with self._lock:
             self._db.execute(
                 "UPDATE queries SET finished_at = ?, status = ?, row_count = ?, bytes_written = ?, "
@@ -134,7 +137,7 @@ class AccessLog:
             )
             record = self._get(query_id)
             if record:
-                self._append_audit(record, reason)
+                self._append_audit(record, reason, wait_ms)
 
     def rejected(
         self,
@@ -228,7 +231,9 @@ class AccessLog:
         row = self._db.execute("SELECT * FROM queries WHERE id = ?", (query_id,)).fetchone()
         return _record(row) if row else None
 
-    def _append_audit(self, record: QueryRecord, reason: str | None = None) -> None:
+    def _append_audit(
+        self, record: QueryRecord, reason: str | None = None, wait_ms: int | None = None
+    ) -> None:
         entry = {
             "ts": record.finished_at,
             "query_id": record.id,
@@ -242,6 +247,7 @@ class AccessLog:
             "bytes": record.bytes_written,
             "elapsed_ms": record.elapsed_ms,
             **({"reason": reason} if reason else {}),
+            **({"wait_ms": wait_ms} if wait_ms is not None else {}),
         }
         with self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")

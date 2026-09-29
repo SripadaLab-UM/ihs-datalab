@@ -164,6 +164,10 @@ class Person:
     zones: list[tuple[date, ZoneInfo]]
     sex: int
     days: list[Day] = field(default_factory=list)
+    # The baseline survey's row, so write_participant can fill in "Bdate"
+    # once the date of birth is drawn (drawn there, so every other value stays
+    # as it was before the column was added).
+    baseline: dict | None = None
 
     def zone(self, d: date) -> ZoneInfo:
         return [z for since, z in self.zones if since <= d][-1]
@@ -955,6 +959,8 @@ def write_surveys(co: Cohort, p: Person, waves: list, survey_keys: dict) -> dict
                 f"substance_alcohol{wave}": answers["substance_alcohol"],
             }
         co.add(WAVE_VIEWS[wave], wide)
+        if wave == 0:
+            p.baseline = wide
         done[wave] = end.date()
     return done
 
@@ -994,6 +1000,10 @@ def write_participant(co: Cohort, p: Person, waves_done: dict[int, date]) -> Non
 
     home = p.zones[0][1]
     enrolled = at(p.enroll, r.uniform(8, 20), home)
+    born = datetime(r.randint(1990, 2000), r.randint(1, 12), r.randint(1, 28))
+    if p.baseline is not None:
+        # QUIRK: a mixed-case quoted column, as in the real view: only "Bdate" finds it.
+        p.baseline["Bdate"] = born
     co.add(
         "STUDYPARTICIPANTS",
         {
@@ -1004,7 +1014,7 @@ def write_participant(co: Cohort, p: Person, waves_done: dict[int, date]) -> Non
             "FIRSTNAME": "Synthetic",
             "LASTNAME": f"Participant {p.pid}",
             "GENDER": "F" if p.sex == 2 else "M",
-            "DATEOFBIRTH": datetime(r.randint(1990, 2000), r.randint(1, 12), r.randint(1, 28)),
+            "DATEOFBIRTH": born,
             "ENROLLMENTDATE": enrolled,
             "UTCOFFSET": tstz(enrolled)[-6:],
             "TIMEZONE": home.key,
