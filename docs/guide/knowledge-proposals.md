@@ -122,8 +122,12 @@ what they say, edit the pages they list, or a table's own page in
 In an Analysis, Data extraction or Data engineering conversation, when the
 agent confirms something durable about the data (a quirk a query showed,
 what a column really holds, a caveat), it may add a **Suggested Knowledge
-update** card under its answer: the page it's for, the text, why it's worth
-keeping, and the queries in this conversation that show it. At most one or
+update** under its answer. It shows as a short row: the page it's for, its
+title and its status, with **Accept as proposal** beside it. Press the row
+(or **+**) to open the full card: the text, why it's worth keeping, and the
+queries in this conversation that show it. Once you've accepted or dismissed
+it, it folds back to a row saying what happened (with **Review in
+Knowledge →** after an accept), and you can open it again at any time. At most one or
 two an answer, and never for a one-off result. DataLab refuses one whose
 evidence isn't a query that ran here, or whose text looks like participant
 data. A suggestion never changes the knowledge base by itself:

@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Conversation } from "@/api/client";
 import { type KbEdit, knowledgeApi, type KnowledgeStatus } from "@/api/knowledge";
 
+import { CompactContext } from "./assistants";
 import { KbSuggestionCard, ProposeUpdateButton } from "./KbSuggestionCard";
 import { ShowQueryContext } from "./provenance";
 import { buildTranscript, type KbSuggestionItem } from "./transcript";
@@ -45,6 +46,18 @@ function Where() {
   const location = useLocation();
   return <p data-testid="where">{location.pathname + location.search}</p>;
 }
+function showWithRerender(item: KbSuggestionItem) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const tree = (value: KbSuggestionItem) => (
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <KbSuggestionCard suggestion={value} conversationId="c_1" />
+      </QueryClientProvider>
+    </MemoryRouter>
+  );
+  const view = render(tree(item));
+  return { rerender: (value: KbSuggestionItem) => view.rerender(tree(value)) };
+}
 function show(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const openQuery = vi.fn();
@@ -63,6 +76,7 @@ function show(node: React.ReactNode) {
 }
 
 beforeEach(() => {
+  sessionStorage.clear();
   vi.mocked(knowledgeApi.status).mockReset().mockResolvedValue(status());
   vi.mocked(knowledgeApi.pages).mockReset().mockResolvedValue({ head: "abc1234", pages: [] });
   vi.mocked(knowledgeApi.getEdit).mockReset().mockResolvedValue(edit());
@@ -82,43 +96,111 @@ it("reads the suggestion from the conversation's events", () => {
   expect(later[0].items.find((i) => i.kind === "kb_suggestion")).toMatchObject({ status: "accepted", editId: "ke_9" });
 });
 
-it("shows the page, the text, why, and the queries behind it", async () => {
+const toggle = () => screen.getByRole("button", { expanded: false, name: /Suggested Knowledge update/ });
+const opener = () => screen.getByRole("button", { name: /Suggested Knowledge update/ });
+
+it("starts folded to a row: what it is, its title and page, pending, and Accept", async () => {
+  show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  const row = opener();
+  expect(row).toHaveAttribute("aria-expanded", "false");
+  expect(row).toHaveTextContent("Zero-step days");
+  expect(row).toHaveTextContent("sources/fitbit.md");
+  expect(row).toHaveTextContent("pending");
+  expect(document.getElementById(row.getAttribute("aria-controls")!)).toBeEmptyDOMElement();
+  expect(screen.queryByText("Analysts read 0 as sedentary.")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+  expect(await screen.findByRole("button", { name: "Accept as proposal" })).toBeTruthy();
+});
+
+it("opens onto the page, the text, why, and the queries behind it", async () => {
   const { openQuery } = show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  fireEvent.click(toggle());
+  expect(opener()).toHaveAttribute("aria-expanded", "true");
   expect(screen.getByText("Suggested Knowledge update")).toBeTruthy();
-  expect(screen.getByText("sources/fitbit.md")).toBeTruthy();
   expect(screen.getByText("0 steps").tagName).toBe("STRONG"); // Markdown
   expect(screen.getByText("Analysts read 0 as sedentary.")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /VFITBITDAILYDATA/ }));
   expect(openQuery).toHaveBeenCalledWith("q_1");
   expect(await screen.findByText("a new page (a draft)")).toBeTruthy();
+  // One Accept, with Dismiss and Edit first, while it's open.
+  expect(screen.getAllByRole("button", { name: "Accept as proposal" })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Dismiss" })).toBeTruthy();
+  fireEvent.click(opener());
+  expect(opener()).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("Analysts read 0 as sedentary.")).toBeNull();
 });
 
-it("Accept as proposal makes it a draft edit to review, without leaving the conversation", async () => {
+it("remembers it's open for the session", () => {
+  show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  fireEvent.click(toggle());
+  cleanup();
+  show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  expect(opener()).toHaveAttribute("aria-expanded", "true");
+});
+
+it("Accept as proposal, from the folded row, makes it a draft edit and says so on the row", async () => {
   show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
   const accept = await screen.findByRole("button", { name: "Accept as proposal" });
   await waitFor(() => expect(accept).toBeEnabled());
   fireEvent.click(accept);
-  const link = await screen.findByRole("link", { name: "Review and Save & share in Knowledge" });
+  const link = await screen.findByRole("link", { name: "Review in Knowledge →" });
   expect(link.getAttribute("href")).toBe("/knowledge/sources/fitbit.md?edit=ke_9&view=review");
+  expect(document.activeElement).toBe(link);
   expect(knowledgeApi.acceptSuggestion).toHaveBeenCalledWith("c_1", "ks_1");
-  expect(screen.getByText(/on this computer: not shared yet/)).toBeTruthy();
+  expect(opener()).toHaveTextContent("accepted as a draft");
+  expect(opener()).toHaveAttribute("aria-expanded", "false");
   expect(screen.getByTestId("where").textContent).toBe("/workspace/c_1");
+  // It can be opened again.
+  fireEvent.click(opener());
+  expect(screen.getByText(/on this computer: not shared yet/)).toBeTruthy();
+  expect(screen.getByText("Analysts read 0 as sedentary.")).toBeTruthy();
+});
+
+it("Accept from the open card folds it back to the row", async () => {
+  show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  fireEvent.click(toggle());
+  const accept = screen.getByRole("button", { name: "Accept as proposal" });
+  await waitFor(() => expect(accept).toBeEnabled());
+  fireEvent.click(accept);
+  const link = await screen.findByRole("link", { name: "Review in Knowledge →" });
+  expect(opener()).toHaveAttribute("aria-expanded", "false");
+  expect(document.activeElement).toBe(link);
+  expect(screen.queryByText("Analysts read 0 as sedentary.")).toBeNull();
 });
 
 it("Edit first opens the editor on it at once", async () => {
   show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  fireEvent.click(toggle());
   const first = await screen.findByRole("button", { name: /Edit first/ });
   await waitFor(() => expect(first).toBeEnabled());
   fireEvent.click(first);
   await waitFor(() => expect(screen.getByTestId("where").textContent).toBe("/knowledge/sources/fitbit.md?edit=ke_9&view=edit"));
 });
 
-it("Dismiss sets it aside", async () => {
+it("Dismiss sets it aside and folds it to the row", async () => {
   show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
-  fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
-  expect(await screen.findByText("dismissed")).toBeTruthy();
+  fireEvent.click(toggle());
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+  await waitFor(() => expect(opener()).toHaveTextContent("dismissed"));
   expect(knowledgeApi.dismissSuggestion).toHaveBeenCalledWith("c_1", "ks_1");
+  expect(opener()).toHaveAttribute("aria-expanded", "false");
+  expect(document.activeElement).toBe(opener());
   expect(screen.queryByRole("button", { name: "Accept as proposal" })).toBeNull();
+  fireEvent.click(opener());
+  expect(screen.getByText(/Dismissed: it wasn't added/)).toBeTruthy();
+});
+
+it("folds when it's accepted elsewhere, without moving focus", async () => {
+  const { rerender } = showWithRerender(suggestion());
+  fireEvent.click(toggle());
+  const other = document.createElement("button");
+  document.body.append(other);
+  other.focus();
+  rerender({ ...suggestion(), status: "accepted", editId: "ke_9" });
+  expect(await screen.findByRole("link", { name: "Review in Knowledge →" })).toBeTruthy();
+  expect(opener()).toHaveAttribute("aria-expanded", "false");
+  expect(document.activeElement).toBe(other);
+  other.remove();
 });
 
 it("once shared, says so with the commit", async () => {
@@ -126,6 +208,41 @@ it("once shared, says so with the commit", async () => {
   show(<KbSuggestionCard suggestion={{ ...suggestion(), status: "accepted", editId: "ke_9" }} conversationId="c_1" />);
   expect(await screen.findByText(/Shared to GitHub/)).toBeTruthy();
   expect(screen.getByRole("link", { name: "c0ffee1" })).toBeTruthy();
+  expect(opener()).toHaveTextContent("shared");
+});
+
+it("docked beside a tab, the row is tighter and the page's note waits for it to open", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <CompactContext value>
+          <KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />
+        </CompactContext>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  const row = opener();
+  expect(row.className).toContain("py-1.5");
+  expect(await screen.findByRole("button", { name: "Accept as proposal" })).toBeTruthy();
+  await waitFor(() => expect(knowledgeApi.pages).toHaveBeenCalled());
+  expect(row).not.toHaveTextContent("a new page (a draft)");
+  fireEvent.click(row);
+  expect(await screen.findByText("a new page (a draft)")).toBeTruthy();
+});
+
+it("works from the keyboard: the row is a native button that says whether it's open and what it opens", () => {
+  show(<KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />);
+  const row = opener();
+  // A native button: Enter and Space press it, and Tab reaches it.
+  expect(row.tagName).toBe("BUTTON");
+  expect(row).toHaveAttribute("type", "button");
+  row.focus();
+  expect(document.activeElement).toBe(row);
+  fireEvent.click(row);
+  const region = document.getElementById(row.getAttribute("aria-controls")!)!;
+  expect(region).toHaveTextContent("Analysts read 0 as sedentary.");
+  expect(document.activeElement).toBe(row);
 });
 
 it("on practice DataLab, the actions say they're for the real DataLab", async () => {
@@ -136,7 +253,12 @@ it("on practice DataLab, the actions say they're for the real DataLab", async ()
       <ProposeUpdateButton conversation={conversation} />
     </>,
   );
-  expect(await screen.findByText(/Available on the real DataLab: practice DataLab has no lab knowledge base/)).toBeTruthy();
+  // On the folded row too.
+  expect(await screen.findByText("Available on the real DataLab")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Accept as proposal" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Accept as proposal" }).title).toBe("Available on the real DataLab");
+  fireEvent.click(toggle());
+  expect(screen.getByText(/Available on the real DataLab: practice DataLab has no lab knowledge base/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Accept as proposal" })).toBeDisabled();
   expect(screen.getByRole("button", { name: /Edit first/ })).toBeDisabled();
   expect(screen.getByRole("button", { name: /Propose a Knowledge update/ })).toBeDisabled();

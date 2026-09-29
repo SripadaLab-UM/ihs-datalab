@@ -90,6 +90,20 @@ it.each(["light", "dark"])("fades disabled controls and keeps their text readabl
   }
 });
 
+// Tailwind's preflight sets `button, input, select, textarea { opacity: 1 }` in the same
+// base layer, at an element's specificity. A :where() fade (zero specificity) loses to it,
+// and disabled controls looked enabled: the fade's selector must outrank one element.
+it("fades disabled controls over preflight's opacity: 1, and still lets a utility win", () => {
+  const preflight = readFileSync(require.resolve("tailwindcss/preflight.css"), "utf8");
+  expect(preflight).toMatch(/opacity:\s*1/);
+  const [selector] = [...baseRules()].find(([sel]) => sel.includes(":disabled")) ?? [""];
+  expect(selector.startsWith(":is(")).toBe(true);
+  // :is() takes its most specific part: an attribute selector, above preflight's element.
+  expect(selector).toMatch(/:is\([^)]*\[role="button"\]/);
+  // In the base layer, which Tailwind's utilities layer always beats.
+  expect(css.indexOf(selector.slice(0, 20))).toBeGreaterThan(css.indexOf("@layer base {"));
+});
+
 it("draws one 2px focus ring with an offset", () => {
   const ring = baseRules().get(":focus-visible") ?? "";
   expect(ring).toMatch(/outline:\s*2px solid var\(--color-ink\)/);
