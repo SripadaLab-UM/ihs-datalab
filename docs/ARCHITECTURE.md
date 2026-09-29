@@ -168,6 +168,12 @@ own slot, and the shared modules offer extension points:
   refused with a message: two launches at once could both pass the port
   check, and the second would then remove the first's containers and end
   its turns.
+- **Quitting.** Ctrl-C on `serve` is the normal way to quit: uvicorn shuts
+  the app down (the lifespan stops sessions, containers and keepers), then
+  re-raises the Ctrl-C, which `cli._run_until_stopped` turns into one line,
+  "DataLab stopped.", and exit code 0 (a deliberate quit, not a failure; the
+  launchers don't treat it as one). The hourly update check is stopped
+  however it ends.
 
 ### 2. Sessions and the Codex adapter
 

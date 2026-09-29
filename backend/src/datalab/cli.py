@@ -279,10 +279,24 @@ def _serve(settings, *, open_browser: bool) -> int:
         server.should_exit = True
 
     app.state.shutdown = shutdown
+    return _run_until_stopped(server.run, on_exit=hourly.stop)
+
+
+def _run_until_stopped(run, *, on_exit) -> int:
+    """Runs the server until it quits. Ctrl-C is the normal way to quit
+    DataLab, so it ends with one line and exit code 0, not a traceback.
+    uvicorn has already shut the app down (sessions, containers, keepers) by
+    the time it re-raises the Ctrl-C as KeyboardInterrupt; `on_exit` (the
+    hourly update check's stop) runs however it ends."""
+    interrupted = False
     try:
-        server.run()
+        run()
+    except KeyboardInterrupt:
+        interrupted = True
     finally:
-        hourly.stop()
+        on_exit()
+    if interrupted:
+        print("DataLab stopped.", flush=True)
     return 0
 
 
