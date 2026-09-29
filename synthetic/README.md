@@ -183,7 +183,10 @@ objects are views in reality but plain tables here, filled by the generator.
   only Q1_SURVEY_COMPLETION. Only IHS_2026 has VOURADAILYACTIVITY.
 - The baseline view names the tobacco item `tobacco0`. The quarterly views
   use `substance_tobacco1..4`. The wide survey views use quoted mixed-case
-  identifiers, such as `"interest0"` and `"Black tea"`.
+  identifiers, such as `"interest0"`, `"Black tea"` and the baseline view's
+  `"Bdate"` (a DATE: the date of birth, as in STUDYPARTICIPANTS). A database
+  loaded before `"Bdate"` was added doesn't have it until `synthetic/db.sh
+  generate` loads it again; every other value is the same either way.
 
 ## Quirks included (on purpose)
 
