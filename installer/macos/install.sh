@@ -316,12 +316,14 @@ version_at_least() {
 }
 free_gb() { df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print int($4 / 1048576) }'; }
 now() { date +%s; }
-# Yes only for y or yes: for questions whose answer shouldn't be assumed.
-ask_yes() {
+# Yes unless the person types n or no; pressing Return is yes. With no
+# terminal to answer (a script, a pipe, CI), no: nothing is installed unasked.
+ask_default_yes() {
   printf '%s ' "$1"
   answer=""
-  if [ -r /dev/tty ]; then read -r answer < /dev/tty 2>/dev/null || answer=""; fi
-  case "$answer" in [yY]|[yY][eE][sS]) return 0 ;; *) return 1 ;; esac
+  [ -r /dev/tty ] || return 1
+  read -r answer < /dev/tty 2>/dev/null || return 1
+  case "$answer" in [nN]|[nN][oO]) return 1 ;; *) return 0 ;; esac
 }
 # For a Docker Desktop that doesn't come up: leftovers of an earlier install.
 leftovers() {
@@ -431,7 +433,7 @@ install_docker_desktop() {
   echo "Docker Desktop's license terms apply to its use; your organisation may have its"
   echo "own guidance about Docker."
   if [ "$INSTALL_DOCKER" != yes ] \
-    && ! ask_yes "Download and install Docker Desktop? [y/N]"; then
+    && ! ask_default_yes "Download and install Docker Desktop? [Y/n]"; then
     echo
     echo "Docker Desktop wasn't installed, and nothing was changed. To install it yourself:"
     echo "  1. Download Docker Desktop for Mac ($kind) from $DOCKER_PAGE"

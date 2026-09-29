@@ -562,8 +562,10 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   or volumes, and never touches Docker's settings or data
   (`~/Library/Group Containers/group.com.docker`).
 - **Missing:** it says what it will do and asks
-  `Download and install Docker Desktop? [y/N]` (no answer, or no terminal,
-  means no; `--install-docker` answers yes beforehand). Before asking it
+  `Download and install Docker Desktop? [Y/n]` (pressing Return is yes, as
+  the person has chosen to install DataLab, which needs it, and macOS asks for
+  their password before anything is installed; n or no stops; with no
+  terminal to answer it's no; `--install-docker` answers yes beforehand). Before asking it
   checks the Mac: Apple silicon (`sysctl -n hw.optional.arm64` is 1, which is
   also true under Rosetta, where `uname -m` says x86_64) or Intel; macOS 14
   or newer (Docker supports the current and two previous major releases; 14
