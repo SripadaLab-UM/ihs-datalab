@@ -12,6 +12,7 @@ database links, because those would let the database server send data out.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,7 +25,10 @@ from sqlglot.optimizer.scope import Scope, find_all_in_scope, traverse_scope
 from sqlglot.schema import MappingSchema
 from sqlglot.tokenizer_core import Token, TokenType
 
+from datalab.data.sql_lobs import POSITION, TooComplex, lob_problem, sql_name
 from datalab.textcheck import lone_surrogate, size_text
+
+log = logging.getLogger(__name__)
 
 MAX_SQL_BYTES = 64 * 1024
 
@@ -166,7 +170,23 @@ _SEQUENCE_PSEUDOCOLUMNS = frozenset({"NEXTVAL", "CURRVAL"})
 
 
 class SqlRejected(ValueError):
-    """The statement may not run. The message is written for the agent or user."""
+    """The statement may not run. The message is written for the agent or user.
+
+    `rule` says which kind of refusal it is, for the chat: "spelling" (a
+    column needs its exact quoted spelling), "long_text" (a CLOB where Oracle
+    can't use one), "too_complex", or "check" for the rest. `query_id` is
+    set by DataLab's data service once the refusal is logged."""
+
+    def __init__(self, message: str, *, rule: str = "check") -> None:
+        super().__init__(message)
+        self.rule = rule
+        self.query_id: str | None = None
+
+
+TOO_COMPLEX = (
+    "The query is too complex for DataLab's SQL check (too deeply nested, or too many "
+    "parts), so it wasn't run. Split it into smaller queries."
+)
 
 
 @dataclass(frozen=True)
@@ -207,7 +227,48 @@ def check_sql(
     if len(sql.encode()) > MAX_SQL_BYTES:
         raise SqlRejected(f"The query is longer than {size_text(MAX_SQL_BYTES)}.")
 
+    try:
+        return _check(sql, allowed_schemas, columns)
+    except SqlRejected:
+        raise
+    except RecursionError as error:
+        # Too deep for the parser or the column check (nested calls or set
+        # operations): refused, never run unchecked.
+        raise SqlRejected(TOO_COMPLEX, rule="too_complex") from error
+    except Exception as error:
+        # A bug in the check, or something sqlglot can't handle: refused
+        # (fail closed), and logged, so every query has its verdict.
+        log.exception("The SQL check failed on a query; the query is refused.")
+        raise SqlRejected(
+            "DataLab's SQL check couldn't finish checking this query, so it wasn't run. "
+            "Try a simpler query.",
+            rule="too_complex",
+        ) from error
+
+
+# Beyond these the column check (sqlglot's qualify) grows quadratically:
+# a 64 KB `SELECT N+N+...+N` took over a minute. Real queries stay far below:
+# an 800-term OR chain is depth ~800 and 4,000 nodes.
+MAX_NODES = 20_000
+MAX_DEPTH = 1_000
+
+
+def _require_size(statement: exp.Expr) -> None:
+    """Refuse a parsed query too large or deep to check in reasonable time,
+    before the column check. Walked without recursion."""
+    stack = [(statement, 1)]
+    nodes = 0
+    while stack:
+        node, depth = stack.pop()
+        nodes += 1
+        if nodes > MAX_NODES or depth > MAX_DEPTH:
+            raise SqlRejected(TOO_COMPLEX, rule="too_complex")
+        stack.extend((child, depth + 1) for child in node.iter_expressions())
+
+
+def _check(sql: str, allowed_schemas: frozenset[str], columns: ColumnIndex | None) -> CheckedSql:
     statement = _parse_single_statement(sql)
+    _require_size(statement)
     if not isinstance(statement, _SELECT_ROOTS):
         raise SqlRejected("Only SELECT queries (optionally with WITH) are allowed.")
 
@@ -396,7 +457,9 @@ def _check_columns(
             # in, qualify turns it into a bare column named after the output it
             # points to, which for SELECT 'x' is X: not a name ORDER BY may use.
             if isinstance(ordered, exp.Ordered) and _is_position(ordered.this):
-                ordered.this.replace(exp.null())
+                position = exp.null()
+                position.meta[POSITION] = int(ordered.this.name)
+                ordered.this.replace(position)
     schema = MappingSchema({**_DUAL, **columns}, dialect="oracle", normalize=False)
     try:
         tree = qualify(
@@ -409,6 +472,8 @@ def _check_columns(
         )
     except OptimizeError as error:
         detail = str(error).split(". Line:")[0]
+        if (spelling := _spelling_problem(detail, statement, columns)) is not None:
+            raise SqlRejected(spelling, rule="spelling") from error
         raise SqlRejected(
             f"{detail}. Every name in a query must be a column of a table it reads "
             "(Oracle would run an unknown name as a function). Check the names with "
@@ -416,6 +481,60 @@ def _check_columns(
             "WITH query, qualify its columns with the query's name (r.n)."
         ) from error
     _require_resolved_columns(tree, generated_names=generated_names)
+    try:
+        lob = lob_problem(tree, columns)
+    except (TooComplex, RecursionError) as error:
+        raise SqlRejected(TOO_COMPLEX, rule="too_complex") from error
+    except Exception as error:
+        # A bug in the long-text check: refuse (fail closed), and say so in the log.
+        log.exception("The SQL check's long-text rule failed; the query is refused.")
+        raise SqlRejected(
+            "DataLab's SQL check couldn't finish checking this query, so it wasn't run. "
+            "Try a simpler query.",
+            rule="too_complex",
+        ) from error
+    if lob is not None:
+        raise SqlRejected(lob, rule="long_text")
+
+
+# The name in qualify's refusal of a column it can't find (as Oracle reads
+# it: unquoted names upper-cased).
+_UNRESOLVED = re.compile(
+    r"^(?:Column '(?P<a>[^']+)' could not be resolved|Unknown column: (?P<b>.+)"
+    r"|Cannot automatically join: (?P<c>.+))$"
+)
+
+
+def _spelling_problem(detail: str, statement: exp.Expr, columns: ColumnIndex) -> str | None:
+    """When the name qualify couldn't find matches a column of a table the
+    query reads only by letter case: what to write instead. Oracle
+    upper-cases an unquoted name (Bdate is BDATE), and a quoted one must
+    match exactly, so a column stored with lower-case letters ("Bdate",
+    "Black tea") must be written in double quotes, exactly. Only explains a
+    refusal, for the one name refused: it never lets a name through."""
+    first = detail.split(" for table:")[0]
+    found = _UNRESOLVED.match(first)
+    if found is None:
+        return None
+    read_as = next(g for g in found.groups() if g is not None).strip()
+    names: set[str] = set()
+    for table in statement.find_all(exp.Table):
+        names |= set(columns.get(table.db.upper(), {}).get(table.name.upper(), {}))
+    spelled = sorted(n for n in names if n.upper() == read_as.upper() and n != read_as)
+    if read_as in names or not spelled:
+        return None
+    right = sql_name(spelled[0])
+    if right.startswith('"'):
+        why = (
+            "is spelled with lower-case letters"
+            if any(c.islower() for c in spelled[0])
+            else "isn't a plain Oracle name"
+        )
+        return f"{right} {why}, so Oracle needs it in double quotes, exactly: {right}."
+    return (
+        f"\"{read_as}\" doesn't match the column's spelling: in double quotes a "
+        f'name must match exactly. Write {right} (without quotes, or as "{right}").'
+    )
 
 
 def _require_resolved_columns(tree: exp.Expr, *, generated_names: bool) -> None:

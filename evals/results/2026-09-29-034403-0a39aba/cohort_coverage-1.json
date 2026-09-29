@@ -1,0 +1,61 @@
+{
+  "task": "cohort_coverage",
+  "mode": "analysis",
+  "prompt": "Take the 2025 cohort to be the enrolled participants in IHS_2025.VW_IHS_PARTICIPANT_SUMMARY (those with a STUDY_PARTICIPANT_ID). What share of that cohort has any HealthKit resting heart rate data, and how many person-days of it do they contribute in total? Exploratory is fine: no plan needed.",
+  "tests": "the cohort applied to numerator and denominator: people outside it, a duplicate cohort row",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: using the enrolled 2025 cohort as deduplicated `STUDY_PARTICIPANT_ID`-nonmissing participants in `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY`, **58 of 136 participants have HealthKit resting heart rate data: 42.6%**. They contribute **16,906 participant-local-days** in total.\n\nI counted person-days as `PARTICIPANTIDENTIFIER` plus the **local calendar date of `RECORD_DATE`** from `IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE`, requiring non-missing `RECORD_DATE` and `VALUE`. The participant summary had 137 enrolled rows but 136 distinct participants, so I used the deduplicated participant denominator. The HealthKit table had multiple samples on some days, so the person-day count is lower than the sample-row count.\n\nI saved the static report at `/work/outputs/healthkit_rhr_2025_coverage.html` and the reproducible script at `/work/scripts/healthkit_rhr_2025_coverage.py`. I also suggested a knowledge-base update noting that the 2025 participant summary should be deduplicated before cohort denominators.",
+  "finished": true,
+  "seconds": 129.39301800727844,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "WITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), dup_ids AS (\n  SELECT PARTICIPANTIDENTIFIER\n  FROM enrolled\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER\n  HAVING COUNT(*) > 1\n), dup_study_ids AS (\n  SELECT STUDY_PARTICIPANT_ID\n  FROM enrolled\n  GROUP BY STUDY_PARTICIPANT_ID\n  HAVING COUNT(*) > 1\n)\nSELECT COUNT(*) AS enrolled_rows,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n       COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_ids,\n       SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n       (SELECT COUNT(*) FROM dup_ids) AS duplicated_participantidentifiers,\n       (SELECT COUNT(*) FROM dup_study_ids) AS duplicated_study_participant_ids\nFROM enrolled",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n)\nSELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) AS hk_participants_outside_cohort\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h\nWHERE h.PARTICIPANTIDENTIFIER IS NOT NULL\n  AND NOT EXISTS (\n    SELECT 1 FROM cohort c\n    WHERE c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n  )",
+    "SELECT COUNT(*) AS hk_rows,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS hk_participants,\n       SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n       SUM(CASE WHEN RECORD_DATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_record_date,\n       SUM(CASE WHEN VALUE IS NULL THEN 1 ELSE 0 END) AS rows_missing_value,\n       MIN(CAST(RECORD_DATE AS DATE)) AS min_record_date_local,\n       MAX(CAST(RECORD_DATE AS DATE)) AS max_record_date_local,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) AS distinct_participant_timestamps,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(TRUNC(CAST(RECORD_DATE AS DATE)), 'YYYY-MM-DD')) AS distinct_participant_local_days\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "WITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), summary AS (\n  SELECT COUNT(*) AS enrolled_rows,\n         COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n         COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_ids,\n         SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier\n  FROM enrolled\n), dup_participant AS (\n  SELECT COUNT(*) AS duplicated_participantidentifiers\n  FROM (\n    SELECT PARTICIPANTIDENTIFIER\n    FROM enrolled\n    WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    GROUP BY PARTICIPANTIDENTIFIER\n    HAVING COUNT(*) > 1\n  )\n), dup_study AS (\n  SELECT COUNT(*) AS duplicated_study_participant_ids\n  FROM (\n    SELECT STUDY_PARTICIPANT_ID\n    FROM enrolled\n    GROUP BY STUDY_PARTICIPANT_ID\n    HAVING COUNT(*) > 1\n  )\n)\nSELECT s.enrolled_rows,\n       s.distinct_participantidentifiers,\n       s.distinct_study_participant_ids,\n       s.rows_missing_participantidentifier,\n       dp.duplicated_participantidentifiers,\n       ds.duplicated_study_participant_ids\nFROM summary s\nCROSS JOIN dup_participant dp\nCROSS JOIN dup_study ds",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), hk_cohort AS (\n  SELECT h.PARTICIPANTIDENTIFIER,\n         TO_CHAR(TRUNC(CAST(h.RECORD_DATE AS DATE)), 'YYYY-MM-DD') AS local_record_date,\n         TO_CHAR(h.RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') AS record_timestamp\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c\n    ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n  WHERE h.RECORD_DATE IS NOT NULL\n    AND h.VALUE IS NOT NULL\n)\nSELECT (SELECT COUNT(*) FROM cohort) AS cohort_participants,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_hk_rhr,\n       ROUND(100 * COUNT(DISTINCT PARTICIPANTIDENTIFIER) / NULLIF((SELECT COUNT(*) FROM cohort), 0), 1) AS percent_with_hk_rhr,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || local_record_date) AS participant_local_days,\n       COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || record_timestamp) AS participant_timestamps,\n       COUNT(*) AS sample_rows\nFROM hk_cohort",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), cohort_n AS (\n  SELECT COUNT(*) AS cohort_participants FROM cohort\n), hk_cohort AS (\n  SELECT h.PARTICIPANTIDENTIFIER,\n         TO_CHAR(TRUNC(CAST(h.RECORD_DATE AS DATE)), 'YYYY-MM-DD') AS local_record_date,\n         TO_CHAR(h.RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM') AS record_timestamp\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c\n    ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n  WHERE h.RECORD_DATE IS NOT NULL\n    AND h.VALUE IS NOT NULL\n), hk_summary AS (\n  SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_hk_rhr,\n         COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || local_record_date) AS participant_local_days,\n         COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || record_timestamp) AS participant_timestamps,\n         COUNT(*) AS sample_rows\n  FROM hk_cohort\n)\nSELECT cn.cohort_participants,\n       hs.participants_with_hk_rhr,\n       ROUND(100 * hs.participants_with_hk_rhr / NULLIF(cn.cohort_participants, 0), 1) AS percent_with_hk_rhr,\n       hs.participant_local_days,\n       hs.participant_timestamps,\n       hs.sample_rows\nFROM cohort_n cn\nCROSS JOIN hk_summary hs",
+    "SELECT COUNT(*) AS hk_rows,\n       SUM(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]+(\\.[0-9]+)?$') THEN 1 ELSE 0 END) AS numeric_value_rows,\n       MIN(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]+(\\.[0-9]+)?$') THEN TO_NUMBER(VALUE) END) AS min_numeric_value,\n       MAX(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]+(\\.[0-9]+)?$') THEN TO_NUMBER(VALUE) END) AS max_numeric_value,\n       COUNT(DISTINCT UNITS) AS distinct_units\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\nWHERE VALUE IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 371424,
+        "inputTokens": 361937,
+        "cachedInputTokens": 173568,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9487,
+        "reasoningOutputTokens": 2187
+      },
+      "last": {
+        "totalTokens": 33635,
+        "inputTokens": 33164,
+        "cachedInputTokens": 19456,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 471,
+        "reasoningOutputTokens": 206
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_52a9ffac75a32b74",
+  "attempt": 1
+}

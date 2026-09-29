@@ -19,12 +19,14 @@ from mcp.types import ToolAnnotations
 from pydantic import BaseModel
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from datalab.data.catalog import Catalog, TableInfo
+from datalab.data.catalog import Catalog, Column, TableInfo
+from datalab.data.failures import Failure
 from datalab.data.helpers import find_concept as concept_candidates
 from datalab.data.helpers import join_keys
-from datalab.data.oracle import QueryFailed
+from datalab.data.oracle import QueryFailed, QueryTimedOut
 from datalab.data.service import DataService
 from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
+from datalab.data.sql_lobs import lob_type, sql_name
 from datalab.data.sqlcheck import SqlRejected
 from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
 from datalab.sessions import plan_schema
@@ -50,9 +52,43 @@ Read-only access to the Intern Health Study (IHS) Oracle database, one schema
 per cohort year (for example IHS_2024, IHS_2025). Start with search_catalog
 (or find_concept for a research concept), check columns with describe_table
 and joins with join_paths, then run SELECT queries with query. Qualify
-every table with its schema. Results are saved as CSV files in /data/oracle;
-work with the file for anything beyond the preview.
+every table with its schema. Write a column spelled with lower-case letters
+in double quotes, exactly ("Bdate"). A CLOB (long text) column can't be used
+in SELECT DISTINCT, GROUP BY, ORDER BY, UNION, MIN/MAX/COUNT or a comparison:
+convert it with TO_CHAR(SUBSTR(col, 1, 1000)), and check MAX(LENGTH(col)) so
+no value is cut unseen. If a query times out, split or narrow it before
+trying again. Results are saved as CSV files in /data/oracle; work with the
+file for anything beyond the preview.
 """
+
+
+# How a refused query's error starts, so the agent can tell DataLab's check
+# from the database. The chat reads the tag at its end instead (failures.py).
+CHECK_REFUSED = "DataLab's SQL check refused this query, so it didn't run:"
+DATABASE_REFUSED = "The database refused this query:"
+TIMED_OUT_NEXT = (
+    "Split the query (by table or data source, or by date range) or narrow its scope "
+    "before trying again; don't run the same query again."
+)
+
+
+def query_error(error: SqlRejected | QueryFailed) -> str:
+    """The query tool's error: what happened and what to do, then the tag."""
+    if isinstance(error, SqlRejected):
+        text = f"{CHECK_REFUSED} {error}"
+        failure = Failure("validation", error.rule, error.query_id)
+        return f"{text}\n{failure.tag()}"
+    said = str(error)
+    if isinstance(error, QueryTimedOut):
+        took = f" after {error.elapsed_ms / 1000:.0f} s" if error.elapsed_ms is not None else ""
+        text = f"The query timed out{took}: {said} {TIMED_OUT_NEXT}"
+        code = error.reason
+    elif error.category in ("sql", "permission"):
+        text = f"{DATABASE_REFUSED} {said}"
+        code = error.code
+    else:
+        text, code = said, error.code
+    return f"{text}\n{Failure(error.category, code, error.query_id).tag()}"
 
 
 class SqlBind(BaseModel):
@@ -103,7 +139,7 @@ def build_agent_tools(
                     "table": hit.table.qualified_name,
                     "type": hit.table.type,
                     "comment": hit.table.comment,
-                    "matching_columns": hit.matching_columns,
+                    "matching_columns": [sql_name(c) for c in hit.matching_columns],
                     "also_in": [
                         c for c in catalog.cohorts_with(hit.table.name) if c != hit.table.schema
                     ],
@@ -150,7 +186,10 @@ def build_agent_tools(
         """
         _session(ctx, tokens, "find_concept")
         await _require_catalog(service)
-        return _json(concept_candidates(catalog, concept[:200], cohorts))
+        found = concept_candidates(catalog, concept[:200], cohorts)
+        for candidate in found["candidates"]:
+            candidate["matching_columns"] = [sql_name(c) for c in candidate["matching_columns"]]
+        return _json(found)
 
     @server.tool(annotations=_READ_ONLY)
     async def query(
@@ -172,7 +211,7 @@ def build_agent_tools(
                 preview_rows=max(0, min(preview_rows, 200)),
             )
         except (SqlRejected, QueryFailed) as error:
-            raise ToolError(str(error)) from error
+            raise ToolError(query_error(error)) from error
         return _json(
             {
                 "query_id": outcome.query_id,
@@ -572,11 +611,40 @@ def _describe(info: TableInfo, catalog: Catalog) -> dict[str, Any]:
         "comment": info.comment,
         "primary_key": info.primary_key,
         "also_in": [c for c in catalog.cohorts_with(info.name) if c != info.schema],
-        "columns": [
-            {"name": c.name, "type": c.type, "nullable": c.nullable, "comment": c.comment}
-            for c in info.columns
-        ],
+        "columns": [_column(c) for c in info.columns],
     }
+
+
+def _column(column: Column) -> dict[str, Any]:
+    """One column for describe_table, with how SQL must write it when that
+    isn't just its name, and what Oracle can't do with long text."""
+    entry: dict[str, Any] = {
+        "name": column.name,
+        "type": column.type,
+        "nullable": column.nullable,
+        "comment": column.comment,
+    }
+    written = sql_name(column.name)
+    notes = []
+    if written != column.name:
+        entry["write_as"] = written
+        notes.append(f"quoted: exact case, always write it as {written}")
+    kind = lob_type(column.type)
+    if kind == "BLOB":
+        notes.append(
+            "BLOB: can't be selected DISTINCT, grouped, sorted or compared; LENGTH and "
+            "IS NULL work on it"
+        )
+    elif kind:
+        notes.append(
+            f"{kind} (long text): to select it DISTINCT, group, sort or compare it, convert "
+            f"it with TO_CHAR(SUBSTR({written}, 1, 1000)), the first 1,000 characters (check "
+            f"MAX(LENGTH({written})) so no value is cut unseen); LIKE and IS NULL work on it "
+            "as it is"
+        )
+    if notes:
+        entry["sql_note"] = "; ".join(notes)
+    return entry
 
 
 async def _require_catalog(service: DataService) -> None:

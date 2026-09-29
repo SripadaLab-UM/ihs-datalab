@@ -54,6 +54,11 @@ def main() -> int:
     parser.add_argument(
         "--port", type=int, default=PORT, help=f"the eval DataLab's port (default {PORT})"
     )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        help="where to make the run's fresh data folder (default: DataLab's own folder)",
+    )
     args = parser.parse_args()
     # Another eval run, or a DataLab, may be using the usual port.
     PORT = args.port
@@ -69,7 +74,7 @@ def main() -> int:
     out.mkdir(parents=True)
     (out / "expected.json").write_text(json.dumps(expected, indent=2), encoding="utf-8")
 
-    home = Path.home() / (
+    home = args.data_root or Path.home() / (
         "Library/Application Support/DataLab"
         if sys.platform == "darwin"
         else ".local/share/datalab"

@@ -1,0 +1,53 @@
+{
+  "task": "bdate_age",
+  "mode": "extraction",
+  "prompt": "What was the mean age of the 2025 cohort's enrolled participants when they started the baseline survey, from the date of birth in the baseline survey view (VW_BASELINE_SURVEY)?",
+  "tests": "a mixed-case quoted column (\"Bdate\")",
+  "passed": true,
+  "checks": [
+    {
+      "name": "mean age at baseline",
+      "passed": true,
+      "detail": "expected 29.76 years (29.26 in whole years), from the quoted \"Bdate\" column and STARTDATE0"
+    },
+    {
+      "name": "enrolled n",
+      "passed": true,
+      "detail": "n = 129 enrolled with a date of birth"
+    }
+  ],
+  "answer": "The 2025 cohort\u2019s enrolled participants had a mean age of **29.76 years** when they started the baseline survey (`n = 129`).\n\nI understood \u201cenrolled\u201d as non-null `STUDY_PARTICIPANT_ID`, using the catalog comment that this field is null for people screened but never enrolled. Catalog evidence: `IHS_2025.VW_BASELINE_SURVEY` contains `STARTDATE0` (`DATE`), quoted `\"Bdate\"` (`DATE`), `STUDY_PARTICIPANT_ID`, and `PARTICIPANTIDENTIFIER`. The enrolled baseline rows were one row per participant, and all enrolled rows had both dates needed for age.\n\nFiles:\n- Result CSV: `/work/outputs/ihs_2025_baseline_mean_age.csv`\n- Data dictionary: `/work/outputs/ihs_2025_baseline_mean_age_dictionary.md`\n\nSQL run:\n```sql\n-- Profile required fields\nSELECT COUNT(*) AS rows_total, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n       COUNT(STUDY_PARTICIPANT_ID) AS rows_with_study_participant_id,\n       COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\n       SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_with_startdate0,\n       SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_with_bdate,\n       SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_complete_for_age\nFROM IHS_2025.VW_BASELINE_SURVEY\n```\n\n```sql\n-- Check duplicate enrolled participant rows\nWITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT ...\nFROM DUAL\n```\n\n```sql\n-- Final extraction\nWITH enrolled AS (\n  SELECT STUDY_PARTICIPANT_ID,\n         MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12 AS age_years_at_baseline_start\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND STARTDATE0 IS NOT NULL\n    AND \"Bdate\" IS NOT NULL\n)\nSELECT COUNT(*) AS participant_count,\n       AVG(age_years_at_baseline_start) AS mean_age_years_at_baseline_start\nFROM enrolled\n```\n\nCaveat: I used exact Oracle `MONTHS_BETWEEN(...)/12`; a whole-years age definition would give a slightly different mean. The local knowledge base was not available at `/work/kb`, so this is based on live catalog metadata and query checks.",
+  "finished": true,
+  "seconds": 75.85721182823181,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS rows_total,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifier,\n  COUNT(STUDY_PARTICIPANT_ID) AS rows_with_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_id,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_with_startdate0,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_with_bdate,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_rows_complete_for_age\nFROM IHS_2025.VW_BASELINE_SURVEY",
+    "WITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), duplicate_participantidentifier AS (\n  SELECT PARTICIPANTIDENTIFIER\n  FROM enrolled\n  GROUP BY PARTICIPANTIDENTIFIER\n  HAVING COUNT(*) > 1\n), duplicate_study_id AS (\n  SELECT STUDY_PARTICIPANT_ID\n  FROM enrolled\n  GROUP BY STUDY_PARTICIPANT_ID\n  HAVING COUNT(*) > 1\n)\nSELECT\n  (SELECT COUNT(*) FROM enrolled) AS enrolled_rows,\n  (SELECT COUNT(*) FROM duplicate_participantidentifier) AS participantidentifier_with_duplicate_rows,\n  (SELECT COUNT(*) FROM duplicate_study_id) AS study_participant_id_with_duplicate_rows\nFROM DUAL",
+    "WITH enrolled AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    STUDY_PARTICIPANT_ID,\n    STARTDATE0,\n    \"Bdate\",\n    MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12 AS age_years_at_baseline_start\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND STARTDATE0 IS NOT NULL\n    AND \"Bdate\" IS NOT NULL\n)\nSELECT\n  COUNT(*) AS participants_with_age,\n  MIN(age_years_at_baseline_start) AS min_age_years,\n  MAX(age_years_at_baseline_start) AS max_age_years,\n  SUM(CASE WHEN age_years_at_baseline_start < 0 THEN 1 ELSE 0 END) AS negative_age_rows,\n  SUM(CASE WHEN age_years_at_baseline_start > 100 THEN 1 ELSE 0 END) AS age_over_100_rows\nFROM enrolled",
+    "WITH enrolled AS (\n  SELECT\n    STUDY_PARTICIPANT_ID,\n    MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12 AS age_years_at_baseline_start\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND STARTDATE0 IS NOT NULL\n    AND \"Bdate\" IS NOT NULL\n)\nSELECT\n  COUNT(*) AS participant_count,\n  AVG(age_years_at_baseline_start) AS mean_age_years_at_baseline_start\nFROM enrolled"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 225865,
+        "inputTokens": 221481,
+        "cachedInputTokens": 115712,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4384,
+        "reasoningOutputTokens": 1357
+      },
+      "last": {
+        "totalTokens": 24356,
+        "inputTokens": 23190,
+        "cachedInputTokens": 20992,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1166,
+        "reasoningOutputTokens": 516
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_3da9cae4a5c04843",
+  "attempt": 1
+}

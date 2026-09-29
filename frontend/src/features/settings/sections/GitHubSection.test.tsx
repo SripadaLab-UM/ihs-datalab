@@ -32,7 +32,7 @@ const signedIn = status({
   repo: "in sync", signed_in: true, account: me, message: null,
   head: "abc1234", last_sync: new Date(Date.now() - 5 * 60_000).toISOString(),
 }); // prettier-ignore
-const pipelinesSynced: PipelinesStatus = { ...signedIn, name: "SripadaLab-UM/ihs-pipelines" };
+const pipelinesSynced: PipelinesStatus = { ...signedIn, practice: false, name: "SripadaLab-UM/ihs-pipelines" };
 const waiting: SignIn = {
   state: "waiting", user_code: "WDJB-MJHT", verification_uri: "https://github.com/login/device",
   expires_at: new Date(Date.now() + 900_000).toISOString(), interval: 5, account: null, message: null,

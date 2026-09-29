@@ -825,7 +825,7 @@ objects:
     real_type: VIEW
     create_as: table
     cohorts: [IHS_2024, IHS_2025, IHS_2026]
-    note: 'Subset of ~200 columns. Mixed-case quoted identifiers ("interest0", "Black tea") as in the real view.'
+    note: 'Subset of ~200 columns. Mixed-case quoted identifiers ("interest0", "Black tea", "Bdate") as in the real view.'
     columns:
       - [PARTICIPANTIDENTIFIER, VARCHAR2(15)]
       - [STUDY_PARTICIPANT_ID, NUMBER]
@@ -850,6 +850,7 @@ objects:
       - ["cannabis0", NUMBER]
       - ["Black tea", NUMBER]
       - ["Sex", NUMBER]
+      - ["Bdate", DATE]
   VW_SEP_SURVEY:
     real_type: VIEW
     create_as: table

@@ -1,0 +1,62 @@
+{
+  "task": "coverage_open",
+  "mode": "analysis",
+  "prompt": "What share of the 2025 cohort's enrolled participants have any HealthKit resting heart rate data, and how many person-days of it do they contribute? Exploratory is fine: no plan needed.",
+  "tests": "the same, with the cohort left to the agent: people with data outside it",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: among the 136 enrolled 2025 participants, 58 had at least one HealthKit resting heart rate record, so the share is 42.6%. Those enrolled participants contributed 19,297 distinct person-days of resting heart rate data.\n\nI used `IHS_2025.STUDYPARTICIPANTS` for enrollment, defining enrolled as non-null `SECONDARYIDENTIFIER`, and `IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE` for the measure. Person-days are distinct enrolled participant plus `STARTDATE` calendar day, requiring non-missing participant ID, start date, and value.\n\nI wrote the reproducible source and report here:\n\n- Report: `/work/outputs/healthkit_rhr_coverage_2025.html`\n- Source: `/work/scripts/healthkit_rhr_coverage_2025.py`\n\nKey checks: no duplicate participant identifiers in the enrolled denominator, no missing participant/date/value fields in the RHR table, all checked RHR values were numeric, and units were `count/min`. A small number of HealthKit RHR participants were not included because they were not enrolled or did not match the participant table; those small counts are suppressed in the report.\n\nI also suggested a knowledge-base update for the HealthKit resting heart rate table/date/unit details, so the lab can review and keep that convention.",
+  "finished": true,
+  "seconds": 138.53200602531433,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS study_participant_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n  COUNT(DISTINCT CASE WHEN SECONDARYIDENTIFIER IS NOT NULL THEN PARTICIPANTIDENTIFIER END) AS enrolled_participants,\n  SUM(CASE WHEN SECONDARYIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_without_secondaryidentifier,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_without_participantidentifier,\n  COUNT(*) - COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS duplicate_participantidentifier_rows\nFROM IHS_2025.STUDYPARTICIPANTS",
+    "SELECT\n  COUNT(*) AS rhr_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_any_rhr,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(STARTDATE, 'YYYY-MM-DD')) AS participant_startdate_days,\n  MIN(STARTDATE) AS min_startdate,\n  MAX(STARTDATE) AS max_startdate,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n  SUM(CASE WHEN STARTDATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_startdate,\n  SUM(CASE WHEN VALUE IS NULL THEN 1 ELSE 0 END) AS rows_missing_value\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  UNITS,\n  COUNT(*) AS rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\nGROUP BY UNITS\nORDER BY rows DESC",
+    "WITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n), rhr_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TO_CHAR(STARTDATE, 'YYYY-MM-DD') AS rhr_day\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n    AND VALUE IS NOT NULL\n)\nSELECT\n  (SELECT COUNT(*) FROM enrolled) AS enrolled_participants,\n  COUNT(DISTINCT e.PARTICIPANTIDENTIFIER) AS enrolled_with_rhr,\n  ROUND(100 * COUNT(DISTINCT e.PARTICIPANTIDENTIFIER) / NULLIF((SELECT COUNT(*) FROM enrolled), 0), 1) AS percent_enrolled_with_rhr,\n  COUNT(DISTINCT e.PARTICIPANTIDENTIFIER || '|' || r.rhr_day) AS enrolled_rhr_person_days,\n  MIN(r.rhr_day) AS first_rhr_day,\n  MAX(r.rhr_day) AS last_rhr_day\nFROM enrolled e\nJOIN rhr_days r\n  ON e.PARTICIPANTIDENTIFIER = r.PARTICIPANTIDENTIFIER",
+    "WITH participant_status AS (\n  SELECT PARTICIPANTIDENTIFIER,\n         CASE WHEN SECONDARYIDENTIFIER IS NOT NULL THEN 'enrolled'\n              WHEN SECONDARYIDENTIFIER IS NULL THEN 'not_enrolled'\n         END AS status\n  FROM IHS_2025.STUDYPARTICIPANTS\n), rhr_participants AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n)\nSELECT\n  COALESCE(s.status, 'unmatched_to_studyparticipants') AS participant_status,\n  COUNT(*) AS participant_count\nFROM rhr_participants r\nLEFT JOIN participant_status s\n  ON r.PARTICIPANTIDENTIFIER = s.PARTICIPANTIDENTIFIER\nGROUP BY COALESCE(s.status, 'unmatched_to_studyparticipants')\nORDER BY participant_status",
+    "SELECT\n  UNITS AS value_units,\n  COUNT(*) AS row_count,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participant_count\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\nGROUP BY UNITS\nORDER BY row_count DESC",
+    "SELECT\n  COUNT(*) AS rows_checked,\n  SUM(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN 1 ELSE 0 END) AS numeric_value_rows,\n  SUM(CASE WHEN NOT REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN 1 ELSE 0 END) AS nonnumeric_value_rows,\n  MIN(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN TO_NUMBER(VALUE) END) AS min_numeric_value,\n  MAX(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN TO_NUMBER(VALUE) END) AS max_numeric_value\nFROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "WITH enrolled AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.STUDYPARTICIPANTS\n  WHERE SECONDARYIDENTIFIER IS NOT NULL\n), rhr_days AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    TO_CHAR(STARTDATE, 'YYYY-MM-DD') AS rhr_day\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n    AND VALUE IS NOT NULL\n), enrolled_summary AS (\n  SELECT COUNT(*) AS enrolled_participants\n  FROM enrolled\n), rhr_summary AS (\n  SELECT\n    COUNT(DISTINCT e.PARTICIPANTIDENTIFIER) AS enrolled_with_rhr,\n    COUNT(DISTINCT e.PARTICIPANTIDENTIFIER || '|' || r.rhr_day) AS enrolled_rhr_person_days,\n    MIN(r.rhr_day) AS first_rhr_day,\n    MAX(r.rhr_day) AS last_rhr_day\n  FROM enrolled e\n  JOIN rhr_days r\n    ON e.PARTICIPANTIDENTIFIER = r.PARTICIPANTIDENTIFIER\n)\nSELECT\n  e.enrolled_participants,\n  r.enrolled_with_rhr,\n  ROUND(100 * r.enrolled_with_rhr / NULLIF(e.enrolled_participants, 0), 1) AS percent_enrolled_with_rhr,\n  r.enrolled_rhr_person_days,\n  r.first_rhr_day,\n  r.last_rhr_day\nFROM enrolled_summary e\nCROSS JOIN rhr_summary r"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 492678,
+        "inputTokens": 482075,
+        "cachedInputTokens": 344576,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 10603,
+        "reasoningOutputTokens": 2604
+      },
+      "last": {
+        "totalTokens": 36819,
+        "inputTokens": 36426,
+        "cachedInputTokens": 34304,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 393,
+        "reasoningOutputTokens": 101
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_9bdea5273b2f1d1d",
+  "attempt": 2
+}
