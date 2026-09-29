@@ -95,6 +95,8 @@ class Share:
     workflows: Callable[[str], WorkflowCheck] | None = None
     # A person's own edit (edits.py), not an agent's change: the message says so.
     by_person: bool = False
+    # ...made from an assistant's proposal (Edit before accepting).
+    from_proposal: bool = False
     # Stop with a conflict, rather than rebase, if GitHub's main changed any
     # of `files` since `base`: the person decides what to keep (edits.py).
     strict: bool = False
@@ -141,7 +143,7 @@ async def save_and_share(clone: Clone, share: Share, tester: Tester) -> SaveResu
 async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
     report = await asyncio.to_thread(_checked, share, share.files, share.commit)
     if report.blocking(share.confirmed):
-        return _check_failed(report, share.confirmed, after_rebase=False)
+        return _check_failed(report, share, after_rebase=False)
     first = await tester(share.commit, share.tree)
     if first.status != "passed":
         return _tests_failed(first, after_rebase=False)
@@ -156,8 +158,21 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         if upstream is None:
             return SaveResult("failed", "GitHub's pipelines repo has no main branch.")
         if share.strict and upstream != share.base:
-            moved = set(await asyncio.to_thread(clone.changed_paths, share.base, upstream))
-            if touched := sorted(p for p in share.files if p in moved):
+            moved = {
+                p.lower()
+                for p in await asyncio.to_thread(clone.changed_paths, share.base, upstream)
+            }
+            if touched := sorted(p for p in share.files if p.lower() in moved):
+                there = await asyncio.to_thread(_contents, clone, upstream, list(share.files))
+                if there == share.files:
+                    # Already on main exactly so (pushed from here before DataLab
+                    # stopped, say): nothing to share.
+                    return SaveResult(
+                        "nothing to save",
+                        "These changes are already in the pipelines repo.",
+                        commit=upstream,
+                        upstream=upstream,
+                    )
                 return SaveResult(
                     "conflict",
                     f"Someone changed {', '.join(touched)} on GitHub since you started. "
@@ -170,11 +185,16 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         )
         if rebased.state == "conflict":
             names = ", ".join(rebased.conflicts)
+            then = (
+                "See the versions, and choose what to keep."
+                if share.by_person
+                else "Discard this change, and ask the agent in a new conversation to make it "
+                "again on the latest version."
+            )
             return SaveResult(
                 "conflict",
                 f"Someone else changed the same lines meanwhile ({names}). Nothing was "
-                "shared. Discard this change, and ask the agent in a new conversation to "
-                "make it again on the latest version.",
+                f"shared. {then}",
                 upstream=upstream,
                 conflicts=rebased.conflicts,
             )
@@ -188,12 +208,20 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
                 upstream=upstream,
             )
         candidate = rebased.commit
+        if clash := await asyncio.to_thread(_case_clash, clone, candidate, list(share.files)):
+            return SaveResult(
+                "failed",
+                f"{clash[0]} and {clash[1]} differ only in case: they'd be the same file on "
+                "Windows and Mac. Nothing was shared: rename one.",
+                upstream=upstream,
+                conflicts=list(clash),
+            )
         # Checked again as it will be pushed: what it changes on top of main.
         changed = await asyncio.to_thread(clone.changed_paths, upstream, candidate)
         contents = await asyncio.to_thread(_contents, clone, candidate, changed)
         again = await asyncio.to_thread(_checked, share, contents, candidate)
         if again.blocking(share.confirmed):
-            return _check_failed(again, share.confirmed, after_rebase=upstream != share.base)
+            return _check_failed(again, share, after_rebase=upstream != share.base)
         # The package as it will be pushed, if others' changes made it another
         # one than the tests passed on: tested again, and the message says so.
         tested = first
@@ -240,7 +268,27 @@ def _contents(clone: Clone, commit: str, paths: list[str]) -> dict[str, bytes | 
     return {p: blobs.get(entries[p].blob, b"") if p in entries else None for p in paths}
 
 
-def _check_failed(report: Report, confirmed: Collection[str], *, after_rebase: bool) -> SaveResult:
+def _case_clash(clone: Clone, commit: str, paths: list[str]) -> tuple[str, str] | None:
+    """Two paths of `commit` (files or folders) differing only in case, one of
+    them the change's own: the same file on Windows and Mac."""
+    names: dict[str, str] = {}
+    for path in clone.ls_tree(commit):
+        parts = path.split("/")
+        for depth in range(1, len(parts) + 1):
+            name = "/".join(parts[:depth])
+            names.setdefault(name.lower(), name)
+    for path in paths:
+        parts = path.split("/")
+        for depth in range(1, len(parts) + 1):
+            name = "/".join(parts[:depth])
+            known = names.get(name.lower())
+            if known is not None and known != name:
+                return known, name
+    return None
+
+
+def _check_failed(report: Report, share: Share, *, after_rebase: bool) -> SaveResult:
+    confirmed = share.confirmed
     blocking = report.blocking(confirmed)
     if report.errors:
         message = "The check found problems to fix before this can be shared."
@@ -248,7 +296,8 @@ def _check_failed(report: Report, confirmed: Collection[str], *, after_rebase: b
         message = (
             "The check found things for you to confirm: text that may be participant "
             "data, or code that would run on everyone's computer. Confirm each one, or "
-            "ask the agent to change it, then save again."
+            + ("change it" if share.by_person else "ask the agent to change it")
+            + ", then save again."
         )
     if after_rebase:
         message = "With the changes others saved meanwhile, " + message[0].lower() + message[1:]
@@ -276,10 +325,17 @@ def _message(share: Share, tested: TestRun) -> str:
         subject = f"{share.subject}: {len(changed)} files"
     body = "\n".join(f"- {'deleted' if share.files[p] is None else 'updated'} {p}" for p in changed)
     passed = tested.summary.get("tests", 0)
-    how = "Edited by hand" if share.by_person else "Reviewed"
+    how = (
+        "Edited in DataLab from an assistant's proposal"
+        if share.from_proposal
+        else "Edited by hand"
+        if share.by_person
+        else "Reviewed"
+    )
     return (
         f"{subject}\n\n"
-        f"{how} and saved in DataLab by {share.author.name} (@{share.login}).\n"
+        f"{how} and saved {'' if share.from_proposal else 'in DataLab '}by {share.author.name} "
+        f"(@{share.login}).\n"
         f"The package's {passed} tests passed on this change.\n\n"
         f"{body}\n\n"
         + "".join(f"{key}: {value}\n" for key, value in share.trailers)

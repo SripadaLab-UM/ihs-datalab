@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -15,6 +16,7 @@ from datalab import db
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
 from datalab.config import Settings
 from datalab.pipelines import edits as edits_module
+from datalab.repos.git import GitError, Identity, name_problem
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.tokens import SessionTokens
@@ -205,9 +207,23 @@ def test_new_files_only_where_the_repo_takes_them(lab):
         "ihsDataR/R/STEPS.R",  # clashes with steps.R on Windows and Mac
         "ihsDataR/R",  # a folder
         "ihsDataR/R/../../x.R",
+        # In a "folder" that's a file: git would drop the file, silently.
+        "ihsDataR/tests/testthat/test-steps.R/extra.R",
+        "ihsDataR/DESCRIPTION/x.R",
+        "ihsDataR/description/x.R",
+        "ihsDataR/r/new.R",  # beside ihsDataR/R/, differing only in case
+        "ihsDataR/R/" + "n" * 101 + ".R",  # a name too long for some computers
     ):
         response = lab.client.post("/api/pipelines/edits", json={"path": path, "new": True})
         assert response.status_code == 409, path
+    folder = lab.client.post(
+        "/api/pipelines/edits", json={"path": "ihsDataR/DESCRIPTION/x.R", "new": True}
+    )
+    assert "ihsDataR/DESCRIPTION is a file, not a folder" in folder.json()["detail"]
+    # One open edit per file, whatever the case of its name.
+    start(lab, "ihsDataR/R/new.R", new=True)
+    twin = lab.client.post("/api/pipelines/edits", json={"path": "ihsDataR/R/NEW.R", "new": True})
+    assert twin.status_code == 409 and "differing only in case" in twin.json()["detail"]
     taken = lab.client.post("/api/pipelines/edits", json={"path": STEPS, "new": True})
     assert taken.status_code == 409
     made = start(lab, "workflows/monthly.yaml", new=True)
@@ -318,8 +334,13 @@ def test_discarding_shares_nothing_and_frees_the_file(lab):
     edit = keep(lab, start(lab), {STEPS: NEW_STEPS})
     gone = lab.client.post(f"/api/pipelines/edits/{edit['id']}/discard").json()
     assert gone["status"] == "discarded" and lab.remote.head() == before
-    late = lab.client.post(f"/api/pipelines/edits/{edit['id']}/share", json={"version": None})
+    late = lab.client.post(
+        f"/api/pipelines/edits/{edit['id']}/share", json={"version": gone["updated_at"]}
+    )
     assert late.status_code == 409
+    # Keeping, sharing and reapplying always say which version of the draft they're of.
+    unversioned = lab.client.put(f"/api/pipelines/edits/{edit['id']}", json={"files": {}})
+    assert unversioned.status_code == 422
     listed = lab.client.get("/api/pipelines/edits").json()
     assert [(e["id"], e["status"]) for e in listed] == [(edit["id"], "discarded")]
     assert start(lab)["id"] != edit["id"]
@@ -351,3 +372,130 @@ def test_practice_datalab_has_no_edits(tmp_path, github_keychain):
         assert refused.status_code == 409 and "Practice" in refused.json()["detail"]
         assert client.get("/api/pipelines/edits").status_code == 409
     connection.close()
+
+
+def test_git_never_drops_a_file_for_a_folder_of_the_same_name(lab):
+    """The second guard, for every caller of commit_files (the knowledge base too)."""
+    synced(lab)
+    clone = lab.pipelines._repo().clone
+    head = clone.remote_head()
+    for files in (
+        {"ihsDataR/DESCRIPTION/x.R": b"x\n"},  # in a "folder" that's a file
+        {"ihsDataR/R": b"x\n"},  # a file where a folder is
+        {"ihsDataR/new.R": b"x\n", "ihsDataR/new.R/y.R": b"y\n"},  # both at once
+    ):
+        with pytest.raises(GitError):
+            clone.commit_files(head, files, "m", Identity("A", "a@example.org"))
+    # Deleting the file first makes room for the folder.
+    made = clone.commit_files(
+        head,
+        {"ihsDataR/DESCRIPTION": None, "ihsDataR/DESCRIPTION/x.R": b"x\n"},
+        "m",
+        Identity("A", "a@example.org"),
+    )
+    assert "ihsDataR/DESCRIPTION/x.R" in clone.ls_tree(made)
+
+
+def test_names_too_long_for_some_computers_are_refused():
+    assert name_problem("ihsDataR/R/" + "a" * 100 + ".R") is not None
+    assert name_problem("/".join(["ihsDataR"] + ["folder"] * 30) + "/x.R") is not None
+    assert name_problem("ihsDataR/tests/testthat/fixtures/weekly_steps_by_iso_week.csv") is None
+
+
+def test_github_moving_on_elsewhere_is_rebased_and_pushed(lab):
+    synced(lab)
+    edit = keep(lab, start(lab), {STEPS: NEW_STEPS})
+    lab.remote.write({"ihsDataR/R/dates.R": b"to_date <- function(x) x\n"}, "Someone else")
+    done = share(lab, edit)
+    assert done["status"] == "saved", done
+    assert lab.remote.show("ihsDataR/R/dates.R") == "to_date <- function(x) x"
+    assert lab.remote.show(STEPS) == NEW_STEPS.rstrip("\n")
+
+
+def test_a_rejected_push_goes_round_again_strictly(lab, monkeypatch):
+    """main moved on between the fetch and the push, on the edit's own file: the
+    next round sees it and stops, rather than rebase over it."""
+    synced(lab)
+    edit = keep(lab, start(lab), {STEPS: NEW_STEPS})
+    clone = lab.pipelines._repo().clone
+    real = clone.push
+    pushes = []
+
+    def push(commit):
+        if not pushes:
+            lab.remote.write({STEPS: b"weekly_steps <- function(x) x + 1\n"}, "Someone else")
+        pushes.append(commit)
+        return real(commit)
+
+    monkeypatch.setattr(clone, "push", push)
+    done = share(lab, edit)
+    assert len(pushes) == 1  # rejected, then the strict check stopped the second round
+    assert done["status"] == "conflict" and done["result"]["conflicts"] == [STEPS]
+    assert lab.remote.show(STEPS) == "weekly_steps <- function(x) x + 1"
+
+
+def test_a_case_twin_saved_meanwhile_is_a_conflict(lab):
+    synced(lab)
+    edit = keep(lab, start(lab, "ihsDataR/R/new.R", new=True), {"ihsDataR/R/new.R": "a <- 1\n"})
+    before = lab.remote.write({"ihsDataR/R/New.R": b"b <- 2\n"}, "Someone else")
+    done = share(lab, edit)
+    assert done["status"] == "conflict" and lab.remote.head() == before
+
+
+def test_already_on_github_as_it_is_here_is_saved_not_a_conflict(lab):
+    """Pushed from here just before DataLab stopped, say: not someone else's change."""
+    synced(lab)
+    edit = keep(lab, start(lab), {STEPS: NEW_STEPS})
+    pushed = lab.remote.write({STEPS: NEW_STEPS.encode()}, "The same change")
+    done = share(lab, edit)  # not synced: found on the fetch
+    assert done["status"] == "saved" and "already on GitHub" in done["result"]["message"]
+    assert lab.remote.head() == pushed
+    synced(lab)
+    other = keep(lab, start(lab), {STEPS: NEW_STEPS + "# more\n"})
+    lab.remote.write({STEPS: (NEW_STEPS + "# more\n").encode()}, "Again")
+    synced(lab)  # found before anything is fetched
+    again = share(lab, other)
+    assert again["status"] == "saved" and "already on GitHub" in again["result"]["message"]
+
+
+def test_an_edit_whose_commit_the_clone_lost_is_made_again_from_its_text(lab):
+    synced(lab)
+    edit = keep(lab, start(lab), {STEPS: NEW_STEPS})
+    found = lab.pipelines.edits.store.get(edit["id"])
+    assert found is not None
+    lab.pipelines.edits.store.update(found, commit="0" * 40, tree="0" * 40)
+    shown = lab.client.get(f"/api/pipelines/edits/{edit['id']}").json()
+    assert shown["files"][0]["text"] == NEW_STEPS
+    repaired = lab.pipelines.edits.store.get(edit["id"])
+    assert repaired is not None and repaired.commit != "0" * 40
+    assert share(lab, shown)["status"] == "saved"
+
+
+def test_a_missing_edit_is_404_and_other_errors_arent(lab, monkeypatch):
+    synced(lab)
+    assert lab.client.get("/api/pipelines/edits/pe_nope").status_code == 404
+    edit = start(lab)
+
+    def broken(*args, **kwargs):
+        raise KeyError("a bug, not a missing edit")
+
+    monkeypatch.setattr(lab.pipelines.edits, "check", broken)
+    with pytest.raises(KeyError):
+        lab.client.get(f"/api/pipelines/edits/{edit['id']}")
+
+
+def test_a_generated_file_isnt_edited_by_hand_on_the_way_back(lab):
+    lab.remote.write({"ihsDataR/man/weekly_steps.Rd": ROXYGEN_RD.encode()}, "Document")
+    synced(lab)
+    cid = conversation(lab)
+    proposal = turn(lab, cid, {"ihsDataR/man/weekly_steps.Rd": None})
+    assert proposal is not None
+    edit = lab.client.post(f"/api/pipelines/proposals/{proposal.id}/edit").json()
+    rd = "ihsDataR/man/weekly_steps.Rd"
+    changed = lab.client.put(
+        f"/api/pipelines/edits/{edit['id']}",
+        json={"files": {rd: ROXYGEN_RD + "% by hand\n"}, "version": edit["updated_at"]},
+    )
+    assert changed.status_code == 409 and "roxygen2" in changed.json()["detail"]
+    # Put back exactly as it was is fine.
+    assert keep(lab, edit, {rd: ROXYGEN_RD})["files"][0]["text"] == ROXYGEN_RD

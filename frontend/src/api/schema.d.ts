@@ -4202,7 +4202,7 @@ export interface components {
                 [key: string]: string | null;
             };
             /** Version */
-            version: string | null;
+            version: string;
         };
         /** PipelineProposalDetail */
         PipelineProposalDetail: {
@@ -4247,7 +4247,7 @@ export interface components {
         /** PipelineReapplyIn */
         PipelineReapplyIn: {
             /** Version */
-            version: string | null;
+            version: string;
             /**
              * Resolutions
              * @default {}
@@ -4312,7 +4312,7 @@ export interface components {
              */
             confirmed: string[];
             /** Version */
-            version: string | null;
+            version: string;
         };
         /** PipelineStartEditIn */
         PipelineStartEditIn: {

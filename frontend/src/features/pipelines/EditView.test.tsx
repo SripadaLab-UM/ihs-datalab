@@ -370,3 +370,35 @@ it("makes a new file where the repo takes one", async () => {
   await screen.findByText("new file");
   expect(screen.getByRole("heading", { name: "New file new.R" })).toBeInTheDocument();
 });
+
+it("says, before discarding an edit of the assistant's proposal, that the proposal goes too", async () => {
+  vi.mocked(pipelinesApi.getEdit).mockResolvedValue(
+    edit({ origin: { proposal_id: "pp_1", conversation_id: "c1", conversation_title: "Weekly steps" } }),
+  );
+  const { onClose } = open({ id: "pe_1" });
+  fireEvent.click(await screen.findByRole("button", { name: /Discard…/ }));
+  const ask = screen.getByRole("group", { name: "Discard this edit?" });
+  expect(ask).toHaveTextContent("the assistant's proposal it replaces is lost too");
+  fireEvent.click(within(ask).getByRole("button", { name: "Discard this edit" }));
+  await waitFor(() => expect(pipelinesApi.discardEdit).toHaveBeenCalledWith("pe_1"));
+  expect(onClose).toHaveBeenCalled();
+});
+
+it("forgets unkept typing for edits shared or discarded elsewhere", async () => {
+  localStorage.setItem("datalab:pipelines:unsaved:pe_7", JSON.stringify({ files: { [STEPS]: "x" }, version: "v1" }));
+  localStorage.setItem("datalab:pipelines:unsaved:pe_8", JSON.stringify({ files: { [STEPS]: "y" }, version: "v1" }));
+  vi.mocked(pipelinesApi.edits).mockResolvedValue([
+    { id: "pe_7", status: "discarded", paths: [STEPS], created_at: "t", updated_at: "t", from_proposal: null },
+    { id: "pe_8", status: "draft", paths: [STEPS], created_at: "t", updated_at: "t", from_proposal: null },
+  ]);
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <PipelinesPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(readUnsaved("pe_7")).toBeNull());
+  expect(readUnsaved("pe_8")).not.toBeNull();
+});

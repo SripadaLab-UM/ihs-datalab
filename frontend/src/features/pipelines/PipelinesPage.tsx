@@ -14,7 +14,7 @@ import { useOverlay } from "@/components/ui/overlay";
 import { formatBytes } from "@/lib/csv";
 import { useTabState } from "@/features/sql/hooks";
 
-import { EditView, type EditTarget } from "./EditView";
+import { EditView, type EditTarget, forgetUnsaved } from "./EditView";
 import { FileTree } from "./FileTree";
 import { ACTIONABLE, EDIT_OPEN, editChip, editTitle, languageOf, proposalChip, repoLine, when } from "./pipelines";
 import { ProposalView } from "./ProposalView";
@@ -52,6 +52,10 @@ export function PipelinesPage() {
     enabled: Boolean(status.data?.available),
     refetchInterval: 5000,
   });
+  // Edits finished elsewhere (another window, another browser): their unkept typing here is stale.
+  useEffect(() => {
+    for (const e of edits.data ?? []) if (e.status === "saved" || e.status === "discarded") forgetUnsaved(e.id);
+  }, [edits.data]);
   const sync = useMutation({
     mutationFn: pipelinesApi.sync,
     onSuccess: (next) => {

@@ -81,6 +81,10 @@ class EditConflict(EditRefused):
     """Another window changed the draft since this one read it."""
 
 
+class EditNotFound(RuntimeError):
+    """There's no such edit."""
+
+
 @dataclass
 class EditFile:
     text: str | None  # None: the edit deletes it
@@ -164,7 +168,12 @@ class EditStore:
         return self.list_open() + [_edit(r) for r in rows]
 
     def open_for(self, path: str) -> Edit | None:
-        return next((e for e in self.list_open() if path in e.files), None)
+        """The open edit of `path`, or of a path differing from it only in case
+        (they're the same file on Windows and Mac)."""
+        lowered = path.lower()
+        found = [e for e in self.list_open() if any(p.lower() == lowered for p in e.files)]
+        exact = next((e for e in found if path in e.files), None)
+        return exact or (found[0] if found else None)
 
     def update(self, edit: Edit, **changes: Any) -> Edit:
         for key, value in changes.items():
@@ -225,8 +234,14 @@ class PipelineEdits:
             raise EditRefused(problem)
         with self._lock:
             found = self.store.open_for(path)
-            if found is not None:
+            if found is not None and path in found.files:
                 return found
+            if found is not None:
+                other = next(p for p in found.files if p.lower() == path.lower())
+                raise EditRefused(
+                    f"You're editing {other} already: names differing only in case are the same "
+                    "file on Windows and Mac."
+                )
             with self.clone.lock:
                 head = self.clone.remote_head()
                 if head is None:
@@ -266,8 +281,6 @@ class PipelineEdits:
         proposal = pipelines.get(proposal_id)
         with pipelines._lock(proposal.conversation_id), self._lock:
             proposal = pipelines._actionable(proposal_id)
-            if proposal.status == "saving":
-                raise EditRefused("This proposal is being saved.")
             if not proposal.files:
                 raise EditRefused("There's nothing in this proposal to edit.")
             files: dict[str, EditFile] = {}
@@ -302,8 +315,22 @@ class PipelineEdits:
     def get(self, edit_id: str) -> Edit:
         edit = self.store.get(edit_id)
         if edit is None:
-            raise LookupError("No such edit.")
-        return edit
+            raise EditNotFound("No such edit.")
+        return self._repaired(edit)
+
+    def _repaired(self, edit: Edit) -> Edit:
+        """The edit, with its commit made again from the kept text if the clone
+        lost it (downloaded afresh, say): the text in the database is the draft."""
+        if edit.status not in OPEN or not self.clone.exists():
+            return edit
+        with self.clone.lock:
+            if self.clone.resolve(edit.commit) is not None:
+                return edit
+            if self.clone.resolve(edit.base) is None:
+                return edit  # where it started is gone too: the person sees the error
+        log.warning("remaking the commit of %s, which the clone no longer has", edit.id)
+        commit, tree = self._commit(edit.id, edit.base, edit.files)
+        return self.store.update(edit, commit=commit, tree=tree)
 
     def upstream(self, edit: Edit) -> dict[str, Upstream]:
         """Each file of the edit at its base and on GitHub's main as last synced."""
@@ -364,8 +391,10 @@ class PipelineEdits:
                     raise EditRefused(f"{path} isn't in this edit: open it with Edit manually.")
                 if text is not None and (problem := text_problem(path, text)):
                     raise EditRefused(problem)
-                changed = text != had.text and had.text is not None
-                if changed and (note := generated_note(path, had.text or "")):
+                before = self._before(edit, path) if had.text is None else None
+                note = generated_note(path, had.text or before or "")
+                restored = had.text is None and text == before  # put back as it was
+                if text != had.text and note and not restored:
                     raise EditRefused(f"{path} can't be edited by hand. {note}")
                 if text is None and had.text is not None and had.new:
                     raise EditRefused(f"{path} is new in this edit: leave it out instead.")
@@ -411,6 +440,9 @@ class PipelineEdits:
                     text = resolutions[path]
                     if problem := text_problem(path, text):
                         raise EditRefused(problem)
+                    generated = generated_note(path, up.theirs or up.before or ours or "")
+                    if generated and text not in (ours, up.theirs):
+                        raise EditRefused(f"{path} can't be edited by hand. {generated}")
                     files[path] = EditFile(text, up.theirs_state == "deleted")
                     continue
                 if up.theirs_state == "not text":
@@ -465,6 +497,23 @@ class PipelineEdits:
                 ):
                     raise EditRefused("There's no change to share yet.")
                 moved = sorted(p for p, u in upstream.items() if u.changed)
+                if moved and all(
+                    u.theirs == edit.files[p].text and u.theirs_state != "not text"
+                    for p, u in upstream.items()
+                ):
+                    # Already on GitHub as this edit has it (saved from here before
+                    # DataLab stopped, say): nothing to share, nothing to resolve.
+                    return self.store.update(
+                        edit,
+                        status="saved",
+                        result={
+                            "state": "nothing to save",
+                            "message": "These changes are already on GitHub's main, exactly "
+                            "as in this edit. Nothing new was shared.",
+                        },
+                        saved_commit=self.head(),
+                        decided_by=account.login,
+                    ), False
                 if moved:
                     return self.store.update(
                         edit,
@@ -496,6 +545,7 @@ class PipelineEdits:
             trailers=tuple(trailers),
             workflows=self._pipelines.workflow_check,
             by_person=True,
+            from_proposal=bool(origin.get("proposal_id")),
             strict=True,
         )
         self._pipelines._track_save(edit.id, self._save(edit, request))
@@ -534,6 +584,12 @@ class PipelineEdits:
             if status == "saved":
                 self._repo.saved(result.commit)
                 self._forget_ref(edit.id)
+                if result.state == "nothing to save":
+                    outcome = {
+                        **outcome,
+                        "message": "These changes are already on GitHub's main, exactly as "
+                        "in this edit. Nothing new was shared.",
+                    }
             self.store.update(
                 edit,
                 status=status,
@@ -567,6 +623,12 @@ class PipelineEdits:
             tree = self.clone.text("rev-parse", f"{commit}^{{tree}}")
             self.clone.set_ref(f"{_REFS}/{edit_id}", commit)
         return commit, tree
+
+    def _before(self, edit: Edit, path: str) -> str | None:
+        """The file's text at the edit's base."""
+        with self.clone.lock:
+            content = self.clone.show(edit.base, path)
+        return kb.as_text(content) if content is not None else None
 
     def _forget_ref(self, edit_id: str) -> None:
         with self.clone.lock:
@@ -645,9 +707,26 @@ def new_file_problem(path: str, entries: Mapping[str, Any]) -> str | None:
     clash = next((p for p in entries if p.lower() == lowered), None)
     if clash is not None:
         return f"There's already {clash} (names differing only in case clash on Windows and Mac)."
-    if any(p.startswith(path + "/") for p in entries):
+    if any(p.lower().startswith(lowered + "/") for p in entries):
         return f"{path} is a folder in the repo."
+    parts = path.split("/")[:-1]
+    folders = {f.lower(): f for p in entries for f in _folders(p)}
+    for depth in range(1, len(parts) + 1):
+        parent = "/".join(parts[:depth])
+        if file := next((p for p in entries if p.lower() == parent.lower()), None):
+            return f"{file} is a file, not a folder."
+        known = folders.get(parent.lower())
+        if known is not None and known != parent:
+            return (
+                f"There's already a folder {known}/ (names differing only in case are the "
+                "same folder on Windows and Mac)."
+            )
     return None
+
+
+def _folders(path: str) -> list[str]:
+    parts = path.split("/")[:-1]
+    return ["/".join(parts[: i + 1]) for i in range(len(parts))]
 
 
 def text_problem(path: str, text: str) -> str | None:

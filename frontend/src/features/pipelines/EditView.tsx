@@ -42,6 +42,11 @@ export function readUnsaved(editId: string): Unsaved | null {
   }
 }
 
+/** Drop what this browser kept unkept for an edit (it was shared or discarded). */
+export function forgetUnsaved(editId: string) {
+  writeUnsaved(editId, null);
+}
+
 function writeUnsaved(editId: string, unsaved: Unsaved | null) {
   try {
     if (unsaved === null) localStorage.removeItem(UNSAVED + editId);
@@ -247,8 +252,9 @@ function Editor({
     },
   });
   useEffect(() => {
+    // Finished here or in another window: nothing unkept is kept for it any more.
+    if (edit.status === "saved" || edit.status === "discarded") writeUnsaved(edit.id, null);
     if (edit.status === "saved") {
-      writeUnsaved(edit.id, null);
       for (const k of ["pipelines-status", "pipelines-files", "pipelines-file"])
         void queryClient.invalidateQueries({ queryKey: [k] });
     }
@@ -528,9 +534,19 @@ function Editor({
               Close
             </Button>
             {discarding ? (
-              <Button variant="danger" onClick={() => discard.mutate()} disabled={busy}>
-                Discard this edit
-              </Button>
+              <span role="group" aria-label="Discard this edit?" className="flex flex-wrap items-center gap-2">
+                <span className="font-sans text-[12.5px] text-ink">
+                  {edit.origin
+                    ? "Nothing is shared, and the assistant's proposal it replaces is lost too."
+                    : "Nothing is shared, and it can't be undone."}
+                </span>
+                <Button variant="danger" onClick={() => discard.mutate()} disabled={busy}>
+                  Discard this edit
+                </Button>
+                <Button variant="ghost" onClick={() => setDiscarding(false)}>
+                  Keep it
+                </Button>
+              </span>
             ) : (
               <Button variant="ghost" onClick={() => setDiscarding(true)} disabled={busy}>
                 <Icon name="trash" size={13} /> Discard…

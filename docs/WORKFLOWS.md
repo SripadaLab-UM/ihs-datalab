@@ -416,8 +416,29 @@ requires the tests to have passed on the change (running them first if
 not), commits it as the person, rebases onto `main`, runs the tests again when the rebased package (the `ihsDataR` tree)
 isn't the one they passed on, and pushes exactly that commit, whose message
 names the test run that passed on it. A conflict shares nothing: discard the
-change and ask the agent to make it again. The change isn't edited in
-DataLab: ask the agent.
+change and ask the agent to make it again, or edit it yourself (below).
+
+**The pipeline file check.** A changed
+`ihsDataR/inst/pipelines/<name>/pipeline.yaml` must pass the pipeline file
+check (the one workflows use to find the pipeline) and be named as its
+folder: otherwise no workflow could use it, so it's an error, with its line.
+Folders starting with `_` (`_template/`) are templates and aren't checked;
+a folder whose name isn't a pipeline name (lower case letters, digits and
+`_`) is told so plainly.
+
+**A person's own edits** (pipelines/edits.py, migration 0013). *Edit
+manually* on a file of `ihsDataR/` or `workflows/`, *New file*, and *Edit
+before accepting* on a proposal open the file (or the proposal's files) in
+the editor. The edit is kept as a draft on this computer until Save & share
+or Discard, and goes through exactly the proposal's check, tests and Save &
+share, committed as the person with a `DataLab-Edit` trailer. It's strict:
+if one of its files changed on GitHub since it began, nothing is shared and
+the person sees their edit, GitHub's version and where they started, and
+reapplies their edit (a three-way merge) or writes what to keep. Edit before
+accepting replaces the proposal (it's superseded, and its conversation's
+base moves on). Files roxygen2 writes (`man/*.Rd`, `NAMESPACE`) aren't
+edited by hand, and a new file can't sit where a file of the same name, or
+of a name differing only in case, already is.
 
 Not built yet: the ad hoc run of a pipeline's workflow, and the converted
 `ihsDataR` itself (its pipelines have no `pipeline.yaml` yet).

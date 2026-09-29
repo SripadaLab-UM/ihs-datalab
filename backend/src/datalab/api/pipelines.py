@@ -37,7 +37,13 @@ from pydantic import BaseModel
 
 from datalab.config import Settings
 from datalab.knowledge.proposals import unified_diff
-from datalab.pipelines.edits import Edit, EditRefused, editable_problem, source_note
+from datalab.pipelines.edits import (
+    Edit,
+    EditNotFound,
+    EditRefused,
+    editable_problem,
+    source_note,
+)
 from datalab.pipelines.proposals import Proposal, TestRun
 from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
 from datalab.repos.git import GitError, safe_path
@@ -300,7 +306,8 @@ class PipelineKeepEditIn(BaseModel):
     # The edit's files as the person has them (None: deleted). A file left
     # out is left out of the edit.
     files: dict[str, str | None]
-    version: str | None
+    # The draft's updated_at as the person opened it.
+    version: str
 
 
 class PipelineCheckEditIn(BaseModel):
@@ -315,11 +322,11 @@ class PipelineEditCheckOut(BaseModel):
 
 class PipelineShareEditIn(BaseModel):
     confirmed: list[str] = []
-    version: str | None
+    version: str
 
 
 class PipelineReapplyIn(BaseModel):
-    version: str | None
+    version: str
     # Texts the person wrote to keep, by file; the rest are merged.
     resolutions: dict[str, str] = {}
 
@@ -385,7 +392,7 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
             raise HTTPException(502, str(error)) from None
         except EditRefused as error:
             raise HTTPException(409, str(error)) from None
-        except LookupError as error:
+        except EditNotFound as error:
             raise HTTPException(404, str(error)) from None
 
     def summary(proposal: Proposal) -> PipelineProposalOut:

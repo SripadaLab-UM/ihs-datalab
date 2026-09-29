@@ -134,7 +134,7 @@ export function ProposalView({
             <Button
               onClick={() => edit.mutate()}
               disabled={working || files.length === 0 || files.some((f) => f.binary)}
-              title="Open its files in the editor as your own edit, to change before sharing. This proposal is replaced by it."
+              title="Open its files in the editor as your own edit, to change before sharing. Your edit replaces this proposal."
             >
               <Icon name="pen" size={13} /> Edit before accepting
             </Button>
