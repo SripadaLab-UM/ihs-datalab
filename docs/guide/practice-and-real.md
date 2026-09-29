@@ -30,6 +30,8 @@ To keep it apart from anything real, the practice DataLab:
 - exports and delivers only to its own practice folder;
 - never signs in to GitHub, and its conversations get no copy of the
   knowledge base, so nothing from practice reaches the lab's repositories.
+  The agent is told there's none, so it works from the catalog and the data
+  instead of trying to read the knowledge base.
 
 Other AI tools, such as Claude, aren't approved for study data, so they're
 used only with the practice DataLab, to try and test DataLab.
@@ -69,7 +71,8 @@ Connections says why, with **Try again**.
 
 The made-up data is kept when DataLab is updated or installed again. To start
 over from scratch, use **Reset practice data…** in Settings → Connections (it
-asks first), or run `datalab --profile practice practice-db reset`. Your
+asks first), or quit the practice DataLab and run
+`datalab --profile practice practice-db reset`. Your
 practice conversations and exports aren't touched. Uninstalling DataLab asks
 whether to delete the practice database too.
 

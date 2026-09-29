@@ -1,39 +1,48 @@
 // The toolbar's Database and U-M GPT key shortcuts: how each stands, Test
 // connection, and a link to its place in Settings → Connections. Secrets are
 // never shown: the key's status is where it's saved, nothing of the key itself.
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 
 import { api, type Health } from "@/api/client";
 import { type Connections, type ConnectionTest, settingsApi } from "@/api/settings";
 import { Button, Icon } from "@/components/ui";
 import { settingsLink } from "@/features/settings/highlight";
+import { ago } from "@/features/settings/sections/UpdatesSection";
 
 import { PanelHead, Shortcut } from "./Popover";
 
 export const CONNECTIONS = ["settings-connections"];
-/** The last Test connection's result in this window, shared by both shortcuts. */
+/**
+ * The last Test connection's result, as DataLab (the server) last found it:
+ * shared by both shortcuts and Settings → Connections, and the same after a
+ * test from another window or the API. Nothing is tested since a restart.
+ */
 export const CONNECTION_TEST = ["connection-test"];
 
 export function useConnections() {
   return useQuery({ queryKey: CONNECTIONS, queryFn: settingsApi.connections });
 }
 
-/** Test connection (one test checks both), and its last result. It never runs on its own. */
+/** Test connection (one test checks both), and the last result DataLab knows. It never runs on its own. */
 export function useConnectionTest() {
   const client = useQueryClient();
-  const test = useQuery({
-    queryKey: CONNECTION_TEST,
-    queryFn: settingsApi.testConnections,
-    enabled: false,
-    staleTime: Infinity,
-    retry: false,
+  const last = useQuery({ queryKey: CONNECTION_TEST, queryFn: settingsApi.lastConnectionTest, retry: false });
+  const test = useMutation({
+    mutationKey: CONNECTION_TEST,
+    mutationFn: settingsApi.testConnections,
+    onSuccess: async (result) => {
+      // A GET of the last result still on its way mustn't overwrite this newer one.
+      await client.cancelQueries({ queryKey: CONNECTION_TEST });
+      client.setQueryData(CONNECTION_TEST, result);
+    },
   });
+  const running = useIsMutating({ mutationKey: CONNECTION_TEST }) > 0;
   return {
-    result: test.data,
-    running: test.isFetching,
+    result: last.data ?? undefined,
+    running,
     error: test.error,
-    run: () => client.fetchQuery({ queryKey: CONNECTION_TEST, queryFn: settingsApi.testConnections, staleTime: 0 }).catch(() => {}),
+    run: () => test.mutate(),
   };
 }
 
@@ -71,7 +80,9 @@ export function databaseStanding(
   }
   if (result && !result.ok) return { state: "test failed", tone: "attn", attention: "DB: not connected" };
   if (oracle.practice) {
-    return { state: result?.ok ? "connected (synthetic)" : "synthetic, not tested yet", tone: result?.ok ? "good" : undefined };
+    if (result?.ok) return { state: "connected (synthetic)", tone: "good" };
+    // Not tested since DataLab started, but its own synthetic database is up.
+    return { state: practiceDatabase === "ready" ? "synthetic, running" : "synthetic, not tested yet", tone: undefined };
   }
   if (!oracle.configured) return { state: "not set up", tone: "attn", attention: "DB: not set up" };
   if (oracle.password === "missing") return { state: "password missing", tone: "attn", attention: "DB: no password" };
@@ -88,11 +99,14 @@ export function keyStanding(connections: Connections | undefined, result?: Conne
   return { state: result?.ok ? `${where}, working` : where, tone: result?.ok ? "good" : undefined };
 }
 
-function Outcome({ ok, message }: { ok: boolean; message: string }) {
+function Outcome({ ok, message, checkedAt }: { ok: boolean; message: string; checkedAt?: string }) {
   return (
     <p role="status" className={`mt-3 flex items-start gap-1.5 text-[12.5px] ${ok ? "text-data" : "text-danger"}`}>
       <Icon name={ok ? "check" : "alert"} size={13} className="mt-px shrink-0" />
-      <span>{message}</span>
+      <span>
+        {message}
+        {checkedAt && <span className="block text-muted">Tested {ago(checkedAt)}</span>}
+      </span>
     </p>
   );
 }
@@ -134,7 +148,7 @@ export function DatabaseShortcut() {
               )}
             </p>
           )}
-          {result && <Outcome ok={result.ok} message={result.message} />}
+          {result && <Outcome ok={result.ok} message={result.message} checkedAt={test.result?.checked_at} />}
           {test.error && <Outcome ok={false} message={test.error.message} />}
           <div className={ACTIONS}>
             {shown?.oracle.configured && (
@@ -182,7 +196,7 @@ export function KeyShortcut() {
                     : "No key saved. Practice uses the key the real DataLab saved, or one saved with datalab --profile practice setup --update."}
             </p>
           )}
-          {result && <Outcome ok={result.ok} message={result.message} />}
+          {result && <Outcome ok={result.ok} message={result.message} checkedAt={test.result?.checked_at} />}
           {test.error && <Outcome ok={false} message={test.error.message} />}
           <div className={ACTIONS}>
             {!missing && shown && (

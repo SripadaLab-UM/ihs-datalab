@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -227,6 +228,32 @@ def test_test_connection_asks_the_database_and_u_m_gpt(tmp_path, keychain):
     }
     # Only approved models count: not another company's.
     assert tested["model"]["ok"] is True and "1 approved model." in tested["model"]["message"]
+    assert MODEL_KEY not in json.dumps(tested)
+
+
+def test_the_last_test_is_kept_for_every_window_until_a_secret_changes(tmp_path, keychain):
+    # The toolbar shows the last result DataLab knows, even for a test run
+    # from Settings, another window or the API (the 0.3.0b2 acceptance).
+    def check(oracle, limits, *, practice):
+        return setup.DatabaseCheck(True, "Connected, read-only.", ("IHS_2025_RO",), True)
+
+    ok = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    h = Harness(
+        real_settings(tmp_path), check_database=check, model_http=ok, model_key=lambda: MODEL_KEY
+    )
+    assert h.client.get("/api/settings/connections/test").json() is None  # not tested yet
+    tested = h.client.post("/api/settings/connections/test").json()
+    checked = datetime.datetime.fromisoformat(tested["checked_at"])
+    assert checked.tzinfo is not None
+    assert abs((datetime.datetime.now(datetime.UTC) - checked).total_seconds()) < 60
+    assert h.client.get("/api/settings/connections/test").json() == tested
+    # A new password may not work: the old result no longer holds.
+    saved = h.client.put("/api/settings/connections/database-password", json={"password": PASSWORD})
+    assert saved.status_code == 204
+    assert h.client.get("/api/settings/connections/test").json() is None
+    h.client.post("/api/settings/connections/test")
+    h.client.put("/api/settings/connections/model-key", json={"key": MODEL_KEY})
+    assert h.client.get("/api/settings/connections/test").json() is None
     assert MODEL_KEY not in json.dumps(tested)
 
 

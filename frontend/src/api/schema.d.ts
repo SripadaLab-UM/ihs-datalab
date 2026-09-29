@@ -2023,7 +2023,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * Last Connection Test
+         * @description The last Test connection's result since DataLab started, or null.
+         */
+        get: operations["last_connection_test_api_settings_connections_test_get"];
         put?: never;
         /** Test Connections */
         post: operations["test_connections_api_settings_connections_test_post"];
@@ -2964,6 +2968,8 @@ export interface components {
         ConnectionTestOut: {
             database: components["schemas"]["DatabaseCheckOut"];
             model: components["schemas"]["ConnectionCheckOut"];
+            /** Checked At */
+            checked_at: string;
         };
         /** ConnectionsOut */
         ConnectionsOut: {
@@ -9801,6 +9807,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    last_connection_test_api_settings_connections_test_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionTestOut"] | null;
                 };
             };
         };

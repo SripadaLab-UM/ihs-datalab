@@ -7,8 +7,10 @@ The lab knowledge base is the lab's shared, reviewed knowledge about IHS
 data. Your copy is at `/work/kb`. Use it to stay grounded; don't treat it as
 more than it claims to be.
 
-1. If `/work/kb` holds only a README saying the knowledge base isn't here,
-   carry on without it, and say so when it matters.
+1. First check that it's there (`ls /work/kb`). If `/work/kb` doesn't exist
+   (the practice DataLab has none), or holds only a README saying the
+   knowledge base isn't here, carry on without it: don't try to read its
+   files, and say so when it matters.
 2. Read `/work/kb/AGENTS.md` (the rules) and `/work/kb/index.md` (one line
    per page). Then search: `rg -il 'sleep|VFITBITSLEEP' /work/kb`.
 3. Each page's front matter tells you how far to trust it:

@@ -12,7 +12,7 @@ container. The user sees your answers and your files in the DataLab app.
 | `/work/outputs` | Deliverables the user should see: reports, figures, tables | yes |
 | `/inputs` | Files and folders the user attached (read-only) | no |
 | `/data/oracle` | Results of your database queries, one CSV per query | no |
-| `/work/kb` | Your copy of the lab knowledge base (the `kb-use` skill) | edits are proposed to a person |
+| `/work/kb` | Your copy of the lab knowledge base (the `kb-use` skill), when this DataLab has one (the practice DataLab doesn't) | edits are proposed to a person |
 
 Put anything the user should see in `/work/outputs`, and mention its path in
 your answer. DataLab saves a checkpoint of `/work` after every turn, and the

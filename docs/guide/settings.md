@@ -18,7 +18,11 @@ The shortcuts at the top right of every screen, beside **Help**, lead here
 too:
 
 - **Database** and **U-M GPT key** say how each connection stands, with a
-  link to [Connections](#connections).
+  link to [Connections](#connections). They show the last **Test
+  connection** since DataLab started, whichever window or Settings ran it,
+  and when it ran ("Tested 5 min ago"). After DataLab starts again nothing
+  has been tested yet ("set up, not tested yet"); on the practice DataLab
+  that reads "synthetic, running" once its database is up.
 - **GitHub** shows your GitHub account, or that you need to sign in, and
   opens [Connections](#connections). The practice DataLab never signs in to
   GitHub, so it doesn't show this. **Export folders** opens your
@@ -33,6 +37,13 @@ too:
   the report before it's saved or sent. Don't put participant data in it.
 - **Session** has **End session…**, which signs every DataLab window in this
   browser out. To get back in, quit DataLab and start it again.
+
+To quit DataLab, press Ctrl-C in the window it opened when it started (a
+Terminal window on a Mac, a small PowerShell window on Windows), or close
+that window. After Ctrl-C it tidies up (conversations stop and their
+workspaces close) and says **DataLab stopped.** Pressing Ctrl-C again while
+it tidies up stops it at once; it says so, and tidies up the next time it
+starts.
 
 The practice DataLab can't change some settings. They are still shown, marked
 **Fixed on the practice DataLab**, so you can see what the real DataLab would
@@ -57,7 +68,9 @@ do about it.
 
 The key and the password are kept in your computer's keychain. You can save
 or replace them here, but DataLab never shows them again, and the agent never
-sees them. **Test connection** checks both the database and U-M GPT.
+sees them. **Test connection** checks both the database and U-M GPT, and
+"Last tested …" says when it last ran. Saving a new key or password clears
+that result, since it may no longer hold.
 
 The installer from the lab's install page sets up the database connection
 for you, with the lab's settings included. If this section says no database

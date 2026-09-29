@@ -168,6 +168,16 @@ own slot, and the shared modules offer extension points:
   refused with a message: two launches at once could both pass the port
   check, and the second would then remove the first's containers and end
   its turns.
+- **Quitting.** Ctrl-C on `serve` is the normal way to quit: uvicorn shuts
+  the app down (the lifespan stops sessions, containers and keepers), then
+  re-raises the Ctrl-C, which `cli._run_until_stopped` turns into one line,
+  "DataLab stopped.", and exit code 0 (a deliberate quit, not a failure; the
+  launchers don't treat it as one). A second Ctrl-C during the graceful
+  wait (a tab's event stream still open) sets uvicorn's `force_exit` and
+  skips the app's shutdown: then it says "DataLab stopped without tidying
+  up; it cleans up when it next starts." (startup removes this data folder's
+  leftover containers), and the requests it cancels aren't logged as
+  errors. The hourly update check is stopped however it ends.
 
 ### 2. Sessions and the Codex adapter
 
@@ -384,7 +394,11 @@ own slot, and the shared modules offer extension points:
     helper was cancelled). Codex's own request retries are kept to one, so a
     request makes at most two rounds of relay attempts (six upstream calls,
     about two minutes of waiting at most).
-    A failure mid-stream is Codex's to retry (up to twice), as before. Each failure is
+    A failure mid-stream is Codex's to retry (up to twice), as before. While
+    it retries, Codex's app-server `error` notification carries
+    `willRetry: true` ("Reconnecting... 1/2"): the runtime stores that as an
+    info `notice`, not an `error`, so it isn't counted as a turn error; the
+    last one, `willRetry: false`, is. Each failure is
     recorded as metadata only (kind, status, provider code, wait), and the
     conversation gets a `model_status` event, so the chat can say "busy,
     trying again in 8 s" and, if it gives up, explain it plainly and offer

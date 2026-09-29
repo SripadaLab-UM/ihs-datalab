@@ -38,7 +38,7 @@ conversation** (built):
 |---|---|---|---|
 | **SQL drafting** | 🔒 Data | SQL Playground | Find the tables and check every column, run only small profiling queries, and propose one query into the editor with `propose_sql` (its binds, assumptions, and the tables and pages it used). It never runs the final query; the person does. No attachments. |
 | **Pipelines** | 🔒 Data | Pipelines tab | Data engineering's rules, for the code the tab shows: explain, edit and test it in its copy of the pipelines repo (`/work/pipelines`). Its changes become a Pipelines proposal. The catalog, `query`, `check_workflow` and the research helper; no analysis plans, no attachments. |
-| **Workflow authoring** | 🔒 Data | Workflows tab | Draft or change workflow files in its copy of the pipelines repo (`/work/pipelines/workflows/`), following [WORKFLOWS.md](WORKFLOWS.md): declared `reads:`, QC with `small_cells` on every delivered CSV, destination keys. It checks each draft with `check_workflow`, DataLab's own workflow check. Its changes become a Pipelines proposal, which a person reviews, tests, and saves there; the agent never saves. The database tools as in Data extraction, read-only. |
+| **Workflow authoring** | 🔒 Data | Workflows tab | Draft or change workflow files in its copy of the pipelines repo (`/work/pipelines/workflows/`), following [WORKFLOWS.md](WORKFLOWS.md): declared `reads:`, QC with `small_cells` on every delivered CSV, destination keys. It checks each draft with `check_workflow`, DataLab's own workflow check. Its changes become a Pipelines proposal, which a person reviews, tests, and saves there; the agent never saves. Pipelines' data tools, read-only: the catalog, `query`, `check_workflow` and the research helper. No analysis plans (`propose_plan`): a workflow is reviewed as New workflow's three stages, tested and saved; the session's token doesn't allow it, so DataLab refuses it. Nothing can be attached: it opens only from the Workflows tab, which attaches nothing. |
 | **Knowledge writing** | 🔒 Data | Knowledge tab | Write or tidy a page or lab skill in `/work/kb`, in the layout and page format of [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), as proposed-edit cards. Never sets `reviewed_by`, `reviewed_on`, or a page's status. The catalog tools only (metadata): its session token allows just `search_catalog`, `describe_table`, `join_paths` and `find_concept`, DataLab refuses every other data tool, and Codex doesn't list them. Nothing can be attached (a file could hold study data); the page open in the tab can go with a message. |
 
 ## How the agent is instructed
@@ -100,7 +100,7 @@ The container has deliberately few locations:
 |---|---|---|
 | `/work` | The conversation's workspace, checkpointed after every turn | Yes |
 | `/work/outputs` | Deliverables shown in the Outputs panel and available to export | Yes |
-| `/work/kb` | Fresh copy of the knowledge base; edits become proposals | Yes |
+| `/work/kb` | Fresh copy of the knowledge base; edits become proposals. Not on the practice DataLab (the agent is told so) | Yes |
 | `/inputs` | Files and folders you attached | No |
 | `/data/oracle` | Query results written by DataLab's data service | No |
 

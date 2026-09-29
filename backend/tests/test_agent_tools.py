@@ -41,13 +41,18 @@ async def mcp_session(base_url: str, token: str, elicitation_callback=None):
 
 
 def data_token(
-    services, tmp_path: Path, kind: str = "data", tools: frozenset[str] | None = None
+    services,
+    tmp_path: Path,
+    kind: str = "data",
+    tools: frozenset[str] | None = None,
+    mode_label: str | None = None,
 ) -> str:
     access = SessionAccess(
         session_id="sess1",
         kind=kind,  # type: ignore[arg-type]
         results_dir=tmp_path / "oracle",
         tools=tools,
+        mode_label=mode_label,
     )
     return services.tokens.issue(access)
 
@@ -697,3 +702,37 @@ async def test_suggest_kb_update_is_only_for_the_modes_that_name_it(server, tmp_
     async with mcp_session(base_url, data_token(services, tmp_path)) as session:
         result = await session.call_tool("suggest_kb_update", args)
     assert "isn't available in this mode" in result.content[0].text
+
+
+async def test_a_refused_tool_names_the_mode_it_isnt_in(server, tmp_path):
+    """The refusal's words come from the conversation's mode, not Knowledge
+    writing's for every mode."""
+    from datalab.sessions.modes import MODES
+
+    base_url, services, database = server
+    workflows = MODES["workflows"]
+    token = data_token(
+        services, tmp_path, tools=workflows.allowed_tools, mode_label=workflows.label
+    )
+    plan = {
+        "analysis_type": "describe_compare",
+        "question_and_purpose": "q",
+        "data_and_scope": "d",
+        "checks_and_limitations": "c",
+        "deliverables": "r",
+    }
+    async with mcp_session(base_url, token) as session:
+        result = await session.call_tool("propose_plan", plan)
+    assert result.is_error
+    assert result.content[0].text.endswith("propose_plan isn't available in Workflow authoring.")
+    assert "Knowledge writing" not in result.content[0].text
+    knowledge = MODES["knowledge"]
+    token = data_token(
+        services, tmp_path, tools=knowledge.allowed_tools, mode_label=knowledge.label
+    )
+    async with mcp_session(base_url, token) as session:
+        result = await session.call_tool("query", {"sql": "SELECT 1 FROM DUAL"})
+    assert "query isn't available in Knowledge writing: it has the catalog tools only" in (
+        result.content[0].text
+    )
+    assert database.calls == []

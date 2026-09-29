@@ -5,7 +5,8 @@ import { expect, it } from "vitest";
 
 import { EVENT_TYPES } from "./useConversationEvents";
 
-const source = (file: string) => readFileSync(join(__dirname, file), "utf8");
+// Normalized: a Windows checkout may have CRLF line endings.
+const source = (file: string) => readFileSync(join(__dirname, file), "utf8").replace(/\r\n/g, "\n");
 const names = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].map((m) => m[1]);
 
 // The stream delivers only the event types listed: one the chat handles but

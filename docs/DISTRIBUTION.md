@@ -72,7 +72,13 @@ in the README. The installer then:
    the labelled volume `datalab-practice-oracle-data`, loaded only when it
    has none, so a reinstall or update keeps it (synthetic/README.md, "In
    practice DataLab"). It never stops the install: practice DataLab sets
-   the database up, or starts it, each time it opens. GitHub is skipped for
+   the database up, or starts it, each time it opens. While a practice
+   DataLab is running (this data folder's lock, or a practice DataLab's
+   `/api/health` answering on its port) `setup` leaves the database to it
+   and `reset` refuses; another program on that port doesn't count. `reset`
+   also refuses when something takes the connection but doesn't answer (it
+   may be a busy practice DataLab), and goes ahead only when the port is
+   free or a clear answer isn't a practice DataLab's. GitHub is skipped for
    the practice profile, when the lab's settings don't name the repos, or with
    `--no-github` (`-NoGitHub` on Windows); the person can sign in later in
    Settings. The installer refuses to run as root (`sudo`), and so does
@@ -96,7 +102,10 @@ in the README. The installer then:
      so a home folder like `/Users/o'brien` works. The installer ends by printing where the
      app, the Desktop shortcut and the program files are, then, only when
      run from a terminal (not a pipe or script), offers "Show in Finder"
-     (`open -R`) and "Open DataLab now?". `DATALAB_SYSTEM_APPLICATIONS`
+     (`open -R`) and "Open DataLab now?". The install has finished by then,
+     so Ctrl-C at either just ends it ("OK.", exit 0), not with the
+     "Stopped. Run this installer again" message an unfinished install
+     gets. (Windows asks nothing after "All done!".) `DATALAB_SYSTEM_APPLICATIONS`
      stands in for `/Applications` in tests.
    - Windows: a Start menu entry and a Desktop shortcut, the same for both.
      A Desktop shortcut of that name that doesn't run this `bin\datalab.cmd`

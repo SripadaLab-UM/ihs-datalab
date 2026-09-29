@@ -39,6 +39,8 @@ class SessionAccess:
     # The ihs-data tools it may use (its mode's, sessions/modes.py), or None
     # for all of them but OPT_IN_TOOLS. DataLab's data tools refuse the others.
     tools: frozenset[str] | None = None
+    # Its mode's name ("Workflow authoring"), for the words of a refusal.
+    mode_label: str | None = None
 
     def allows(self, tool: str) -> bool:
         if self.tools is None:

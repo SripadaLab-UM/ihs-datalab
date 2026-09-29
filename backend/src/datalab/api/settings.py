@@ -25,6 +25,7 @@ its own routes in knowledge.py.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import re
 import sqlite3
 from collections.abc import Callable
@@ -159,6 +160,8 @@ class PracticeResetIn(BaseModel):
 class ConnectionTestOut(BaseModel):
     database: DatabaseCheckOut
     model: ConnectionCheckOut
+    # When it ran (UTC, ISO 8601).
+    checked_at: str
 
 
 # ---------------------------------------------------------------- storage
@@ -356,6 +359,11 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
     checker = services.checker or UpdateChecker(settings)
     updater = services.updater or Updater(settings, checker)
     router = APIRouter(prefix="/api/settings", tags=["settings"])
+    # The last Test connection's result, whoever asked for it (the toolbar,
+    # Settings, or the API), so every window shows what DataLab last found.
+    # In memory only: after a restart nothing has been tested yet. Saving a
+    # new password or key forgets it, since it may no longer hold.
+    last_test: list[ConnectionTestOut] = []
 
     @router.get("/status")
     def status() -> SettingsStatus:
@@ -413,6 +421,7 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             raise HTTPException(422, str(refused)) from None
         except KeyringError:
             raise HTTPException(503, _KEYCHAIN_FAILED) from None
+        last_test.clear()
         services.password_changed()
 
     @router.put("/connections/model-key", status_code=204)
@@ -426,6 +435,12 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             raise HTTPException(422, str(refused)) from None
         except KeyringError:
             raise HTTPException(503, _KEYCHAIN_FAILED) from None
+        last_test.clear()
+
+    @router.get("/connections/test")
+    def last_connection_test() -> ConnectionTestOut | None:
+        """The last Test connection's result since DataLab started, or null."""
+        return last_test[-1] if last_test else None
 
     @router.post("/connections/test")
     async def test_connections() -> ConnectionTestOut:
@@ -447,7 +462,10 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
                 message=f"The U-M GPT check failed ({type(model).__name__}). Test again, "
                 "or tell the DataLab maintainer.",
             )
-        return ConnectionTestOut(database=database, model=model)
+        checked_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+        result = ConnectionTestOut(database=database, model=model, checked_at=checked_at)
+        last_test[:] = [result]
+        return result
 
     def check_database() -> DatabaseCheckOut:
         oracle = settings.oracle

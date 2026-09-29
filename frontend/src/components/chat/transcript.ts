@@ -303,9 +303,15 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           summary: data.summary && typeof data.summary === "object" ? (data.summary as Record<string, unknown>) : null,
         });
         break;
-      case "error":
-        addError(current(), text(data.message) || "Something went wrong.");
+      case "error": {
+        const message = text(data.message);
+        // Codex retrying a dropped model stream by itself: stored as an error
+        // by DataLab 0.3.0b2 and earlier (newer ones store it as an info
+        // notice, from the notification's willRetry). Not a turn error.
+        if (RECONNECTING.test(message)) add({ kind: "notice", tone: "info", text: retryingNote(message) });
+        else addError(current(), message || "Something went wrong.");
         break;
+      }
       case "notice":
         add({ kind: "notice", tone: data.tone === "error" ? "error" : "info", text: text(data.text) });
         break;
@@ -505,6 +511,14 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
     }
   }
   return turns;
+}
+
+/** Codex's own text while it retries a model stream: "Reconnecting... 1/2". */
+const RECONNECTING = /^Reconnecting\.{3} \d+\/\d+$/;
+
+/** The same words as the backend's (runtime.retrying_note). */
+function retryingNote(message: string): string {
+  return `The connection to the model dropped for a moment; the agent is trying again (${message}).`;
 }
 
 /**

@@ -32,6 +32,7 @@ vi.mock("@/api/settings", async (original) => ({
     saveDatabasePassword: vi.fn(async () => undefined),
     saveModelKey: vi.fn(async () => undefined),
     testConnections: vi.fn(),
+    lastConnectionTest: vi.fn(async () => null),
     practiceDatabase: vi.fn(),
     startPracticeDatabase: vi.fn(),
     resetPracticeDatabase: vi.fn(),
@@ -102,12 +103,26 @@ it("tests the connection and says how it went", async () => {
   mocked.testConnections.mockResolvedValue({
     database: { ok: false, message: "Can't reach the database. Connect to the U-M VPN (or check your network), then test again. (DNS lookup failed)", enabled_roles: [], read_only: null },
     model: { ok: true, message: "U-M GPT accepted the key and offers 3 approved models." },
+    checked_at: "2026-09-29T12:00:00+00:00",
   });
   wrap(<ConnectionsSection />);
   await screen.findByText("Not saved");
   fireEvent.click(screen.getAllByRole("button", { name: "Test connection" })[0]);
   expect(await screen.findByText(/Connect to the U-M VPN/)).toBeTruthy();
   expect(screen.getByText(/offers 3 approved models/)).toBeTruthy();
+});
+
+it("shows the last test DataLab knows, from this window or another", async () => {
+  mocked.connections.mockResolvedValue(REAL);
+  mocked.lastConnectionTest.mockResolvedValueOnce({
+    database: { ok: true, message: "Connected, read-only.", enabled_roles: ["IHS_2025_RO"], read_only: true },
+    model: { ok: true, message: "U-M GPT accepted the key and offers 3 approved models." },
+    checked_at: new Date().toISOString(),
+  });
+  wrap(<ConnectionsSection />);
+  expect(await screen.findByText("Connected, read-only.")).toBeTruthy();
+  expect(screen.getByText("Last tested just now")).toBeTruthy();
+  expect(mocked.testConnections).not.toHaveBeenCalled();
 });
 
 const PRACTICE: Connections = {

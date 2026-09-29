@@ -80,11 +80,12 @@ the opt-in `propose_sql` and `suggest_kb_update`.
 | Data engineering | data | Workspace | all + `suggest_kb_update` | yes | Balanced | off | as Analysis | `/work/pipelines` changes become a Pipelines proposal; `/work/kb` edits |
 | SQL drafting | data | SQL Playground's chat | catalog + `query`, `propose_sql`, `ask_research_helper` | no | Balanced | off (docked chats have no switch) | brief; no research helper; the proposal is prepared as usual | the person uses, edits and runs the proposed query |
 | Pipelines | data | Pipelines' chat | catalog + `query`, `check_workflow`, `ask_research_helper` | no | Balanced | off | brief; no research helper; the proposal as usual | the proposal is reviewed, tested and saved in Pipelines |
-| Workflow authoring | data | Workflows' chat, New workflow | all | yes (from the Workspace) | Balanced | off | as Pipelines, and it never guesses a destination or small-cell rule | a Pipelines proposal, or New workflow's review, test and Save |
+| Workflow authoring | data | Workflows' chat, New workflow | catalog + `query`, `check_workflow`, `ask_research_helper` (no analysis plans) | no | Balanced | off | as Pipelines, and it never guesses a destination or small-cell rule | a Pipelines proposal, or New workflow's review, test and Save |
 | Knowledge writing | data | Knowledge's chat, Edit with agent | catalog only | no | Balanced | off | brief; the proposal as usual | proposed-edit cards, then Save & share |
 | Research | research | Workspace | none: web search and the research proxy instead | yes (may reach the internet) | Balanced | n/a | its own note: brief, cite sources, no claims about the study's data | nothing is shared from it |
 
-Every mode gets the knowledge base copy at `/work/kb`, and every data mode
+Every mode gets the knowledge base copy at `/work/kb` (on the practice
+DataLab there's none, and the agent's instructions say so), and every data mode
 the same read-only database rules (the SQL check, the Data accessed log,
 results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
 `medium`, `high`), and DataLab sends one with every turn.
@@ -145,7 +146,8 @@ draft", "How this SQL was created").
 profile icons, and the uninstallers; in-app updates of signed releases
 (`SHA256SUMS.sig`), checked at start and about once an hour; database
 backups, `datalab rollback` and `datalab versions --use`; Connections
-(keychain), GitHub App sign-in, export folders with Dropbox detection;
+(keychain; the last Test connection is kept by DataLab, so the toolbar and
+Settings agree whichever ran it), GitHub App sign-in, export folders with Dropbox detection;
 Storage; Copy diagnostics; Send feedback (support reports,
 [docs/SUPPORT.md](docs/SUPPORT.md)); on Windows, a banner while Docker can't
 run (opening a closed Docker Desktop) and a guided fix, after the person turns

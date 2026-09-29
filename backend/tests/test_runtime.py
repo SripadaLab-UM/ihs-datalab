@@ -606,3 +606,41 @@ def test_a_failed_query_keeps_its_reason_and_category_for_the_chat():
     assert event["error"] is None and event["failure"] is None
     assert event["summary"]["query_id"] == "q_20260928T120002_abc125"
     assert "SYN-1" not in str(event)
+
+
+def test_codex_retrying_a_dropped_stream_is_a_note_not_a_turn_error():
+    """From the 0.3.0b2 Windows acceptance: Codex's temporary stream retry
+    reached the chat as `{"type":"error","data":{"message":"Reconnecting...
+    1/2"}}`, counted as "1 error reported", although the turn completed. The
+    app-server `error` notification (Codex 0.157.1's ErrorNotification:
+    error, threadId, turnId and the required willRetry) says whether Codex is
+    retrying by itself."""
+    from datalab.sessions.runtime import _to_event
+
+    retrying = {
+        "error": {
+            "message": "Reconnecting... 1/2",
+            "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": None}},
+            "additionalDetails": None,
+        },
+        "threadId": "th_1",
+        "turnId": "tu_1",
+        "willRetry": True,
+    }
+    kind, data = _to_event("error", retrying)
+    assert kind == "notice" and data["tone"] == "info" and data["retry"] is True
+    assert "Reconnecting... 1/2" in data["text"]
+
+    # Retries used up (or any error Codex won't retry): a real error, as before.
+    final = {
+        **retrying,
+        "error": {
+            "message": "exceeded retry limit, last status: 503",
+            "codexErrorInfo": {"responseTooManyFailedAttempts": {"httpStatusCode": 503}},
+        },
+        "willRetry": False,
+    }
+    assert _to_event("error", final) == (
+        "error",
+        {"message": "exceeded retry limit, last status: 503"},
+    )

@@ -11,7 +11,10 @@ keywords: plan, approve, frozen, hash, revision, exploratory, off-plan, pilot, p
 
 In Analysis mode, before it looks at outcome data for a new question, the
 agent proposes an [analysis plan](glossary.md#plan) and waits for you. In
-other modes it proposes one when a question calls for it. Small follow-ups
+Data extraction and Data engineering it proposes one when a question calls
+for it. Research sessions and the tabs' own chats (SQL drafting, Pipelines,
+Workflow authoring and Knowledge writing) never do: what you review in a tab
+is the query, the code, the workflow or the page itself. Small follow-ups
 and quick questions about the data itself don't need one. With
 [Express](glossary.md#express) on, the agent doesn't propose plans at all.
 

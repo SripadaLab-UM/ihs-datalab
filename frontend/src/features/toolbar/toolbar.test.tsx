@@ -23,6 +23,7 @@ vi.mock("@/api/settings", () => ({
   settingsApi: {
     connections: vi.fn(),
     testConnections: vi.fn(),
+    lastConnectionTest: vi.fn(async () => null),
     feedbackContact: vi.fn(),
     diagnostics: vi.fn(),
     updateCheck: vi.fn(),
@@ -82,6 +83,7 @@ beforeEach(() => {
   vi.mocked(githubApi.status).mockReset().mockResolvedValue({ available: false } as never);
   vi.mocked(settingsApi.connections).mockReset().mockResolvedValue(connections());
   vi.mocked(settingsApi.testConnections).mockReset();
+  vi.mocked(settingsApi.lastConnectionTest).mockReset().mockResolvedValue(null);
   vi.mocked(settingsApi.feedbackContact).mockReset().mockResolvedValue({ contact: null, email: null });
   vi.mocked(settingsApi.diagnostics).mockReset().mockResolvedValue({ text: "DataLab 0.2.0\nSafety: ok" });
   vi.mocked(sessionApi.end).mockReset().mockResolvedValue(undefined);
@@ -119,6 +121,7 @@ it("database: Test connection calls the existing test and shows the result; a fa
   vi.mocked(settingsApi.testConnections).mockResolvedValue({
     database: { ok: false, message: "Can't reach the database.", enabled_roles: [], read_only: null },
     model: { ok: true, message: "ok" },
+    checked_at: "2026-09-29T12:00:00+00:00",
   });
   show(<DatabaseShortcut />);
   fireEvent.click(await screen.findByRole("button", { name: "Database: set up, not tested yet" }));
@@ -144,6 +147,72 @@ it("database: on practice, the synthetic database, fixed", async () => {
   const button = await screen.findByRole("button", { name: "Database: synthetic, not tested yet" });
   fireEvent.click(button);
   expect(screen.getByText("Fixed on the practice DataLab: the synthetic database")).toBeInTheDocument();
+});
+
+it("database: shows the last test DataLab knows, even one run from Settings or the API", async () => {
+  const checked_at = new Date(Date.now() - 5 * 60_000).toISOString();
+  vi.mocked(settingsApi.lastConnectionTest).mockResolvedValue({
+    database: { ok: true, message: "Connected, read-only.", enabled_roles: ["IHS_RO"], read_only: true },
+    model: { ok: true, message: "ok" },
+    checked_at,
+  });
+  show(<DatabaseShortcut />);
+  fireEvent.click(await screen.findByRole("button", { name: "Database: connected" }));
+  expect(screen.getByText("Connected, read-only.")).toBeInTheDocument();
+  expect(screen.getByText("Tested 5 min ago")).toBeInTheDocument();
+  expect(settingsApi.testConnections).not.toHaveBeenCalled(); // it never tests on its own
+});
+
+it("database: on practice, untested since a restart, says its synthetic database is running", async () => {
+  vi.mocked(settingsApi.connections).mockResolvedValue(connections({ practice: true }));
+  vi.mocked(api.health).mockResolvedValue({ profile: "practice", version: "0.3.0", practice_database: "ready" } as never);
+  show(<DatabaseShortcut />);
+  expect(await screen.findByRole("button", { name: "Database: synthetic, running" })).toBeInTheDocument();
+});
+
+it("database and key: one test updates both shortcuts", async () => {
+  vi.mocked(settingsApi.testConnections).mockResolvedValue({
+    database: { ok: true, message: "Connected, read-only.", enabled_roles: [], read_only: true },
+    model: { ok: true, message: "U-M GPT accepted the key." },
+    checked_at: new Date().toISOString(),
+  });
+  show(
+    <>
+      <DatabaseShortcut />
+      <KeyShortcut />
+    </>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Database: set up, not tested yet" }));
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  expect(await screen.findByRole("button", { name: "U-M GPT key: saved in keychain, working" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Database: connected" })).toBeInTheDocument();
+});
+
+it("database: a test's result isn't overwritten by an older last-result request still on its way", async () => {
+  let answerLast: (value: null) => void = () => {};
+  vi.mocked(settingsApi.lastConnectionTest)
+    .mockResolvedValueOnce(null)
+    .mockImplementation(() => new Promise((resolve) => (answerLast = resolve)));
+  vi.mocked(settingsApi.testConnections).mockResolvedValue({
+    database: { ok: true, message: "Connected, read-only.", enabled_roles: [], read_only: true },
+    model: { ok: true, message: "ok" },
+    checked_at: new Date().toISOString(),
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <DatabaseShortcut />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Database: set up, not tested yet" }));
+  void client.refetchQueries({ queryKey: ["connection-test"] }); // a GET, still pending
+  fireEvent.click(screen.getByRole("button", { name: "Test connection" }));
+  expect(await screen.findByRole("button", { name: "Database: connected" })).toBeInTheDocument();
+  answerLast(null); // the older answer arrives late
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.getByRole("button", { name: "Database: connected" })).toBeInTheDocument();
 });
 
 // ------------------------------------------------------------ U-M GPT key
@@ -176,6 +245,7 @@ it("key: Test connection shows the model's result", async () => {
   vi.mocked(settingsApi.testConnections).mockResolvedValue({
     database: { ok: true, message: "ok", enabled_roles: [], read_only: true },
     model: { ok: false, message: "U-M GPT refused the key." },
+    checked_at: "2026-09-29T12:00:00+00:00",
   });
   show(<KeyShortcut />);
   fireEvent.click(await screen.findByRole("button", { name: "U-M GPT key: saved in keychain" }));

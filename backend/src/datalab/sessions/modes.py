@@ -690,6 +690,14 @@ MODES = {
                 "Check the workflow files for missing QC before delivery.",
                 "Which workflows deliver counts without a small-cell check?",
             ),
+            # Pipelines' tools: the catalog, small checks, the workflow check
+            # and the research helper. No analysis plans (propose_plan): a
+            # workflow's review is New workflow's three stages, test and Save.
+            # It's only opened from the Workflows tab (the chat and New
+            # workflow), and nothing there attaches files (Turn this into a
+            # workflow is DataLab's own draft, with no agent), so none can be.
+            tools=CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"},
+            attachments=False,
             tab_only=True,
             question="What should this workflow do?",
         ),
@@ -731,8 +739,22 @@ KNOWLEDGE = (
 )
 
 
-def instructions(mode_id: str) -> str:
-    return MODES[mode_id].instructions + KNOWLEDGE
+# When DataLab copies no knowledge base into conversations (the practice
+# DataLab never does: it doesn't use the lab's repositories). Without it the
+# agent would follow its kb-use guidance, try to read /work/kb/AGENTS.md and
+# index.md, and the answer's checks would list those reads as failed steps.
+NO_KNOWLEDGE = (
+    "\nThis DataLab has no copy of the lab's knowledge base: /work/kb doesn't exist "
+    "here, and there are no lab skills. Don't look for it or read files in it (skip "
+    "the kb-use and kb-propose skills); work from the catalog tools and the data, and "
+    "say so when a lab convention would matter to the answer.\n"
+)
+
+
+def instructions(mode_id: str, *, knowledge_base: bool = True) -> str:
+    """The mode's instructions, and where the knowledge base is: `knowledge_base`
+    is whether DataLab copies it into this mode's conversations."""
+    return MODES[mode_id].instructions + (KNOWLEDGE if knowledge_base else NO_KNOWLEDGE)
 
 
 # --- Express ----------------------------------------------------------------

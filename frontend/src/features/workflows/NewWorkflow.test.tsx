@@ -449,7 +449,7 @@ it("removes a discarded draft's test runs", async () => {
 
 it("asks Workflow authoring's own question in an empty chat", async () => {
   vi.mocked(api.modes).mockResolvedValue([
-    { id: "workflows", label: "Workflow authoring", kind: "data", description: "", starters: [], tab_only: true, queries: true, attachments: true, question: "What should this workflow do?" },
+    { id: "workflows", label: "Workflow authoring", kind: "data", description: "", starters: [], tab_only: true, queries: true, attachments: false, question: "What should this workflow do?" },
   ]); // prettier-ignore
   render(
     <QueryClientProvider client={new QueryClient()}>

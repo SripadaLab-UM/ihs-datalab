@@ -135,6 +135,10 @@ class SessionManager:
         """What the seed `name` returned for this conversation, if it's in place."""
         return seeds.base(self.paths(conversation_id), name)
 
+    def seeds_into(self, into: str, mode: str) -> bool:
+        """Whether a seed puts `/work/<into>` in this mode's new conversations."""
+        return any(s.into == into and (s.modes is None or mode in s.modes) for s in self._seeds)
+
     def seeded_folders(self, conversation_id: str) -> list[str]:
         """The /work folders DataLab copied in for this conversation (seeds in place)."""
         done = seeds.records(self.paths(conversation_id))
@@ -477,12 +481,15 @@ class SessionManager:
                 self._containers(conversation),
                 self._tokens,
                 model=conversation.model,
-                developer_instructions=modes.instructions(conversation.mode),
+                developer_instructions=modes.instructions(
+                    conversation.mode, knowledge_base=self.seeds_into("kb", conversation.mode)
+                ),
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
                 tools=mode.allowed_tools if mode.kind == "data" else mode.tools,
                 tools_off=mode.tools_off,
+                mode_label=mode.label,
             )
             self._runtimes[conversation.id] = runtime
         return runtime

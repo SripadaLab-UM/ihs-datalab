@@ -4,10 +4,13 @@ import { type FormEvent, type ReactNode, useState } from "react";
 import { type Connections, type ConnectionTest, settingsApi } from "@/api/settings";
 import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 
+import { CONNECTION_TEST, useConnectionTest } from "@/features/toolbar/ConnectionShortcuts";
+
 import { GitHubSection } from "./GitHubSection";
 import { KeyFeatures } from "./KeyFeatures";
 import { PracticeDatabaseStatus } from "./PracticeDatabase";
 import { FixedOnPractice, Part, Section } from "./Section";
+import { ago } from "./UpdatesSection";
 
 type Source = Connections["model"]["key"];
 
@@ -19,12 +22,13 @@ type Source = Connections["model"]["key"];
  */
 export function ConnectionsSection() {
   const connections = useQuery({ queryKey: ["settings-connections"], queryFn: settingsApi.connections });
-  // One test checks both, so either part's button shows both results.
-  const test = useMutation({ mutationFn: settingsApi.testConnections });
+  // One test checks both, so either part's button shows both results. The
+  // result is the last one DataLab knows, shared with the toolbar.
+  const test = useConnectionTest();
   const shown = connections.data;
   const testButton = (
-    <Button onClick={() => test.mutate()} disabled={test.isPending || !shown}>
-      {test.isPending ? "Testing…" : "Test connection"}
+    <Button onClick={test.run} disabled={test.running || !shown}>
+      {test.running ? "Testing…" : "Test connection"}
     </Button>
   );
 
@@ -35,14 +39,15 @@ export function ConnectionsSection() {
         them here; DataLab never shows them again.
       </p>
       {connections.isError && <p className="mt-3 text-sm text-danger">{connections.error.message}</p>}
-      {test.isError && <p className="mt-3 text-sm text-danger">{test.error.message}</p>}
+      {test.error && <p className="mt-3 text-sm text-danger">{test.error.message}</p>}
       {shown && (
         <div className="mt-6 flex flex-col gap-8">
           {shown.read_only_because && (
             <p className="border-l-2 border-attn/50 pl-3 text-sm text-muted">{shown.read_only_because}</p>
           )}
-          <Model connections={shown} result={test.data?.model} testButton={testButton} />
-          <Database connections={shown} result={test.data?.database} testButton={testButton} />
+          <Model connections={shown} result={test.result?.model} testButton={testButton} />
+          <Database connections={shown} result={test.result?.database} testButton={testButton} />
+          {test.result && <p className="-mt-4 text-xs text-muted">Last tested {ago(test.result.checked_at)}</p>}
           <GitHubSection />
           <dl className="grid grid-cols-[10rem_1fr] gap-y-1.5 border-t border-line pt-5 text-sm">
             <dt className="text-muted">Profile</dt>
@@ -238,6 +243,8 @@ function SecretPart({
       setSaved(true);
       mutation.reset();
       queryClient.invalidateQueries({ queryKey: ["settings-connections"] });
+      // DataLab forgets the last test when a secret changes.
+      queryClient.invalidateQueries({ queryKey: CONNECTION_TEST });
     },
   });
   const overridden = source === "environment" && canSet && (
