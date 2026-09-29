@@ -21,11 +21,14 @@ def client_for(settings: Settings, fake: FakeWindows, platform: str = "win32") -
 
 
 def test_the_page_learns_the_vm_is_refused_and_where_to_get_admin_access(settings):
-    shown = client_for(settings, FakeWindows()).get("/api/docker").json()
+    lab = dataclasses.replace(
+        settings, windows=WindowsSettings(admin_access_url="https://admin.example.org/jit")
+    )
+    shown = client_for(lab, FakeWindows()).get("/api/docker").json()
     assert shown == {
         "state": "vm-refused",
         "fixing": False,
-        "admin_access_url": "https://profile.med.umich.edu",
+        "admin_access_url": "https://admin.example.org/jit",
     }
 
 

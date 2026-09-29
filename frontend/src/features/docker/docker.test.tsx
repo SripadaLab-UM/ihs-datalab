@@ -8,7 +8,7 @@ import { DockerBanner } from "./DockerBanner";
 
 vi.mock("@/api/docker", () => ({ dockerApi: { status: vi.fn(), start: vi.fn(), fix: vi.fn() } }));
 
-const refused: DockerStatus = { state: "vm-refused", fixing: false, admin_access_url: "https://profile.med.umich.edu" };
+const refused: DockerStatus = { state: "vm-refused", fixing: false, admin_access_url: "https://admin.example.org/jit" };
 
 function banner() {
   return render(
@@ -38,8 +38,8 @@ it("walks through turning on admin access, then asks Windows only when Fix it is
   banner();
   // The dialog opens by itself the first time.
   const dialog = await screen.findByRole("dialog", { name: "Docker needs a Windows fix" });
-  const link = within(dialog).getByRole("link", { name: "profile.med.umich.edu" });
-  expect(link).toHaveAttribute("href", "https://profile.med.umich.edu");
+  const link = within(dialog).getByRole("link", { name: "admin.example.org/jit" });
+  expect(link).toHaveAttribute("href", "https://admin.example.org/jit");
   expect(link).toHaveAttribute("target", "_blank");
   expect(dialog).toHaveTextContent("Restarting Windows fixes it too");
   expect(dockerApi.fix).not.toHaveBeenCalled();
@@ -76,7 +76,7 @@ it("another lab with no admin page says to ask IT", async () => {
   vi.mocked(dockerApi.status).mockResolvedValue({ ...refused, admin_access_url: null });
   banner();
   const dialog = await screen.findByRole("dialog");
-  expect(dialog).toHaveTextContent("ask IT if you don't have it");
+  expect(dialog).toHaveTextContent("on a Michigan Medicine computer, from your profile page");
   expect(within(dialog).queryByRole("link")).not.toBeInTheDocument();
 });
 

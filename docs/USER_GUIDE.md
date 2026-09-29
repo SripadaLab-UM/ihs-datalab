@@ -23,8 +23,9 @@ Start with [Start here](guide/README.md).
 11. [Sign in to GitHub](guide/github-sign-in.md)
 12. [Settings & Safety](guide/settings.md)
 13. [Practice and real data](guide/practice-and-real.md)
-14. [The tour](guide/tour.md)
-15. [Glossary](guide/glossary.md)
+14. [When Docker can't run](guide/docker.md)
+15. [The tour](guide/tour.md)
+16. [Glossary](guide/glossary.md)
 
 ## Writing for the guide
 

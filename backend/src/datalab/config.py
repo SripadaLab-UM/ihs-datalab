@@ -192,9 +192,9 @@ class WindowsSettings:
     """`[windows]`: what DataLab on Windows tells people (windows_vm.py)."""
 
     # Where people turn on their temporary administrator access, which the
-    # fix for Docker's virtual machine needs (Michigan Medicine: the profile
-    # page). None: the page says to ask IT for administrator access instead.
-    admin_access_url: str | None = "https://profile.med.umich.edu"
+    # fix for Docker's virtual machine needs. The lab's settings file names it
+    # (this public repo doesn't). None: the page says where, in words.
+    admin_access_url: str | None = None
 
     def __post_init__(self) -> None:
         url = self.admin_access_url

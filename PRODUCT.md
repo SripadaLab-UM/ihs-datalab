@@ -147,8 +147,11 @@ profile icons, and the uninstallers; in-app updates of signed releases
 backups, `datalab rollback` and `datalab versions --use`; Connections
 (keychain), GitHub App sign-in, export folders with Dropbox detection;
 Storage; Copy diagnostics; Send feedback (support reports,
-[docs/SUPPORT.md](docs/SUPPORT.md)); CI, pinned dependencies and images, and
-automated releases.
+[docs/SUPPORT.md](docs/SUPPORT.md)); on Windows, a banner while Docker can't
+run (opening a closed Docker Desktop) and a guided fix, after the person turns
+on their temporary administrator access, for the virtual machine's sign-in
+right that a Windows policy takes away (docs/guide/docker.md); CI, pinned
+dependencies and images, and automated releases.
 
 **Synthetic IHS dataset and practice** (implemented): a synthetic Oracle
 (Oracle Database Free) with the IHS shape, its quirks and made-up

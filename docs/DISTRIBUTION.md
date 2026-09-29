@@ -858,8 +858,9 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
     opens it by itself when it starts), a note while it's starting, and, when
     the right is missing, "How to fix it…", which opens a dialog by itself
     the first time. The dialog says to turn on the temporary administrator
-    access first (`[windows] admin_access_url`, by default Michigan
-    Medicine's https://profile.med.umich.edu; unset, it says to ask IT), then
+    access first, linking to the page for it when the lab's settings file
+    names one (`[windows] admin_access_url`; otherwise it says where in
+    words: on a Michigan Medicine computer, the profile page), then
     to press Fix it, which shows one Windows permission box and restarts
     Docker Desktop. It says what happened: fixed, declined (most often: the
     administrator access wasn't on yet, so turn it on and press Fix it

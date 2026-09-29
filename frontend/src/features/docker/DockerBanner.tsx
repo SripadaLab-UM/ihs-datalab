@@ -156,7 +156,7 @@ export function DockerFixDialog({ status, onClose }: { status: DockerStatus; onC
               </a>
             </>
           ) : (
-            " (ask IT if you don't have it)"
+            " (on a Michigan Medicine computer, from your profile page; elsewhere, ask IT)"
           )}
           , and wait until it says it's on.
         </li>

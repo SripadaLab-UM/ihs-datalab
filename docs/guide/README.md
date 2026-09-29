@@ -44,6 +44,7 @@ This guide is the same text as DataLab's own Help and its tooltips. It's written
 - [Sign in to GitHub](github-sign-in.md)
 - [Settings & Safety](settings.md)
 - [Practice and real data](practice-and-real.md)
+- [When Docker can't run](docker.md)
 
 **Reference**
 
