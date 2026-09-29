@@ -242,17 +242,19 @@ access. It never gains it.
     `TO_CHAR(SUBSTR(col, 1, 1000))`, since package calls such as
     `DBMS_LOB.SUBSTR` stay refused, with how to tell whether it cuts a value.
     The work is linear in the query's size, with a budget: a query too deep
-    or large for the check is refused, never run unchecked.
+    or large for the check (over 20,000 parse-tree nodes or 1,000 levels,
+    measured before the column check) is refused, never run unchecked, and
+    so is any query the check itself fails on.
 - **What Oracle's refusals show.** For the errors a query commonly runs into
   (ORA-00904, 00932, 00942, 01722, date formats, …) the agent, Queries and
   the chat get the Oracle code and DataLab's own explanation, not Oracle's
   text, which in 23ai can quote a value (`data/oracle_errors.py`). The one
   part kept is the identifier ORA-00904 names, when the query itself wrote
-  it. Errors whose first line names the server say only DataLab's words:
-  ORA-12801 (a parallel query server's host and SID) is explained by the
-  error it wraps, and not reaching the database (DPY-6005, ORA-12514, …)
-  says only the code. Other errors show the first line of Oracle's message,
-  as before. Each failure carries a category (validation, sql, permission,
+  it. Any other code is shown alone, with a general sentence: Oracle's own
+  text isn't passed on (it can quote values, and ORA-12801's names a
+  parallel query server's host and SID; that one is explained by the error
+  it wraps). Not reaching the database (DPY-6005, ORA-12514, …) says only
+  the code; a refused sign-in says what to do about it. Each failure carries a category (validation, sql, permission,
   timeout, connection, cancelled, result_limit) to the agent and the chat
   (`data/failures.py`), so the chat never labels the SQL check's refusal as
   Oracle's; the chat shows DataLab's own words for it, never the result's rows.

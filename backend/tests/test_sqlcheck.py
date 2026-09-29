@@ -531,6 +531,11 @@ class TestLongText:
             f"SELECT DISTINCT NVL2(SURVEYNAME, QUESTIONTEXT, SURVEYNAME) FROM {D}",
             f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', QUESTIONTEXT, SURVEYNAME) FROM {D}",
             f"SELECT DISTINCT CASE WHEN SURVEYNAME = 'x' THEN QUESTIONTEXT END FROM {D}",
+            # A NULL result doesn't decide the type (from the re-review).
+            f"SELECT DISTINCT COALESCE(NULL, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT NVL(NULL, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT NVL2(SURVEYNAME, NULL, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT CASE WHEN SURVEYNAME = 'x' THEN NULL ELSE QUESTIONTEXT END FROM {D}",
             f"SELECT 1 FROM {D} WHERE UPPER(QUESTIONTEXT) = 'X'",
         ],
     )
@@ -621,6 +626,8 @@ class TestLongText:
             f"SELECT DISTINCT NVL2(SURVEYNAME, SURVEYNAME, QUESTIONTEXT) FROM {D}",
             f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', SURVEYNAME, QUESTIONTEXT) FROM {D}",
             f"SELECT GREATEST(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            # DECODE with a NULL first result gives text.
+            f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', NULL, QUESTIONTEXT) FROM {D}",
             f"SELECT 1 FROM {D} a JOIN {D} b USING (SURVEYNAME)",
             f"SELECT LISTAGG(TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 50)), '; ') "
             f"WITHIN GROUP (ORDER BY SURVEYNAME) FROM {D}",
@@ -704,7 +711,7 @@ class TestSpellingIsExplainedOnlyForTheNameRefused:
         )
 
 
-TOO_COMPLEX_COLUMNS = {"IHS_2025": {"T": {"A": "VARCHAR2(10)", "Q": "CLOB"}}}
+TOO_COMPLEX_COLUMNS = {"IHS_2025": {"T": {"A": "VARCHAR2(10)", "Q": "CLOB", "N": "NUMBER"}}}
 
 
 class TestTooComplex:
@@ -747,6 +754,36 @@ class TestTooComplex:
             assert refused.rule == "too_complex"
         assert time.monotonic() - started < 60
 
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            # From the re-review: qualify was quadratic on these (72 s, 126 s, 12.6 s).
+            "SELECT " + "+".join(["N"] * 21000) + " FROM IHS_2025.T",
+            "SELECT DISTINCT " + "||".join(["A"] * 21000) + "||Q FROM IHS_2025.T",
+            "SELECT A FROM IHS_2025.T WHERE " + " OR ".join(f"N={i}" for i in range(5000)),
+        ],
+    )
+    def test_64_kb_of_one_operator_is_refused_quickly(self, sql):
+        assert len(sql.encode()) <= 64 * 1024
+        started = time.monotonic()
+        with pytest.raises(SqlRejected) as info:
+            self.check(sql)
+        assert info.value.rule == "too_complex"
+        assert time.monotonic() - started < 5
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            "SELECT A FROM IHS_2025.T WHERE " + " OR ".join(f"N={i}" for i in range(800)),
+            "SELECT A FROM IHS_2025.T WHERE N IN (" + ",".join(map(str, range(6000))) + ")",
+            "SELECT " + ", ".join(f"N+{i} AS c{i}" for i in range(2000)) + " FROM IHS_2025.T",
+        ],
+    )
+    def test_large_realistic_queries_still_pass(self, sql):
+        started = time.monotonic()
+        self.check(sql)
+        assert time.monotonic() - started < 5
+
     def test_deep_nesting_is_refused_not_an_error(self):
         deep = "SELECT " + "UPPER(" * 200 + "A" + ")" * 200 + " FROM IHS_2025.T"
         with pytest.raises(SqlRejected) as info:
@@ -763,3 +800,17 @@ class TestTooComplex:
         monkeypatch.setattr(sqlcheck, "lob_problem", broken)
         with pytest.raises(SqlRejected, match="couldn't finish checking"):
             self.check("SELECT A FROM IHS_2025.T")
+
+    def test_an_unexpected_error_anywhere_in_the_check_refuses(self, monkeypatch):
+        from datalab.data import sqlcheck
+
+        def broken(*args, **kwargs):
+            raise AttributeError("a bug")
+
+        monkeypatch.setattr(sqlcheck, "_referenced_tables", broken)
+        with pytest.raises(SqlRejected, match="couldn't finish checking") as info:
+            self.check("SELECT A FROM IHS_2025.T")
+        assert info.value.rule == "too_complex"
+        # A refusal itself passes through as it is.
+        with pytest.raises(SqlRejected, match="Only SELECT"):
+            self.check("DELETE FROM IHS_2025.T")

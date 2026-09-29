@@ -28,9 +28,11 @@ import oracledb
 from datalab.config import OracleSettings, QueryLimits
 from datalab.data.oracle_errors import (
     CALL_TIMEOUT_CODES,
+    SIGN_IN,
     connection_message,
     explain,
     oracle_code,
+    sign_in_message,
 )
 from datalab.data.oracle_errors import category as error_category
 
@@ -99,6 +101,8 @@ class MarkerNotVerified(QueryFailed):
     another error). Refused like NotSyntheticDatabase, since no query runs
     without a verified marker, but worth trying again: it isn't known to be
     another database."""
+
+    category = "connection"
 
 
 @dataclass
@@ -180,7 +184,8 @@ class OracleDatabase:
             # No database to talk to (it's down, or the port is closed): the
             # query failed, with a message that's safe to show.
             code = oracle_code(error)
-            raise QueryFailed(connection_message(code), category="connection", code=code) from error
+            said = sign_in_message(code) if code in SIGN_IN else connection_message(code)
+            raise QueryFailed(said, category="connection", code=code) from error
         done = threading.Event()
         timed_out = threading.Event()
 

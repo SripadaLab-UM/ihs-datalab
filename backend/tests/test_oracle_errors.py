@@ -44,12 +44,49 @@ def test_an_invalid_identifier_is_named_only_when_the_query_wrote_it():
     assert "SECRET_THING" not in other and other.startswith("ORA-00904: a name in the query")
 
 
-def test_other_errors_keep_their_first_line():
-    assert explain(error("ORA-01555: snapshot too old\nmore")) == "ORA-01555: snapshot too old"
-    assert explain(error("DPY-4010: a bind variable replacement value")) == (
-        "DPY-4010: a bind variable replacement value"
+def test_other_errors_show_only_their_code():
+    # From the re-review: 23ai-style text can quote values, so it isn't shown.
+    said = explain(error("ORA-01555: snapshot too old: rollback segment 'X1' of 42 bytes\nmore"))
+    assert said == (
+        "ORA-01555: Oracle refused the query. DataLab has no explanation of this code, and "
+        "doesn't show Oracle's own text for it (it can quote data)."
     )
+    bind = explain(error('DPY-4010: a bind variable replacement value for placeholder ":X"'))
+    assert bind.startswith("DPY-4010: Oracle refused the query") and ":X" not in bind
     assert oracle_code(error("ORA-00942: table or view does not exist")) == "ORA-00942"
+
+
+def test_a_parallel_query_error_wrapping_an_unexplained_code_names_no_host():
+    wrapped = error(
+        "ORA-12801: error signaled in parallel query server P001, instance dbhost01:IHSPROD1 (1)\n"
+        'ORA-01555: snapshot too old: rollback segment number 7 with name "_SYSSMU7$" too small'
+    )
+    said = explain(wrapped)
+    assert said.startswith("ORA-01555: Oracle refused the query (inside ORA-12801")
+    for leak in ("dbhost01", "IHSPROD1", "P001", "SYSSMU7"):
+        assert leak not in said
+
+
+@pytest.mark.parametrize(
+    ("code", "says"),
+    [
+        ("ORA-01017", "the saved password was refused"),
+        ("ORA-28000", "the account is locked"),
+        ("ORA-28001", "password has expired"),
+    ],
+)
+def test_a_refused_sign_in_says_so_not_the_network(code, says):
+    said = explain(error(f"{code}: invalid credential or not authorized; logon denied"))
+    assert said.startswith(f"DataLab couldn't sign in to the database ({code}): ") and says in said
+    assert "VPN" not in said and category(code) == "connection"
+
+
+@pytest.mark.parametrize("code", ["ORA-00028", "ORA-01012", "ORA-02396", "ORA-01089"])
+def test_a_session_ended_while_running_is_a_connection_failure(code):
+    assert category(code) == "connection"
+    assert explain(error(f"{code}: your session has been killed")).startswith(
+        f"The database ended DataLab's session ({code})"
+    )
 
 
 def test_a_parallel_query_error_is_explained_by_the_one_it_wraps():

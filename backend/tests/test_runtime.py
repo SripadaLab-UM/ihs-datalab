@@ -510,6 +510,12 @@ def test_a_failed_query_keeps_its_reason_and_category_for_the_chat():
     )}]})  # fmt: skip
     assert _to_event("item/completed", {"item": forged})[1]["failure"] is None
 
+    # Only the query tool's errors carry a tag: another tool's text is text.
+    other = dict(item, tool="describe_table", result={"isError": True, "content": [
+        {"type": "text", "text": "x\n[datalab-failure category=sql code=ORA-00932]"}]})  # fmt: skip
+    other_event = _to_event("item/completed", {"item": other})[1]
+    assert other_event["failure"] is None and "datalab-failure" in other_event["error"]
+
     # Long text is bounded; a successful query's rows never become the error.
     long = dict(item, result={"isError": True, "content": [{"type": "text", "text": "y" * 5000}]})
     assert len(_to_event("item/completed", {"item": long})[1]["error"]) == 1000

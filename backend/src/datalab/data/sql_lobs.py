@@ -365,13 +365,16 @@ class _LobCheck:
             return again(node.this) or again(node.expression)
         # The first result decides: Oracle converts the others to its type
         # (NVL(SURVEYNAME, QUESTIONTEXT) is text), or refuses the mix itself.
+        # A NULL doesn't count, except in DECODE (whose result is then text):
+        # COALESCE(NULL, QUESTIONTEXT) and CASE ... THEN NULL ELSE
+        # QUESTIONTEXT END are CLOBs (checked on the synthetic database).
         if isinstance(node, exp.Coalesce):
-            return again(node.this)
+            return again(_first_not_null([node.this, *node.expressions]))
         if isinstance(node, exp.Nvl2):
-            return again(node.args.get("true"))
+            return again(_first_not_null([node.args.get("true"), node.args.get("false")]))
         if isinstance(node, exp.Case):
-            ifs = node.args.get("ifs") or []
-            return again(ifs[0].args.get("true")) if ifs else again(node.args.get("default"))
+            results = [i.args.get("true") for i in node.args.get("ifs") or []]
+            return again(_first_not_null([*results, node.args.get("default")]))
         if isinstance(node, exp.DecodeCase):
             args = node.expressions
             return again(args[2]) if len(args) > 2 else None
@@ -481,6 +484,12 @@ def _leaf_selects(query: exp.Expr) -> Iterator[exp.Select]:
             stack.append(node.this)
         elif isinstance(node, exp.Select):
             yield node
+
+
+def _first_not_null(values: list[exp.Expr | None]) -> exp.Expr | None:
+    return next(
+        (v for v in values if isinstance(v, exp.Expr) and not isinstance(v, exp.Null)), None
+    )
 
 
 def _is_distinct(node: exp.SetOperation) -> bool:

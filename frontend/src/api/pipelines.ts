@@ -13,6 +13,11 @@ export type PipelineFileDiff = Schemas["PipelineFileDiff"];
 export type PipelineFinding = Schemas["PipelineFindingOut"];
 export type PipelineTest = Schemas["PipelineTestOut"];
 export type PipelineTestLog = Schemas["PipelineTestLogOut"];
+export type PipelineEdit = Schemas["PipelineEditOut"];
+export type PipelineEditFile = Schemas["PipelineEditFileOut"];
+export type PipelineEditSummary = Schemas["PipelineEditSummaryOut"];
+export type PipelineEditCheck = Schemas["PipelineEditCheckOut"];
+export type PipelineReapply = Schemas["PipelineReapplyOut"];
 
 const path = (p: string) => p.split("/").map(encodeURIComponent).join("/");
 
@@ -38,4 +43,36 @@ export const pipelinesApi = {
     }),
   reject: (id: string) => request<PipelineProposalDetail>(`/api/pipelines/proposals/${id}/reject`, { method: "POST" }),
   testLog: (id: string) => request<PipelineTestLog>(`/api/pipelines/tests/${id}/log`),
+
+  // A person's own edits (Edit manually, New file, Edit before accepting).
+  /** The open edits on this computer, then the latest finished ones. */
+  edits: () => request<PipelineEditSummary[]>("/api/pipelines/edits"),
+  /** The file's open edit, or a new one from main as last synced (`isNew`: a file not in the repo yet). */
+  startEdit: (p: string, isNew = false) =>
+    request<PipelineEdit>("/api/pipelines/edits", { method: "POST", body: JSON.stringify({ path: p, new: isNew }) }),
+  /** Edit before accepting: the proposal becomes the person's edit (and is superseded). */
+  editProposal: (id: string) => request<PipelineEdit>(`/api/pipelines/proposals/${id}/edit`, { method: "POST" }),
+  getEdit: (id: string) => request<PipelineEdit>(`/api/pipelines/edits/${id}`),
+  /** Keep as a draft on this computer: never GitHub. */
+  keepEdit: (id: string, files: Record<string, string | null>, version: string) =>
+    request<PipelineEdit>(`/api/pipelines/edits/${id}`, { method: "PUT", body: JSON.stringify({ files, version }) }),
+  /** The proposal's check, on the text in the editor now. */
+  checkEdit: (id: string, p: string, text: string) =>
+    request<PipelineEditCheck>(`/api/pipelines/edits/${id}/check`, {
+      method: "POST",
+      body: JSON.stringify({ path: p, text }),
+    }),
+  testEdit: (id: string) => request<PipelineEdit>(`/api/pipelines/edits/${id}/tests`, { method: "POST" }),
+  /** Save & share, in the background (as a proposal's). */
+  shareEdit: (id: string, confirmed: string[], version: string) =>
+    request<PipelineEdit>(`/api/pipelines/edits/${id}/share`, {
+      method: "POST",
+      body: JSON.stringify({ confirmed, version }),
+    }),
+  reapplyEdit: (id: string, version: string, resolutions: Record<string, string> = {}) =>
+    request<PipelineReapply>(`/api/pipelines/edits/${id}/reapply`, {
+      method: "POST",
+      body: JSON.stringify({ version, resolutions }),
+    }),
+  discardEdit: (id: string) => request<PipelineEdit>(`/api/pipelines/edits/${id}/discard`, { method: "POST" }),
 };
