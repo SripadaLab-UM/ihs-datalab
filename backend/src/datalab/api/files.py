@@ -98,6 +98,8 @@ class CheckpointOut(BaseModel):
     created_at: str
     label: str
     turn: int | None
+    # Its turn was asked with Express on.
+    express: bool = False
     files: int
     bytes: int
     skipped: list[SkippedOut]
@@ -313,12 +315,14 @@ def build_files_router(
     @router.get("/checkpoints")
     def list_checkpoints(conversation_id: str) -> list[CheckpointOut]:
         conversation_or_404(conversation_id)
+        express = store.express_turns(conversation_id)
         return [
             CheckpointOut(
                 number=c.number,
                 created_at=c.created_at,
                 label=c.label,
                 turn=c.turn,
+                express=c.turn in express,
                 files=c.files,
                 bytes=c.bytes,
                 skipped=[SkippedOut(**s.__dict__) for s in c.skipped],

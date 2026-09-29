@@ -28,6 +28,7 @@ const listed = (checkpoint: number): WorkspaceFile[] => [
 const checkpoint = (number: number) => ({
   number,
   label: `Checkpoint ${number}`,
+  express: false,
   created_at: "",
   files: 1,
   bytes: 100,

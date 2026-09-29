@@ -75,6 +75,7 @@ class FileProvenanceOut(BaseModel):
     summary: str
     checkpoint: int | None = None
     turn: int | None = None
+    express: bool = False  # that turn was asked with Express on
     in_review: bool = False  # first saved after the turn's rigor review, not the turn
     # ...and the turn's own checkpoint wasn't saved, so the turn's commands are listed too.
     turn_not_saved: bool = False

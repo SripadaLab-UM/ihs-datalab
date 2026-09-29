@@ -527,6 +527,12 @@ def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
             "only (metadata, no rows): write any SQL a page needs and say it needs checking "
             "in a Data extraction conversation."
         )
+    if tokens.express_refuses(access, tool):
+        raise ToolError(
+            f"{tool} is off: the person switched Express on for this message, so there "
+            "are no plans, approvals or questions to wait for. Answer directly from the "
+            "catalog, the knowledge base and the data, and say which reading you chose."
+        )
     return access
 
 

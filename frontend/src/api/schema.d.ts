@@ -2754,6 +2754,11 @@ export interface components {
             label: string;
             /** Turn */
             turn: number | null;
+            /**
+             * Express
+             * @default false
+             */
+            express: boolean;
             /** Files */
             files: number;
             /** Bytes */
@@ -2889,6 +2894,8 @@ export interface components {
         ConversationChange: {
             /** Rigor Review */
             rigor_review?: boolean | null;
+            /** Express */
+            express?: boolean | null;
             /** Title */
             title?: string | null;
         };
@@ -2913,6 +2920,8 @@ export interface components {
             updated_at: string;
             /** Rigor Review */
             rigor_review: boolean;
+            /** Express */
+            express: boolean;
             /** Busy */
             busy: boolean;
         };
@@ -3447,6 +3456,11 @@ export interface components {
             checkpoint?: number | null;
             /** Turn */
             turn?: number | null;
+            /**
+             * Express
+             * @default false
+             */
+            express: boolean;
             /**
              * In Review
              * @default false

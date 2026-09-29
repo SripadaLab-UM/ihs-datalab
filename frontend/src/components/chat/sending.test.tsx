@@ -54,7 +54,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 const conversation: Conversation = {
   id: "c1", kind: "data", mode: "analysis", title: "New conversation", model: "gpt-5.5",
-  created_at: "", updated_at: "", rigor_review: false, busy: false,
+  created_at: "", updated_at: "", rigor_review: false, express: false, busy: false,
 }; // prettier-ignore
 
 /** A promise the test settles when it chooses. */

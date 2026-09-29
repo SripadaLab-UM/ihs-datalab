@@ -225,11 +225,24 @@ class SessionManager:
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
-            note = self._workspace_note(conversation.id)
+            # Express and the rigor review as they are now, for the whole of
+            # this turn: a switch during it applies from the next message.
+            express = conversation.express
+            # Always sent: a turn's effort may stay with the thread in Codex,
+            # so an Express turn's low effort mustn't outlive it.
+            effort = effort or self._default_effort(conversation, continues)
+            self._tokens.set_express(conversation.id, express)
+            note = self._express_note(conversation) + self._workspace_note(conversation.id)
             self._store.append(
                 conversation.id,
                 "user_message",
-                {"text": text, **({"continues": True} if continues else {})},
+                {
+                    "text": text,
+                    **({"continues": True} if continues else {}),
+                    **({"express": True} if express else {}),
+                    "rigor_review": conversation.rigor_review,
+                    "effort": effort,
+                },
             )
             turn = self._store.count(conversation.id, "user_message")
             self._turns[conversation.id] = asyncio.create_task(
@@ -265,6 +278,8 @@ class SessionManager:
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
+            # The reviewed turn's own Express state, as its question recorded it.
+            self._tokens.set_express(conversation.id, bool(asked.data.get("express")))
             turn = self._store.count(conversation.id, "user_message")
             self._turns[conversation.id] = asyncio.create_task(
                 self._rerun_review(conversation.id, runtime, asked, turn)
@@ -481,6 +496,7 @@ class SessionManager:
         await self._shutdown(conversation_id)
         runtime_paths = self.paths(conversation_id)
         await self._containers_for(conversation_id, "data").remove()
+        self._tokens.set_express(conversation_id, False)
         self._store.delete(conversation_id)
         shutil.rmtree(runtime_paths.root, ignore_errors=True)
 
@@ -595,6 +611,31 @@ class SessionManager:
                     {"path": attachment.container_path, "reason": problem},
                 )
         return mount_args(mountable)
+
+    def _review_wanted(self, conversation_id: str, started: Event | None) -> bool:
+        """Whether the turn that `started` began was asked with the rigor review
+        on. A question from before DataLab recorded it: the switch as it is now."""
+        if started is not None and "rigor_review" in started.data:
+            return bool(started.data["rigor_review"])
+        conversation = self._store.get(conversation_id)
+        return conversation is not None and conversation.rigor_review
+
+    def _default_effort(self, conversation: Conversation, continues: bool) -> str:
+        """The effort for a message sent without one: Continue keeps the effort of
+        the turn it picks up; otherwise low with Express on, else the usual one."""
+        if continues:
+            asked = self._store.last(conversation.id, "user_message")
+            if asked is not None and asked.data.get("effort"):
+                return str(asked.data["effort"])
+        return "low" if conversation.express else modes.DEFAULT_EFFORT
+
+    def _express_note(self, conversation: Conversation) -> str:
+        """Tell the agent this message is an Express one, or that Express is off
+        again after one (modes.py: EXPRESS). Before the message is logged."""
+        if conversation.express:
+            return modes.express_note(conversation.mode)
+        asked = self._store.last(conversation.id, "user_message")
+        return modes.EXPRESS_OFF if asked is not None and asked.data.get("express") else ""
 
     def _workspace_note(self, conversation_id: str) -> str:
         """Tell the agent what changed in its files since its last turn."""
@@ -757,10 +798,12 @@ class SessionManager:
         evidence = runtime.take_evidence()
         ran_commands = runtime.ran_commands()
         claims = await self._trace(conversation_id, since, evidence)
-        conversation = self._store.get(conversation_id)
-        # Reviewed only if there's something to review (work was done, or
-        # the answer states numbers), and not if the person pressed Stop.
-        wanted = conversation is not None and conversation.rigor_review
+        # Reviewed only if the review was on when the turn began (its question
+        # records it: switching Express on meanwhile doesn't cancel it, and
+        # switching the review on during an Express turn doesn't add one), if
+        # there's something to review (work was done, or the answer states
+        # numbers), and not if the person pressed Stop.
+        wanted = self._review_wanted(conversation_id, started)
         if wanted and (ran_commands or evidence or claims) and not runtime.stop_requested:
             began = self._work_began(conversation_id, started) if started else None
             question = str(began.data.get("text", "")) if began else ""

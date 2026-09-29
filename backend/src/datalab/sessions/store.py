@@ -30,6 +30,9 @@ class Conversation:
     created_at: str
     updated_at: str
     rigor_review: bool = False
+    # Quick answers: low effort, no plans or confirmations (sessions/modes.py:
+    # EXPRESS). Never on together with rigor_review.
+    express: bool = False
 
 
 @dataclass(frozen=True)
@@ -72,11 +75,38 @@ class ConversationStore:
         return conversation
 
     def set_rigor_review(self, conversation_id: str, on: bool) -> None:
+        """Switching the rigor review on switches Express off: never both."""
+        self.set_switches(conversation_id, rigor_review=on)
+
+    def set_express(self, conversation_id: str, on: bool) -> None:
+        """Switching Express on switches the rigor review off: never both."""
+        self.set_switches(conversation_id, express=on)
+
+    def set_switches(
+        self, conversation_id: str, *, rigor_review: bool | None = None, express: bool | None = None
+    ) -> None:
+        """Change either switch, or both, in one statement. One switched on
+        switches the other off unless it's given too; both on is refused."""
+        if rigor_review and express:
+            raise ValueError("Express and the rigor review can't both be on.")
+        r = None if rigor_review is None else int(rigor_review)
+        e = None if express is None else int(express)
         with self._lock:
             self._db.execute(
-                "UPDATE conversations SET rigor_review = ? WHERE id = ?",
-                (int(on), conversation_id),
+                "UPDATE conversations SET "
+                "rigor_review = CASE WHEN :r IS NOT NULL THEN :r "
+                "ELSE rigor_review AND NOT COALESCE(:e, 0) END, "
+                "express = CASE WHEN :e IS NOT NULL THEN :e "
+                "ELSE express AND NOT COALESCE(:r, 0) END "
+                "WHERE id = :id",
+                {"r": r, "e": e, "id": conversation_id},
             )
+
+    def express_turns(self, conversation_id: str) -> set[int]:
+        """The turns (numbered as checkpoints number them: the nth question)
+        asked with Express on, as each question's event recorded it."""
+        asked = self.events_of_types_after(conversation_id, 0, ("user_message",))
+        return {n for n, event in enumerate(asked, 1) if event.data.get("express")}
 
     def get(self, conversation_id: str) -> Conversation | None:
         with self._lock:
@@ -208,6 +238,7 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         rigor_review=bool(row["rigor_review"]),
+        express=bool(row["express"]),
     )
 
 

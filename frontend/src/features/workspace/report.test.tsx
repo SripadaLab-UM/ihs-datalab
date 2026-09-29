@@ -12,7 +12,7 @@ const conversation: Conversation = {
   model: "gpt-5.5",
   created_at: "",
   updated_at: "",
-  rigor_review: true,
+  rigor_review: true, express: false,
   busy: false,
 };
 

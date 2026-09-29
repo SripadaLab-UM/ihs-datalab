@@ -21,6 +21,12 @@ SessionKind = Literal["data", "research"]
 # findings can be durable (Analysis, Data extraction, Data engineering).
 TAB_TOOLS = frozenset({"propose_sql"})
 OPT_IN_TOOLS = TAB_TOOLS | {"suggest_kb_update"}
+# Tools no turn asked with Express on may use, whatever its mode: each stops
+# the turn to wait for the person (an analysis plan to approve, a research
+# helper question to review before it goes online). Express has no such
+# steps; the helper's review is a safety check, so it goes rather than being
+# skipped. The data tools refuse them for as long as the turn runs.
+EXPRESS_OFF_TOOLS = frozenset({"propose_plan", "ask_research_helper"})
 
 
 @dataclass(frozen=True)
@@ -44,6 +50,10 @@ class SessionTokens:
     def __init__(self) -> None:
         self._by_token: dict[str, SessionAccess] = {}
         self._lock = threading.Lock()
+        # Sessions whose current turn was asked with Express on (set by the
+        # session manager as each turn starts). Kept apart from the tokens,
+        # which a restart mid-conversation replaces.
+        self._express: set[str] = set()
 
     def issue(self, access: SessionAccess) -> str:
         token = "dls_" + secrets.token_urlsafe(32)
@@ -56,6 +66,22 @@ class SessionTokens:
             return None
         with self._lock:
             return self._by_token.get(token)
+
+    def set_express(self, session_id: str, on: bool) -> None:
+        with self._lock:
+            if on:
+                self._express.add(session_id)
+            else:
+                self._express.discard(session_id)
+
+    def express(self, session_id: str) -> bool:
+        """Whether this session's current turn was asked with Express on."""
+        with self._lock:
+            return session_id in self._express
+
+    def express_refuses(self, access: SessionAccess, tool: str) -> bool:
+        """Whether `tool` is off because the session's turn is an Express one."""
+        return tool in EXPRESS_OFF_TOOLS and self.express(access.session_id)
 
     def revoke_session(self, session_id: str) -> None:
         with self._lock:

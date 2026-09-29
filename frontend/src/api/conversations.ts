@@ -46,6 +46,9 @@ export const conversationsApi = {
     }),
   setRigorReview: (id: string, on: boolean) =>
     request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ rigor_review: on }) }),
+  // Quick answers. Switching it on switches the rigor review off, and the other way round.
+  setExpress: (id: string, on: boolean) =>
+    request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ express: on }) }),
   stop: (id: string) => request<Conversation>(`/api/conversations/${id}/stop`, { method: "POST" }),
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
   /** Every event in a conversation (the API returns them 1,000 at a time). */

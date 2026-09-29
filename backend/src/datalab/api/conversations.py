@@ -58,11 +58,15 @@ class ConversationOut(BaseModel):
     created_at: str
     updated_at: str
     rigor_review: bool
+    # Quick answers: low effort, no plans or confirmations. Never on with rigor_review.
+    express: bool
     busy: bool
 
 
 class ConversationChange(BaseModel):
+    # Switching one of these on switches the other off.
     rigor_review: bool | None = None
+    express: bool | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
 
     _one_line = field_validator("title")(_one_line_title)
@@ -256,8 +260,13 @@ def build_conversations_router(
     @router.patch("/conversations/{conversation_id}")
     def change_conversation(conversation_id: str, body: ConversationChange) -> ConversationOut:
         get_or_404(conversation_id)
-        if body.rigor_review is not None:
-            store.set_rigor_review(conversation_id, body.rigor_review)
+        if body.rigor_review and body.express:
+            raise HTTPException(422, "Express and the rigor review can't both be on: choose one.")
+        if body.rigor_review is not None or body.express is not None:
+            # One statement: switching one on switches the other off.
+            store.set_switches(
+                conversation_id, rigor_review=body.rigor_review, express=body.express
+            )
         if body.title is not None:
             store.rename(conversation_id, body.title)
             # Other windows showing this conversation pick the new name up.
