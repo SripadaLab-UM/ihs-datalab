@@ -23,7 +23,9 @@ export function useDockerStatus() {
   return useQuery({
     queryKey: KEY,
     queryFn: dockerApi.status,
-    refetchInterval: (query) => (query.state.data && SETTLED.has(query.state.data.state) ? 5 * 60_000 : 30_000),
+    // Every few seconds while a fix is under way, so the dialog follows its phase.
+    refetchInterval: (query) =>
+      query.state.data?.fixing ? 3_000 : query.state.data && SETTLED.has(query.state.data.state) ? 5 * 60_000 : 30_000,
     retry: false,
   });
 }
@@ -90,7 +92,7 @@ export function DockerBanner() {
           </span>
         </Bar>
       )}
-      {state === "stopped" && (
+      {state === "stopped" && !docker.data.fixing && (
         <Bar>
           <span>Docker Desktop isn't running, so conversations and workflows can't start.</span>
           <Button className="py-0.5" disabled={start.isPending} onClick={() => start.mutate()}>
@@ -137,7 +139,7 @@ function outcomeText(result: DockerFix): { text: string; ok: boolean } {
     case "working":
       return {
         ok: false,
-        text: "Something in DataLab is working (a conversation, a query or a workflow). Fix it restarts Docker Desktop, which would stop it: wait for it to finish, then click Fix it.",
+        text: "Something in DataLab is working (a conversation, a query, a workflow or a pipeline test). Fix it restarts Docker Desktop, which would stop it: wait for it to finish, then click Fix it.",
       };
     case "declined":
       return {
@@ -149,7 +151,10 @@ function outcomeText(result: DockerFix): { text: string; ok: boolean } {
     case "busy":
       return { ok: false, text: "Windows' permission box is already open: look for it (it may be behind other windows)." };
     case "not-needed":
-      return { ok: true, text: "Windows isn't blocking Docker's virtual machine now, so there's nothing to fix." };
+      return {
+        ok: false,
+        text: "Windows isn't blocking Docker's virtual machine now, so there's nothing to fix here. If Docker still doesn't start, restart Windows.",
+      };
     default:
       return { ok: false, text: "This computer doesn't need this fix." };
   }
@@ -167,6 +172,8 @@ export function DockerFixDialog({
   const client = useQueryClient();
   const fix = useMutation({
     mutationFn: dockerApi.fix,
+    // Look again shortly, so the page sees the fix under way (and its phase).
+    onMutate: () => void setTimeout(() => void client.invalidateQueries({ queryKey: KEY }), 1_500),
     onSuccess: (result) => client.setQueryData<DockerStatus>(KEY, (old) => old && { ...old, state: result.state, fixing: false }),
   });
   const recheck = useMutation({
@@ -176,14 +183,17 @@ export function DockerFixDialog({
   const url = status.admin_access_url;
   const outcome = fix.data && outcomeText(fix.data);
   const vmStarts = recheck.data !== undefined && VM_STARTS.has(recheck.data.state);
-  const fixed = fix.data?.outcome === "fixed" || fix.data?.outcome === "not-needed" || vmStarts;
+  // Nothing more the dialog can do: fixed, or the right is back but Docker Desktop isn't
+  // (restarting Windows is what's left), or there was nothing to fix.
+  const finished = ["fixed", "restart-failed", "not-needed"].includes(fix.data?.outcome ?? "") || vmStarts;
   const waiting = fix.isPending || (status.fixing && !fix.data);
+  const restarting = waiting && status.phase === "restarting";
   return (
     <Modal
       title="Docker needs a Windows fix"
       onClose={onClose}
       actions={
-        fixed ? (
+        finished ? (
           <Button variant="primary" onClick={onClose}>
             Done
           </Button>
@@ -196,7 +206,7 @@ export function DockerFixDialog({
               {recheck.isPending ? "Checking…" : "Check again"}
             </Button>
             <Button variant="primary" disabled={waiting} onClick={() => fix.mutate()}>
-              {waiting ? "Waiting for Windows…" : "Fix it"}
+              {restarting ? "Restarting Docker Desktop…" : waiting ? "Waiting for Windows…" : "Fix it"}
             </Button>
           </>
         )
@@ -238,8 +248,9 @@ export function DockerFixDialog({
       <p className="mt-3 text-sm text-muted">No administrator access? Restarting Windows fixes it too, for a while.</p>
       {waiting && (
         <p role="status" className="mt-3 text-sm font-medium">
-          Windows is asking for permission: look for its box (it may be behind other windows) and click Yes. Then DataLab
-          restarts Docker Desktop, which takes a minute or two.
+          {restarting
+            ? "Windows gave permission. DataLab is restarting Docker Desktop: it closes it, stops its virtual machine and opens it again, which takes a minute or two."
+            : "Windows is asking for permission: look for its box (it may be behind other windows) and click Yes. Then DataLab restarts Docker Desktop, which takes a minute or two."}
         </p>
       )}
       {outcome && (

@@ -883,7 +883,18 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
     everything in Docker, so the fix is refused while a conversation's turn,
     a query, a workflow run or a pipeline test is going, and the dialog says
     so before the button is pressed. On the re-test machine, with Docker
-    working, the restart took 14 seconds.
+    working, the restart took 14 seconds. Docker Desktop 4.77 and 4.93 have
+    only the `docker-desktop` distribution; older ones' `docker-desktop-data`
+    is left running, which is harmless. A Docker Desktop started elevated
+    lists with no user name, so it isn't closed, and the restart fails at
+    "ready". While the fix runs, the page sees its phase (`prompt`, then
+    `restarting`): during the restart the state is "starting", and Open
+    Docker Desktop does nothing, so it can't race the restart.
+  - The installer's Step 2 does the same after its own fix (Repair-VmLogon):
+    if Docker Desktop is already open, it closes its programs (the same four,
+    this account's only, by process id with the image and user filters) and
+    runs `wsl --terminate docker-desktop`; Step 2 then opens Docker Desktop
+    and waits, and says "restart Windows" if it doesn't get ready.
   - How often it looks, since a check can start WSL's VM: the page asks
     every 30 seconds while something is wrong and every 5 minutes
     otherwise (the policy can take the right away while DataLab is open);

@@ -113,6 +113,10 @@ $DockerDesktop = Join-Path $ProgramFilesDir "Docker\Docker\Docker Desktop.exe"
 # Docker Desktop's Windows service. Docker Desktop starts without an
 # administrator only when this service starts by itself (--always-run-service).
 $DockerService = "com.docker.service"
+# Docker Desktop's own processes, which run as the person: the ones closing it
+# ends (Repair-VmLogon). Never its service above, which runs as SYSTEM. The same
+# list as DOCKER_DESKTOP_IMAGES in DataLab's windows_vm.py (tests check they match).
+$DockerDesktopImages = @("Docker Desktop.exe", "com.docker.backend.exe", "com.docker.build.exe", "docker-sandbox.exe")
 $WslExe = Join-Path $ProgramFilesDir "WSL\wsl.exe"
 # The group Docker Desktop creates for the people allowed to use it; its SID
 # differs per computer, so it's matched by name.
@@ -318,6 +322,8 @@ function Repair-VmLogon {
     Say "    given back. If your computer gives you administrator access for a limited"
     Say "    time, request it first."
     Say "It can happen again later; DataLab then offers the same fix when it starts."
+    Say "If Docker Desktop is open, fixing it closes and reopens Docker Desktop, so"
+    Say "anything running in Docker stops."
     if (-not (Ask "Fix it now?")) {
         Stop-Install "Docker can't start until that's fixed. Restart Windows, then run the installer again."
     }
@@ -334,10 +340,91 @@ function Repair-VmLogon {
         Stop-Install "That didn't fix it. Restart Windows, then run the installer again."
     }
     Good "Docker's virtual machine may start again."
-    # A Docker Desktop already waiting for its engine doesn't try again by itself.
-    if (Get-Process "com.docker.backend" -ErrorAction SilentlyContinue) {
-        $null = Invoke-Quiet "docker" @("desktop", "restart", "--detach") 60
+    $script:VmLogonRepaired = $true
+    # A Docker Desktop that was already waiting for its engine never tries
+    # again, and `docker desktop restart` left that stuck backend running (seen
+    # with DataLab 0.3.0b3): so it's closed and its VM stopped, and Step 2
+    # opens it afresh.
+    $open = @($DockerDesktopImages | ForEach-Object { Get-OwnPids $_ } | Where-Object { $_ })
+    if ($open) {
+        Say "Closing Docker Desktop, so it starts again with its virtual machine..."
+        if (-not (Stop-DockerDesktopProcesses)) {
+            Stop-Install ("Windows lets Docker's virtual machine start again, but Docker Desktop " +
+                "wouldn't close. Restart Windows, then run the installer again.")
+        }
+        if (-not (Stop-DockerVm)) {
+            Stop-Install ("Windows lets Docker's virtual machine start again, but Docker's virtual " +
+                "machine wouldn't stop. Restart Windows, then run the installer again.")
+        }
     }
+}
+
+# Runs a program and returns its exit code and what it printed, or $null if it
+# didn't finish in time. `$arguments` is the command line after the program.
+function Invoke-Captured($file, [string]$arguments, $seconds = 30) {
+    $info = New-Object System.Diagnostics.ProcessStartInfo $file, $arguments
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.EnvironmentVariables["WSL_UTF8"] = "1"  # wsl.exe's own messages in UTF-8
+    $process = [System.Diagnostics.Process]::Start($info)
+    $out = $process.StandardOutput.ReadToEndAsync()
+    $err = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($seconds * 1000)) {
+        try { $process.Kill() } catch {}
+        return $null
+    }
+    return @{ Code = $process.ExitCode; Out = $out.Result + $err.Result }
+}
+
+# The ids of one program's processes (by its exact file name) that run as this
+# account: never another account's, nor SYSTEM's. $null when tasklist can't say.
+# The account comes from this process's own token, not the environment.
+function Get-OwnPids($image) {
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $listed = Invoke-Captured (Join-Path $SystemDir "tasklist.exe") `
+        "/FI `"IMAGENAME eq $image`" /FI `"USERNAME eq $me`" /FO CSV /NH" 15
+    if (-not $listed -or $listed.Code -ne 0) { return $null }
+    # No match is one line, "INFO: No tasks are running which match ...". A Docker
+    # Desktop started elevated may list with no user name: it isn't found here.
+    $rows = @($listed.Out -split "`r?`n" | Where-Object { $_.StartsWith('"') } |
+        ConvertFrom-Csv -Header Image, Id, Session, Number, Memory)
+    # The comma keeps an empty list a list: `return @()` would give the caller $null.
+    return ,@($rows | Where-Object { $_.Image -eq $image -and $_.Id -match '^\d+$' } | ForEach-Object { [int]$_.Id })
+}
+
+# Ends Docker Desktop's own processes ($DockerDesktopImages), this account's
+# only, by process id. $false if any is still there afterwards.
+function Stop-DockerDesktopProcesses {
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+    foreach ($image in $DockerDesktopImages) {
+        $ids = Get-OwnPids $image
+        if ($null -eq $ids) { return $false }
+        # The same filters as the listing, beside the id: an id Windows has
+        # handed to another program since isn't ended, nor one that has ended
+        # already ("INFO: No tasks running with the specified criteria.").
+        foreach ($id in $ids) {
+            $null = Invoke-Captured (Join-Path $SystemDir "taskkill.exe") `
+                "/F /FI `"IMAGENAME eq $image`" /FI `"USERNAME eq $me`" /PID $id" 15
+        }
+    }
+    # taskkill /F answers before a process has quite gone: look again, once a
+    # second, for 15 seconds.
+    for ($i = 0; $i -lt 15; $i++) {
+        Start-Sleep -Seconds 1
+        $left = @($DockerDesktopImages | ForEach-Object { Get-OwnPids $_ })
+        if (-not ($left | Where-Object { $null -eq $_ -or $_.Count -gt 0 })) { return $true }
+    }
+    return $false
+}
+
+# Stops Docker's own WSL distribution, and nothing else of WSL's (never
+# `wsl --shutdown`). One that isn't there counts as stopped.
+function Stop-DockerVm {
+    $done = Invoke-Captured (Join-Path $SystemDir "wsl.exe") "--terminate docker-desktop" 60
+    if (-not $done) { return $false }
+    return ($done.Code -eq 0 -or $done.Out.Contains("WSL_E_DISTRO_NOT_FOUND"))
 }
 
 # --- Shared by install.ps1 and uninstall.ps1 (keep both copies the same) ----
@@ -1260,6 +1347,10 @@ if (-not (Test-DockerRunning)) {
             Say "Still waiting for Docker Desktop ($minutes min)... this is normal the first time."
         }
     } until ($running -or $clock.Elapsed.TotalMinutes -ge 10)
+    if (-not $running -and $script:VmLogonRepaired) {
+        Stop-Install ("Windows lets Docker's virtual machine start again, but Docker Desktop didn't " +
+            "get ready within 10 minutes. Restart Windows, then run the installer again.")
+    }
     if (-not $running) {
         Stop-Install ("Docker Desktop didn't finish starting. Open it from the Start menu, wait until " +
             "it says 'Engine running' (bottom left), then run the installer again.")

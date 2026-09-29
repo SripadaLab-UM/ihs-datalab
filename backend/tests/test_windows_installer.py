@@ -76,7 +76,14 @@ def test_quickedit_is_turned_off_in_memory_for_the_admin_window_only():
 
 def test_a_running_datalab_is_never_stopped_by_the_installer():
     assert "Get-RunningDataLab" in person_part(INSTALL)
-    assert "Stop-Process" not in INSTALL and "taskkill" not in INSTALL.lower()
+    assert "Stop-Process" not in INSTALL
+    # taskkill only closes Docker Desktop (Repair-VmLogon), by its own
+    # programs' names: never DataLab.
+    function = code(INSTALL[INSTALL.index("function Stop-DockerDesktopProcesses") :])
+    function = function[: function.index("\n}\n")]
+    assert code(INSTALL).lower().count("taskkill") == function.lower().count("taskkill") == 1
+    assert "foreach ($image in $DockerDesktopImages)" in function
+    assert "datalab" not in function.lower()
 
 
 def test_each_checked_download_is_logged_with_its_publisher():

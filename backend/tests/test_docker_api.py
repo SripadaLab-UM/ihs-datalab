@@ -41,6 +41,7 @@ def test_the_page_learns_the_vm_is_refused_and_where_to_get_admin_access(setting
     assert shown == {
         "state": "vm-refused",
         "fixing": False,
+        "phase": None,
         "admin_access_url": "https://admin.example.org/jit",
     }
 

@@ -150,6 +150,9 @@ it("names the step of the restart that didn't work, and says to restart Windows"
   fireEvent.click(within(dialog).getByRole("button", { name: "Fix it" }));
   const said = await within(dialog).findByText(/Windows lets Docker's virtual machine start again, but/);
   expect(said).toHaveTextContent("Docker Desktop didn't get ready within 4 minutes. Restart Windows to finish.");
+  // The right is back, so Fix it would only say there's nothing to fix: it's gone.
+  expect(within(dialog).queryByRole("button", { name: "Fix it" })).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Done" })).toBeInTheDocument();
 });
 
 it("waits while something in DataLab is working, without asking Windows", async () => {
@@ -162,4 +165,31 @@ it("waits while something in DataLab is working, without asking Windows", async 
     "wait for it to finish, then click Fix it",
   );
   expect(within(dialog).getByRole("button", { name: "Fix it" })).toBeEnabled();
+});
+
+it("follows the fix's phase: waiting for Windows, then restarting Docker Desktop", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue(refused);
+  vi.mocked(dockerApi.fix).mockReturnValue(new Promise(() => {}));
+  banner();
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Fix it" }));
+  expect(await within(dialog).findByRole("button", { name: "Waiting for Windows…" })).toBeDisabled();
+  // After Windows' Yes, DataLab says it's restarting (as after a reload mid-fix).
+  vi.mocked(dockerApi.status).mockResolvedValue({ ...refused, state: "starting", fixing: true, phase: "restarting" });
+  expect(await within(dialog).findByRole("button", { name: "Restarting Docker Desktop…" }, { timeout: 4000 })).toBeDisabled();
+  expect(dialog).toHaveTextContent("Windows gave permission. DataLab is restarting Docker Desktop");
+  expect(dialog).not.toHaveTextContent("Windows is asking for permission");
+  // And the banner doesn't offer to open Docker Desktop in the middle of it.
+  expect(screen.queryByRole("button", { name: "Open Docker Desktop" })).not.toBeInTheDocument();
+});
+
+it("nothing to fix doesn't read as if Docker works", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue(refused);
+  vi.mocked(dockerApi.fix).mockResolvedValue({ outcome: "not-needed", state: "starting", failed_step: null });
+  banner();
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Fix it" }));
+  const said = await within(dialog).findByText(/nothing to fix here/);
+  expect(said).toHaveTextContent("If Docker still doesn't start, restart Windows.");
+  expect(said.className).not.toContain("text-data");
 });

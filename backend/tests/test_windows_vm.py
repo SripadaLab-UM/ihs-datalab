@@ -32,6 +32,9 @@ TASKLIST_NONE = b"INFO: No tasks are running which match the specified criteria.
 # as they answered on the same laptop (2026-09-29).
 TASKKILL_DONE = "SUCCESS: The process with PID {pid} has been terminated.\r\n"
 TASKKILL_GONE = 'ERROR: The process "{pid}" not found.\r\n'
+# taskkill /F /FI "IMAGENAME eq …" /FI "USERNAME eq …" /PID, for an id that has
+# gone or now belongs to another program (exit 0, nothing ended).
+TASKKILL_NO_MATCH = b"\r\nINFO: No tasks running with the specified criteria.\r\n"
 TERMINATE_NOT_FOUND = (
     b"There is no distribution with the supplied name.\r\n"
     b"Error code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND\r\n"
@@ -56,6 +59,7 @@ class FakeWindows:
         desktop_open=True,
         ready_after_open=False,
         unkillable=(),
+        linger=0,
         terminate=(0, TERMINATE_DONE),
     ):
         self.docker = docker
@@ -64,6 +68,8 @@ class FakeWindows:
         self.after_grant = after_grant  # what wsl.exe says once the grant has run
         self.ready_after_open = ready_after_open  # the engine answers once reopened
         self.unkillable = set(unkillable)  # programs taskkill can't end
+        self.linger = linger  # listings a killed process still shows up in
+        self.dying: dict[int, int] = {}
         self.terminate = terminate  # what `wsl --terminate docker-desktop` answers
         self.processes: dict[int, tuple[str, str]] = {7768: ("com.docker.service", "SYSTEM")}
         self._next_pid = 30000
@@ -82,6 +88,11 @@ class FakeWindows:
             self.processes[self._next_pid] = (image, USER)
 
     def _tasklist(self, command):
+        for pid in list(self.dying):  # a killed process that takes a moment to go
+            self.dying[pid] -= 1
+            if self.dying[pid] < 0:
+                del self.dying[pid]
+                self.processes.pop(pid, None)
         filters = [command[i + 1] for i, part in enumerate(command) if part == "/FI"]
         image = next(f[len("IMAGENAME eq ") :] for f in filters if f.startswith("IMAGENAME eq "))
         user = next(
@@ -116,12 +127,26 @@ class FakeWindows:
             return subprocess.CompletedProcess(command, 0, self._tasklist(command), b"")
         if name == "taskkill.exe":
             pid = int(command[command.index("/PID") + 1])
-            if pid not in self.processes:
+            filters = [command[i + 1] for i, part in enumerate(command) if part == "/FI"]
+            if filters:
+                image = next(
+                    f[len("IMAGENAME eq ") :] for f in filters if f.startswith("IMAGENAME eq ")
+                )
+                user = next(
+                    f[len("USERNAME eq ") :] for f in filters if f.startswith("USERNAME eq ")
+                )
+                found = self.processes.get(pid)
+                if found is None or found[0].lower() != image.lower() or found[1] != user:
+                    return subprocess.CompletedProcess(command, 0, TASKKILL_NO_MATCH, b"")
+            elif pid not in self.processes:
                 return subprocess.CompletedProcess(
                     command, 128, b"", TASKKILL_GONE.format(pid=pid).encode()
                 )
             if self.processes[pid][0] not in self.unkillable:
-                del self.processes[pid]
+                if self.linger:
+                    self.dying[pid] = self.linger  # still listed for a few checks
+                else:
+                    del self.processes[pid]
             return subprocess.CompletedProcess(
                 command, 0, TASKKILL_DONE.format(pid=pid).encode(), b""
             )
@@ -428,21 +453,78 @@ def test_the_restart_ends_only_docker_desktops_own_processes_of_this_account():
 
 def test_processes_that_have_ended_meanwhile_are_fine():
     fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
-    answers: list[int] = []
+    answers: list[bytes] = []
 
     def ended_already(command, **options):
         if Path(command[0]).name.lower() == "taskkill.exe":
             pid = int(command[command.index("/PID") + 1])
             fake.processes.pop(pid, None)  # it ended by itself just before
             answer = fake.run(command, **options)
-            answers.append(answer.returncode)
+            answers.append(answer.stdout)
             return answer
         return fake.run(command, **options)
 
     doctor = doctor_for(fake)
     doctor._run = ended_already
     assert doctor.fix() == windows_vm.FixResult("fixed")
-    assert answers and set(answers) == {128}  # "not found", every time, and still fixed
+    assert answers and set(answers) == {TASKKILL_NO_MATCH}  # every time, and still fixed
+
+
+def test_a_process_id_windows_gave_to_another_program_is_left_alone():
+    """Between the listing and taskkill, a Docker Desktop process can end and
+    Windows can hand its id to something else: the filters beside /PID keep
+    taskkill to Docker Desktop's own programs of this account."""
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
+    real_run = fake.run
+
+    def reused(command, **options):
+        if Path(command[0]).name.lower() == "taskkill.exe":
+            pid = int(command[command.index("/PID") + 1])
+            assert f"USERNAME eq {USER}" in command
+            fake.processes[pid] = ("notepad.exe", USER)  # someone else's now
+        return real_run(command, **options)
+
+    doctor = doctor_for(fake)
+    doctor._run = reused
+    doctor.fix()
+    assert [name for name, _ in fake.processes.values()].count("notepad.exe") == 4
+
+
+@pytest.mark.parametrize(("linger", "outcome"), [(5, "fixed"), (40, "restart-failed")])
+def test_a_process_that_takes_a_moment_to_go_is_waited_for_a_while(linger, outcome):
+    """taskkill /F answers before a process has quite gone: the restart checks
+    again, once a second, for 15 seconds before calling it "stop"."""
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True, linger=linger)
+    doctor = doctor_for(fake)
+    result = doctor.fix()
+    assert result.outcome == outcome
+    if outcome == "restart-failed":
+        assert result.failed_step == "stop" and fake.opened == []
+
+
+def test_during_the_fix_the_page_sees_where_it_is_and_cant_open_docker_desktop():
+    """Found in review: during the restart, a GET said "stopped" (Docker
+    Desktop's processes are down on purpose), and Open Docker Desktop in
+    between made the restart look as if Docker Desktop wouldn't close."""
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
+    doctor = doctor_for(fake)
+    seen: dict[str, tuple] = {}
+    real_run = fake.run
+
+    def watching(command, **options):
+        name = Path(command[0]).name.lower()
+        if name == "powershell.exe":
+            seen["prompt"] = (doctor.phase, doctor.fixing)
+        if name == "wsl.exe" and "--terminate" in command:  # mid-restart, processes down
+            seen["restarting"] = (doctor.phase, doctor.state(), doctor.check(), doctor.start())
+        return real_run(command, **options)
+
+    doctor._run = watching
+    assert doctor.fix() == windows_vm.FixResult("fixed")
+    assert seen["prompt"] == ("prompt", True)
+    assert seen["restarting"] == ("restarting", "starting", "starting", "starting")
+    assert len(fake.opened) == 1  # the restart's own, not a second from start()
+    assert doctor.phase is None and not doctor.fixing
 
 
 def test_a_docker_vm_that_isnt_there_counts_as_stopped():
@@ -571,6 +653,46 @@ def test_the_installer_checks_before_starting_docker_and_fixes_only_on_yes():
     assert "-EncodedCommand $encoded" in repair and "$VmLogonGrant" in repair
     probe = INSTALL[INSTALL.index("function Test-VmLogonRefused") :]
     assert '"--system", "-e", "true"' in probe[: probe.index("\n}\n")]
+
+
+def installer_function(name: str) -> str:
+    body = INSTALL[INSTALL.index(f"function {name}") :]
+    return body[: body.index("\n}\n")]
+
+
+def test_the_installer_closes_the_same_docker_desktop_programs_as_datalab():
+    listed = re.search(r"^\$DockerDesktopImages = @\((.*)\)$", INSTALL, re.M)
+    assert listed, "install.ps1 has no $DockerDesktopImages"
+    assert tuple(re.findall(r'"([^"]+)"', listed.group(1))) == windows_vm.DOCKER_DESKTOP_IMAGES
+    assert "com.docker.service" not in listed.group(1)
+
+
+def test_the_installers_repair_restarts_an_open_docker_desktop_afresh():
+    """The same restart as DataLab's (0.3.0b3 found `docker desktop restart`
+    leaves a stuck backend): close Docker Desktop's own programs, stop its VM,
+    and let Step 2 open it again; say "restart Windows" if it doesn't come back."""
+    repair = installer_function("Repair-VmLogon")
+    # Code only: the comments explain what isn't done.
+    script = "\n".join(line for line in INSTALL.splitlines() if not line.lstrip().startswith("#"))
+    assert "docker desktop restart" not in script.lower()
+    assert '"desktop", "restart"' not in script
+    grant = repair.index("-Verb RunAs")
+    assert grant < repair.index("Stop-DockerDesktopProcesses") < repair.index("Stop-DockerVm")
+    # Said before asking: fixing closes and reopens Docker Desktop.
+    assert repair.index("closes and reopens Docker Desktop") < repair.index('Ask "Fix it now?"')
+    listing = installer_function("Get-OwnPids")
+    assert (
+        "WindowsIdentity]::GetCurrent().Name" in listing
+    )  # the token's account, not $Env:USERNAME
+    assert '/FI `"USERNAME eq $me`"' in listing and "/FO CSV" in listing
+    kill = installer_function("Stop-DockerDesktopProcesses")
+    assert '/FI `"IMAGENAME eq $image`" /FI `"USERNAME eq $me`" /PID $id' in kill
+    assert "-lt 15" in kill  # waits a while for processes to go, bounded
+    vm = installer_function("Stop-DockerVm")
+    assert '"--terminate docker-desktop"' in vm and "WSL_E_DISTRO_NOT_FOUND" in vm
+    assert "--shutdown" not in script
+    step2 = INSTALL[INSTALL.index('Step "Step 2 of 8') : INSTALL.index('Step "Step 3 of 8')]
+    assert "$script:VmLogonRepaired" in step2 and "Restart Windows, then run the installer" in step2
 
 
 def test_the_administrator_part_gives_the_right_too():

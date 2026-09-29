@@ -33,13 +33,15 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from datalab.config import Settings
-from datalab.windows_vm import DockerDoctor, DockerState, FixOutcome, RestartStep
+from datalab.windows_vm import DockerDoctor, DockerState, FixOutcome, FixPhase, RestartStep
 
 
 class DockerStatusOut(BaseModel):
     state: DockerState
-    # An administrator prompt from DataLab is showing now.
+    # A fix from DataLab is under way, and where: "prompt" (Windows' box is
+    # showing) or "restarting" (Docker Desktop is being closed and reopened).
     fixing: bool
+    phase: FixPhase | None = None
     admin_access_url: str | None
 
 
@@ -62,6 +64,7 @@ def build_docker_router(
         return DockerStatusOut(
             state=state,
             fixing=doctor.fixing,
+            phase=doctor.phase,
             admin_access_url=settings.windows.admin_access_url,
         )
 
@@ -79,7 +82,7 @@ def build_docker_router(
 
     @router.post("/fix")
     async def fix() -> DockerFixOut:
-        if working():
+        if await asyncio.to_thread(working):
             return DockerFixOut(outcome="working", state=await asyncio.to_thread(doctor.state))
         result = await asyncio.to_thread(doctor.fix)
         return DockerFixOut(

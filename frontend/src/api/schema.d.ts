@@ -3251,6 +3251,8 @@ export interface components {
             state: "unsupported" | "ready" | "not-installed" | "stopped" | "starting" | "vm-refused" | "unknown";
             /** Fixing */
             fixing: boolean;
+            /** Phase */
+            phase?: ("prompt" | "restarting") | null;
             /** Admin Access Url */
             admin_access_url: string | null;
         };
