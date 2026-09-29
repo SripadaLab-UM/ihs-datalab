@@ -12,7 +12,8 @@ keywords: plan, approve, frozen, hash, revision, exploratory, off-plan, pilot, p
 In Analysis mode, before it looks at outcome data for a new question, the
 agent proposes an [analysis plan](glossary.md#plan) and waits for you. In
 other modes it proposes one when a question calls for it. Small follow-ups
-and quick questions about the data itself don't need one.
+and quick questions about the data itself don't need one. With
+[Express](glossary.md#express) on, the agent doesn't propose plans at all.
 
 ## Read and edit it
 
@@ -41,8 +42,9 @@ everything shown. **Not yet** asks the agent what to change.
 
 What approval does:
 
-- It records what you agreed, exactly. Later work is labelled **per plan**
-  or **exploratory (off-plan)** in the chat and in exported reports.
+- It records what you agreed, exactly. The agent is asked to say which
+  later results follow the plan and to label anything else "exploratory
+  (off-plan)", in its answers and reports.
 - It doesn't lock anything. The agent can still run an off-plan query; it's
   asked to label it, and the [rigor review](glossary.md#rigor-review) checks
   that it did.

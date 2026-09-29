@@ -70,21 +70,37 @@ to repeat a run:
 
 ## Make a workflow
 
+- **New workflow**, on the Workflows page, is the usual way. Describe the
+  task in your own words and press **Start drafting**. The workflow
+  assistant asks what the file needs and your description doesn't say (the
+  dates, the cohort, the checks, where the files go), then drafts it in three
+  stages: **Extract**, **Process & QC** and **Deliver**. You review and edit
+  each stage on the page. On the practice DataLab, **Test run on practice
+  data** runs the draft on synthetic data, exactly as a saved workflow would,
+  and delivers nothing. Then **Save** it (**Save & share** when the
+  workflows are in the lab's repository).
 - **From the SQL Playground:** **Save as workflow** drafts a workflow from
   the current query.
 - **From a conversation:** **Turn this into a workflow**, in the **Queries**
   tab, drafts one from the queries that ran.
 
-DataLab writes the draft itself, with no AI and no data. You review and edit
-the file, with its problems marked, before anything is saved. Each possible
-participant-data finding, such as an ID typed into the SQL, must be confirmed
-first. Where the workflows come from the lab's `ihs-pipelines` repository,
-saving is [Save & share](glossary.md#save--share), and the package's tests
-must pass. Editing an existing workflow file isn't in the tab yet.
+Save as workflow and Turn this into a workflow are written by DataLab
+itself, with no AI and no data. Either way, you review the file, with its
+problems marked, before anything is saved. Each possible participant-data
+finding, such as an ID typed into the SQL, must be confirmed first. Where
+the workflows come from the lab's `ihs-pipelines` repository, saving is
+[Save & share](glossary.md#save--share), and the package's tests must pass.
 
-The chat beside the Workflows tab is in Workflow authoring mode, a
-[data session](glossary.md#data-session). Ask it to draft a new workflow or
-change one: it works in its own copy of the repository and checks each draft
-with DataLab's workflow check. Its changes become a proposal in the
-[Pipelines](pipelines.md) tab, which you review, test and save there; the
-agent never saves.
+## Change a workflow
+
+The Workflows tab shows a saved workflow's file read-only. To change it,
+use **Edit manually** on the file in the [Pipelines](pipelines.md) tab
+(under `workflows/`), or ask the chat beside the Workflows tab. Built-in
+workflows on the practice DataLab can't be changed: start a **New
+workflow** instead.
+
+The chat is in Workflow authoring mode, a
+[data session](glossary.md#data-session). It works in its own copy of the
+repository and checks each draft with DataLab's workflow check. Its changes
+become a proposal in the Pipelines tab, which you review, test and save
+there; the agent never saves.

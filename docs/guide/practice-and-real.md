@@ -18,8 +18,8 @@ tables, realistic quirks, and invented participants. Use it to learn
 DataLab, try a question before asking it for real, or give a
 demo.
 
-You're in the practice DataLab when **practice · synthetic data** shows at
-the top right of every screen.
+You're in the practice DataLab when the header at the top of every screen
+says **practice** (**practice · synthetic data** on a wide window).
 
 To keep it apart from anything real, the practice DataLab:
 
@@ -68,10 +68,11 @@ it's going. If it can't (Docker Desktop isn't running, say), Settings →
 Connections says why, with **Try again**.
 
 The made-up data is kept when DataLab is updated or installed again. To start
-over from scratch, use **Reset practice data** in Settings → Connections (it
+over from scratch, use **Reset practice data…** in Settings → Connections (it
 asks first), or run `datalab --profile practice practice-db reset`. Your
 practice conversations and exports aren't touched. Uninstalling DataLab asks
 whether to delete the practice database too.
 
-The first time it opens, the [tour](tour.md) starts; you can take it again
-at any time from Help.
+A first-run [tour](tour.md) is planned for the practice DataLab; it's
+switched off for now. Start with [Ask your first question](first-question.md)
+instead.

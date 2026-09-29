@@ -107,9 +107,9 @@ Two ways to save, and they're different:
 
 If someone changed the page on GitHub since you started, DataLab never
 overwrites it. It shows **your edit**, **the version now on GitHub**, and
-**where you started**, and you choose: **reapply your edit on the new
+**where you started**, and you choose: **Reapply my edit on the new
 version** (changes that don't overlap are combined; where they do, you
-write the text to keep), or **open both side by side**.
+write the text to keep), or **Open both side by side**.
 
 Some pages can't be edited here, and say where they come from instead:
 `index.md` is written by the check from the pages' front matter, and

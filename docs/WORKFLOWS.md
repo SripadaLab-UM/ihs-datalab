@@ -1,9 +1,11 @@
 # Workflows and pipelines
 
-Status: **draft** for v1. The runner, run records, Run again, Replay and
-delivery are built (milestone 6 core; see [As built](#as-built-milestone-6-core)),
-and so are the Workflows tab, read-only for now, and the Pipelines tab
-([As built](#as-built-pipelines)).
+Status: **implemented**, except where marked. The runner, run records, Run
+again, Replay and delivery ([As built](#as-built-milestone-6-core)), the
+Workflows tab with New workflow, Save as workflow and Turn this into a
+workflow, and the Pipelines tab with a person's own edits
+([As built](#as-built-pipelines)) are built. **Not built:** running a set of
+workflows, and scheduled runs (v1.1).
 
 Workflows are how DataLab handles bespoke, repeatable data work. Examples are
 Yu's regular exports to Dropbox, the 2025 daily wearable metrics, and next,
@@ -140,8 +142,9 @@ objects first, then runs the pipeline.
 
 - Run from the Workflows tab: choose a workflow, fill in the parameters, and
   click **Run**. Progress appears step by step.
-- **Run a set:** run several workflows in order with shared parameters, such
-  as "all 2025 exports for this quarter". One failure doesn't stop the others.
+- **Run a set** (planned, not built): run several workflows in order with
+  shared parameters, such as "all 2025 exports for this quarter". One
+  failure wouldn't stop the others.
 - Where steps run:
   - SQL steps run through the host data service. The database password is
     never exposed.
@@ -361,8 +364,10 @@ check's found and wanted values, and a step's counts, are kept as numbers
 only, so text an R check wrote can't carry a value into the record or the
 tab. Destination
 keys are listed read-only; folders are chosen in Settings. New files come
-from Save as workflow ([As built](#as-built-save-as-workflow)); editing an
-existing one isn't in the tab yet. The docked chat opens in Workflow
+from New workflow, Save as workflow ([As built](#as-built-save-as-workflow))
+and Turn this into a workflow. An existing file is shown read-only here;
+it's changed in the Pipelines tab (**Edit manually**, under `workflows/`) or
+by the Workflow authoring agent. The docked chat opens in Workflow
 authoring mode (sessions/modes.py): the agent drafts in its copy of the repo,
 checks each draft with the `check_workflow` tool (the same check as the tab
 and every run, with pipelines as on `main`), and its changes become a
@@ -505,7 +510,7 @@ the person picks among the queries that ran (each SQL once), and the draft
 goes through the same review and Save. It takes the SQL only: the
 workspace's R scripts read `/data/oracle` files and outputs by their own
 paths, not a workflow's `inputs`/`outputs`, so turning them into R steps
-needs the Workflow authoring agent (not built).
+is the Workflow authoring agent's job (the Workflows tab's chat).
 
 ## As built (New workflow)
 

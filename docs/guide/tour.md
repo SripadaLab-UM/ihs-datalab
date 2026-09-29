@@ -1,6 +1,6 @@
 ---
 title: The tour
-summary: Five steps through a first conversation. It starts once on the practice DataLab, and you can take it again from Help.
+summary: Five steps through a first conversation, planned for the practice DataLab. The tour is switched off for now.
 order: 80
 keywords: tour, walkthrough, onboarding, introduction, first run, replay
 ---

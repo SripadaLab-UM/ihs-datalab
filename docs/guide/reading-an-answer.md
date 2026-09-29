@@ -20,6 +20,23 @@ answer names show as buttons that say what they are (**Open report**,
 **Open table: flow (CSV)**); hover to see the full path. Query ids and SQL
 stay in the **Queries** tab.
 
+## A step that didn't work
+
+A failed step keeps its place in the story and is never folded away. Its
+label says what went wrong, in DataLab's own words. For a query, that's who
+stopped it and why:
+
+- **the SQL check refused it**, sometimes with the reason ("column needs
+  quoting", "long-text column can't be sorted, grouped or compared");
+- **the database refused it**, with Oracle's code and what it usually means
+  ("ORA-00904 — unknown column: check its spelling and quotes");
+- **query timed out**, **couldn't reach the database**, **result too
+  large**, or **stopped**.
+
+A failed query is marked **recovered** when a later query in the same turn
+worked and read at least one of the same tables. That says the agent got
+past it, not that its answer is right.
+
 ## The trace
 
 Under the answer, **Checks on this answer** lists what was checked, and by
@@ -123,8 +140,12 @@ the activity** opens that step in "How this answer was made".
 
 In a data session, **Queries** beside the chat is the
 [Data accessed](glossary.md#data-accessed) record: every query the agent
-ran, with its tables, time, row count and exact SQL, and a link to open the
-result.
+ran, newest last, with its tables, time, row count, and **The SQL** to
+unfold. **Open the result** shows what came back. A query that didn't run
+says so (**rejected**, **failed** or **cancelled**), with DataLab's message.
+**Turn this into a workflow** drafts a [workflow](glossary.md#workflow) from
+the queries that ran (see
+[Run a workflow](running-a-workflow.md#make-a-workflow)).
 
 ## Your judgement
 
