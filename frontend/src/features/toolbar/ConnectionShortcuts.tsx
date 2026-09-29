@@ -130,7 +130,7 @@ export function DatabaseShortcut() {
                   <span className="block">as {shown.oracle.user}, read-only</span>
                 </>
               ) : (
-                "No database is set up yet. Ask the DataLab maintainer for the lab's settings file."
+                "No database is set up yet: the installer didn't finish. Run it again, the same way; it carries on from where it stopped."
               )}
             </p>
           )}
