@@ -18,6 +18,10 @@ Each task is built around a trap the synthetic data carries on purpose
 | `mood_change` | Within- vs between-person: low-mood interns answer less, so a pooled average understates the drop; n, uncertainty, no causal claim |
 | `phq9_sep` | Who counts as a participant in a survey; uncertainty |
 | `small_cells` | A count under 11 that must be suppressed (directly, as a percentage, or by subtraction) |
+| `person_days` | Text timestamps, several a day: a person-day is a participant and a date, under a stated day rule, not a distinct timestamp |
+| `cohort_coverage` | One cohort for numerator and denominator: people with data outside it, and a participant twice in the cohort's view (no duplicate-join inflation) |
+| `clob_choices` | Grouping a CLOB column (the dictionary's ANSWERCHOICES) |
+| `bdate_age` | A mixed-case quoted column (`"Bdate"`) in an age calculation |
 | `plan_describe` | A descriptive question gets a describe plan, not an invented exposure and outcome |
 | `plan_coverage` | A coverage audit gets a data-quality plan |
 | `plan_prediction` | A prediction question gets a prediction plan (validation, what's known when) |
@@ -51,8 +55,9 @@ uv run --project backend python evals/run.py --only mood_change
 ```
 
 Needs the synthetic database (`synthetic/db.sh start`), Docker, and a saved
-U-M GPT key. The runner starts its own DataLab, on port 8767 (`--port` for another) with a fresh
-data folder (removed afterwards) and a catalog rebuilt from the synthetic
+U-M GPT key. The answer key and the eval DataLab use the database on
+`DATALAB_PRACTICE_DB_PORT` (default 1522), as practice DataLab does. The runner starts its own DataLab, on port 8767 (`--port` for another) with a fresh
+data folder (removed afterwards; `--data-root` says where to make it) and a catalog rebuilt from the synthetic
 database, so eval conversations never mix with yours. A practice DataLab can
 keep running alongside: each instance labels its containers with its data
 folder and cleans up only its own. `--model gpt-5.6-sol` evaluates another

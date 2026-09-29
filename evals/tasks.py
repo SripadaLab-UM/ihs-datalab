@@ -474,6 +474,125 @@ def _small_cells(answer: str, e: dict) -> list[Check]:
     ]
 
 
+# Correctness cases: answers a finished turn can still get wrong.
+# A person-day is a participant and a date, whichever rule decides the date
+# (the text timestamp's local date prefix, its UTC date, or the sample's
+# start date), as long as the answer says which.
+DAY_RULES = ("local_record_date", "utc_record_date", "local_start_date")
+_DAY_RULE = (
+    r"\blocal\b", r"\bUTC\b", r"time[- ]?zone", r"\boffset", r"prefix", r"SUBSTR",
+    r"first (10|ten) char", r"calendar date", r"start ?date", r"\bTRUNC\b",
+)  # fmt: skip
+_PERSON_DAYS = r"person[- ]days?|participant[- ]days?|\bdays\b"
+_NOT_DAYS = (
+    r"\brows?\b|timestamps?|samples?|records?|readings?|\braw\b|measurements?|instead|naive|wrong"
+)
+
+
+def _person_days(answer: str, e: dict) -> list[Check]:
+    d = e["person_days"]
+    right = any(near(answer, d[rule], 0) for rule in DAY_RULES)
+    # Every distinct timestamp counted as a day (or every row), given as person-days.
+    raw = [
+        s
+        for s in sentences(answer)
+        if (near(s, d["raw_timestamps"], 0) or near(s, d["rows"], 0))
+        and mentions(s, _PERSON_DAYS)
+        and not mentions(s, _NOT_DAYS)
+    ]
+    return [
+        Check(
+            "one person-day per participant-date",
+            right and not raw,
+            f"expected {d['local_record_date']:,} (RECORD_DATE's local date), "
+            f"{d['utc_record_date']:,} (its UTC date) or {d['local_start_date']:,} (STARTDATE's "
+            f"date); {d['raw_timestamps']:,} counts each timestamp as a day",
+        ),
+        Check(
+            "day rule stated",
+            mentions(answer, *_DAY_RULE),
+            "which date makes a day, and in what time zone",
+        ),
+    ]
+
+
+_EXPLAINED = r"duplicat|twice|double|inflat|naive|instead|would|without|rows?\b|incl|outside|not in"
+
+
+def _coverage(answer: str, e: dict) -> list[Check]:
+    c = e["cohort_coverage"]
+    lines = sentences(answer)
+    share = near(answer, c["covered"], 0) and (
+        near(answer, c["cohort_n"], 0) or percent_near(answer, c["covered_pct"], 0.1)
+    )
+    trap_share = [
+        s for s in lines
+        if any(percent_near(s, t, 0.1) for t in c["trap_pcts"]) and not mentions(s, _EXPLAINED)
+    ]  # fmt: skip
+    # The cohort's rows (a participant counted twice) as its size.
+    trap_size = [
+        s for s in lines
+        if near(s, c["cohort_rows"], 0) and mentions(s, r"participants?|cohort|denominator|people")
+        and not mentions(s, r"rows?\b|duplicat|twice|distinct|unique|double")
+    ]  # fmt: skip
+    days = any(near(answer, c[f"days_{rule}"], 0) for rule in DAY_RULES)
+    inflated = [
+        s for s in lines
+        if any(near(s, c[f"inflated_{rule}"], 0) for rule in DAY_RULES) and not mentions(s, _EXPLAINED)
+    ]  # fmt: skip
+    return [
+        Check(
+            "cohort share",
+            share and not trap_share and not trap_size,
+            f"expected {c['covered']} of {c['cohort_n']} ({c['covered_pct']:.1f}%): the cohort has "
+            f"{c['cohort_rows']} summary rows for {c['cohort_n']} people, and {c['all_source_ids']} "
+            f"people in the table include {c['all_source_ids'] - c['covered']} outside the cohort",
+        ),
+        Check(
+            "person-days, no duplicate-join inflation",
+            days and not inflated,
+            f"expected {c['days_local_record_date']:,}, {c['days_utc_record_date']:,} or "
+            f"{c['days_local_start_date']:,} person-days (by day rule); joining the duplicate "
+            f"summary row gives {c['inflated_local_record_date']:,} and the like",
+        ),
+        Check("day rule stated", mentions(answer, *_DAY_RULE), "which date makes a day"),
+    ]
+
+
+def _clob_choices(answer: str, e: dict) -> list[Check]:
+    x = e["clob_choices"]
+    both = mentions(answer, r"not at all", r"several days") and mentions(
+        answer, r"never", r"once or twice"
+    )
+    counts = near(answer, x["phq9_rows"], 0) and near(answer, x["substance_rows"], 0)
+    return [
+        Check(
+            "answer-choice sets and their rows",
+            both and counts,
+            f"two sets: the PHQ-9 choices on {x['phq9_rows']} rows and the substance-use choices "
+            f"on {x['substance_rows']} (of {x['rows']})",
+        )
+    ]
+
+
+def _bdate_age(answer: str, e: dict) -> list[Check]:
+    b = e["bdate_age"]
+    mean = near(answer, b["mean_age"], 0.1) or near(answer, b["mean_whole_years"], 0.1)
+    return [
+        Check(
+            "mean age at baseline",
+            mean,
+            f"expected {b['mean_age']:.2f} years ({b['mean_whole_years']:.2f} in whole years), "
+            'from the quoted "Bdate" column and STARTDATE0',
+        ),
+        Check(
+            "enrolled n",
+            near(answer, b["enrolled_n"], 0),
+            f"n = {b['enrolled_n']} enrolled with a date of birth",
+        ),
+    ]
+
+
 # Plans: does the agent pick the kind of analysis the question is, and add
 # only the sections it raises? Graded on the plan as proposed, before anyone
 # edits it.
@@ -593,6 +712,26 @@ TASKS = [
          "Give me the distribution of answers to the PHQ-9 suicidal-thoughts item in the 2025 "
          "cohort's September survey.",
          "a small cell that must be suppressed", _small_cells),
+    Task("person_days", "extraction",
+         "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit "
+         "resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? Count every participant "
+         "and source in the view.",
+         "text timestamps: several a day, some after midnight or another date in UTC", _person_days),
+    Task("cohort_coverage", "analysis",
+         "Take the 2025 cohort to be the enrolled participants in IHS_2025.VW_IHS_PARTICIPANT_SUMMARY "
+         "(those with a STUDY_PARTICIPANT_ID). What share of that cohort has any HealthKit resting "
+         "heart rate data, and how many person-days of it do they contribute in total? Exploratory "
+         "is fine: no plan needed.",
+         "the cohort applied to numerator and denominator: people outside it, a duplicate cohort row",
+         _coverage),
+    Task("clob_choices", "extraction",
+         "In the 2025 cohort's survey dictionary, what distinct sets of answer choices are there, "
+         "and how many dictionary rows use each?",
+         "a CLOB column grouped (TO_CHAR first)", _clob_choices),
+    Task("bdate_age", "extraction",
+         "What was the mean age of the 2025 cohort's enrolled participants when they started the "
+         "baseline survey, from the date of birth in the baseline survey view (VW_BASELINE_SURVEY)?",
+         'a mixed-case quoted column ("Bdate")', _bdate_age),
     Task("plan_describe", "analysis",
          "Describe nightly sleep duration in the 2025 cohort's Fitbit data during the intern year, "
          "month by month.",
