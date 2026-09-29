@@ -428,3 +428,227 @@ class TestSecondReview:
 
 def test_sql_that_isnt_text_is_refused_not_an_error():
     assert "isn't text (U+D800" in rejected("SELECT 1 FROM IHS_2025.PARTICIPANTS -- \ud800")
+
+
+# Long text and mixed-case names, as in the survey dictionary and baseline views.
+SURVEY = {
+    "IHS_2025": {
+        "STG_SURVEYDICTIONARY": {
+            "SURVEYNAME": "VARCHAR2(2000)",
+            "RESULTIDENTIFIER": "VARCHAR2(300)",
+            "QUESTIONTEXT": "CLOB",
+            "ANSWERCHOICES": "CLOB",
+        },
+        "VW_BASELINE_SURVEY": {
+            "PARTICIPANTIDENTIFIER": "VARCHAR2(15)",
+            "Bdate": "DATE",
+            "interest0": "NUMBER",
+            "Black tea": "NUMBER",
+            "PHOTO": "BLOB",
+        },
+    }
+}
+D = "IHS_2025.STG_SURVEYDICTIONARY"
+B = "IHS_2025.VW_BASELINE_SURVEY"
+
+
+def survey_ok(sql: str):
+    return check_sql(sql, allowed_schemas=COHORTS, columns=SURVEY)
+
+
+def survey_rejected(sql: str) -> str:
+    with pytest.raises(SqlRejected) as info:
+        survey_ok(sql)
+    return str(info.value)
+
+
+FIX = "Use TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) there instead"
+
+
+class TestLongText:
+    """Oracle can't compare, sort or group a CLOB: refused before it runs, with
+    the fix (tests/test_sqlcheck_oracle.py runs these on the synthetic database)."""
+
+    @pytest.mark.parametrize(
+        ("sql", "context"),
+        [
+            (f"SELECT DISTINCT QUESTIONTEXT FROM {D}", "SELECT DISTINCT"),
+            (f"SELECT UNIQUE QUESTIONTEXT FROM {D}", "SELECT DISTINCT"),
+            (f"SELECT COUNT(*) FROM {D} GROUP BY QUESTIONTEXT", "GROUP BY"),
+            (f"SELECT COUNT(*) FROM {D} GROUP BY ROLLUP(SURVEYNAME, QUESTIONTEXT)", "GROUP BY"),
+            (f"SELECT SURVEYNAME FROM {D} ORDER BY QUESTIONTEXT", "ORDER BY"),
+            (f"SELECT QUESTIONTEXT FROM {D} ORDER BY 1", "ORDER BY"),
+            (f"SELECT SURVEYNAME, QUESTIONTEXT q FROM {D} ORDER BY q", "ORDER BY"),
+            (f"SELECT ROW_NUMBER() OVER (ORDER BY QUESTIONTEXT) FROM {D}", "ORDER BY"),
+            (f"SELECT ROW_NUMBER() OVER (PARTITION BY QUESTIONTEXT ORDER BY SURVEYNAME) FROM {D}",
+             "PARTITION BY"),
+            (f"SELECT QUESTIONTEXT FROM {D} UNION SELECT ANSWERCHOICES FROM {D}", "UNION"),
+            (f"SELECT QUESTIONTEXT FROM {D} MINUS SELECT ANSWERCHOICES FROM {D}", "UNION"),
+            (f"SELECT QUESTIONTEXT FROM {D} INTERSECT SELECT ANSWERCHOICES FROM {D}", "UNION"),
+            (f"SELECT MIN(QUESTIONTEXT) FROM {D}", "MIN()"),
+            (f"SELECT MAX(QUESTIONTEXT) FROM {D} GROUP BY SURVEYNAME", "MAX()"),
+            (f"SELECT COUNT(DISTINCT QUESTIONTEXT) FROM {D}", "COUNT()"),
+            (f"SELECT STATS_MODE(QUESTIONTEXT) FROM {D}", "STATS_MODE()"),
+            (f"SELECT LAG(QUESTIONTEXT) OVER (ORDER BY SURVEYNAME) FROM {D}", "LAG()"),
+            (f"SELECT 1 FROM {D} WHERE QUESTIONTEXT = 'x'", "a comparison"),
+            (f"SELECT 1 FROM {D} WHERE QUESTIONTEXT <> :q", "a comparison"),
+            (f"SELECT 1 FROM {D} WHERE QUESTIONTEXT IN ('a', 'b')", "a comparison"),
+            (f"SELECT 1 FROM {D} WHERE QUESTIONTEXT NOT IN ('a')", "a comparison"),
+            (f"SELECT 1 FROM {D} WHERE QUESTIONTEXT BETWEEN 'a' AND 'b'", "a comparison"),
+            (f"SELECT 1 FROM {D} WHERE SURVEYNAME IN (SELECT QUESTIONTEXT FROM {D})",
+             "a comparison"),
+            (f"SELECT 1 FROM {D} a JOIN {D} b ON a.SURVEYNAME = b.SURVEYNAME "
+             "AND a.QUESTIONTEXT = b.QUESTIONTEXT", "a comparison"),
+            (f"SELECT CASE QUESTIONTEXT WHEN 'x' THEN 1 END FROM {D}", "a comparison"),
+            (f"SELECT DECODE(QUESTIONTEXT, 'x', 1, 0) FROM {D}", "a comparison"),
+        ],
+    )  # fmt: skip
+    def test_a_clob_where_oracle_cant_use_one(self, sql, context):
+        message = survey_rejected(sql)
+        assert "QUESTIONTEXT" in message and "CLOB" in message and context in message
+        assert "DBMS_LOB.SUBSTR isn't available" in message or "COUNT(" in message
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            f"SELECT DISTINCT SUBSTR(QUESTIONTEXT, 1, 500) FROM {D}",
+            f"SELECT DISTINCT UPPER(QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT TRIM(QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT QUESTIONTEXT || '!' FROM {D}",
+            f"SELECT DISTINCT CONCAT(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT REPLACE(QUESTIONTEXT, 'a', 'b') FROM {D}",
+            f"SELECT DISTINCT NVL(QUESTIONTEXT, 'none') FROM {D}",
+            f"SELECT DISTINCT CASE WHEN SURVEYNAME = 'x' THEN QUESTIONTEXT END FROM {D}",
+            f"SELECT 1 FROM {D} WHERE UPPER(QUESTIONTEXT) = 'X'",
+        ],
+    )
+    def test_functions_of_a_clob_are_still_a_clob(self, sql):
+        message = survey_rejected(sql)
+        assert "made from the CLOB column QUESTIONTEXT" in message
+        assert FIX in message
+
+    def test_through_ctes_subqueries_and_aliases(self):
+        cte = f"WITH d AS (SELECT SUBSTR(QUESTIONTEXT, 1, 500) q FROM {D}) SELECT DISTINCT q FROM d"
+        assert "made from the CLOB column QUESTIONTEXT" in survey_rejected(cte)
+        star = f"WITH d AS (SELECT * FROM {D}) SELECT questiontext FROM d ORDER BY 1"
+        assert "QUESTIONTEXT is a CLOB column" in survey_rejected(star)
+        derived = f"SELECT s.q FROM (SELECT QUESTIONTEXT q FROM {D}) s ORDER BY s.q"
+        assert "ORDER BY" in survey_rejected(derived)
+        listed = f"WITH d (name, q) AS (SELECT SURVEYNAME, QUESTIONTEXT FROM {D}) " \
+            "SELECT name FROM d GROUP BY name, q"  # fmt: skip
+        assert "GROUP BY" in survey_rejected(listed)
+        union = f"SELECT SURVEYNAME t FROM {D} UNION ALL SELECT QUESTIONTEXT FROM {D} ORDER BY 1"
+        assert "ORDER BY" in survey_rejected(union)
+
+    def test_counting_one(self):
+        message = survey_rejected(f"SELECT COUNT(QUESTIONTEXT) FROM {D}")
+        assert "use COUNT(LENGTH(QUESTIONTEXT))" in message
+
+    def test_a_blob_and_a_made_clob(self):
+        assert "LENGTH(PHOTO) and IS NULL work on it" in survey_rejected(
+            f"SELECT DISTINCT PHOTO FROM {B}"
+        )
+        made = survey_rejected(f"SELECT DISTINCT TO_CLOB(SURVEYNAME) FROM {D}")
+        assert made.startswith("TO_CLOB(SURVEYNAME) is a CLOB, and Oracle can't")
+
+    def test_the_query_seen_on_the_real_datalab(self):
+        # Adapted to the synthetic schema: passed the check, and Oracle 19c refused it.
+        seen = (
+            f"SELECT DISTINCT SURVEYNAME, RESULTIDENTIFIER, SUBSTR(QUESTIONTEXT, 1, 500) AS QTEXT "
+            f"FROM {D} WHERE SURVEYNAME LIKE '%Baseline%' ORDER BY SURVEYNAME, RESULTIDENTIFIER"
+        )
+        assert survey_rejected(seen) == (
+            "SUBSTR(QUESTIONTEXT, 1, 500) is a CLOB, made from the CLOB column QUESTIONTEXT, "
+            "and Oracle can't use a CLOB in SELECT DISTINCT: it would refuse the query "
+            "(ORA-00932 or ORA-22848). Use TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) there "
+            "instead: ordinary text of up to 1,000 characters. SUBSTR, UPPER, TRIM or || alone "
+            "still give a CLOB, and DBMS_LOB.SUBSTR isn't available in DataLab. LIKE, IS NULL, "
+            "LENGTH and INSTR work on the CLOB as it is."
+        )
+        survey_ok(
+            seen.replace("SUBSTR(QUESTIONTEXT, 1, 500)", "TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 500))")
+        )
+        retry = f"SELECT SURVEYNAME, MIN(QUESTIONTEXT) FROM {D} GROUP BY SURVEYNAME"
+        assert "in MIN()" in survey_rejected(retry)
+        survey_ok(retry.replace("MIN(QUESTIONTEXT)", "MIN(TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)))"))
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            f"SELECT QUESTIONTEXT, ANSWERCHOICES FROM {D}",
+            f"SELECT SURVEYNAME, QUESTIONTEXT FROM {D} ORDER BY SURVEYNAME",
+            f"SELECT DISTINCT TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) FROM {D}",
+            f"SELECT DISTINCT CAST(SUBSTR(QUESTIONTEXT, 1, 1000) AS VARCHAR2(4000)) FROM {D}",
+            f"SELECT DISTINCT TO_CHAR(QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT LENGTH(QUESTIONTEXT), INSTR(QUESTIONTEXT, 'a') FROM {D}",
+            f"SELECT 1 FROM {D} WHERE QUESTIONTEXT LIKE '%sleep%'",
+            f"SELECT 1 FROM {D} WHERE QUESTIONTEXT NOT LIKE '%sleep%'",
+            f"SELECT 1 FROM {D} WHERE REGEXP_LIKE(QUESTIONTEXT, 'sleep', 'i')",
+            f"SELECT 1 FROM {D} WHERE QUESTIONTEXT IS NULL OR ANSWERCHOICES IS NOT NULL",
+            f"SELECT 1 FROM {D} WHERE LENGTH(QUESTIONTEXT) > 10",
+            f"SELECT 1 FROM {D} WHERE TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 100)) = 'x'",
+            f"SELECT QUESTIONTEXT FROM {D} UNION ALL SELECT ANSWERCHOICES FROM {D}",
+            f"SELECT COUNT(*), COUNT(LENGTH(QUESTIONTEXT)) FROM {D}",
+            f"SELECT SURVEYNAME, COUNT(*) FROM {D} GROUP BY SURVEYNAME ORDER BY 2",
+            f"SELECT NVL(QUESTIONTEXT, ANSWERCHOICES) FROM {D}",
+            f"SELECT DISTINCT INITCAP(SURVEYNAME), NVL2(QUESTIONTEXT, 'y', 'n') FROM {D}",
+            f"SELECT LISTAGG(TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 50)), '; ') "
+            f"WITHIN GROUP (ORDER BY SURVEYNAME) FROM {D}",
+            f"WITH d AS (SELECT TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 500)) q FROM {D}) "
+            "SELECT DISTINCT q FROM d ORDER BY q",
+            f"SELECT q FROM (SELECT QUESTIONTEXT q, SURVEYNAME s FROM {D}) ORDER BY s",
+            f"SELECT 1 FROM {D} a WHERE EXISTS (SELECT 1 FROM {D} b WHERE b.QUESTIONTEXT IS NULL)",
+        ],
+    )
+    def test_what_oracle_does_with_a_clob(self, sql):
+        survey_ok(sql)
+
+    def test_with_types_it_cant_work_out_nothing_is_refused(self):
+        # No catalog: nothing is known to be a CLOB.
+        ok(f"SELECT DISTINCT QUESTIONTEXT FROM {D} ORDER BY QUESTIONTEXT")
+
+
+class TestSpelling:
+    """Oracle upper-cases an unquoted name, and a quoted one must match exactly."""
+
+    NEEDS_QUOTES = '"Bdate" is spelled with lower-case letters, so Oracle needs it in double quotes, exactly: "Bdate".'  # noqa: E501
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            f"SELECT Bdate FROM {B}",
+            f"SELECT b.Bdate FROM {B} b",
+            f"SELECT PARTICIPANTIDENTIFIER FROM {B} WHERE BDATE IS NOT NULL",
+            f"SELECT COUNT(*) FROM {B} WHERE EXTRACT(YEAR FROM bdate) < 2000",
+            f'SELECT "BDATE" FROM {B}',
+            f'SELECT "bdate" FROM {B}',
+            f"WITH v AS (SELECT * FROM {B}) SELECT bdate FROM v",
+        ],
+    )
+    def test_a_mixed_case_name_needs_its_quotes(self, sql):
+        assert survey_rejected(sql) == self.NEEDS_QUOTES
+
+    def test_spaces_and_lower_case(self):
+        assert '"Black tea" is spelled with lower-case letters' in survey_rejected(
+            f'SELECT "BLACK TEA" FROM {B}'
+        )
+        assert '"interest0" is spelled' in survey_rejected(f"SELECT interest0 FROM {B}")
+
+    def test_a_quoted_upper_case_name_must_match_too(self):
+        message = survey_rejected(f'SELECT "participantidentifier" FROM {B}')
+        assert "Write PARTICIPANTIDENTIFIER" in message
+
+    @pytest.mark.parametrize(
+        "sql",
+        [
+            f'SELECT "Bdate", "interest0", "Black tea" FROM {B}',
+            f'SELECT b."Bdate" FROM {B} b WHERE b."Bdate" IS NOT NULL',
+            f"SELECT participantidentifier, PARTICIPANTIDENTIFIER, ParticipantIdentifier FROM {B}",
+            f'SELECT "PARTICIPANTIDENTIFIER" FROM {B}',
+        ],
+    )
+    def test_right_spellings(self, sql):
+        survey_ok(sql)
+
+    def test_an_unknown_name_keeps_the_general_message(self):
+        assert "could not be resolved" in survey_rejected(f"SELECT NOT_A_COLUMN FROM {B}")

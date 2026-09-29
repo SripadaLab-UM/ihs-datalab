@@ -49,6 +49,11 @@ decides. It never changes the knowledge base by itself.
 - There is one schema per cohort year (`IHS_2017`, `IHS_2021` … `IHS_2026`).
   Always qualify tables with their schema. Tables and columns differ between
   years, so check with `describe_table` before relying on a column.
+- Write a column spelled with lower-case letters in double quotes, exactly
+  (`"Bdate"`, `"interest0"`). A CLOB (long text) column can't go in `SELECT
+  DISTINCT`, `GROUP BY`, `ORDER BY`, `UNION`, `MIN`/`MAX`/`COUNT` or a
+  comparison; use `TO_CHAR(SUBSTR(col, 1, 1000))` there (the `sql-extraction`
+  skill has more).
 - `propose_plan` sends an analysis plan to the person for approval (see
   your mode's instructions for when). An approved plan is frozen.
 - Your work may be reviewed against a rigor checklist after you answer.

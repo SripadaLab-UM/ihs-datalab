@@ -77,6 +77,46 @@ function more(items: string[], shown = 3): Chip[] {
   return chips;
 }
 
+// Why a query didn't run, for its chip. The error comes through the agent's
+// container, so only an Oracle code is taken from it: the words are DataLab's.
+// The backend starts the error with who refused it (data/agent_tools.py).
+const DATES = "a value couldn't be read as a date";
+const TOO_LONG = "a text result is too long";
+const ORACLE_REASONS: Record<string, string> = {
+  "00904": "a column name Oracle doesn't know (check its spelling and quotes)",
+  "00932": "inconsistent data types, often a CLOB column sorted, grouped or compared",
+  "22848": "a CLOB column can't be sorted, grouped or compared",
+  "22849": "a CLOB column can't be used in that function",
+  "00942": "a table that doesn't exist in that cohort, or can't be read",
+  "01722": "text that isn't a number was read as one",
+  "01858": DATES, "01861": DATES, "01841": DATES, "01843": DATES, "01847": DATES, "01839": DATES, "01830": DATES, "01840": DATES,
+  "01476": "division by zero",
+  "00979": "not a GROUP BY expression",
+  "00937": "a column beside an aggregate needs GROUP BY",
+  "00934": "an aggregate isn't allowed there",
+  "01427": "a one-value subquery returned more than one row",
+  "00918": "a column name is in more than one table",
+  "12899": TOO_LONG, "01489": TOO_LONG,
+}; // prettier-ignore
+
+export type QueryRefusal = "check" | "database" | "other";
+
+export function refusedBy(error: string | null): QueryRefusal {
+  if (error && /SQL check refused/.test(error)) return "check";
+  if (error && (/database refused/.test(error) || /\bORA-\d{5}\b/.test(error))) return "database";
+  return "other";
+}
+
+export function queryRefusal(error: string | null): string {
+  const by = refusedBy(error);
+  if (by === "check") return "the SQL check refused it";
+  if (by === "other") return "it didn't run";
+  const code = /\bORA-(\d{5})\b/.exec(error ?? "")?.[1];
+  if (!code) return "the database refused it";
+  const why = ORACLE_REASONS[code];
+  return why ? `the database refused it: ORA-${code} — ${why}` : `the database refused it: ORA-${code}`;
+}
+
 function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | null {
   const args = (item.arguments ?? {}) as Record<string, unknown>;
   const s = item.summary ?? {};
@@ -141,7 +181,7 @@ function toolStep(item: Extract<Item, { kind: "tool" }>, live: boolean): Step | 
         icon: "db",
         title: tables.length ? `Queried ${tables.map(shortTable).slice(0, 2).join(" and ")}` : "Ran a query",
         chips: failed
-          ? [{ text: "the database refused it", tone: "bad" }]
+          ? [{ text: queryRefusal(item.error), tone: "bad" }]
           : rows === null
             ? []
             : [{ text: plural(rows, "row") }, { text: "read-only", tone: "good" }],

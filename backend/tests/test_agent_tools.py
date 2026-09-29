@@ -13,6 +13,8 @@ from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from datalab.app import create_app
+from datalab.data.catalog import Catalog, Column, TableInfo
+from datalab.data.oracle import QueryFailed
 from datalab.sessions.tokens import SessionAccess
 from tests.conftest import FakeDatabase, live_server
 
@@ -128,6 +130,85 @@ async def test_rejected_sql_is_a_tool_error(server, tmp_path):
         result = await session.call_tool("query", {"sql": "DELETE FROM IHS_2025.T"})
     assert result.is_error
     assert "Only SELECT" in result.content[0].text
+    assert database.calls == []
+
+
+def _with_survey_tables(catalog: Catalog) -> None:
+    survey = [
+        TableInfo(
+            "IHS_2025",
+            "VW_BASELINE_SURVEY",
+            "VIEW",
+            columns=[Column("PARTICIPANTIDENTIFIER", "VARCHAR2(15)"), Column("Bdate", "DATE")],
+        ),
+        TableInfo(
+            "IHS_2025",
+            "STG_SURVEYDICTIONARY",
+            "TABLE",
+            columns=[Column("SURVEYNAME", "VARCHAR2(2000)"), Column("QUESTIONTEXT", "CLOB")],
+        ),
+    ]
+    catalog.replace(Catalog([*(catalog.get(n) for n in _SAMPLE_TABLES), *survey]))  # type: ignore[misc]
+
+
+_SAMPLE_TABLES = (
+    "IHS_2025.VFITBITDAILYDATA",
+    "IHS_2024.VFITBITDAILYDATA",
+    "IHS_2025.VW_DAILY_MOOD",
+)
+
+
+async def test_describe_marks_quoted_names_and_long_text(server, catalog, tmp_path):
+    base_url, services, _ = server
+    _with_survey_tables(catalog)
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        baseline = payload(
+            await session.call_tool("describe_table", {"table": "IHS_2025.VW_BASELINE_SURVEY"})
+        )
+        dictionary = payload(
+            await session.call_tool("describe_table", {"table": "IHS_2025.STG_SURVEYDICTIONARY"})
+        )
+        hits = payload(await session.call_tool("search_catalog", {"query": "bdate"}))
+    plain, bdate = baseline["columns"]
+    assert "write_as" not in plain and "sql_note" not in plain
+    assert bdate["write_as"] == '"Bdate"'
+    assert bdate["sql_note"] == 'quoted: exact case, always write it as "Bdate"'
+    assert "TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000))" in dictionary["columns"][1]["sql_note"]
+    assert dictionary["columns"][1]["sql_note"].startswith("CLOB (long text)")
+    assert hits[0]["matching_columns"] == ['"Bdate"']
+
+
+async def test_who_refused_a_query_is_in_its_error(server, catalog, tmp_path, monkeypatch):
+    base_url, services, database = server
+    _with_survey_tables(catalog)
+
+    def refuse(*args, **kwargs):
+        raise QueryFailed("ORA-00932: inconsistent data types. Often a CLOB (long text) column")
+
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        checked = await session.call_tool(
+            "query", {"sql": "SELECT DISTINCT QUESTIONTEXT FROM IHS_2025.STG_SURVEYDICTIONARY"}
+        )
+        spelled = await session.call_tool(
+            "query", {"sql": "SELECT Bdate FROM IHS_2025.VW_BASELINE_SURVEY"}
+        )
+        monkeypatch.setattr(database, "extract_to_csv", refuse)
+        refused = await session.call_tool(
+            "query", {"sql": "SELECT SURVEYNAME FROM IHS_2025.STG_SURVEYDICTIONARY"}
+        )
+    # (The MCP library puts "Error executing tool query: " in front.)
+    assert checked.is_error and (
+        "DataLab's SQL check refused this query, so it didn't run: QUESTIONTEXT is a CLOB column"
+        in checked.content[0].text
+    )
+    assert spelled.content[0].text.endswith(
+        '"Bdate" is spelled with lower-case letters, so Oracle needs it in double quotes, '
+        'exactly: "Bdate".'
+    )
+    assert refused.is_error and refused.content[0].text.endswith(
+        "The database refused this query: ORA-00932: inconsistent data types. "
+        "Often a CLOB (long text) column"
+    )
     assert database.calls == []
 
 

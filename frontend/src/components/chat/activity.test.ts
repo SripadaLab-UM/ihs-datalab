@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { activityRows, answerOf, describeCommand, nowLine, shortTable, tablesIn } from "./activity";
+import { activityRows, answerOf, describeCommand, nowLine, queryRefusal, refusedBy, shortTable, tablesIn } from "./activity";
 import type { Item } from "./transcript";
 
 // Commands as Codex really sends them (from practice sessions, synthetic data).
@@ -70,6 +70,28 @@ describe("activityRows", () => {
     expect(join.type === "step" && join.step.tone).toBe("attn"); // it has a heads-up
     const query = rows[4];
     expect(query.type === "step" && query.step.chips.map((c) => c.text)).toEqual(["1 row", "read-only"]);
+  });
+
+  it("says who refused a query, with the Oracle code and DataLab's own words for it", () => {
+    const failedWith = (error: string) => {
+      const row = activityRows([{ ...(tool("query", { sql: "SELECT 1 FROM IHS_2025.X" }, null, "failed") as object), error } as Item], false)[0];
+      return row.type === "step" ? row.step.chips.map((c) => c.text) : [];
+    }; // prettier-ignore
+    expect(failedWith('{"message":"The database refused this query: ORA-00932: inconsistent data types. Often a CLOB"}')).toEqual([
+      "the database refused it: ORA-00932 — inconsistent data types, often a CLOB column sorted, grouped or compared",
+    ]);
+    expect(failedWith("The database refused this query: ORA-00904: a name in the query isn't a column")).toEqual([
+      "the database refused it: ORA-00904 — a column name Oracle doesn't know (check its spelling and quotes)",
+    ]);
+    // A code DataLab has no words for is shown as the code alone: none of Oracle's text.
+    expect(failedWith("The database refused this query: ORA-12345: something 'secret-value'")).toEqual(["the database refused it: ORA-12345"]);
+    // The SQL check's refusal names an ORA code it avoided: it's still the check's.
+    expect(failedWith("DataLab's SQL check refused this query, so it didn't run: QUESTIONTEXT is a CLOB column (ORA-00932 or ORA-22848).")).toEqual([
+      "the SQL check refused it",
+    ]);
+    expect(failedWith("The query ran longer than 300 seconds and was cancelled.")).toEqual(["it didn't run"]);
+    expect(queryRefusal(null)).toBe("it didn't run");
+    expect(refusedBy("DataLab's SQL check refused this query, so it didn't run: x")).toBe("check");
   });
 
   it("marks a failed query, and a running step as live", () => {

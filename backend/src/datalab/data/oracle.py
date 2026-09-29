@@ -26,6 +26,7 @@ from typing import Any
 import oracledb
 
 from datalab.config import OracleSettings, QueryLimits
+from datalab.data.oracle_errors import explain
 
 # Return CLOBs as strings and dates as datetimes, so rows can be written as CSV.
 oracledb.defaults.fetch_lobs = False
@@ -185,7 +186,7 @@ class OracleDatabase:
                     f"The query ran longer than {self._limits.deadline_seconds:.0f} seconds "
                     "and was cancelled."
                 ) from error
-            raise QueryFailed(_oracle_message(error)) from error
+            raise QueryFailed(explain(error, sql)) from error
         except BaseException:
             partial.unlink(missing_ok=True)
             raise

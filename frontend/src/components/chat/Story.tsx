@@ -5,10 +5,16 @@ import { CodeBlock } from "@/components/code/CodeBlock";
 import { Button, Chip, Icon } from "@/components/ui";
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
-import type { Detail, Row, Step } from "./activity";
-import { shortTable, unwrapShell as unwrap } from "./activity";
+import type { Detail, QueryRefusal, Row, Step } from "./activity";
+import { refusedBy, shortTable, unwrapShell as unwrap } from "./activity";
 import { Markdown } from "./Markdown";
 import { ShownStepContext, stepElementId } from "./showStep";
+
+const REFUSED: Record<QueryRefusal, string> = {
+  check: "DataLab's SQL check refused this query before it ran. Nothing was read.",
+  database: "The database refused this query. Nothing was read.",
+  other: "This query didn't run. Nothing was read.",
+};
 
 /**
  * The agent's work, told as a story: plain sentences on hairline rules, each
@@ -377,7 +383,7 @@ export function DetailView({ detail }: { detail: Detail }) {
         <>
           <Caption>
             {detail.error
-              ? "The database refused this query. Nothing was read."
+              ? REFUSED[refusedBy(detail.error)]
               : `A read-only query${detail.rows === null ? "" : `: ${detail.rows.toLocaleString()} row${detail.rows === 1 ? "" : "s"}`}. It's listed under Queries.`}
           </Caption>
           {detail.sql ? (

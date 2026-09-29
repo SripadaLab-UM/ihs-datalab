@@ -27,12 +27,25 @@ Query the IHS database carefully and show your work.
    (`TO_TIMESTAMP_TZ`, `FROM_TZ`, `NEW_TIME`), text and regular expressions,
    `LISTAGG`, statistics (`MEDIAN`, `PERCENTILE_CONT`, `CORR`, `REGR_*`,
    `STATS_*`), and window functions. Not allowed: package calls such as
-   `DBMS_LOB.SUBSTR` (use `SUBSTR`, which works on long text), XML functions,
-   `SYS_CONTEXT`, and functions defined in the database.
+   `DBMS_LOB.SUBSTR`, XML functions, `SYS_CONTEXT`, and functions defined in
+   the database.
    A `TIMESTAMP WITH TIME ZONE` column comes back in the CSV as its local
    time without the offset, so values in different offsets can't be compared
    or subtracted there. Select `SYS_EXTRACT_UTC(col)` for the instant in UTC,
    or `TO_CHAR(col, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')` to keep the offset.
-10. If a query is rejected (it isn't a single SELECT, or it's too large), read
-    the message, narrow the query, and try again. Don't try to get around a
-    limit; ask the person instead.
+10. Column names are exact. A column spelled with lower-case letters (the
+    survey views' `"Bdate"`, `"interest0"`, `"Black tea"`) must be written in
+    double quotes, exactly as `describe_table` shows it: unquoted, `Bdate` means
+    `BDATE`, which doesn't exist. Upper-case names need no quotes.
+11. CLOB columns (long text, such as `QUESTIONTEXT` and `ANSWERCHOICES` in the
+    survey dictionaries) can be selected and searched with `LIKE`, `IS NULL`,
+    `LENGTH` and `INSTR`, but Oracle can't use them in `SELECT DISTINCT`,
+    `GROUP BY`, `ORDER BY`, `PARTITION BY`, `UNION` (without `ALL`),
+    `MIN`/`MAX`/`COUNT`, `=`/`IN`/`BETWEEN` or a join. `SUBSTR`, `UPPER`,
+    `TRIM` and `||` still return a CLOB. Convert first:
+    `TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000))` is ordinary text of up to 1,000
+    characters. To count them, use `COUNT(LENGTH(col))`.
+12. If a query is rejected (it isn't a single SELECT, or it's too large), read
+    the message, narrow the query, and try again. If the database refuses it,
+    the message gives the Oracle code and what to change. Don't try to get
+    around a limit; ask the person instead.

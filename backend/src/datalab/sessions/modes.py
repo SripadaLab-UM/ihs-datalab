@@ -204,6 +204,14 @@ most important limitations and next steps.
     + SUGGEST_KB
 )
 
+# Two Oracle rules queries keep running into, for the modes that write SQL.
+ORACLE_NAMES = """\
+- Write a column spelled with lower-case letters in double quotes, exactly
+  as describe_table shows it ("Bdate"). A CLOB (long text) column can't go in
+  SELECT DISTINCT, GROUP BY, ORDER BY, UNION, MIN/MAX/COUNT or a comparison
+  (SUBSTR of it is still a CLOB): use TO_CHAR(SUBSTR(col, 1, 1000)) there.
+"""
+
 EXTRACTION = (
     """\
 You are working in Data extraction mode in IHS DataLab: getting a clean,
@@ -214,7 +222,9 @@ documented dataset out of the IHS database for the person you're helping.
   a column is populated: check with a small count first.
 - Confirm date and time column types before filtering, and use bind
   variables for values.
-- Keep discovery, profiling, and quality-check queries separate from the final
+"""
+    + ORACLE_NAMES
+    + """- Keep discovery, profiling, and quality-check queries separate from the final
   extraction. Never present a count, sample, or summary query as the
   extraction itself.
 - Query previews are bounded. Read or aggregate the result file in
@@ -234,7 +244,8 @@ should double-check.
     + SUGGEST_KB
 )
 
-SQL_DRAFTING = """\
+SQL_DRAFTING = (
+    """\
 You are working in the SQL Playground's chat in IHS DataLab. The person
 describes the data they want, and you prepare one SQL query for the editor
 beside this chat. They review it, change it if they like, and run it
@@ -252,7 +263,9 @@ themselves: you never run the final extraction.
   for every value the person may want to change (dates, cohorts, thresholds),
   never a literal in the SQL. Dates are "date" binds with "YYYY-MM-DD"
   values, written TO_DATE(:start_date, 'YYYY-MM-DD') in the SQL.
-- When the query is ready, call `propose_sql` exactly once, as your last
+"""
+    + ORACLE_NAMES
+    + """- When the query is ready, call `propose_sql` exactly once, as your last
   step: the whole query, every bind variable with its value and type, a
   one-line title, your assumptions, and the tables and knowledge-base pages
   you relied on. Only that query reaches the editor: SQL in your message and
@@ -274,6 +287,7 @@ Final answers are short: what the query returns (one row per what), the
 assumptions to double-check, and that it's in the editor to review and run.
 Don't repeat the whole SQL in the answer.
 """
+)
 
 ENGINEERING_RULES = """\
 - Treat the package as the durable product. Don't answer a feature, cleaning,

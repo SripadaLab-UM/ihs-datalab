@@ -24,6 +24,7 @@ from sqlglot.optimizer.scope import Scope, find_all_in_scope, traverse_scope
 from sqlglot.schema import MappingSchema
 from sqlglot.tokenizer_core import Token, TokenType
 
+from datalab.data.sql_lobs import POSITION, lob_problem, sql_name
 from datalab.textcheck import lone_surrogate, size_text
 
 MAX_SQL_BYTES = 64 * 1024
@@ -396,7 +397,9 @@ def _check_columns(
             # in, qualify turns it into a bare column named after the output it
             # points to, which for SELECT 'x' is X: not a name ORDER BY may use.
             if isinstance(ordered, exp.Ordered) and _is_position(ordered.this):
-                ordered.this.replace(exp.null())
+                position = exp.null()
+                position.meta[POSITION] = int(ordered.this.name)
+                ordered.this.replace(position)
     schema = MappingSchema({**_DUAL, **columns}, dialect="oracle", normalize=False)
     try:
         tree = qualify(
@@ -408,6 +411,8 @@ def _check_columns(
             infer_schema=False,
         )
     except OptimizeError as error:
+        if (spelling := _spelling_problem(statement, columns)) is not None:
+            raise SqlRejected(spelling) from error
         detail = str(error).split(". Line:")[0]
         raise SqlRejected(
             f"{detail}. Every name in a query must be a column of a table it reads "
@@ -416,6 +421,46 @@ def _check_columns(
             "WITH query, qualify its columns with the query's name (r.n)."
         ) from error
     _require_resolved_columns(tree, generated_names=generated_names)
+    if (lob := lob_problem(tree, columns)) is not None:
+        raise SqlRejected(lob)
+
+
+def _spelling_problem(statement: exp.Expr, columns: ColumnIndex) -> str | None:
+    """When a name that isn't a column matches one only by letter case: what
+    to write instead. Oracle upper-cases an unquoted name (Bdate is BDATE),
+    and a quoted one must match exactly, so a column stored with lower-case
+    letters ("Bdate", "Black tea") must be written in double quotes, exactly.
+    Only explains a refusal: it never lets a name through."""
+    names: set[str] = set()
+    for table in statement.find_all(exp.Table):
+        names |= set(columns.get(table.db.upper(), {}).get(table.name.upper(), {}))
+    by_upper: dict[str, list[str]] = {}
+    for name in sorted(names):
+        by_upper.setdefault(name.upper(), []).append(name)
+    for column in statement.find_all(exp.Column):
+        identifier = column.this
+        if not isinstance(identifier, exp.Identifier):
+            continue
+        quoted = bool(identifier.args.get("quoted"))
+        read_as = identifier.name if quoted else identifier.name.upper()
+        if read_as in names:
+            continue
+        spelled = [n for n in by_upper.get(identifier.name.upper(), []) if n != read_as]
+        if not spelled:
+            continue
+        right = sql_name(spelled[0])
+        if right.startswith('"'):
+            why = (
+                "is spelled with lower-case letters"
+                if any(c.islower() for c in spelled[0])
+                else "isn't a plain Oracle name"
+            )
+            return f"{right} {why}, so Oracle needs it in double quotes, exactly: {right}."
+        return (
+            f"\"{identifier.name}\" doesn't match the column's spelling: in double quotes a "
+            f'name must match exactly. Write {right} (without quotes, or as "{right}").'
+        )
+    return None
 
 
 def _require_resolved_columns(tree: exp.Expr, *, generated_names: bool) -> None:
