@@ -225,11 +225,20 @@ class SessionManager:
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
-            note = self._workspace_note(conversation.id)
+            # Express, as it is now, for the whole of this turn (not a later switch).
+            express = conversation.express
+            if express and effort is None:
+                effort = "low"
+            self._tokens.set_express(conversation.id, express)
+            note = self._express_note(conversation) + self._workspace_note(conversation.id)
             self._store.append(
                 conversation.id,
                 "user_message",
-                {"text": text, **({"continues": True} if continues else {})},
+                {
+                    "text": text,
+                    **({"continues": True} if continues else {}),
+                    **({"express": True} if express else {}),
+                },
             )
             turn = self._store.count(conversation.id, "user_message")
             self._turns[conversation.id] = asyncio.create_task(
@@ -265,6 +274,7 @@ class SessionManager:
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
+            self._tokens.set_express(conversation.id, conversation.express)
             turn = self._store.count(conversation.id, "user_message")
             self._turns[conversation.id] = asyncio.create_task(
                 self._rerun_review(conversation.id, runtime, asked, turn)
@@ -481,6 +491,7 @@ class SessionManager:
         await self._shutdown(conversation_id)
         runtime_paths = self.paths(conversation_id)
         await self._containers_for(conversation_id, "data").remove()
+        self._tokens.set_express(conversation_id, False)
         self._store.delete(conversation_id)
         shutil.rmtree(runtime_paths.root, ignore_errors=True)
 
@@ -595,6 +606,14 @@ class SessionManager:
                     {"path": attachment.container_path, "reason": problem},
                 )
         return mount_args(mountable)
+
+    def _express_note(self, conversation: Conversation) -> str:
+        """Tell the agent this message is an Express one, or that Express is off
+        again after one (modes.py: EXPRESS). Before the message is logged."""
+        if conversation.express:
+            return modes.express_note(conversation.mode)
+        asked = self._store.last(conversation.id, "user_message")
+        return modes.EXPRESS_OFF if asked is not None and asked.data.get("express") else ""
 
     def _workspace_note(self, conversation_id: str) -> str:
         """Tell the agent what changed in its files since its last turn."""

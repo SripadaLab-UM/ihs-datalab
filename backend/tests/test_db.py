@@ -73,6 +73,7 @@ def test_0011_keeps_existing_folders_and_deliveries(tmp_path):
     assert db.migrate(connection, app_version="0.0.0") == [
         "0011_export_folders.sql",
         "0012_kb_edits.sql",
+        "0013_express.sql",
     ]
     [folder] = connection.execute("SELECT * FROM export_destinations").fetchall()
     assert (folder["name"], folder["key"], folder["offered"]) == (

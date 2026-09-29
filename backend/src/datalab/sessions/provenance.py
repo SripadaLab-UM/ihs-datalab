@@ -163,6 +163,7 @@ class Turn:
     number: int  # as checkpoints count them: the nth question
     started_at: str
     ended_at: str | None = None  # when the next turn started, if one has
+    express: bool = False  # asked with Express on (its question's event says)
     commands: list[Command] = field(default_factory=list)
     changed: list[str] = field(default_factory=list)  # files the agent edited directly
     # Its rigor review's own work: not the turn's, but it can change files too.
@@ -181,7 +182,7 @@ def turns_from_events(events: Iterable[Any]) -> dict[int, Turn]:
         if event.type == "user_message":
             if turn is not None:
                 turn.ended_at = event.created_at
-            turn = Turn(len(turns) + 1, event.created_at)
+            turn = Turn(len(turns) + 1, event.created_at, express=_express(event))
             turns[turn.number] = turn
             reviewing = False
         elif turn is not None:
@@ -198,10 +199,14 @@ def one_turn(events: Iterable[Any], number: int, ended_at: str | None = None) ->
         if event.type == "user_message":
             if turn is not None:
                 break
-            turn = Turn(number, event.created_at, ended_at)
+            turn = Turn(number, event.created_at, ended_at, express=_express(event))
         elif turn is not None:
             reviewing = _add(turn, event, reviewing)
     return turn
+
+
+def _express(event: Any) -> bool:
+    return bool((event.data or {}).get("express"))
 
 
 def _add(turn: Turn, event: Any, reviewing: bool) -> bool:
@@ -297,6 +302,7 @@ def file_chain(
         "found": True,
         "checkpoint": made.number,
         "turn": made.turn,
+        "express": False,
         "in_review": in_review,
         "turn_not_saved": turn_not_saved,
         "as_of": versions[-1].number,  # the checkpoint whose version of the file this is
@@ -314,6 +320,7 @@ def file_chain(
             "which no turn made: a restore, or a file already there."
         )
         return chain
+    chain["express"] = turn.express
 
     if turn_not_saved:
         commands = turn.commands + turn.review_commands

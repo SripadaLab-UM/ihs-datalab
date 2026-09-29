@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from datalab.sessions.tokens import EXPRESS_OFF_TOOLS as _EXPRESS_OFF_TOOLS
 from datalab.sessions.tokens import OPT_IN_TOOLS as _OPT_IN_TOOLS
 from datalab.sessions.tokens import TAB_TOOLS as _TAB_TOOLS
 from datalab.sessions.tokens import SessionKind
@@ -691,3 +692,58 @@ KNOWLEDGE = (
 
 def instructions(mode_id: str) -> str:
     return MODES[mode_id].instructions + KNOWLEDGE
+
+
+# --- Express ----------------------------------------------------------------
+# The Express switch (per conversation, any mode): quick answers. It isn't a
+# mode and it isn't in the mode's instructions: DataLab puts EXPRESS in front
+# of each message asked with Express on, and EXPRESS_OFF in front of the first
+# one after it's switched off, so a switch takes effect on the next message
+# without restarting the agent. The tools that wait for the person
+# (tokens.EXPRESS_OFF_TOOLS) are refused by DataLab's data tools meanwhile.
+# The effort is low unless the person picks another. Data access, the SQL
+# check, the query log, results files and export rules don't change.
+
+EXPRESS_OFF_TOOLS = _EXPRESS_OFF_TOOLS
+
+# Modes whose work is a proposal a person reviews before it's saved (or, for
+# SQL drafting, runs): Express keeps that review and only asks for brevity.
+REVIEWED_MODES = frozenset({"sql", "pipelines", "workflows", "knowledge"})
+
+EXPRESS = """\
+[DataLab: Express is on for this message. The person wants a quick, direct
+answer. This changes how you work, not what you may access or the checks
+DataLab applies, and for this message it overrides your mode's guidance on
+plans, pilots and asking before going on:
+- Answer directly. Don't propose an analysis plan (propose_plan is off), don't
+  stop after a pilot to ask about a full run, and don't ask "shall I
+  proceed?" or for any other confirmation.
+- Ask only if the question is genuinely ambiguous: readings that would give
+  materially different answers. Otherwise take the obvious reading and say in
+  one line which one you took.
+- Be brief: the number or table first, then one line on how you got it (the
+  tables, filters and sample size). No report file or long write-up unless
+  asked. DataLab shows the queries itself, collapsed under the answer.
+- The research helper is off: work from the catalog, the knowledge base and
+  the data.
+- Everything else still holds: the same data and tools, the SQL check,
+  small-cell and privacy rules, and labelling unplanned analysis
+  exploratory.
+"""
+
+EXPRESS_REVIEWED = """\
+- Your work here is still a proposal the person reviews before it's saved or
+  run: prepare it exactly as you would otherwise (complete and checked), and
+  only keep what you say about it short.
+"""
+
+EXPRESS_OFF = (
+    "[DataLab: Express is off again from this message: work as your mode's "
+    "instructions say, with their plans, pilots and confirmations.]\n\n"
+)
+
+
+def express_note(mode_id: str) -> str:
+    """What goes in front of a message asked with Express on, in this mode."""
+    reviewed = EXPRESS_REVIEWED if mode_id in REVIEWED_MODES else ""
+    return EXPRESS + reviewed + "]\n\n"
