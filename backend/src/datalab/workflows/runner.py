@@ -24,42 +24,43 @@ the original definition on the original extracts, with the original image,
 seed and pipeline library; before it starts it says what can't be pinned
 (the image gone, another platform, DataLab's wrapper changed), and afterwards
 whether every output matched byte for byte.
+
+This file runs the steps. A step's files and result (the step contract) are
+stepfiles.py's, delivery is delivery.py's, what Replay checks and compares is
+replay.py's, and the plan they share is runstate.py's.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import csv
 import getpass
 import hashlib
 import json
 import logging
-import math
 import os
-import re
 import secrets
 import shutil
-import stat
 import subprocess
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from datalab import __version__, export_folders, exports
+from datalab import exports as exports  # tests patch exports.export through here
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog
 from datalab.data.oracle import QueryFailed
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import SqlRejected
-from datalab.exports import DestinationStore, ExportError, ExportSource
-from datalab.sessions.titles import scrub_title
+from datalab.exports import DestinationStore
+from datalab.workflows.delivery import Delivery
+
+# Moved to delivery.py; still importable from here, where tests look.
+from datalab.workflows.delivery import delivery_message as delivery_message
+from datalab.workflows.delivery import delivery_title as delivery_title
 from datalab.workflows.model import (
     ORACLE_INPUT,
-    WORKFLOW_NAME,
     BuiltinQc,
     CustomQc,
     Pipeline,
@@ -75,10 +76,8 @@ from datalab.workflows.model import (
     WorkflowInvalid,
     bind_value,
     extract_sql,
-    load_pipeline_file,
     load_workflow,
     resolve_params,
-    resolve_ref,
     sql_binds,
     step_inputs,
     step_kind,
@@ -86,6 +85,14 @@ from datalab.workflows.model import (
 )
 from datalab.workflows.qc import builtin_qc
 from datalab.workflows.records import FINISHED, InputsGone, RunStore, now
+from datalab.workflows.replay import (
+    ReplayCheck,
+    compare,
+    kept_path,
+    kept_pipelines,
+    replay_check,
+)
+from datalab.workflows.runstate import Output, Plan, StepFailed
 from datalab.workflows.sandbox import (
     RNG_KIND,
     RUNTIME_ENV,
@@ -100,16 +107,27 @@ from datalab.workflows.source import (
     SourceError,
     WorkflowFile,
     WorkflowFolder,
-    git_blob_id,
     tree_sha256,
+)
+from datalab.workflows.stepfiles import (
+    WRAPPER_NAME,
+    collect,
+    container_failure,
+    copy_checked,
+    copy_tree,
+    file_facts,
+    input_ref,
+    lookup_output,
+    package_name,
+    read_result,
+    remove_quietly,
+    runner_version,
+    spec_facts,
+    wrapper_bytes,
 )
 
 log = logging.getLogger(__name__)
 
-MAX_RESULT_BYTES = 64 * 1024
-MAX_MESSAGE_CHARS = 500
-MAX_MESSAGES = 50
-WRAPPER_NAME = "run_step.R"
 # A test run's `workflow_path`: a draft, not a file in the folder (see start_test).
 DRAFT_PREFIX = "draft:"
 # How many test runs of one draft are kept (the newest).
@@ -126,114 +144,6 @@ class ReplayNotExact(RuntimeError):
     def __init__(self, reasons: list[str]) -> None:
         self.reasons = reasons
         super().__init__("; ".join(reasons))
-
-
-@dataclass(frozen=True)
-class ReplayCheck:
-    exact: bool
-    reasons: list[str]  # why it wouldn't be exact
-    blocking: list[str]  # why it can't run at all
-
-
-@dataclass
-class _Output:
-    step: str
-    name: str
-    file: str
-    folder: Path
-    facts: dict[str, Any]
-
-    @property
-    def path(self) -> Path:
-        return self.folder / self.file
-
-
-@dataclass
-class _Plan:
-    run_id: str
-    mode: str
-    workflow: Workflow
-    file: WorkflowFile
-    params: dict[str, Scalar]
-    seed: int
-    image: ImageFacts | None
-    host_platform: str
-    pipelines: PipelineLookup
-    deliver: bool = True
-    # What the record says when `deliver` is off.
-    no_delivery: str = "Replays don't deliver unless asked to."
-    original: dict[str, Any] | None = None
-    set_id: str | None = None
-    replay_exact: bool | None = None
-    replay_notes: list[str] = field(default_factory=list)
-    # The run's own copy of the workflow files and the package (a Replay has
-    # the original's kept copies instead).
-    folder: WorkflowFolder | None = None
-    run_dir: Path = Path()
-    budget: int = 0
-    libraries: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-
-# A cohort year: 2000 to 2029.
-_YEAR = re.compile(r"20[012]\d")
-
-
-def delivery_message(destination: export_folders.Target, files: int) -> str:
-    """What a finished delivery says: saved on this computer, never "synced"."""
-    count = "1 file" if files == 1 else f"{files} files"
-    message = f"{export_folders.saved_to(destination.name)}: {count}."
-    note = export_folders.sync_note(destination.sync_provider, files=files)
-    return f"{message} {note}" if note else message
-
-
-def delivery_title(name: str) -> str:
-    """The workflow's name as words, for its dated delivery folder.
-
-    The export scrubs the title of anything shaped like a study identifier,
-    and read as one word, `fitbit_daily_2025` mixes letters and digits the
-    way IDs do, so the whole name went and the folder was called "export".
-    So the name is split into pieces, and each is kept only if it can't be
-    part of an identifier:
-
-    - a word of letters, if the scrub keeps it;
-    - never a piece mixing letters and digits (`p0001`, `syn25`);
-    - a piece of digits only if it is a cohort year (2000 to 2029) and the
-      piece before it was kept, so `steps_0001` can't come out as
-      "steps 0001", nor `syn_25_2001` or `syn25_2001` keep part of a code;
-    - and if the scrub would still change the joined words (`participant
-      2025`), none of it: the folder is called "export". So is a name the
-      file check wouldn't accept.
-    """
-    if not WORKFLOW_NAME.fullmatch(name):
-        return "export"
-    kept: list[str] = []
-    previous_kept = True
-    for piece in re.split(r"[\W_]+", name):
-        if not piece:
-            continue
-        if piece.isalpha():
-            keep = scrub_title(piece) == piece
-        elif piece.isdigit():
-            keep = previous_kept and bool(_YEAR.fullmatch(piece))
-        else:
-            keep = False
-        if keep:
-            kept.append(piece)
-        previous_kept = keep
-    title = " ".join(kept)
-    return title if title and scrub_title(title) == title else "export"
-
-
-def wrapper_bytes() -> bytes:
-    return resources.files(__package__).joinpath(WRAPPER_NAME).read_bytes()
-
-
-def wrapper_sha256() -> str:
-    return hashlib.sha256(wrapper_bytes()).hexdigest()
-
-
-def runner_version() -> str:
-    return f"datalab {__version__}; {WRAPPER_NAME} sha256:{wrapper_sha256()}"
 
 
 def step_seed(run_seed: int, step_id: str) -> int:
@@ -474,7 +384,7 @@ class WorkflowRunner:
             raise RunRefused(" ".join(check.blocking))
         if check.reasons and not allow_inexact:
             raise ReplayNotExact(check.reasons)
-        pipelines = self._kept_pipelines(original)
+        pipelines = kept_pipelines(self.settings, original)
         workflow = self.check_text(original["workflow_text"], pipelines)
         file = WorkflowFile(
             path=original["workflow_path"],
@@ -601,7 +511,7 @@ class WorkflowRunner:
         deliver: bool = True,
         run_id: str | None = None,
         folder: WorkflowFolder | None = None,
-    ) -> _Plan:
+    ) -> Plan:
         needs_container = any(
             isinstance(s, RStep | PipelineStep) or (isinstance(s, QcStep) and s.custom)
             for s in workflow.steps
@@ -621,7 +531,7 @@ class WorkflowRunner:
                     "Docker isn't running. Start Docker Desktop and try again."
                 ) from None
             host = ""
-        return _Plan(
+        return Plan(
             run_id=run_id or new_run_id(),
             mode=mode,
             workflow=workflow,
@@ -637,13 +547,21 @@ class WorkflowRunner:
             folder=folder,
         )
 
+    async def _replay_check(self, original: dict[str, Any]) -> ReplayCheck:
+        return await replay_check(
+            original,
+            settings=self.settings,
+            sandbox=self.sandbox,
+            image_or_none=self._image_or_none,
+        )
+
     async def _image_or_none(self, ref: str) -> ImageFacts | None:
         try:
             return await self.sandbox.image(ref)
         except SandboxError:
             return None
 
-    def _launch(self, plan: _Plan) -> str:
+    def _launch(self, plan: Plan) -> str:
         plan.run_dir = self.runs_dir / plan.run_id
         # Always new, never an old run's folder (a run's copy of its files is
         # already in it: see _pin).
@@ -666,7 +584,7 @@ class WorkflowRunner:
         self._notify()
         return plan.run_id
 
-    def _record_new_run(self, plan: _Plan, pipelines: list[dict[str, Any]]) -> None:
+    def _record_new_run(self, plan: Plan, pipelines: list[dict[str, Any]]) -> None:
         workflow = plan.workflow
         image = plan.image
         self.store.create_run(
@@ -714,7 +632,7 @@ class WorkflowRunner:
 
     # ----------------------------------------------------------- running
 
-    async def _run(self, plan: _Plan) -> None:
+    async def _run(self, plan: Plan) -> None:
         run_id = plan.run_id
         try:
             async with self._slots:
@@ -741,7 +659,7 @@ class WorkflowRunner:
                 self._write_record(plan)
             self._notify()
 
-    def _finish_cancelled(self, plan: _Plan) -> None:
+    def _finish_cancelled(self, plan: Plan) -> None:
         self._skip_rest(plan.run_id, "cancelled")
         run = self.store.get_run(plan.run_id) or {}
         fields: dict[str, Any] = {}
@@ -761,13 +679,13 @@ class WorkflowRunner:
             elif step["status"] == "pending":
                 self.store.update_step(run_id, step["step_id"], status="skipped")
 
-    async def _execute(self, plan: _Plan) -> None:
+    async def _execute(self, plan: Plan) -> None:
         run_dir = plan.run_dir
         (run_dir / "workflow.yaml").write_text(plan.file.text, encoding="utf-8", newline="")
         (run_dir / "datalab").mkdir()
         (run_dir / "datalab" / WRAPPER_NAME).write_bytes(wrapper_bytes())
         plan.budget = self.settings.workflows.max_run_bytes
-        done: dict[str, dict[str, _Output]] = {}
+        done: dict[str, dict[str, Output]] = {}
         failed: str | None = None
         for step in plan.workflow.steps:
             if failed is not None:
@@ -781,10 +699,10 @@ class WorkflowRunner:
             try:
                 problem = self._disk_problem(plan)
                 if problem:
-                    raise _StepFailed(problem)
+                    raise StepFailed(problem)
                 fields, outputs = await self._step(plan, step, step_dir, done)
                 status = fields.pop("status", "succeeded")
-            except _StepFailed as failure:
+            except StepFailed as failure:
                 fields, outputs, status = failure.fields, {}, "failed"
                 fields["message"] = failure.message
             fields.setdefault(
@@ -800,7 +718,7 @@ class WorkflowRunner:
         message = f"Step {failed} failed, so the rest didn't run." if failed else None
         self.store.update_run(plan.run_id, status=status, message=message)
         if plan.mode == "replay" and plan.original is not None:
-            same, notes = self._compare(plan.original, plan.run_id)
+            same, notes = compare(plan.original, self.store.steps(plan.run_id))
             self.store.update_run(
                 plan.run_id, reproduced=same, replay_notes=[*plan.replay_notes, *notes]
             )
@@ -808,7 +726,7 @@ class WorkflowRunner:
         self.store.update_run(plan.run_id, finished_at=now())
 
     async def _deliver_shielded(
-        self, plan: _Plan, done: dict[str, dict[str, _Output]], failed: str | None
+        self, plan: Plan, done: dict[str, dict[str, Output]], failed: str | None
     ) -> None:
         """Deliver, and don't let a cancel cut it short.
 
@@ -841,7 +759,7 @@ class WorkflowRunner:
                 ).strip(),
             )
 
-    def _disk_problem(self, plan: _Plan) -> str | None:
+    def _disk_problem(self, plan: Plan) -> str | None:
         free = shutil.disk_usage(plan.run_dir).free
         if free < self.settings.limits.min_free_disk_bytes:
             return f"Only {free // 1024**2} MB of disk is free; free some space and run it again."
@@ -851,8 +769,8 @@ class WorkflowRunner:
         return None
 
     async def _step(
-        self, plan: _Plan, step: Step, step_dir: Path, done: dict[str, dict[str, _Output]]
-    ) -> tuple[dict[str, Any], dict[str, _Output]]:
+        self, plan: Plan, step: Step, step_dir: Path, done: dict[str, dict[str, Output]]
+    ) -> tuple[dict[str, Any], dict[str, Output]]:
         if isinstance(step, SqlStep):
             return await self._sql_step(plan, step, step_dir)
         if isinstance(step, QcStep) and isinstance(step.qc, BuiltinQc):
@@ -862,8 +780,8 @@ class WorkflowRunner:
     # SQL -------------------------------------------------------------
 
     async def _sql_step(
-        self, plan: _Plan, step: SqlStep, step_dir: Path
-    ) -> tuple[dict[str, Any], dict[str, _Output]]:
+        self, plan: Plan, step: SqlStep, step_dir: Path
+    ) -> tuple[dict[str, Any], dict[str, Output]]:
         out_dir = step_dir / "outputs"
         out_dir.mkdir()
         target = out_dir / step.output
@@ -881,12 +799,12 @@ class WorkflowRunner:
                 plan, step.sql, binds, step_dir / "query", target
             )
         facts = await asyncio.to_thread(file_facts, target)
-        output = _Output(step.id, "final", step.output, out_dir, facts)
+        output = Output(step.id, "final", step.output, out_dir, facts)
         fields["outputs"] = {"final": {"file": step.output, **facts}}
         return fields, {"final": output}
 
     async def _query(
-        self, plan: _Plan, sql: str, binds: dict[str, Any], results: Path, target: Path
+        self, plan: Plan, sql: str, binds: dict[str, Any], results: Path, target: Path
     ) -> str:
         try:
             outcome = await self.data.run_query(
@@ -898,43 +816,37 @@ class WorkflowRunner:
                 allowed_tables=plan.workflow.read_objects,
             )
         except SqlRejected as error:
-            raise _StepFailed(f"The data service refused the query: {error}") from None
+            raise StepFailed(f"The data service refused the query: {error}") from None
         except QueryFailed as error:
-            raise _StepFailed(f"The query failed: {error}") from None
+            raise StepFailed(f"The query failed: {error}") from None
         os.replace(outcome.result_path, target)
         with contextlib.suppress(OSError):
             results.rmdir()
         return outcome.query_id
 
-    def _original_step(self, plan: _Plan, step_id: str) -> dict[str, Any]:
+    def _original_step(self, plan: Plan, step_id: str) -> dict[str, Any]:
         assert plan.original is not None
         found = next((s for s in plan.original["steps"] if s["step_id"] == step_id), None)
         if found is None or found["status"] != "succeeded":
-            raise _StepFailed("The original run has no kept result for this step.")
+            raise StepFailed("The original run has no kept result for this step.")
         return found
 
-    def _copy_kept(self, plan: _Plan, step_id: str, kept: dict[str, Any], target: Path) -> None:
+    def _copy_kept(self, plan: Plan, step_id: str, kept: dict[str, Any], target: Path) -> None:
         """Copy one of the original run's kept files, checked against its recorded sha256."""
         assert plan.original is not None
-        source = self._kept_path(plan.original, step_id, kept)
-        _copy_checked(source, target, kept["sha256"])
-
-    def _kept_path(self, original: dict[str, Any], step_id: str, kept: dict[str, Any]) -> Path:
-        folder = kept.get("folder", "outputs")
-        return (
-            self.settings.data_dir / original["run_dir"] / "steps" / step_id / folder / kept["file"]
-        )
+        source = kept_path(self.settings, plan.original, step_id, kept)
+        copy_checked(source, target, kept["sha256"])
 
     # Built-in QC ---------------------------------------------------------
 
     async def _builtin_qc(
-        self, plan: _Plan, step: QcStep, qc: BuiltinQc, done: dict[str, dict[str, _Output]]
-    ) -> tuple[dict[str, Any], dict[str, _Output]]:
-        output = _lookup(qc.file, done)
+        self, plan: Plan, step: QcStep, qc: BuiltinQc, done: dict[str, dict[str, Output]]
+    ) -> tuple[dict[str, Any], dict[str, Output]]:
+        output = lookup_output(qc.file, done)
         checks = await asyncio.to_thread(builtin_qc, qc, output.path, plan.params)
         failed = [c for c in checks if c["status"] != "pass"]
         fields: dict[str, Any] = {
-            "inputs": {"file": _input_ref(output)},
+            "inputs": {"file": input_ref(output)},
             "result": {"status": "failed" if failed else "ok", "checks": checks},
         }
         if failed:
@@ -948,8 +860,8 @@ class WorkflowRunner:
     # Containers ----------------------------------------------------------
 
     async def _container_step(
-        self, plan: _Plan, step: Step, step_dir: Path, done: dict[str, dict[str, _Output]]
-    ) -> tuple[dict[str, Any], dict[str, _Output]]:
+        self, plan: Plan, step: Step, step_dir: Path, done: dict[str, dict[str, Output]]
+    ) -> tuple[dict[str, Any], dict[str, Output]]:
         assert plan.image is not None
         spec_dir, scratch, result_dir, out_dir = (
             step_dir / n for n in ("spec", "scratch", "result", "outputs")
@@ -958,34 +870,34 @@ class WorkflowRunner:
             folder.mkdir()
         seed = step_seed(plan.seed, step.id)
         outputs = step_outputs(step, plan.pipelines)
-        inputs: dict[str, _Output] = {}
+        inputs: dict[str, Output] = {}
         for name, ref in step_inputs(step).items():
-            inputs[name] = _lookup(ref, done)
+            inputs[name] = lookup_output(ref, done)
         binds = [Bind(plan.run_dir / "datalab", "/run/datalab"), Bind(spec_dir, "/run/step")]
         for name, output in inputs.items():
             binds.append(Bind(output.folder, f"/run/in/{name}"))
         spec_inputs = {
-            name: {"path": f"/run/in/{name}/{o.file}", **_spec_facts(o.facts)}
+            name: {"path": f"/run/in/{name}/{o.file}", **spec_facts(o.facts)}
             for name, o in inputs.items()
         }
         fields: dict[str, Any] = {
             "seed": seed,
-            "inputs": {name: _input_ref(o) for name, o in inputs.items()},
+            "inputs": {name: input_ref(o) for name, o in inputs.items()},
         }
         env: dict[str, str] = {}
         if isinstance(step, PipelineStep):
             pipeline = plan.pipelines(step.pipeline)
             if pipeline is None:
-                raise _StepFailed(f"The pipeline {step.pipeline} isn't there any more.")
+                raise StepFailed(f"The pipeline {step.pipeline} isn't there any more.")
             script = pipeline.script
             extracts, queries = await self._extracts(plan, step, pipeline, step_dir)
             binds.append(Bind(step_dir / "extracts", f"/run/in/{ORACLE_INPUT}"))
             for obj, output in extracts.items():
                 spec_inputs[obj] = {
                     "path": f"/run/in/{ORACLE_INPUT}/{output.file}",
-                    **_spec_facts(output.facts),
+                    **spec_facts(output.facts),
                 }
-                fields["inputs"][obj] = {**_input_ref(output), "folder": "extracts"}
+                fields["inputs"][obj] = {**input_ref(output), "folder": "extracts"}
             fields["queries"] = queries
             library = await self._library(plan, step)
             binds.append(Bind(library, "/opt/ihs/lib"))
@@ -1027,11 +939,11 @@ class WorkflowRunner:
             )
         )
         (step_dir / "log.txt").write_bytes(outcome.log)
-        result = _read_result(result_dir / "result.json")
+        result = read_result(result_dir / "result.json")
         collected, missing, dropped = await asyncio.to_thread(
-            _collect, scratch, out_dir, outputs, max(budget, 0)
+            collect, scratch, out_dir, outputs, max(budget, 0)
         )
-        await asyncio.to_thread(_remove_quietly, scratch)
+        await asyncio.to_thread(remove_quietly, scratch)
         fields.update(
             exit_code=outcome.exit_code,
             result=result,
@@ -1048,19 +960,19 @@ class WorkflowRunner:
         )
         if not ok:
             fields["status"] = "failed"
-            fields["message"] = _container_failure(outcome, result, missing)
+            fields["message"] = container_failure(outcome, result, missing)
         elif dropped:
             fields["message"] = f"{dropped} undeclared files were left behind."
         return fields, collected
 
     async def _extracts(
-        self, plan: _Plan, step: PipelineStep, pipeline: Pipeline, step_dir: Path
-    ) -> tuple[dict[str, _Output], list[dict[str, Any]]]:
+        self, plan: Plan, step: PipelineStep, pipeline: Pipeline, step_dir: Path
+    ) -> tuple[dict[str, Output], list[dict[str, Any]]]:
         """Extract the pipeline's declared objects through the data service (or,
         for a Replay, copy the original's), into the step's extracts folder."""
         folder = step_dir / "extracts"
         folder.mkdir()
-        extracts: dict[str, _Output] = {}
+        extracts: dict[str, Output] = {}
         queries: list[dict[str, Any]] = []
         original = self._original_step(plan, step.id) if plan.mode == "replay" else None
         for entry in pipeline.spec.reads:
@@ -1071,7 +983,7 @@ class WorkflowRunner:
             if original is not None:
                 kept = original["inputs"].get(entry.object)
                 if kept is None:
-                    raise _StepFailed("The original run has no kept extract for this step.")
+                    raise StepFailed("The original run has no kept extract for this step.")
                 await asyncio.to_thread(self._copy_kept, plan, step.id, kept, target)
                 previous = next(
                     (q for q in original["queries"] if q.get("object") == entry.object), {}
@@ -1080,13 +992,13 @@ class WorkflowRunner:
             else:
                 query_id = await self._query(plan, sql, binds, step_dir / "query", target)
             facts = await asyncio.to_thread(file_facts, target)
-            extracts[entry.object] = _Output(step.id, entry.object, file, folder, facts)
+            extracts[entry.object] = Output(step.id, entry.object, file, folder, facts)
             queries.append(
                 {"object": entry.object, "query_id": query_id, "sql": sql, "binds": binds}
             )
         return extracts, queries
 
-    def _keep_pipeline(self, plan: _Plan, pipeline: Pipeline) -> None:
+    def _keep_pipeline(self, plan: Plan, pipeline: Pipeline) -> None:
         """A copy of the pipeline's definition in the run folder, for Replay."""
         folder = plan.run_dir / "pipelines" / pipeline.name
         if folder.exists():
@@ -1097,20 +1009,7 @@ class WorkflowRunner:
         )
         (folder / "run.R").write_text(pipeline.script, encoding="utf-8", newline="")
 
-    def _kept_pipelines(self, original: dict[str, Any]) -> PipelineLookup:
-        root = self.settings.data_dir / original["run_dir"] / "pipelines"
-
-        def lookup(name: str) -> Pipeline | None:
-            folder = root / name
-            try:
-                spec = load_pipeline_file((folder / "pipeline.yaml").read_text(encoding="utf-8"))
-                return Pipeline(name, spec, (folder / "run.R").read_text(encoding="utf-8"))
-            except (OSError, WorkflowInvalid):
-                return None
-
-        return lookup
-
-    async def _library(self, plan: _Plan, step: PipelineStep) -> Path:
+    async def _library(self, plan: Plan, step: PipelineStep) -> Path:
         """The pipelines package, built once per source tree in the sandbox.
 
         The source is copied into the run folder first, so the build and the
@@ -1121,15 +1020,15 @@ class WorkflowRunner:
         if plan.mode == "replay" and plan.original is not None:
             original_copy = self.settings.data_dir / plan.original["run_dir"] / "package-src"
             if not source_copy.exists():
-                await asyncio.to_thread(_copy_tree, original_copy, source_copy)
+                await asyncio.to_thread(copy_tree, original_copy, source_copy)
         elif not source_copy.exists():
             try:
                 package = (plan.folder or self.folder).package()
             except SourceError as error:
-                raise _StepFailed(str(error)) from None
-            await asyncio.to_thread(_copy_tree, package.root, source_copy)
+                raise StepFailed(str(error)) from None
+            await asyncio.to_thread(copy_tree, package.root, source_copy)
         tree = await asyncio.to_thread(tree_sha256, source_copy)
-        name = _package_name(source_copy)
+        name = package_name(source_copy)
         cache = self.cache_dir / "libs" / f"{tree[:32]}-{plan.image.digest.split(':')[-1][:12]}"
         if not (cache / "library.json").is_file():
             await self._build(plan, source_copy, name, tree, cache)
@@ -1146,7 +1045,7 @@ class WorkflowRunner:
         self.store.update_run(plan.run_id, pipelines=list(plan.libraries.values()))
         return cache / "lib"
 
-    async def _build(self, plan: _Plan, source: Path, name: str, tree: str, cache: Path) -> None:
+    async def _build(self, plan: Plan, source: Path, name: str, tree: str, cache: Path) -> None:
         assert plan.image is not None
         staging = cache.with_name(f"{cache.name}-{secrets.token_hex(3)}")
         (staging / "lib").mkdir(parents=True)
@@ -1170,7 +1069,7 @@ class WorkflowRunner:
         )  # fmt: skip
         if outcome.exit_code != 0:
             (plan.run_dir / f"build-{name}.log").write_bytes(outcome.log)
-            raise _StepFailed(f"The {name} package didn't build (exit {outcome.exit_code}).")
+            raise StepFailed(f"The {name} package didn't build (exit {outcome.exit_code}).")
         library_sha = await asyncio.to_thread(tree_sha256, staging / "lib")
         (staging / "library.json").write_text(
             json.dumps({"package": name, "tree_sha256": tree, "library_sha256": library_sha}),
@@ -1180,248 +1079,21 @@ class WorkflowRunner:
             staging.rename(cache)
         except OSError:
             # Another run built it first; use theirs.
-            await asyncio.to_thread(_remove_quietly, staging)
+            await asyncio.to_thread(remove_quietly, staging)
 
     # Delivery ------------------------------------------------------------
 
     async def _deliver(
-        self, plan: _Plan, done: dict[str, dict[str, _Output]], failed: str | None
+        self, plan: Plan, done: dict[str, dict[str, Output]], failed: str | None
     ) -> None:
-        spec = plan.workflow.deliver
-        if spec is None:
-            return
-        if failed:
-            self.store.update_run(
-                plan.run_id,
-                delivery_status="skipped",
-                delivery_message="A step failed, so nothing was delivered.",
-            )
-            return
-        if not plan.deliver:
-            self.store.update_run(
-                plan.run_id, delivery_status="skipped", delivery_message=plan.no_delivery
-            )
-            return
-        try:
-            destination = self._destination(spec.destination)
-            folder = destination.path
-            sources = []
-            chosen = []
-            for ref in spec.files:
-                output = _lookup(ref, done)
-                chosen.append(output)
-                sources.append(
-                    ExportSource(
-                        open=lambda p=output.path: os.open(
-                            p, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-                        ),
-                        path=output.file,
-                        container_path=f"{plan.run_id}/{output.step}/{output.file}",
-                    )
-                )
-            about = self._manifest_about(plan, chosen)
-            title = delivery_title(plan.workflow.name)
-            subfolder = exports.safe_name(spec.folder)
-
-            def write() -> exports.ExportResult:
-                # Everything goes inside the very folder that was checked,
-                # and its subfolder is never followed through a link.
-                with export_folders.open_target(destination) as root:
-                    with contextlib.suppress(FileExistsError):
-                        root.mkdir(subfolder)
-                    with root.child(subfolder) as target:
-                        return exports.export(
-                            target, title=title, tag=plan.run_id, sources=sources, about=about
-                        )
-
-            result = await asyncio.to_thread(write)
-        except ExportError as error:
-            self.store.update_run(
-                plan.run_id, delivery_status="failed", delivery_message=str(error)
-            )
-            return
-        except OSError as error:
-            log.warning("Delivery for %s failed: %s", plan.run_id, error)
-            self.store.update_run(
-                plan.run_id,
-                delivery_status="failed",
-                delivery_message="DataLab couldn't write to the export folder.",
-            )
-            return
-        written = result.entries
-        self.store.add_delivery(
-            {
-                "id": f"dl_{secrets.token_hex(6)}",
-                "run_id": plan.run_id,
-                "destination_key": spec.destination,
-                "destination_id": destination.id,
-                "destination_path": str(folder),
-                "destination_name": destination.name,
-                "sync_provider": destination.sync_provider,
-                "folder": str(result.folder),
-                "files": [{k: f[k] for k in ("path", "bytes", "sha256")} for f in written],
-                "manifest_sha256": result.manifest_sha256,
-                "delivered_at": now(),
-            }
-        )
-        self.access_log.record_export(
-            session_id=plan.run_id,
-            destination=spec.destination,
-            files=len(result.files),
-            contains_study_data=self.settings.profile == "real",
-        )
-        self.store.update_run(
-            plan.run_id,
-            delivery_status="delivered",
-            delivery_message=delivery_message(destination, len(result.files)),
-        )
-
-    def _destination(self, key: str) -> export_folders.Target:
-        """The folder a destination key names on this computer, checked now.
-
-        The practice profile delivers only to its own practice folder, so
-        nothing from it can end up somewhere real.
-        """
-        return export_folders.target_for_key(self.settings, self.destinations, key)
-
-    def _manifest_about(self, plan: _Plan, chosen: list[_Output]) -> dict[str, Any]:
-        run = self.store.get_run(plan.run_id) or {}
-        steps = self.store.steps(plan.run_id)
-        return {
-            "profile": self.settings.profile,
-            "contains_study_data": self.settings.profile == "real",
-            "workflow": {
-                "name": plan.workflow.name,
-                "path": plan.file.path,
-                "source": plan.file.source,
-                "blob": plan.file.blob,
-                "commit": plan.file.commit,
-            },
-            "run": {
-                "id": plan.run_id,
-                "mode": plan.mode,
-                "of_run": run.get("of_run"),
-                "params": plan.params,
-                "seed": plan.seed,
-                "image": run.get("image_digest"),
-                "started_by": self.started_by,
-            },
-            "qc": [
-                {
-                    "step": s["step_id"],
-                    "status": s["status"],
-                    "checks": [
-                        {
-                            "id": c.get("id"),
-                            "status": c.get("status"),
-                            # Numbers only: a custom check's text could carry values.
-                            "observed": _number_or_none(c.get("observed")),
-                        }
-                        for c in ((s.get("result") or {}).get("checks") or [])
-                    ],
-                }
-                for s in steps
-                if s["kind"].startswith("qc")
-            ],
-            "outputs": [
-                {"step": o.step, "file": o.file, "sha256": o.facts.get("sha256")} for o in chosen
-            ],
-            # Delivered CSVs no small_cells check covered, and why (from the workflow file).
-            "without_small_cells": dict(
-                plan.workflow.deliver.without_small_cells if plan.workflow.deliver else {}
-            ),
-        }
-
-    # Replay --------------------------------------------------------------
-
-    async def _replay_check(self, original: dict[str, Any]) -> ReplayCheck:
-        reasons: list[str] = []
-        blocking: list[str] = []
-        if original["status"] != "succeeded":
-            blocking.append("Only a run that finished can be replayed.")
-        if not original["inputs_kept"]:
-            blocking.append("This run's extracted inputs have been removed.")
-        for step in original["steps"]:
-            if step["kind"] == "sql" and step["status"] == "succeeded":
-                kept = step["outputs"]["final"]
-                if not _matches(self._kept_path(original, step["step_id"], kept), kept["sha256"]):
-                    blocking.append(
-                        f"The kept extract for {step['step_id']} is missing or changed."
-                    )
-            if step["kind"] == "pipeline" and step["status"] == "succeeded":
-                for obj, kept in step["inputs"].items():
-                    if kept.get("folder") == "extracts" and not _matches(
-                        self._kept_path(original, step["step_id"], kept), kept["sha256"]
-                    ):
-                        blocking.append(f"The kept extract {obj} for {step['step_id']} is missing.")
-        text_blob = original["workflow_text"].encode()
-        if original["workflow_source"] == "file":
-            kept = {"sha256:" + hashlib.sha256(text_blob).hexdigest()}
-        else:
-            kept = {git_blob_id(text_blob), git_blob_id(text_blob.replace(b"\r\n", b"\n"))}
-        if original["workflow_blob"] not in kept:
-            blocking.append("The kept workflow file doesn't match its recorded blob id.")
-        uses_containers = any(
-            s["kind"] in ("r", "pipeline", "qc_custom") for s in original["steps"]
-        )
-        if uses_containers:
-            image = await self._image_or_none(original["image_digest"])
-            if image is None:
-                reasons.append(
-                    f"The agent image this run used ({original['image_digest'][:19]}…) isn't on "
-                    "this computer, so the current image would be used."
-                )
-            try:
-                host = await self.sandbox.host_platform()
-            except SandboxError:
-                blocking.append("Docker isn't running.")
-                host = original["host_platform"]
-            if host != original["host_platform"]:
-                reasons.append(
-                    f"This computer runs Docker on {host}; the run was on "
-                    f"{original['host_platform']}. Results can differ in the last digits."
-                )
-            if not original["runner_version"].endswith(f"sha256:{wrapper_sha256()}"):
-                reasons.append("DataLab's step wrapper has changed since this run.")
-            for pipeline in original["pipelines"]:
-                library = self.settings.data_dir / pipeline.get("library", "-") / "library.json"
-                with contextlib.suppress(OSError, ValueError):
-                    if json.loads(library.read_text(encoding="utf-8"))[
-                        "library_sha256"
-                    ] == pipeline.get("library_sha256"):
-                        continue
-                reasons.append(
-                    f"The {pipeline['name']} pipeline's library would be rebuilt from the kept "
-                    "source, so its build may differ."
-                )
-        if not original["runner_version"].startswith(f"datalab {__version__};"):
-            reasons.append("DataLab's version has changed since this run; its checks may differ.")
-        return ReplayCheck(exact=not reasons and not blocking, reasons=reasons, blocking=blocking)
-
-    def _compare(self, original: dict[str, Any], run_id: str) -> tuple[bool, list[str]]:
-        """Whether every output and every check matched the original's, and what didn't."""
-        mine = {s["step_id"]: s for s in self.store.steps(run_id)}
-        notes = []
-        for old in original["steps"]:
-            new = mine.get(old["step_id"], {})
-            for name, out in (old.get("outputs") or {}).items():
-                theirs = (new.get("outputs") or {}).get(name) or {}
-                if theirs.get("sha256") != out.get("sha256"):
-                    notes.append(
-                        f"Step {old['step_id']}'s {out['file']} differs from the original."
-                    )
-            old_checks = (old.get("result") or {}).get("checks")
-            if old_checks is not None and old_checks != (new.get("result") or {}).get("checks"):
-                notes.append(f"Step {old['step_id']}'s checks differ from the original.")
-            if old["status"] != new.get("status"):
-                notes.append(
-                    f"Step {old['step_id']} {new.get('status')}; it {old['status']} before."
-                )
-        return not notes, notes
+        """Deliver the run's files (delivery.py), or record why it didn't."""
+        await Delivery(
+            self.settings, self.store, self.access_log, self.destinations, self.started_by
+        ).deliver(plan, done, failed)
 
     # Record --------------------------------------------------------------
 
-    def _write_record(self, plan: _Plan) -> None:
+    def _write_record(self, plan: Plan) -> None:
         detail = self.detail(plan.run_id)
         if detail is None or not plan.run_dir.is_dir():
             return
@@ -1430,238 +1102,15 @@ class WorkflowRunner:
             out.write(json.dumps(detail, indent=2, sort_keys=True, default=str) + "\n")
 
 
-class _StepFailed(Exception):
-    def __init__(self, message: str, fields: dict[str, Any] | None = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.fields = fields or {}
-
-
 # ---------------------------------------------------------------- helpers
 
 
-def _param_name(plan: _Plan, bind: str) -> str:
+def _param_name(plan: Plan, bind: str) -> str:
     """The parameter a bind names (Oracle binds ignore case)."""
     for name in plan.params:
         if name.lower() == bind.lower():
             return name
-    raise _StepFailed(f"No parameter for :{bind}.")
-
-
-def _lookup(ref: str, done: Mapping[str, Mapping[str, _Output]]) -> _Output:
-    names = {step: dict.fromkeys(outputs, "") for step, outputs in done.items()}
-    resolved = resolve_ref(ref, names)
-    if isinstance(resolved, str):
-        raise _StepFailed(resolved)
-    return done[resolved[0]][resolved[1]]
-
-
-def _input_ref(output: _Output) -> dict[str, Any]:
-    return {
-        "step": output.step,
-        "output": output.name,
-        "file": output.file,
-        "sha256": output.facts.get("sha256"),
-    }
-
-
-def _number_or_none(value: Any) -> int | float | bool | None:
-    return value if isinstance(value, int | float | bool) else None
-
-
-def _finite_or_none(value: Any) -> int | float | bool | None:
-    number = _number_or_none(value)
-    return None if isinstance(number, float) and not math.isfinite(number) else number
-
-
-def _spec_facts(facts: Mapping[str, Any]) -> dict[str, Any]:
-    return {k: facts[k] for k in ("sha256", "bytes", "rows", "columns") if k in facts}
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    with os.fdopen(fd, "rb") as handle:
-        while chunk := handle.read(1024 * 1024):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
-def file_facts(path: Path) -> dict[str, Any]:
-    """Checksum and size, and for a CSV its row count and header. No values."""
-    facts: dict[str, Any] = {"sha256": sha256_file(path), "bytes": path.stat().st_size}
-    if path.suffix.lower() == ".csv":
-        with (
-            contextlib.suppress(UnicodeDecodeError, csv.Error),
-            path.open(newline="", encoding="utf-8") as handle,
-        ):
-            reader = csv.reader(handle)
-            header = next(reader, [])
-            facts["rows"] = sum(1 for _ in reader)
-            facts["columns"] = header
-    return facts
-
-
-def _matches(path: Path, sha256: str) -> bool:
-    try:
-        return path.is_file() and not path.is_symlink() and sha256_file(path) == sha256
-    except OSError:
-        return False
-
-
-def _copy_checked(source: Path, target: Path, sha256: str) -> None:
-    fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-    digest = hashlib.sha256()
-    with os.fdopen(fd, "rb") as reader, open(target, "xb") as writer:
-        while chunk := reader.read(1024 * 1024):
-            digest.update(chunk)
-            writer.write(chunk)
-    if digest.hexdigest() != sha256:
-        target.unlink(missing_ok=True)
-        raise _StepFailed(f"The kept input {source.name} doesn't match its recorded checksum.")
-
-
-def _read_result(path: Path) -> dict[str, Any]:
-    """result.json, capped and checked; its messages are the step's, shown as data."""
-    failed: dict[str, Any] = {"status": "failed", "messages": [], "checks": []}
-    try:
-        info = os.lstat(path)
-    except OSError:
-        return {**failed, "messages": [{"level": "error", "text": "The step wrote no result."}]}
-    if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RESULT_BYTES:
-        return {
-            **failed,
-            "messages": [{"level": "error", "text": "The step's result was refused."}],
-        }
-    try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        with os.fdopen(fd, "rb") as handle:
-            result = json.loads(handle.read(MAX_RESULT_BYTES))
-    except (OSError, ValueError):
-        return {**failed, "messages": [{"level": "error", "text": "The step's result isn't JSON."}]}
-    if not isinstance(result, dict):
-        return failed
-    result = dict(result)
-    raw_messages, raw_checks = result.get("messages"), result.get("checks")
-    messages: list[Any] = raw_messages if isinstance(raw_messages, list) else []
-    counts = result.get("counts")
-    raw_counts: dict[Any, Any] = counts if isinstance(counts, dict) else {}
-    checks: list[Any] = raw_checks if isinstance(raw_checks, list) else []
-    return {
-        "status": result.get("status") if result.get("status") in ("ok", "failed") else "failed",
-        # Numbers only, like a check's observed and expected.
-        "counts": {
-            str(name)[:100]: number
-            for name, raw in list(raw_counts.items())[:100]
-            if (number := _finite_or_none(raw)) is not None
-        },
-        "messages": [_capped_message(m) for m in messages[:MAX_MESSAGES]],
-        "checks": [_capped_check(c) for c in checks[:100] if isinstance(c, dict)],
-        "r_version": str(result.get("r_version", ""))[:100],
-        "rng_kind": result.get("rng_kind") if isinstance(result.get("rng_kind"), list) else [],
-    }
-
-
-def _capped_message(message: Any) -> dict[str, str]:
-    if not isinstance(message, dict):
-        return {"level": "info", "text": str(message)[:MAX_MESSAGE_CHARS]}
-    return {
-        "level": str(message.get("level", "info"))[:10],
-        "text": str(message.get("text", ""))[:MAX_MESSAGE_CHARS],
-    }
-
-
-def _capped_check(check: dict[str, Any]) -> dict[str, Any]:
-    """A custom check's result, as kept in the run record. `observed` and
-    `expected` are kept only as numbers: text there could carry values (a
-    participant id), and the record is shown in the Workflows tab."""
-    return {
-        "id": str(check.get("id", ""))[:100],
-        "status": "pass" if check.get("status") == "pass" else "fail",
-        "observed": _finite_or_none(check.get("observed")),
-        "expected": _finite_or_none(check.get("expected")),
-        "message": str(check.get("message", ""))[:MAX_MESSAGE_CHARS],
-    }
-
-
-def _container_failure(outcome: Any, result: dict[str, Any], missing: list[str]) -> str:
-    if outcome.timed_out:
-        return "The step ran past its time limit and was stopped."
-    if outcome.over_cap:
-        return "The step wrote more than the run's disk cap and was stopped."
-    if outcome.exit_code == 3 or any(c["status"] == "fail" for c in result.get("checks", [])):
-        failed = [c["id"] for c in result.get("checks", []) if c["status"] == "fail"]
-        return f"Failed checks: {', '.join(failed)}."
-    errors = [m["text"] for m in result.get("messages", []) if m.get("level") == "error"]
-    if errors:
-        return f"The R code stopped with an error: {errors[-1]}"
-    if missing:
-        return f"The step didn't write {', '.join(missing)}."
-    return f"The step exited with code {outcome.exit_code}."
-
-
-def _collect(
-    scratch: Path, out_dir: Path, outputs: Mapping[str, str], budget: int
-) -> tuple[dict[str, _Output], list[str], int]:
-    """Copy the declared outputs, regular files only, never links; count the rest."""
-    collected: dict[str, _Output] = {}
-    missing: list[str] = []
-    for name, file in outputs.items():
-        source = scratch / file
-        try:
-            info = os.lstat(source)
-        except OSError:
-            missing.append(file)
-            continue
-        if not stat.S_ISREG(info.st_mode) or info.st_size > budget:
-            missing.append(file)
-            continue
-        budget -= info.st_size
-        fd = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        with os.fdopen(fd, "rb") as reader, open(out_dir / file, "xb") as writer:
-            shutil.copyfileobj(reader, writer)
-        collected[name] = _Output("", name, file, out_dir, file_facts(out_dir / file))
-    try:
-        present = set(os.listdir(scratch))
-    except OSError:
-        present = set()
-    return collected, missing, len(present - set(outputs.values()))
-
-
-def _copy_tree(source: Path, target: Path) -> None:
-    """Copy a source tree; links and dot-files aren't copied."""
-    target.mkdir(parents=True)
-    for folder, dirs, files in os.walk(source, followlinks=False):
-        dirs[:] = sorted(
-            d for d in dirs if not d.startswith(".") and not (Path(folder) / d).is_symlink()
-        )
-        relative = Path(folder).relative_to(source)
-        (target / relative).mkdir(parents=True, exist_ok=True)
-        for name in files:
-            path = Path(folder) / name
-            if name.startswith(".") or path.is_symlink() or not path.is_file():
-                continue
-            shutil.copyfile(path, target / relative / name, follow_symlinks=False)
-
-
-def _package_name(source: Path) -> str:
-    text = (source / "DESCRIPTION").read_text(encoding="utf-8", errors="replace")
-    match = re.search(r"^Package:\s*([A-Za-z][A-Za-z0-9.]*)\s*$", text, re.MULTILINE)
-    if not match:
-        raise _StepFailed("The package's DESCRIPTION doesn't name it.")
-    return match.group(1)
-
-
-def _remove_quietly(path: Path) -> None:
-    """Remove a folder, retrying briefly (Windows: a scanner may hold a file open)."""
-    for _ in range(3):
-        try:
-            shutil.rmtree(path)
-            return
-        except FileNotFoundError:
-            return
-        except OSError:
-            continue
+    raise StepFailed(f"No parameter for :{bind}.")
 
 
 def who_is_running() -> str:
