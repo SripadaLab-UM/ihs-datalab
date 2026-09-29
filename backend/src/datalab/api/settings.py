@@ -395,8 +395,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
         if oracle is None:
             raise HTTPException(
                 409,
-                "No database is set up yet. Ask the DataLab maintainer for the lab's "
-                "settings file.",
+                "No database is set up yet: the installer didn't finish. Run it again, the "
+                "same way; it carries on from where it stopped.",
             )
         try:
             setup.store_oracle_password(oracle, body.password.get_secret_value())

@@ -111,8 +111,10 @@ function Database({
   const roles = result?.ok && result.enabled_roles.length ? `Enabled roles: ${result.enabled_roles.join(", ")}` : "";
   const details = !oracle.configured ? (
     <p className="mt-2 text-sm text-muted">
-      No database is set up yet. Ask the DataLab maintainer for the lab's settings file, then run{" "}
-      <code className="font-mono text-xs">datalab setup --settings &lt;file&gt;</code>.
+      No database is set up yet: the installer didn't finish. Run it again, the same way; it carries on from where it
+      stopped and keeps what's done. If you installed by hand from the release files, run{" "}
+      <code className="font-mono text-xs">datalab setup --settings &lt;file&gt;</code> with the lab's settings file from the
+      DataLab maintainer.
     </p>
   ) : (
     <dl className="mt-3 grid grid-cols-[10rem_1fr] items-baseline gap-y-1.5 text-sm">

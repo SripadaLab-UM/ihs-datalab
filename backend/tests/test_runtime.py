@@ -465,6 +465,86 @@ def test_tool_summaries_keep_metadata_and_never_rows():
     )
 
 
+def test_the_live_app_server_shape_of_a_failed_query_keeps_its_reason():
+    """From the 0.3.0b1 install test (production, packaged app): the live
+    app-server `item/completed` notification for a failed MCP query has
+    `status: "failed"`, `error: null` and the text in `result.content`, with
+    no `isError` flag (only Codex's rollout file has it). The reason, category,
+    code and query id must still reach the chat."""
+    from datalab.sessions.runtime import _to_event
+
+    def live(text: str) -> dict:
+        # The exact shape of the live notification's item, as reported.
+        return {
+            "type": "mcpToolCall",
+            "id": "t9",
+            "server": "ihs-data",
+            "tool": "query",
+            "arguments": {"sql": "SELECT 1 / 0 FROM DUAL WHERE ROWNUM <= 1"},
+            "status": "failed",
+            "error": None,
+            "result": {
+                "content": [{"type": "text", "text": text}],
+                "structuredContent": None,
+                "_meta": None,
+            },
+        }
+
+    oracle = live(
+        "Error executing tool query: The database refused this query: ORA-01476: "
+        "division by zero.\n"
+        "[datalab-failure category=sql code=ORA-01476 query=q_20260929T100000_abc126]"
+    )
+    kind, data = _to_event("item/completed", {"item": oracle})
+    assert kind == "tool_call" and data["status"] == "failed"
+    assert data["error"] == "The database refused this query: ORA-01476: division by zero."
+    assert data["failure"] == {
+        "category": "sql",
+        "code": "ORA-01476",
+        "query_id": "q_20260929T100000_abc126",
+    }
+    assert data["summary"] is None
+
+    # Refused by DataLab's own check before Oracle (MIN on a CLOB).
+    local = live(
+        "DataLab's SQL check refused this query, so it didn't run: "
+        "QUESTIONTEXT is a CLOB column (ORA-00932).\n"
+        "[datalab-failure category=validation code=long_text query=q_20260929T100001_abc127]"
+    )
+    failure = _to_event("item/completed", {"item": local})[1]["failure"]
+    assert failure == {
+        "category": "validation",
+        "code": "long_text",
+        "query_id": "q_20260929T100001_abc127",
+    }
+
+    # A timeout, in the same live shape.
+    timed_out = live(
+        "The query timed out after 120 s (DPY-4024). Split it or narrow it.\n"
+        "[datalab-failure category=timeout code=DPY-4024 query=q_20260929T100002_abc128]"
+    )
+    assert _to_event("item/completed", {"item": timed_out})[1]["failure"]["category"] == "timeout"
+
+    # Failed with no content at all: nothing made up, and no crash.
+    empty = dict(live("x"), result={"content": [], "structuredContent": None, "_meta": None})
+    event = _to_event("item/completed", {"item": empty})[1]
+    assert event["error"] is None and event["failure"] is None and event["status"] == "failed"
+    missing = dict(live("x"), result=None)
+    event = _to_event("item/completed", {"item": missing})[1]
+    assert event["error"] is None and event["failure"] is None
+
+    # A completed call in the same shape is never read as an error, and its
+    # rows never reach the event.
+    ok = dict(
+        live('{"query_id": "q_20260929T100003_abc129", "row_count": 1, "preview": [["SYN-1"]]}'),
+        status="completed",
+    )
+    event = _to_event("item/completed", {"item": ok})[1]
+    assert event["error"] is None and event["failure"] is None
+    assert event["summary"]["query_id"] == "q_20260929T100003_abc129"
+    assert "SYN-1" not in str(event)
+
+
 def test_a_failed_query_keeps_its_reason_and_category_for_the_chat():
     """From the external review: Codex puts a tool's error in its result
     (isError, text content) and leaves `error` empty, so the chat showed no

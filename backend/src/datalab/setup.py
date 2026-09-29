@@ -134,8 +134,10 @@ def _ask_for_secrets(profile: Profile, settings: Settings, *, update: bool) -> i
             return 1
     elif profile == "real":
         print(
-            "No database is configured yet. Ask the DataLab maintainer for the lab's "
-            "settings file, then run: datalab setup --settings <file>"
+            "No database is configured yet. The installer from the lab's install page "
+            "includes the lab's settings: run it again, the same way. If you installed by "
+            "hand, run: datalab setup --settings <file>, with the lab's settings file from "
+            "the DataLab maintainer."
         )
     return 0
 

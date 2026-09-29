@@ -595,15 +595,18 @@ _TOOL_ERROR_PREFIX = re.compile(r"^Error executing tool [A-Za-z0-9_]+: ")
 def tool_failure(item: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
     """A failed MCP tool call's error, and its structured failure (failures.py).
 
-    Codex puts a tool's own error in the result (isError, with the text as
-    content) and leaves `error` empty, so the reason is taken from there when
-    `error` has none. It's bounded text, rendered as text by the chat. Only
-    failed calls: a successful result (a query's rows) never gets here.
+    Codex puts a tool's own error in the result's text content and leaves
+    `error` empty, so the reason is taken from there when `error` has none.
+    Codex's rollout file marks that result `isError`, but the live app-server
+    notification doesn't: it only says `status: "failed"`. Either is enough.
+    It's bounded text, rendered as text by the chat. Only failed calls: a
+    successful result (a query's rows) is never read as an error.
     """
     error = item.get("error")
     result = item.get("result")
     text = ""
-    if isinstance(result, dict) and (result.get("isError") or result.get("is_error")):
+    failed = item.get("status") == "failed"
+    if isinstance(result, dict) and (failed or result.get("isError") or result.get("is_error")):
         text = "\n".join(
             c.get("text", "")
             for c in result.get("content") or []

@@ -14,7 +14,7 @@ keywords: start, new conversation, ask, question, mode, starter, stop, attach, i
 2. Choose what you'd like to do. This is the conversation's
    [mode](glossary.md#mode):
    - **Analysis**: scientific questions. The agent plans first, pilots, and
-     asks before a large run.
+     asks before a large run (unless [Express](glossary.md#express) is on).
    - **Data extraction**: a clean, documented dataset out of the database.
    - **Data engineering**: working on the lab's R pipelines.
    - **Research**: literature, methods and packages, with the web.
@@ -59,6 +59,12 @@ the line says it's waiting for you, the agent has paused for a decision:
 - an [analysis plan](plans.md) to approve, or
 - a question for the [research helper](glossary.md#research-helper) to
   send, edit or decline.
+
+With the [Express](glossary.md#express) switch on (in the conversation's
+header, beside **Rigor review**), the agent skips these: no plan, no pause
+after a pilot, no research helper. It answers directly and quickly, with the
+same data access and checks. It's off in a new conversation; turn it on for
+quick questions, and off again for work that needs a plan.
 
 A stopped turn keeps everything it saved: see **History**. If a turn stopped
 part-way, **Continue** picks it up without sending anything twice.

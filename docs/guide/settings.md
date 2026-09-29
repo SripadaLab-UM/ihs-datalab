@@ -47,8 +47,14 @@ The key and the password are kept in your computer's keychain. You can save
 or replace them here, but DataLab never shows them again, and the agent never
 sees them. **Test connection** checks both the database and U-M GPT.
 
-If no database is set up yet, ask the DataLab maintainer for the lab's
-settings file. On the practice DataLab the database is the synthetic one on
+The installer from the lab's install page sets up the database connection
+for you, with the lab's settings included. If this section says no database
+is set up, the setup didn't finish: run the installer again, the same way (it
+carries on from where it stopped, and keeps what's already done). If it still
+says so, send the maintainer **Copy diagnostics** from **About** (it has no
+data, keys or passwords). If you installed by hand from GitHub's release files
+instead, the lab's settings file is needed:
+`datalab setup --settings <file>`, from the maintainer. On the practice DataLab the database is the synthetic one on
 your computer, whose settings are fixed, and it uses the U-M GPT key the real
 DataLab saved.
 
