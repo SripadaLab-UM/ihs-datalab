@@ -109,8 +109,11 @@ palette that follows the system setting.
 - `components/chat/Story.tsx`: the story (`StepRow` and `GroupRow` as ruled
   rows that open with "+", `SayRow` narration, the live `NowCard` line,
   `DetailView`).
-- `components/chat/Chat.tsx`: turns, the answer card, trace and review, the
-  composer. The chat follows new steps only while you're at the bottom;
+- `components/chat/Chat.tsx`: the chat itself (its conversation's state and
+  sending), made of `ChatControls` (header, title, Express and Rigor review
+  switches, effort), `Intro` (an empty conversation), `TurnView` (a turn),
+  `Answer` (the answer card, its checks and the rigor review) and `Composer`.
+  The chat follows new steps only while you're at the bottom (`chatHooks`);
   scroll up and it stays put, with "Jump to latest".
 - `components/chat/DockedChat.tsx`: the same chat, docked beside a tab's own
   content. It opens a conversation, or starts one of a given mode with the
