@@ -1,0 +1,53 @@
+{
+  "task": "person_days",
+  "mode": "extraction",
+  "prompt": "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? A person-day is one participant on one day, from any source; include every participant in the view.",
+  "tests": "text timestamps: several a day, some after midnight or another date in UTC",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one person-day per participant-date",
+      "passed": true,
+      "detail": "expected 19,198 (RECORD_DATE's local date), 21,951 (its UTC date) or 21,870 (STARTDATE's date); 25,132 counts each timestamp as a day"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day, and in what time zone"
+    }
+  ],
+  "answer": "I counted **21,870 person-days** of resting heart rate data in `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE`.\n\nI understood \u201cperson-day\u201d as one distinct `PARTICIPANTIDENTIFIER` plus sample calendar day, using `SUBSTR(STARTDATE, 1, 10)`, collapsing across all HealthKit sources. No participant/demographic join was used, so every participant appearing in the view is included.\n\nOutput files:\n- Count CSV: `/work/outputs/healthkit_resting_hr_person_days_2025.csv`\n- Data dictionary: `/work/outputs/healthkit_resting_hr_person_days_2025_dictionary.md`\n\nCatalog evidence: `search_catalog` found `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE` as a view. `describe_table` confirmed the needed columns: `PARTICIPANTIDENTIFIER`, `STARTDATE`, `RECORD_DATE`, and source fields. `STARTDATE` and `RECORD_DATE` are both `VARCHAR2(26)`.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n  COUNT(STARTDATE) AS rows_with_startdate,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: field completeness/profile. Result row count: 1.\n\n```sql\nSELECT\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day_text,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day_text,\n  MIN(SUBSTR(RECORD_DATE, 1, 10)) AS min_record_day_text,\n  MAX(SUBSTR(RECORD_DATE, 1, 10)) AS max_record_day_text,\n  COUNT(DISTINCT SUBSTR(STARTDATE, 1, 10)) AS distinct_start_days,\n  COUNT(DISTINCT SUBSTR(RECORD_DATE, 1, 10)) AS distinct_record_days\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: date range/day profile. Result row count: 1.\n\n```sql\nSELECT\n  COUNT(*) AS rows_checked,\n  SUM(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 ELSE 0 END) AS startdate_iso_prefix_rows,\n  SUM(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 ELSE 0 END) AS record_date_iso_prefix_rows,\n  SUM(CASE WHEN SUBSTR(STARTDATE, 1, 10) = SUBSTR(RECORD_DATE, 1, 10) THEN 1 ELSE 0 END) AS same_start_and_record_day_rows,\n  SUM(CASE WHEN SUBSTR(STARTDATE, 1, 10) <> SUBSTR(RECORD_DATE, 1, 10) THEN 1 ELSE 0 END) AS different_start_and_record_day_rows\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\nPurpose: check date-string format and whether sample day differs from record day. Result row count: 1.\n\n```sql\nWITH participant_days AS (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS SAMPLE_DAY\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n)\nSELECT\n  COUNT(*) AS person_days_resting_heart_rate\nFROM participant_days\n```\nPurpose: final person-day count. Result row count: 1. Column: `PERSON_DAYS_RESTING_HEART_RATE`.\n\nCaveat to double-check: I used `STARTDATE` as the sample day. `RECORD_DATE` can fall on a different calendar day, so use that only if you intend a recorded/exported-day definition. I also suggested a knowledge-base note about this date-field caveat for review.",
+  "finished": true,
+  "seconds": 75.20351696014404,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS rows_with_participant,\n  COUNT(STARTDATE) AS rows_with_startdate,\n  COUNT(RECORD_DATE) AS rows_with_record_date,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day_text,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day_text,\n  MIN(SUBSTR(RECORD_DATE, 1, 10)) AS min_record_day_text,\n  MAX(SUBSTR(RECORD_DATE, 1, 10)) AS max_record_day_text,\n  COUNT(DISTINCT SUBSTR(STARTDATE, 1, 10)) AS distinct_start_days,\n  COUNT(DISTINCT SUBSTR(RECORD_DATE, 1, 10)) AS distinct_record_days\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  COUNT(*) AS rows_checked,\n  SUM(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 ELSE 0 END) AS startdate_iso_prefix_rows,\n  SUM(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 ELSE 0 END) AS record_date_iso_prefix_rows,\n  SUM(CASE WHEN SUBSTR(STARTDATE, 1, 10) = SUBSTR(RECORD_DATE, 1, 10) THEN 1 ELSE 0 END) AS same_start_and_record_day_rows,\n  SUM(CASE WHEN SUBSTR(STARTDATE, 1, 10) <> SUBSTR(RECORD_DATE, 1, 10) THEN 1 ELSE 0 END) AS different_start_and_record_day_rows\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "WITH participant_days AS (\n  SELECT DISTINCT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS SAMPLE_DAY\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n)\nSELECT\n  COUNT(*) AS person_days_resting_heart_rate\nFROM participant_days"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 205027,
+        "inputTokens": 200628,
+        "cachedInputTokens": 126464,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4399,
+        "reasoningOutputTokens": 1276
+      },
+      "last": {
+        "totalTokens": 20182,
+        "inputTokens": 18986,
+        "cachedInputTokens": 18432,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1196,
+        "reasoningOutputTokens": 269
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_085eeb8113ac285f",
+  "attempt": 1
+}

@@ -1,0 +1,52 @@
+{
+  "task": "bdate_age",
+  "mode": "extraction",
+  "prompt": "What was the mean age of the 2025 cohort's enrolled participants when they started the baseline survey, from the date of birth in the baseline survey view (VW_BASELINE_SURVEY)?",
+  "tests": "a mixed-case quoted column (\"Bdate\")",
+  "passed": true,
+  "checks": [
+    {
+      "name": "mean age at baseline",
+      "passed": true,
+      "detail": "expected 29.76 years (29.26 in whole years), from the quoted \"Bdate\" column and STARTDATE0"
+    },
+    {
+      "name": "enrolled n",
+      "passed": true,
+      "detail": "n = 129 enrolled with a date of birth"
+    }
+  ],
+  "answer": "The mean age was **29.762 years** at baseline survey start, among **129 enrolled 2025 participants**. Rounded: **29.8 years**.\n\nI understood \u201cenrolled participants\u201d as `STUDY_PARTICIPANT_ID IS NOT NULL`, based on the column comment in `IHS_2025.VW_BASELINE_SURVEY`: null means screened but never enrolled. Age was continuous years at `STARTDATE0`, using `\"Bdate\"` from the same view: `MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12`.\n\nFiles:\n`/work/outputs/ihs_2025_mean_age_baseline_start.csv`\n`/work/outputs/ihs_2025_mean_age_baseline_start_dictionary.md`\n\nCatalog/schema evidence: `search_catalog` found `IHS_2025.VW_BASELINE_SURVEY` with `STARTDATE0`, `\"Bdate\"`, `STUDY_PARTICIPANT_ID`, and `PARTICIPANTIDENTIFIER`. `describe_table` confirmed `STARTDATE0` and `\"Bdate\"` are `DATE` columns, and `STUDY_PARTICIPANT_ID` identifies enrollment status. The local `/work/kb` directory was not present, so I could not use knowledge-base notes.\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS baseline_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  COUNT(STUDY_PARTICIPANT_ID) AS rows_with_study_participant_id,\n  COUNT(\"Bdate\") AS rows_with_birthdate,\n  COUNT(STARTDATE0) AS rows_with_startdate0,\n  COUNT(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 END) AS complete_enrolled_rows\nFROM IHS_2025.VW_BASELINE_SURVEY\n```\n\nPurpose: profile completeness. Row count returned: 1 aggregate row. Result: 139 baseline rows; 129 complete enrolled rows.\n\n```sql\nWITH enrolled_baseline AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID, STARTDATE0, \"Bdate\" AS BIRTHDATE\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT\n  COUNT(*) AS enrolled_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS enrolled_distinct_participants,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS enrolled_distinct_study_ids,\n  COUNT(CASE WHEN STARTDATE0 IS NULL THEN 1 END) AS missing_startdate0,\n  COUNT(CASE WHEN BIRTHDATE IS NULL THEN 1 END) AS missing_birthdate,\n  COUNT(CASE WHEN BIRTHDATE > STARTDATE0 THEN 1 END) AS birthdate_after_startdate,\n  COUNT(CASE WHEN MONTHS_BETWEEN(STARTDATE0, BIRTHDATE) / 12 < 15 THEN 1 END) AS age_under_15,\n  COUNT(CASE WHEN MONTHS_BETWEEN(STARTDATE0, BIRTHDATE) / 12 > 80 THEN 1 END) AS age_over_80\nFROM enrolled_baseline\n```\n\nPurpose: duplicate/missing/date sanity check. Row count returned: 1 aggregate row. Result: 129 enrolled rows, 129 distinct participants, no missing dates or flagged age/date issues.\n\n```sql\nSELECT\n  COUNT(*) AS N_ENROLLED_PARTICIPANTS,\n  AVG(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS MEAN_AGE_YEARS_AT_BASELINE_START\nFROM IHS_2025.VW_BASELINE_SURVEY\nWHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  AND STARTDATE0 IS NOT NULL\n  AND \"Bdate\" IS NOT NULL\n```\n\nPurpose: final extraction. Row count returned: 1 aggregate row. Columns: `N_ENROLLED_PARTICIPANTS`, `MEAN_AGE_YEARS_AT_BASELINE_START`.\n\nCaveat to double-check: this uses continuous age, not age last birthday/floored age.",
+  "finished": true,
+  "seconds": 365.0358998775482,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS baseline_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participants,\n  COUNT(STUDY_PARTICIPANT_ID) AS rows_with_study_participant_id,\n  COUNT(\"Bdate\") AS rows_with_birthdate,\n  COUNT(STARTDATE0) AS rows_with_startdate0,\n  COUNT(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 END) AS complete_enrolled_rows\nFROM IHS_2025.VW_BASELINE_SURVEY",
+    "WITH enrolled_baseline AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    STUDY_PARTICIPANT_ID,\n    STARTDATE0,\n    \"Bdate\" AS BIRTHDATE\n  FROM IHS_2025.VW_BASELINE_SURVEY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT\n  COUNT(*) AS enrolled_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS enrolled_distinct_participants,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS enrolled_distinct_study_ids,\n  COUNT(CASE WHEN STARTDATE0 IS NULL THEN 1 END) AS missing_startdate0,\n  COUNT(CASE WHEN BIRTHDATE IS NULL THEN 1 END) AS missing_birthdate,\n  COUNT(CASE WHEN BIRTHDATE > STARTDATE0 THEN 1 END) AS birthdate_after_startdate,\n  COUNT(CASE WHEN MONTHS_BETWEEN(STARTDATE0, BIRTHDATE) / 12 < 15 THEN 1 END) AS age_under_15,\n  COUNT(CASE WHEN MONTHS_BETWEEN(STARTDATE0, BIRTHDATE) / 12 > 80 THEN 1 END) AS age_over_80\nFROM enrolled_baseline",
+    "SELECT\n  COUNT(*) AS N_ENROLLED_PARTICIPANTS,\n  AVG(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS MEAN_AGE_YEARS_AT_BASELINE_START\nFROM IHS_2025.VW_BASELINE_SURVEY\nWHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  AND STARTDATE0 IS NOT NULL\n  AND \"Bdate\" IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 221928,
+        "inputTokens": 217605,
+        "cachedInputTokens": 154112,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 4323,
+        "reasoningOutputTokens": 1256
+      },
+      "last": {
+        "totalTokens": 24274,
+        "inputTokens": 23028,
+        "cachedInputTokens": 20992,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1246,
+        "reasoningOutputTokens": 356
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_41abee05dabcdbe8",
+  "attempt": 2
+}

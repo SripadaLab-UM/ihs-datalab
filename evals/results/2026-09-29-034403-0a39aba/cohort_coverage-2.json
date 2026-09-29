@@ -1,0 +1,60 @@
+{
+  "task": "cohort_coverage",
+  "mode": "analysis",
+  "prompt": "Take the 2025 cohort to be the enrolled participants in IHS_2025.VW_IHS_PARTICIPANT_SUMMARY (those with a STUDY_PARTICIPANT_ID). What share of that cohort has any HealthKit resting heart rate data, and how many person-days of it do they contribute in total? Exploratory is fine: no plan needed.",
+  "tests": "the cohort applied to numerator and denominator: people outside it, a duplicate cohort row",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: in the 2025 enrolled cohort, **58 of 136 participants** had any HealthKit resting heart rate data, so the cohort share is **42.6%**. Using local calendar day from `RECORD_DATE` as the day rule, they contributed **16,906 person-days** in total.\n\nI used `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY` for the enrolled cohort and `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE` for resting heart rate, joined by `PARTICIPANTIDENTIFIER`. The cohort was deduplicated before joining. As a timestamp sensitivity, using local `STARTDATE` instead would give **19,297 person-days**, so downstream analyses should choose the date field deliberately.\n\nI wrote the report to `/work/outputs/healthkit_rhr_coverage_2025.html` and the reproducible script to `/work/scripts/healthkit_rhr_coverage_2025.py`. I also suggested a knowledge-base update noting that the 2025 participant summary should be deduplicated before joins.",
+  "finished": true,
+  "seconds": 142.08972311019897,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS summary_rows,\n  COUNT(STUDY_PARTICIPANT_ID) AS rows_with_study_participant_id,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_ids,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS enrolled_rows_missing_participantidentifier\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY",
+    "WITH enrolled AS (\n  SELECT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n)\nSELECT duplicate_row_count, participantidentifier_count\nFROM (\n  SELECT COUNT(*) AS duplicate_row_count\n  FROM (\n    SELECT PARTICIPANTIDENTIFIER\n    FROM enrolled\n    GROUP BY PARTICIPANTIDENTIFIER\n    HAVING COUNT(*) > 1\n  )\n), (\n  SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_count\n  FROM enrolled\n)",
+    "SELECT\n  COUNT(*) AS hkit_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS hkit_participants,\n  MIN(SUBSTR(RECORD_DATE, 1, 10)) AS min_record_local_date,\n  MAX(SUBSTR(RECORD_DATE, 1, 10)) AS max_record_local_date,\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_local_date,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_local_date,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n  SUM(CASE WHEN RECORD_DATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_record_date,\n  SUM(CASE WHEN STARTDATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_startdate,\n  SUM(CASE WHEN VALUE IS NULL THEN 1 ELSE 0 END) AS rows_missing_value\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), hkit AS (\n  SELECT h.PARTICIPANTIDENTIFIER, h.VALUE, h.UNITS\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n  WHERE h.VALUE IS NOT NULL\n    AND REGEXP_LIKE(h.VALUE, '^[-+]?[0-9]*\\.?[0-9]+$')\n)\nSELECT\n  COUNT(*) AS numeric_rows_in_cohort,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS numeric_participants_in_cohort,\n  MIN(TO_NUMBER(VALUE)) AS min_resting_hr_value,\n  MAX(TO_NUMBER(VALUE)) AS max_resting_hr_value,\n  COUNT(DISTINCT UNITS) AS distinct_units\nFROM hkit",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), hkit AS (\n  SELECT PARTICIPANTIDENTIFIER, RECORD_DATE, STARTDATE, VALUE, UNITS\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND RECORD_DATE IS NOT NULL\n    AND VALUE IS NOT NULL\n), in_cohort AS (\n  SELECT h.*\n  FROM hkit h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n), record_day_counts AS (\n  SELECT PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10) AS local_day, COUNT(*) AS row_count\n  FROM in_cohort\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(RECORD_DATE, 1, 10)\n), start_day_counts AS (\n  SELECT PARTICIPANTIDENTIFIER, SUBSTR(STARTDATE, 1, 10) AS local_day, COUNT(*) AS row_count\n  FROM in_cohort\n  WHERE STARTDATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, SUBSTR(STARTDATE, 1, 10)\n)\nSELECT\n  (SELECT COUNT(*) FROM cohort) AS cohort_n,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM in_cohort) AS participants_with_resting_hr,\n  (SELECT COUNT(*) FROM in_cohort) AS resting_hr_rows_in_cohort,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || RECORD_DATE) FROM in_cohort) AS record_distinct_participant_timestamps,\n  (SELECT COUNT(*) FROM record_day_counts) AS record_local_person_days,\n  (SELECT COUNT(*) FROM record_day_counts WHERE row_count > 1) AS record_local_person_days_with_multiple_rows,\n  (SELECT MAX(row_count) FROM record_day_counts) AS record_local_max_rows_per_person_day,\n  (SELECT COUNT(*) FROM start_day_counts) AS start_local_person_days,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM hkit WHERE PARTICIPANTIDENTIFIER NOT IN (SELECT PARTICIPANTIDENTIFIER FROM cohort)) AS hkit_participants_outside_cohort,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM hkit WHERE NOT REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$')) AS participants_with_nonnumeric_values,\n  (SELECT COUNT(*) FROM hkit WHERE NOT REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$')) AS nonnumeric_value_rows\nFROM DUAL",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), hkit AS (\n  SELECT h.PARTICIPANTIDENTIFIER, h.UNITS\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n  WHERE h.VALUE IS NOT NULL\n)\nSELECT UNITS, COUNT(*) AS rows_with_unit, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_unit\nFROM hkit\nGROUP BY UNITS\nORDER BY COUNT(*) DESC"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 421947,
+        "inputTokens": 410957,
+        "cachedInputTokens": 216064,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 10990,
+        "reasoningOutputTokens": 2705
+      },
+      "last": {
+        "totalTokens": 35961,
+        "inputTokens": 35545,
+        "cachedInputTokens": 33280,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 416,
+        "reasoningOutputTokens": 177
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_97c0c72bd7b2ce26",
+  "attempt": 2
+}

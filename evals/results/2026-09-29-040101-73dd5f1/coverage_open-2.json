@@ -1,0 +1,58 @@
+{
+  "task": "coverage_open",
+  "mode": "analysis",
+  "prompt": "What share of the 2025 cohort's enrolled participants have any HealthKit resting heart rate data, and how many person-days of it do they contribute? Exploratory is fine: no plan needed.",
+  "tests": "the same, with the cohort left to the agent: people with data outside it",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: 58 of 136 enrolled 2025 participants had at least one HealthKit resting heart rate row, which is 42.6% of the enrolled cohort. Using the local calendar date of `STARTDATE` as the day rule, they contributed 19,297 person-days of resting heart rate data.\n\nI used distinct enrolled `PARTICIPANTIDENTIFIER`s from `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY` where `STUDY_PARTICIPANT_ID` is not null, joined to `IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE`. A duplicate cohort row was deduplicated before joining. `RECORD_DATE` gave fewer person-days, 16,906, so the date-field choice matters; I used `STARTDATE` because it reflects the measurement date.\n\nReport: `/work/outputs/healthkit_rhr_coverage_2025.html`  \nSource: `/work/scripts/healthkit_rhr_coverage_2025.py`\n\nThe local KB was unavailable in this workspace, so I grounded this in the live catalog/table descriptions instead.",
+  "finished": true,
+  "seconds": 123.4237802028656,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "WITH cohort_raw AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), cohort_dupes AS (\n  SELECT PARTICIPANTIDENTIFIER, COUNT(*) AS row_count\n  FROM cohort_raw\n  GROUP BY PARTICIPANTIDENTIFIER\n  HAVING COUNT(*) > 1\n), cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM cohort_raw\n)\nSELECT\n  (SELECT COUNT(*) FROM cohort_raw) AS cohort_source_rows,\n  (SELECT COUNT(*) FROM cohort) AS enrolled_participants,\n  (SELECT COUNT(*) FROM cohort_dupes) AS participant_ids_with_duplicate_rows,\n  (SELECT COUNT(*) FROM cohort WHERE PARTICIPANTIDENTIFIER IS NULL) AS cohort_null_participant_ids\nFROM DUAL",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), h AS (\n  SELECT PARTICIPANTIDENTIFIER, STARTDATE, RECORD_DATE, VALUE, UNITS\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n), h_in AS (\n  SELECT h.*\n  FROM h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n), value_flags AS (\n  SELECT\n    COUNT(*) AS rows_in_cohort,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_any_row,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS start_local_person_days,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(TRUNC(CAST(RECORD_DATE AS DATE)), 'YYYY-MM-DD')) AS record_local_person_days,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(STARTDATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) AS distinct_start_timestamps,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) AS distinct_record_timestamps,\n    SUM(CASE WHEN STARTDATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_startdate,\n    SUM(CASE WHEN RECORD_DATE IS NULL THEN 1 ELSE 0 END) AS rows_missing_record_date,\n    SUM(CASE WHEN VALUE IS NULL THEN 1 ELSE 0 END) AS rows_missing_value,\n    SUM(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN 0 ELSE 1 END) AS rows_non_numeric_value,\n    MIN(CAST(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN VALUE END AS NUMBER)) AS min_numeric_value,\n    MAX(CAST(CASE WHEN REGEXP_LIKE(VALUE, '^[-+]?[0-9]*\\.?[0-9]+$') THEN VALUE END AS NUMBER)) AS max_numeric_value,\n    COUNT(DISTINCT UNITS) AS distinct_units\n  FROM h_in\n)\nSELECT\n  (SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) FROM h WHERE h.PARTICIPANTIDENTIFIER NOT IN (SELECT PARTICIPANTIDENTIFIER FROM cohort)) AS participants_outside_enrolled_cohort,\n  (SELECT COUNT(*) FROM h WHERE h.PARTICIPANTIDENTIFIER NOT IN (SELECT PARTICIPANTIDENTIFIER FROM cohort)) AS rows_outside_enrolled_cohort,\n  value_flags.*\nFROM value_flags",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), h_in AS (\n  SELECT h.PARTICIPANTIDENTIFIER,\n         h.STARTDATE,\n         h.RECORD_DATE,\n         h.VALUE,\n         h.UNITS\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n), person_days AS (\n  SELECT PARTICIPANTIDENTIFIER,\n         COUNT(DISTINCT TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS start_local_days\n  FROM h_in\n  WHERE STARTDATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER\n)\nSELECT\n  (SELECT COUNT(*) FROM cohort) AS enrolled_participants,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM h_in) AS participants_with_any_rhr,\n  ROUND(100 * (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM h_in) / NULLIF((SELECT COUNT(*) FROM cohort), 0), 1) AS percent_with_any_rhr,\n  COUNT(*) AS rhr_sample_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS start_local_person_days,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(STARTDATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) AS distinct_start_timestamps,\n  MIN(TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS first_start_local_date,\n  MAX(TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS last_start_local_date,\n  (SELECT COUNT(*) FROM person_days WHERE start_local_days >= 2) AS participants_with_at_least_two_start_days,\n  COUNT(DISTINCT UNITS) AS distinct_units,\n  MIN(UNITS) AS unit_example\nFROM h_in",
+    "WITH cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n    AND PARTICIPANTIDENTIFIER IS NOT NULL\n), h_in AS (\n  SELECT h.PARTICIPANTIDENTIFIER,\n         h.STARTDATE,\n         h.RECORD_DATE,\n         h.VALUE,\n         h.UNITS\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n), person_days AS (\n  SELECT PARTICIPANTIDENTIFIER,\n         COUNT(DISTINCT TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS start_local_days\n  FROM h_in\n  WHERE STARTDATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER\n), totals AS (\n  SELECT COUNT(*) AS enrolled_participants FROM cohort\n), participants AS (\n  SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants_with_any_rhr FROM h_in\n), h_agg AS (\n  SELECT\n    COUNT(*) AS rhr_sample_rows,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS start_local_person_days,\n    COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(STARTDATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) AS distinct_start_timestamps,\n    MIN(TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS first_start_local_date,\n    MAX(TO_CHAR(TRUNC(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD')) AS last_start_local_date,\n    COUNT(DISTINCT UNITS) AS distinct_units,\n    MIN(UNITS) AS unit_example\n  FROM h_in\n), pp_agg AS (\n  SELECT COUNT(*) AS participants_with_at_least_two_start_days\n  FROM person_days\n  WHERE start_local_days >= 2\n)\nSELECT\n  totals.enrolled_participants,\n  participants.participants_with_any_rhr,\n  ROUND(100 * participants.participants_with_any_rhr / NULLIF(totals.enrolled_participants, 0), 1) AS percent_with_any_rhr,\n  h_agg.rhr_sample_rows,\n  h_agg.start_local_person_days,\n  h_agg.distinct_start_timestamps,\n  h_agg.first_start_local_date,\n  h_agg.last_start_local_date,\n  pp_agg.participants_with_at_least_two_start_days,\n  h_agg.distinct_units,\n  h_agg.unit_example\nFROM totals\nCROSS JOIN participants\nCROSS JOIN h_agg\nCROSS JOIN pp_agg"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 347564,
+        "inputTokens": 337671,
+        "cachedInputTokens": 152576,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9893,
+        "reasoningOutputTokens": 2362
+      },
+      "last": {
+        "totalTokens": 36591,
+        "inputTokens": 36227,
+        "cachedInputTokens": 28160,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 364,
+        "reasoningOutputTokens": 120
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_89d2b0123d10b359",
+  "attempt": 2
+}

@@ -1,0 +1,55 @@
+{
+  "task": "coverage_open",
+  "mode": "analysis",
+  "prompt": "What share of the 2025 cohort's enrolled participants have any HealthKit resting heart rate data, and how many person-days of it do they contribute? Exploratory is fine: no plan needed.",
+  "tests": "the same, with the cohort left to the agent: people with data outside it",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: **58 of 136 enrolled 2025 participants had any non-missing HealthKit resting heart-rate data, or 42.6%**. Those participants contributed **19,297 person-days** using the local calendar date of the HealthKit sample `STARTDATE`.\n\nI used `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY` for the enrolled denominator (`STUDY_PARTICIPANT_ID` not null, de-duplicated to one row per participant) and `IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE` for resting HR. The included HealthKit rows had no missing `STARTDATE`, no non-numeric values, and no values outside a broad 0-250 bpm plausibility range. The `RECORD_DATE` day rule would give a different total, **16,906 person-days**, so `STARTDATE` is the better interpretation for \u201cdays of measured data.\u201d\n\nReport: `/work/outputs/healthkit_rhr_coverage_2025.html`  \nSource script: `/work/scripts/healthkit_rhr_coverage_2025.R`\n\nNo uncertainty interval is reported because this is a descriptive coverage count from the currently available database, not a sampled estimate.",
+  "finished": true,
+  "seconds": 135.45226216316223,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "WITH cohort_raw AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), cohort_dup AS (\n  SELECT PARTICIPANTIDENTIFIER, COUNT(*) AS row_n\n  FROM cohort_raw\n  GROUP BY PARTICIPANTIDENTIFIER\n), cohort AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER\n  FROM cohort_raw\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n), hr_raw AS (\n  SELECT PARTICIPANTIDENTIFIER, STARTDATE, RECORD_DATE, VALUE, UNITS\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n), hr_nonnull_value AS (\n  SELECT *\n  FROM hr_raw\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND VALUE IS NOT NULL\n), hr_in_cohort AS (\n  SELECT h.*\n  FROM hr_nonnull_value h\n  JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER\n), start_days AS (\n  SELECT PARTICIPANTIDENTIFIER, TRUNC(CAST(STARTDATE AS DATE)) AS day, COUNT(*) AS row_n\n  FROM hr_in_cohort\n  WHERE STARTDATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, TRUNC(CAST(STARTDATE AS DATE))\n), record_days AS (\n  SELECT PARTICIPANTIDENTIFIER, TRUNC(CAST(RECORD_DATE AS DATE)) AS day, COUNT(*) AS row_n\n  FROM hr_in_cohort\n  WHERE RECORD_DATE IS NOT NULL\n  GROUP BY PARTICIPANTIDENTIFIER, TRUNC(CAST(RECORD_DATE AS DATE))\n)\nSELECT\n  (SELECT COUNT(*) FROM cohort_raw) AS cohort_source_rows,\n  (SELECT COUNT(*) FROM cohort) AS enrolled_participants,\n  (SELECT COUNT(*) FROM cohort_dup WHERE PARTICIPANTIDENTIFIER IS NULL) AS null_cohort_ids,\n  (SELECT COUNT(*) FROM cohort_dup WHERE row_n > 1 AND PARTICIPANTIDENTIFIER IS NOT NULL) AS duplicate_cohort_ids,\n  (SELECT COUNT(*) FROM hr_raw) AS hr_rows_total,\n  (SELECT COUNT(*) FROM hr_nonnull_value) AS hr_rows_with_value,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM hr_nonnull_value) AS hr_participants_any_value_anywhere,\n  (SELECT COUNT(DISTINCT h.PARTICIPANTIDENTIFIER) FROM hr_nonnull_value h LEFT JOIN cohort c ON c.PARTICIPANTIDENTIFIER = h.PARTICIPANTIDENTIFIER WHERE c.PARTICIPANTIDENTIFIER IS NULL) AS hr_participants_outside_enrolled_cohort,\n  (SELECT COUNT(*) FROM hr_in_cohort) AS hr_rows_with_value_enrolled,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM hr_in_cohort) AS enrolled_participants_with_hr,\n  (SELECT COUNT(*) FROM start_days) AS enrolled_start_person_days,\n  (SELECT COUNT(*) FROM record_days) AS enrolled_record_person_days,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(STARTDATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) FROM hr_in_cohort WHERE STARTDATE IS NOT NULL) AS enrolled_start_timestamps,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || TO_CHAR(RECORD_DATE, 'YYYY-MM-DD HH24:MI:SS TZH:TZM')) FROM hr_in_cohort WHERE RECORD_DATE IS NOT NULL) AS enrolled_record_timestamps,\n  (SELECT COUNT(*) FROM start_days WHERE row_n > 1) AS start_person_days_with_multiple_rows,\n  (SELECT COUNT(*) FROM record_days WHERE row_n > 1) AS record_person_days_with_multiple_rows,\n  (SELECT TO_CHAR(MIN(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD') FROM hr_in_cohort WHERE STARTDATE IS NOT NULL) AS start_date_min,\n  (SELECT TO_CHAR(MAX(CAST(STARTDATE AS DATE)), 'YYYY-MM-DD') FROM hr_in_cohort WHERE STARTDATE IS NOT NULL) AS start_date_max,\n  (SELECT COUNT(*) FROM hr_in_cohort WHERE STARTDATE IS NULL) AS rows_missing_startdate,\n  (SELECT COUNT(*) FROM hr_in_cohort WHERE RECORD_DATE IS NULL) AS rows_missing_record_date,\n  (SELECT COUNT(*) FROM hr_in_cohort WHERE NOT REGEXP_LIKE(VALUE, '^-?[0-9]+(\\.[0-9]+)?$')) AS rows_non_numeric_value,\n  (SELECT COUNT(*) FROM hr_in_cohort WHERE REGEXP_LIKE(VALUE, '^-?[0-9]+(\\.[0-9]+)?$') AND (TO_NUMBER(VALUE) <= 0 OR TO_NUMBER(VALUE) > 250)) AS rows_value_outside_plausible_range\nFROM DUAL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 331556,
+        "inputTokens": 322336,
+        "cachedInputTokens": 178688,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 9220,
+        "reasoningOutputTokens": 2953
+      },
+      "last": {
+        "totalTokens": 34386,
+        "inputTokens": 33869,
+        "cachedInputTokens": 31232,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 517,
+        "reasoningOutputTokens": 250
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_58cc75f1893c9dde",
+  "attempt": 1
+}

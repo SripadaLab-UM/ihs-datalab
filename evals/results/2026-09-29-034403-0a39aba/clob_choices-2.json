@@ -1,0 +1,47 @@
+{
+  "task": "clob_choices",
+  "mode": "extraction",
+  "prompt": "In the 2025 cohort's survey dictionary, what distinct sets of answer choices are there, and how many dictionary rows use each?",
+  "tests": "a CLOB column grouped (TO_CHAR first)",
+  "passed": true,
+  "checks": [
+    {
+      "name": "answer-choice sets and their rows",
+      "passed": true,
+      "detail": "two sets: the PHQ-9 choices on 90 rows and the substance-use choices on 20 (of 110)"
+    }
+  ],
+  "answer": "**Answer**\n\nI understood the request as: in `IHS_2025.STG_SURVEYDICTIONARY`, group the survey dictionary rows by distinct `ANSWERCHOICES` values and count how many dictionary rows use each.\n\nCatalog evidence: `search_catalog` found `IHS_2025.STG_SURVEYDICTIONARY` with matching columns `SURVEYNAME`, `SURVEYKEY`, `SURVEYVERSION`, `ANSWERCHOICES`, and `QUESTIONTEXT`. `describe_table` confirmed `ANSWERCHOICES` is a `CLOB`, so I converted it with `TO_CHAR(SUBSTR(...))` for grouping. `/work/kb` was not available in this workspace, so I could not check local KB notes.\n\n| Answer choices | Dictionary rows |\n|---|---:|\n| `0=Not at all|1=Several days|2=More than half the days|3=Nearly every day` | 90 |\n| `0=Never|1=Once or Twice|2=Monthly|3=Weekly|4=Daily or Almost Daily` | 20 |\n\nFiles:\n- Dataset: `/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets.csv`\n- Data dictionary: `/work/outputs/ihs_2025_survey_dictionary_answer_choice_sets_dictionary.md`\n\nSQL actually run:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n  COUNT(*) - COUNT(LENGTH(ANSWERCHOICES)) AS rows_without_answerchoices,\n  MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY\n```\n\nPurpose: profile completeness and length before grouping a CLOB. Row count: 1. Result: 110 total rows, 110 with answer choices, max length 72.\n\n```sql\nSELECT\n  TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000)) AS answer_choices,\n  COUNT(*) AS dictionary_rows\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))\nORDER BY dictionary_rows DESC, answer_choices\n```\n\nPurpose: final extraction of distinct answer-choice sets and row counts. Row count: 2. Columns: `ANSWER_CHOICES`, `DICTIONARY_ROWS`.\n\nCaveat: no participant cohort or person-day rule applies here because this is survey metadata, not participant-level data.",
+  "finished": true,
+  "seconds": 60.79671597480774,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(ANSWERCHOICES) AS rows_with_answerchoices,\n  COUNT(*) - COUNT(ANSWERCHOICES) AS rows_without_answerchoices,\n  MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY",
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(LENGTH(ANSWERCHOICES)) AS rows_with_answerchoices,\n  COUNT(*) - COUNT(LENGTH(ANSWERCHOICES)) AS rows_without_answerchoices,\n  MAX(LENGTH(ANSWERCHOICES)) AS max_answerchoices_length\nFROM IHS_2025.STG_SURVEYDICTIONARY",
+    "SELECT\n  TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000)) AS answer_choices,\n  COUNT(*) AS dictionary_rows\nFROM IHS_2025.STG_SURVEYDICTIONARY\nGROUP BY TO_CHAR(SUBSTR(ANSWERCHOICES, 1, 1000))\nORDER BY dictionary_rows DESC, answer_choices"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 168399,
+        "inputTokens": 165213,
+        "cachedInputTokens": 76800,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3186,
+        "reasoningOutputTokens": 992
+      },
+      "last": {
+        "totalTokens": 18725,
+        "inputTokens": 17869,
+        "cachedInputTokens": 5632,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 856,
+        "reasoningOutputTokens": 329
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_616acd15a8340acb",
+  "attempt": 2
+}

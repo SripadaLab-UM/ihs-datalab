@@ -1,0 +1,60 @@
+{
+  "task": "cohort_coverage",
+  "mode": "analysis",
+  "prompt": "Take the 2025 cohort to be the enrolled participants in IHS_2025.VW_IHS_PARTICIPANT_SUMMARY (those with a STUDY_PARTICIPANT_ID). What share of that cohort has any HealthKit resting heart rate data, and how many person-days of it do they contribute in total? Exploratory is fine: no plan needed.",
+  "tests": "the cohort applied to numerator and denominator: people outside it, a duplicate cohort row",
+  "passed": true,
+  "checks": [
+    {
+      "name": "cohort share",
+      "passed": true,
+      "detail": "expected 58 of 136 (42.6%): the cohort has 137 summary rows for 136 people, and 66 people in the table include 8 outside the cohort"
+    },
+    {
+      "name": "person-days, no duplicate-join inflation",
+      "passed": true,
+      "detail": "expected 16,906, 19,369 or 19,297 person-days (by day rule); joining the duplicate summary row gives 17,244 and the like"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day"
+    }
+  ],
+  "answer": "Exploratory bottom line: in the requested 2025 enrolled cohort, **58 of 136 participants** had any HealthKit resting heart rate data, so the share is **42.6%**. Those participants contributed **19,297 person-days** total, counting distinct enrolled participant plus local calendar day from HealthKit `STARTDATE`.\n\nI used `IHS_2025.VW_IHS_PARTICIPANT_SUMMARY` for the cohort denominator and `IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE` for the HealthKit RHR data, joined by `PARTICIPANTIDENTIFIER`. I used `STARTDATE` rather than `RECORD_DATE` because a check showed those dates are not interchangeable for person-day counts.\n\nReport: `/work/outputs/healthkit_rhr_coverage_2025.html`  \nSummary CSV: `/work/outputs/healthkit_rhr_coverage_2025_summary.csv`  \nSource script: `/work/scripts/healthkit_rhr_coverage_2025.py`\n\nLimitations: this is descriptive coverage only, not an adherence or health interpretation. The local KB was not mounted, so I relied on live catalog/table metadata. I also suggested a KB update noting the `STARTDATE` vs `RECORD_DATE` issue for HealthKit RHR.",
+  "finished": true,
+  "seconds": 165.8093180656433,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS summary_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS distinct_participantidentifiers,\n  COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS distinct_study_participant_ids,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN 1 ELSE 0 END) AS rows_with_study_participant_id,\n  COUNT(DISTINCT CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN PARTICIPANTIDENTIFIER END) AS enrolled_participantidentifiers,\n  COUNT(DISTINCT CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN STUDY_PARTICIPANT_ID END) AS enrolled_study_participant_ids,\n  SUM(CASE WHEN PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS rows_missing_participantidentifier,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NULL THEN 1 ELSE 0 END) AS rows_missing_study_participant_id\nFROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY",
+    "WITH enrolled AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), hk AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    STARTDATE,\n    RECORD_DATE,\n    VALUE,\n    UNITS,\n    TO_CHAR(STARTDATE, 'YYYY-MM-DD') AS start_day,\n    CASE WHEN REGEXP_LIKE(TRIM(VALUE), '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$') THEN TO_NUMBER(TRIM(VALUE)) END AS value_num\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n)\nSELECT\n  COUNT(*) AS hk_rows_total,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS hk_participants_total,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.PARTICIPANTIDENTIFIER END) AS enrolled_hk_participants,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.PARTICIPANTIDENTIFIER || '|' || hk.start_day END) AS enrolled_hk_person_days,\n  COUNT(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN 1 END) AS enrolled_hk_rows,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NULL THEN hk.PARTICIPANTIDENTIFIER END) AS hk_participants_not_in_enrolled_cohort,\n  SUM(CASE WHEN hk.PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_participantidentifier,\n  SUM(CASE WHEN hk.STARTDATE IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_startdate,\n  SUM(CASE WHEN hk.VALUE IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_value,\n  SUM(CASE WHEN hk.VALUE IS NOT NULL AND NOT REGEXP_LIKE(TRIM(hk.VALUE), '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$') THEN 1 ELSE 0 END) AS hk_rows_nonnumeric_value,\n  SUM(CASE WHEN hk.value_num IS NOT NULL AND hk.value_num <= 0 THEN 1 ELSE 0 END) AS hk_rows_nonpositive_value,\n  MIN(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.STARTDATE END) AS enrolled_hk_start_min,\n  MAX(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.STARTDATE END) AS enrolled_hk_start_max,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.UNITS END) AS enrolled_units_count\nFROM hk\nLEFT JOIN enrolled e\n  ON hk.PARTICIPANTIDENTIFIER = e.PARTICIPANTIDENTIFIER",
+    "WITH enrolled AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), hk AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    STARTDATE,\n    RECORD_DATE,\n    VALUE,\n    UNITS,\n    TO_CHAR(STARTDATE, 'YYYY-MM-DD') AS start_day,\n    CASE WHEN REGEXP_LIKE(TRIM(VALUE), '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$') THEN TO_NUMBER(TRIM(VALUE)) END AS value_num\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE\n)\nSELECT\n  COUNT(*) AS hk_rows_total,\n  COUNT(DISTINCT hk.PARTICIPANTIDENTIFIER) AS hk_participants_total,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.PARTICIPANTIDENTIFIER END) AS enrolled_hk_participants,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.PARTICIPANTIDENTIFIER || '|' || hk.start_day END) AS enrolled_hk_person_days,\n  COUNT(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN 1 END) AS enrolled_hk_rows,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NULL THEN hk.PARTICIPANTIDENTIFIER END) AS hk_participants_not_in_enrolled_cohort,\n  SUM(CASE WHEN hk.PARTICIPANTIDENTIFIER IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_participantidentifier,\n  SUM(CASE WHEN hk.STARTDATE IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_startdate,\n  SUM(CASE WHEN hk.VALUE IS NULL THEN 1 ELSE 0 END) AS hk_rows_missing_value,\n  SUM(CASE WHEN hk.VALUE IS NOT NULL AND NOT REGEXP_LIKE(TRIM(hk.VALUE), '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)$') THEN 1 ELSE 0 END) AS hk_rows_nonnumeric_value,\n  SUM(CASE WHEN hk.value_num IS NOT NULL AND hk.value_num <= 0 THEN 1 ELSE 0 END) AS hk_rows_nonpositive_value,\n  MIN(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.STARTDATE END) AS enrolled_hk_start_min,\n  MAX(CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.STARTDATE END) AS enrolled_hk_start_max,\n  COUNT(DISTINCT CASE WHEN e.STUDY_PARTICIPANT_ID IS NOT NULL THEN hk.UNITS END) AS enrolled_units_count\nFROM hk\nLEFT JOIN enrolled e\n  ON hk.PARTICIPANTIDENTIFIER = e.PARTICIPANTIDENTIFIER",
+    "WITH enrolled_rows AS (\n  SELECT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), by_participantidentifier AS (\n  SELECT PARTICIPANTIDENTIFIER, COUNT(*) AS row_count, COUNT(DISTINCT STUDY_PARTICIPANT_ID) AS study_id_count\n  FROM enrolled_rows\n  GROUP BY PARTICIPANTIDENTIFIER\n), by_study_id AS (\n  SELECT STUDY_PARTICIPANT_ID, COUNT(*) AS row_count, COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participantidentifier_count\n  FROM enrolled_rows\n  GROUP BY STUDY_PARTICIPANT_ID\n)\nSELECT\n  (SELECT COUNT(*) FROM enrolled_rows) AS enrolled_rows,\n  (SELECT COUNT(*) FROM by_participantidentifier) AS enrolled_distinct_participantidentifiers,\n  (SELECT COUNT(*) FROM by_study_id) AS enrolled_distinct_study_participant_ids,\n  (SELECT SUM(CASE WHEN row_count > 1 THEN 1 ELSE 0 END) FROM by_participantidentifier) AS participantidentifiers_with_multiple_rows,\n  (SELECT SUM(CASE WHEN study_id_count > 1 THEN 1 ELSE 0 END) FROM by_participantidentifier) AS participantidentifiers_with_multiple_study_ids,\n  (SELECT SUM(CASE WHEN row_count > 1 THEN 1 ELSE 0 END) FROM by_study_id) AS study_ids_with_multiple_rows,\n  (SELECT SUM(CASE WHEN participantidentifier_count > 1 THEN 1 ELSE 0 END) FROM by_study_id) AS study_ids_with_multiple_participantidentifiers\nFROM dual",
+    "WITH enrolled AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), joined AS (\n  SELECT\n    hk.PARTICIPANTIDENTIFIER,\n    TO_CHAR(hk.STARTDATE, 'YYYY-MM-DD') AS start_day,\n    TO_CHAR(hk.RECORD_DATE, 'YYYY-MM-DD') AS record_day,\n    hk.VALUE,\n    hk.UNITS\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE hk\n  INNER JOIN enrolled e\n    ON hk.PARTICIPANTIDENTIFIER = e.PARTICIPANTIDENTIFIER\n)\nSELECT\n  COUNT(*) AS enrolled_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS enrolled_participants,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || start_day) AS person_days_by_startdate,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER || '|' || record_day) AS person_days_by_record_date,\n  SUM(CASE WHEN start_day = record_day THEN 1 ELSE 0 END) AS rows_start_day_equals_record_day,\n  SUM(CASE WHEN start_day <> record_day THEN 1 ELSE 0 END) AS rows_start_day_differs_record_day,\n  COUNT(DISTINCT CASE WHEN start_day <> record_day THEN PARTICIPANTIDENTIFIER END) AS participants_with_start_record_day_difference,\n  MIN(start_day) AS first_start_day,\n  MAX(start_day) AS last_start_day,\n  MIN(record_day) AS first_record_day,\n  MAX(record_day) AS last_record_day\nFROM joined",
+    "WITH enrolled AS (\n  SELECT DISTINCT PARTICIPANTIDENTIFIER, STUDY_PARTICIPANT_ID\n  FROM IHS_2025.VW_IHS_PARTICIPANT_SUMMARY\n  WHERE STUDY_PARTICIPANT_ID IS NOT NULL\n), joined AS (\n  SELECT\n    hk.PARTICIPANTIDENTIFIER,\n    TO_CHAR(hk.STARTDATE, 'YYYY-MM-DD') AS start_day,\n    COUNT(*) AS samples_on_day\n  FROM IHS_2025.HEALTHKITSAMPLES_RESTINGHEARTRATE hk\n  INNER JOIN enrolled e\n    ON hk.PARTICIPANTIDENTIFIER = e.PARTICIPANTIDENTIFIER\n  GROUP BY hk.PARTICIPANTIDENTIFIER, TO_CHAR(hk.STARTDATE, 'YYYY-MM-DD')\n)\nSELECT\n  COUNT(*) AS enrolled_person_days,\n  SUM(samples_on_day) AS enrolled_samples,\n  SUM(CASE WHEN samples_on_day = 1 THEN 1 ELSE 0 END) AS person_days_with_one_sample,\n  SUM(CASE WHEN samples_on_day > 1 THEN 1 ELSE 0 END) AS person_days_with_multiple_samples,\n  MIN(samples_on_day) AS min_samples_per_person_day,\n  MAX(samples_on_day) AS max_samples_per_person_day,\n  ROUND(AVG(samples_on_day), 3) AS mean_samples_per_person_day\nFROM joined"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 532278,
+        "inputTokens": 519304,
+        "cachedInputTokens": 275456,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 12974,
+        "reasoningOutputTokens": 2506
+      },
+      "last": {
+        "totalTokens": 39036,
+        "inputTokens": 38683,
+        "cachedInputTokens": 30208,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 353,
+        "reasoningOutputTokens": 74
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_07c7090a4106b454",
+  "attempt": 1
+}

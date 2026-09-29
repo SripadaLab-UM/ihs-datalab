@@ -1,0 +1,53 @@
+{
+  "task": "person_days",
+  "mode": "extraction",
+  "prompt": "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? Count every participant and source in the view.",
+  "tests": "text timestamps: several a day, some after midnight or another date in UTC",
+  "passed": true,
+  "checks": [
+    {
+      "name": "one person-day per participant-date",
+      "passed": true,
+      "detail": "expected 19,198 (RECORD_DATE's local date), 21,951 (its UTC date) or 21,870 (STARTDATE's date); 25,132 counts each timestamp as a day"
+    },
+    {
+      "name": "day rule stated",
+      "passed": true,
+      "detail": "which date makes a day, and in what time zone"
+    }
+  ],
+  "answer": "The count is **22,406 participant-source-days** of resting heart rate data in `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE`.\n\nI understood \u201ccount every participant and source\u201d as: count each distinct `PARTICIPANTIDENTIFIER` + day from `STARTDATE` + `SOURCEIDENTIFIER`. If sources are collapsed, the count is **21,870 participant-days**.\n\nCatalog/schema evidence: the catalog found `IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE` as a view; `describe_table` showed `PARTICIPANTIDENTIFIER`, `STARTDATE`, `SOURCEIDENTIFIER`, `SOURCENAME`, and `VALUE`. `STARTDATE` is `VARCHAR2(26)`, not a date type, so I used the confirmed ISO-style day prefix: `SUBSTR(STARTDATE, 1, 10)`.\n\nOutputs:\n`/work/outputs/ihs_2025_healthkit_resting_hr_person_source_days.csv`\n`/work/outputs/ihs_2025_healthkit_resting_hr_person_source_days_dictionary.md`\n\nSQL run:\n\n```sql\nSELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(STARTDATE) AS nonnull_startdate,\n  COUNT(RECORD_DATE) AS nonnull_record_date,\n  COUNT(SOURCEIDENTIFIER) AS nonnull_sourceidentifier,\n  COUNT(SOURCENAME) AS nonnull_sourcename,\n  COUNT(VALUE) AS nonnull_value\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\n\nPurpose: field population check. Result row count: 1. All key fields were populated on **25,132** rows.\n\n```sql\nSELECT\n  COUNT(*) AS row_count,\n  COUNT(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS startdate_iso_day_prefix,\n  COUNT(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS record_date_iso_day_prefix,\n  MIN(LENGTH(STARTDATE)) AS min_startdate_length,\n  MAX(LENGTH(STARTDATE)) AS max_startdate_length,\n  MIN(LENGTH(RECORD_DATE)) AS min_record_date_length,\n  MAX(LENGTH(RECORD_DATE)) AS max_record_date_length,\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day_text,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day_text\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n```\n\nPurpose: date text format check. Result row count: 1. All rows had ISO-style prefixes; day range was **2025-04-02** to **2026-06-30**.\n\n```sql\nWITH base AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS START_DAY,\n    SOURCEIDENTIFIER,\n    SOURCENAME,\n    VALUE\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n    AND SOURCEIDENTIFIER IS NOT NULL\n)\nSELECT\n  (SELECT COUNT(*) FROM base) AS sample_rows,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM base) AS participants,\n  (SELECT COUNT(DISTINCT SOURCEIDENTIFIER) FROM base) AS source_identifiers,\n  (SELECT COUNT(DISTINCT SOURCENAME) FROM base) AS source_names,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY FROM base)) AS participant_days_collapsing_sources,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER FROM base)) AS participant_source_days_by_identifier,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER, SOURCENAME FROM base)) AS participant_source_days_by_identifier_name\nFROM dual\n```\n\nPurpose: final summary. Result row count: 1. Columns returned: `SAMPLE_ROWS`, `PARTICIPANTS`, `SOURCE_IDENTIFIERS`, `SOURCE_NAMES`, `PARTICIPANT_DAYS_COLLAPSING_SOURCES`, `PARTICIPANT_SOURCE_DAYS_BY_IDENTIFIER`, `PARTICIPANT_SOURCE_DAYS_BY_IDENTIFIER_NAME`.\n\nCaveat: the day is based on the stored `STARTDATE` text prefix, with no timezone conversion. I also suggested a knowledge-base update noting that this HealthKit view stores date fields as text with an ISO-style prefix.",
+  "finished": true,
+  "seconds": 96.45412302017212,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(PARTICIPANTIDENTIFIER) AS nonnull_participantidentifier,\n  COUNT(STARTDATE) AS nonnull_startdate,\n  COUNT(RECORD_DATE) AS nonnull_record_date,\n  COUNT(SOURCEIDENTIFIER) AS nonnull_sourceidentifier,\n  COUNT(SOURCENAME) AS nonnull_sourcename,\n  COUNT(VALUE) AS nonnull_value\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "SELECT\n  COUNT(*) AS row_count,\n  COUNT(CASE WHEN REGEXP_LIKE(STARTDATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS startdate_iso_day_prefix,\n  COUNT(CASE WHEN REGEXP_LIKE(RECORD_DATE, '^\\d{4}-\\d{2}-\\d{2}') THEN 1 END) AS record_date_iso_day_prefix,\n  MIN(LENGTH(STARTDATE)) AS min_startdate_length,\n  MAX(LENGTH(STARTDATE)) AS max_startdate_length,\n  MIN(LENGTH(RECORD_DATE)) AS min_record_date_length,\n  MAX(LENGTH(RECORD_DATE)) AS max_record_date_length,\n  MIN(SUBSTR(STARTDATE, 1, 10)) AS min_start_day_text,\n  MAX(SUBSTR(STARTDATE, 1, 10)) AS max_start_day_text\nFROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE",
+    "WITH base AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS START_DAY,\n    SOURCEIDENTIFIER,\n    SOURCENAME,\n    VALUE\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n    AND SOURCEIDENTIFIER IS NOT NULL\n)\nSELECT\n  COUNT(*) AS sample_rows,\n  COUNT(DISTINCT PARTICIPANTIDENTIFIER) AS participants,\n  COUNT(DISTINCT SOURCEIDENTIFIER) AS source_identifiers,\n  COUNT(DISTINCT SOURCENAME) AS source_names,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY FROM base)) AS participant_days_collapsing_sources,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER FROM base)) AS participant_source_days_by_identifier,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER, SOURCENAME FROM base)) AS participant_source_days_by_identifier_name\nFROM base",
+    "WITH base AS (\n  SELECT\n    PARTICIPANTIDENTIFIER,\n    SUBSTR(STARTDATE, 1, 10) AS START_DAY,\n    SOURCEIDENTIFIER,\n    SOURCENAME,\n    VALUE\n  FROM IHS_2025.VHEALTHKITSAMPLES_RESTINGHEARTRATE\n  WHERE PARTICIPANTIDENTIFIER IS NOT NULL\n    AND STARTDATE IS NOT NULL\n    AND SOURCEIDENTIFIER IS NOT NULL\n)\nSELECT\n  (SELECT COUNT(*) FROM base) AS sample_rows,\n  (SELECT COUNT(DISTINCT PARTICIPANTIDENTIFIER) FROM base) AS participants,\n  (SELECT COUNT(DISTINCT SOURCEIDENTIFIER) FROM base) AS source_identifiers,\n  (SELECT COUNT(DISTINCT SOURCENAME) FROM base) AS source_names,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY FROM base)) AS participant_days_collapsing_sources,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER FROM base)) AS participant_source_days_by_identifier,\n  (SELECT COUNT(*) FROM (SELECT DISTINCT PARTICIPANTIDENTIFIER, START_DAY, SOURCEIDENTIFIER, SOURCENAME FROM base)) AS participant_source_days_by_identifier_name\nFROM dual"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 241378,
+        "inputTokens": 235575,
+        "cachedInputTokens": 98816,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 5803,
+        "reasoningOutputTokens": 1913
+      },
+      "last": {
+        "totalTokens": 24415,
+        "inputTokens": 22936,
+        "cachedInputTokens": 16384,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1479,
+        "reasoningOutputTokens": 452
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_fe7a80dc7c1da8d6",
+  "attempt": 1
+}

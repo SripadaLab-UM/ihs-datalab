@@ -1,0 +1,51 @@
+{
+  "task": "bdate_age",
+  "mode": "extraction",
+  "prompt": "What was the mean age of the 2025 cohort's enrolled participants when they started the baseline survey, from the date of birth in the baseline survey view (VW_BASELINE_SURVEY)?",
+  "tests": "a mixed-case quoted column (\"Bdate\")",
+  "passed": true,
+  "checks": [
+    {
+      "name": "mean age at baseline",
+      "passed": true,
+      "detail": "expected 29.76 years (29.26 in whole years), from the quoted \"Bdate\" column and STARTDATE0"
+    },
+    {
+      "name": "enrolled n",
+      "passed": true,
+      "detail": "n = 129 enrolled with a date of birth"
+    }
+  ],
+  "answer": "I understood the request as: compute the mean age, in years, for the `IHS_2025` enrolled cohort at `VW_BASELINE_SURVEY.STARTDATE0`, using DOB from `VW_BASELINE_SURVEY.\"Bdate\"`.\n\nResult: the mean age was **29.76 years** among **129 enrolled participants**.\n\nCatalog evidence: `IHS_2025.VW_BASELINE_SURVEY` exists in the live catalog. `describe_table` confirmed `STARTDATE0` is `DATE`, `\"Bdate\"` is `DATE`, and `STUDY_PARTICIPANT_ID` is \u201cNULL for people who were screened but never enrolled,\u201d so I used non-null `STUDY_PARTICIPANT_ID` as the enrolled-participant filter. The local knowledge base directory was not present in this workspace.\n\nI ran these SQL statements:\n\n```sql\nSELECT\n  COUNT(*) AS total_rows,\n  COUNT(STUDY_PARTICIPANT_ID) AS enrolled_rows,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_startdate,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_bdate,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_both_dates,\n  MIN(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN STARTDATE0 END) AS min_startdate0,\n  MAX(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN STARTDATE0 END) AS max_startdate0,\n  MIN(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN \"Bdate\" END) AS min_bdate,\n  MAX(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN \"Bdate\" END) AS max_bdate\nFROM IHS_2025.VW_BASELINE_SURVEY\n```\n\nPurpose: profiling/population check. Row count: 1 summary row. It found 129 enrolled rows, all with both `STARTDATE0` and `\"Bdate\"` populated.\n\n```sql\nSELECT\n  COUNT(*) AS participant_count,\n  AVG(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS mean_age_years,\n  STDDEV(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS sd_age_years,\n  MIN(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS min_age_years,\n  MAX(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS max_age_years\nFROM IHS_2025.VW_BASELINE_SURVEY\nWHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  AND STARTDATE0 IS NOT NULL\n  AND \"Bdate\" IS NOT NULL\n```\n\nPurpose: final extraction. Row count: 1 summary row. Columns: `PARTICIPANT_COUNT`, `MEAN_AGE_YEARS`, `SD_AGE_YEARS`, `MIN_AGE_YEARS`, `MAX_AGE_YEARS`.\n\nFiles:\n`/work/outputs/mean_baseline_age_2025.csv`\n`/work/outputs/mean_baseline_age_2025_data_dictionary.md`\n\nCaveat to double-check: I used Oracle\u2019s `MONTHS_BETWEEN(...)/12` as the age-in-years definition, which is usually appropriate for DOB-to-survey-start age but may differ slightly from day-count divided by 365.25.",
+  "finished": true,
+  "seconds": 57.694692850112915,
+  "approvals": [],
+  "follow_up": "",
+  "queries": [
+    "SELECT\n  COUNT(*) AS total_rows,\n  COUNT(STUDY_PARTICIPANT_ID) AS enrolled_rows,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_startdate,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_bdate,\n  SUM(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL AND STARTDATE0 IS NOT NULL AND \"Bdate\" IS NOT NULL THEN 1 ELSE 0 END) AS enrolled_with_both_dates,\n  MIN(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN STARTDATE0 END) AS min_startdate0,\n  MAX(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN STARTDATE0 END) AS max_startdate0,\n  MIN(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN \"Bdate\" END) AS min_bdate,\n  MAX(CASE WHEN STUDY_PARTICIPANT_ID IS NOT NULL THEN \"Bdate\" END) AS max_bdate\nFROM IHS_2025.VW_BASELINE_SURVEY",
+    "SELECT\n  COUNT(*) AS participant_count,\n  AVG(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS mean_age_years,\n  STDDEV(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS sd_age_years,\n  MIN(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS min_age_years,\n  MAX(MONTHS_BETWEEN(STARTDATE0, \"Bdate\") / 12) AS max_age_years\nFROM IHS_2025.VW_BASELINE_SURVEY\nWHERE STUDY_PARTICIPANT_ID IS NOT NULL\n  AND STARTDATE0 IS NOT NULL\n  AND \"Bdate\" IS NOT NULL"
+  ],
+  "usage": [
+    {
+      "total": {
+        "totalTokens": 172901,
+        "inputTokens": 169099,
+        "cachedInputTokens": 71680,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 3802,
+        "reasoningOutputTokens": 966
+      },
+      "last": {
+        "totalTokens": 20472,
+        "inputTokens": 19432,
+        "cachedInputTokens": 0,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 1040,
+        "reasoningOutputTokens": 240
+      },
+      "modelContextWindow": 258400
+    }
+  ],
+  "conversation": "c_7845e8bf0a814455",
+  "attempt": 1
+}
