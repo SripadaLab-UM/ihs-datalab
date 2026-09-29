@@ -188,6 +188,28 @@ UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)
+class WindowsSettings:
+    """`[windows]`: what DataLab on Windows tells people (windows_vm.py)."""
+
+    # Where people turn on their temporary administrator access, which the
+    # fix for Docker's virtual machine needs. The lab's settings file names it
+    # (this public repo doesn't). None: the page says where, in words.
+    admin_access_url: str | None = None
+
+    def __post_init__(self) -> None:
+        # Only a link: one that isn't an https:// address is left out (the page
+        # then says where in words), rather than stopping DataLab from starting.
+        url = self.admin_access_url
+        if url is not None and not re.fullmatch(r"https://[^\s\"'<>]+", url):
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "windows.admin_access_url isn't an https:// address, so it's ignored"
+            )
+            object.__setattr__(self, "admin_access_url", None)
+
+
+@dataclass(frozen=True)
 class Settings:
     profile: Profile
     data_dir: Path
@@ -208,6 +230,7 @@ class Settings:
     repos: RepoSettings = field(default_factory=RepoSettings)
     workflows: WorkflowSettings = field(default_factory=WorkflowSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
+    windows: WindowsSettings = field(default_factory=WindowsSettings)
 
     @property
     def settings_file(self) -> Path:
@@ -339,6 +362,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         repos=_section(RepoSettings, raw, "repos"),
         workflows=_section(WorkflowSettings, raw, "workflows"),
         updates=_section(UpdateSettings, raw, "updates"),
+        windows=_section(WindowsSettings, raw, "windows"),
     )
     return _check_models(settings)
 

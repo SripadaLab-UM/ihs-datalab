@@ -248,9 +248,13 @@ def _serve(settings, *, open_browser: bool) -> int:
     # that off); stopped as DataLab quits.
     hourly = app.state.hourly_update_check
     hourly.start()
-    # On Windows, a policy can stop Docker's virtual machine from starting;
-    # this says so in DataLab's window and offers to fix it, while DataLab runs.
-    threading.Thread(target=_check_windows_vm, name="windows-vm-check", daemon=True).start()
+    # On Windows: opens Docker Desktop if it's closed, and says in DataLab's window
+    # when a policy stops its virtual machine (the page offers the fix).
+    doctor = getattr(app.state, "docker_doctor", None)
+    if doctor is not None:
+        threading.Thread(
+            target=_check_windows_vm, args=(doctor,), name="windows-vm-check", daemon=True
+        ).start()
 
     class Server(uvicorn.Server):
         async def serve(self, sockets=None) -> None:
@@ -282,13 +286,13 @@ def _serve(settings, *, open_browser: bool) -> int:
     return 0
 
 
-def _check_windows_vm() -> None:
+def _check_windows_vm(doctor) -> None:
     import logging
 
     from datalab import windows_vm
 
     try:
-        windows_vm.check_before_serve(say=lambda text: print(text, flush=True))
+        windows_vm.check_before_serve(doctor, say=lambda text: print(text, flush=True))
     except Exception:  # never a reason for DataLab to stop
         logging.getLogger(__name__).exception("couldn't check Docker's virtual machine")
 

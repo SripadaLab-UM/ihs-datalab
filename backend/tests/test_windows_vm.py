@@ -15,20 +15,29 @@ from datalab import windows_vm
 INSTALL = (Path(__file__).resolve().parents[2] / "installer" / "windows" / "install.ps1").read_text(
     encoding="utf-8"
 )
+# What wsl.exe said on the Michigan Medicine laptop once the policy had run
+# (2026-09-28, WSL 2.7.14), and what tasklist lists (Windows 11 26100).
 REFUSED = (
-    "The user has not been granted the requested logon type at this computer.\r\n"
+    "Logon failure: the user has not been granted the requested logon type at this computer. \r\n"
+    "\r\n"
     "Error code: Wsl/Service/CreateInstance/CreateVm/HCS/0x80070569\r\n"
 )
+TASKLIST_OPEN = (
+    b"\r\nDocker Desktop.exe            30500 Console                    2     55,376 K\r\n"
+    b"Docker Desktop.exe            18580 Console                    2     98,464 K\r\n"
+)
+TASKLIST_NONE = b"INFO: No tasks are running which match the specified criteria.\r\n"
 
 
 class FakeWindows:
     """subprocess.run as DataLab uses it here: docker, wsl.exe and PowerShell."""
 
-    def __init__(self, *, docker=False, wsl=None, grant=0, after_grant=None):
+    def __init__(self, *, docker=False, wsl=None, grant=0, after_grant=None, desktop_open=True):
         self.docker = docker
         self.wsl = wsl or (1, REFUSED.encode("utf-16-le"))
         self.grant_code = grant
         self.after_grant = after_grant  # what wsl.exe says once the grant has run
+        self.desktop_open = desktop_open  # Docker Desktop's app, per tasklist
         self.calls: list[list[str]] = []
         self.opened: list[list[str]] = []
 
@@ -42,6 +51,9 @@ class FakeWindows:
         if name == "wsl.exe":
             code, said = self.wsl
             return subprocess.CompletedProcess(command, code, said, b"")
+        if name == "tasklist.exe":
+            listed = TASKLIST_OPEN if self.desktop_open else TASKLIST_NONE
+            return subprocess.CompletedProcess(command, 0, listed, b"")
         if name == "powershell.exe":
             if self.grant_code == 0 and self.after_grant is not None:
                 self.wsl = self.after_grant
@@ -50,22 +62,20 @@ class FakeWindows:
 
     def popen(self, command, **options):
         self.opened.append(command)
+        self.desktop_open = True
 
     def ran(self, name: str) -> list[list[str]]:
         return [c for c in self.calls if Path(c[0]).name.lower() == name]
 
 
-def serve_check(fake: FakeWindows, *, answer="y", interactive=True):
-    said: list[str] = []
-    outcome = windows_vm.check_before_serve(
-        ask=lambda prompt: answer,
-        say=said.append,
-        interactive=interactive,
-        run=fake.run,
-        popen=fake.popen,
-        platform="win32",
-    )
-    return outcome, "\n".join(said)
+def doctor_for(fake: FakeWindows, *, platform="win32") -> windows_vm.DockerDoctor:
+    return windows_vm.DockerDoctor(run=fake.run, popen=fake.popen, platform=platform)
+
+
+@pytest.fixture(autouse=True)
+def installed(docker_app):
+    """Docker Desktop is installed, unless a test says otherwise."""
+    return docker_app
 
 
 # ------------------------------------------------------------ the fix itself
@@ -158,63 +168,186 @@ def test_a_wsl_that_hangs_or_is_missing_is_unknown_not_refused():
 # ------------------------------------------------------------ at DataLab's start
 
 
-def test_nothing_is_checked_off_windows_or_while_docker_answers():
+@pytest.mark.parametrize(
+    ("fake", "state"),
+    [
+        (FakeWindows(docker=True), "ready"),
+        (FakeWindows(), "vm-refused"),
+        (FakeWindows(wsl=(0, b""), desktop_open=True), "starting"),
+        (FakeWindows(wsl=(0, b""), desktop_open=False), "stopped"),
+        (FakeWindows(wsl=(1, b"")), "unknown"),
+    ],
+)
+def test_how_docker_stands(fake, state):
+    assert windows_vm.docker_state(fake.run, "win32") == state
+    if state in ("ready", "stopped"):
+        # A working Docker, or a closed Docker Desktop, never starts WSL's VM.
+        assert fake.ran("wsl.exe") == []
+
+
+def test_docker_desktop_not_where_its_installer_puts_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(windows_vm, "docker_desktop", lambda: tmp_path / "missing.exe")
     fake = FakeWindows()
-    assert windows_vm.check_before_serve(run=fake.run, platform="darwin") == "not-windows"
+    assert windows_vm.docker_state(fake.run, "win32") == "not-installed"
+    assert doctor_for(fake).start() == "not-installed" and fake.opened == []
+    # A Docker that answers counts, wherever it's installed.
+    assert windows_vm.docker_state(FakeWindows(docker=True).run, "win32") == "ready"
+
+
+def test_nothing_is_checked_off_windows():
+    fake = FakeWindows()
+    doctor = doctor_for(fake, platform="darwin")
+    assert doctor.state() == "unsupported" and doctor.fix() == "unsupported"
     assert fake.calls == []
-    fake = FakeWindows(docker=True)
-    assert serve_check(fake)[0] == "docker-answers"
-    assert fake.ran("wsl.exe") == []
 
 
-def test_a_virtual_machine_that_starts_means_docker_is_just_not_running_yet():
+def clocked(fake: FakeWindows) -> tuple[windows_vm.DockerDoctor, list[float]]:
+    now = [0.0]
+    doctor = windows_vm.DockerDoctor(
+        run=fake.run, popen=fake.popen, platform="win32", clock=lambda: now[0]
+    )
+    return doctor, now
+
+
+def test_an_answer_is_kept_for_a_few_seconds_unless_asked_fresh():
+    fake = FakeWindows()
+    doctor, _ = clocked(fake)
+    assert doctor.state() == "vm-refused"
+    fake.wsl = (0, b"")
+    assert doctor.state() == "vm-refused"  # the page's polling doesn't start a VM each time
+    assert doctor.state(fresh=True) == "starting"
+    assert len(fake.ran("wsl.exe")) == 2
+
+
+def test_once_the_vm_starts_it_isnt_tried_again_for_a_few_minutes():
+    """While Docker Desktop starts (its engine not answering yet), the page asks
+    every half minute: WSL's VM is tried once, not at every check."""
     fake = FakeWindows(wsl=(0, b""))
-    outcome, said = serve_check(fake)
-    assert outcome == "vm-starts" and said == ""
+    doctor, now = clocked(fake)
+    assert doctor.state() == "starting"
+    for seconds in range(30, 300, 30):
+        now[0] = seconds
+        assert doctor.state() == "starting"
+    assert len(fake.ran("wsl.exe")) == 1
+    # Then again, in case the policy has run meanwhile.
+    fake.wsl = (1, REFUSED.encode("utf-16-le"))
+    now[0] = windows_vm.DockerDoctor.VM_OK_SECONDS + 1
+    assert doctor.state() == "vm-refused"
+
+
+def test_check_again_runs_at_most_every_few_seconds():
+    fake = FakeWindows()
+    doctor, now = clocked(fake)
+    doctor.check()
+    doctor.check()
+    assert len(fake.ran("wsl.exe")) == 1
+    now[0] = windows_vm.DockerDoctor.MIN_CHECK_SECONDS + 1
+    doctor.check()
+    assert len(fake.ran("wsl.exe")) == 2
+
+
+def test_while_a_check_runs_others_get_the_last_answer_instead_of_waiting():
+    fake = FakeWindows()
+    doctor = doctor_for(fake)
+    assert doctor.state() == "vm-refused"
+    meanwhile: list[str] = []
+
+    def slow(command, **options):
+        if Path(command[0]).name.lower() == "wsl.exe":
+            meanwhile.append(doctor.state(fresh=True))  # another tab, mid-check
+        return fake.run(command, **options)
+
+    doctor._run = slow
+    assert doctor.state(fresh=True) == "vm-refused"
+    assert meanwhile == ["vm-refused"]
+
+
+def test_the_fix_is_refused_unless_the_vm_is():
+    fake = FakeWindows(docker=True)
+    assert doctor_for(fake).fix() == "not-needed"
+    fake = FakeWindows(wsl=(0, b""))  # Docker Desktop starting, VM fine
+    assert doctor_for(fake).fix() == "not-needed"
     assert fake.ran("powershell.exe") == []
 
 
-def test_accepting_fixes_it_and_restarts_docker_desktop():
+def test_the_fix_restarts_docker_desktop_once_windows_lets_the_vm_start():
     fake = FakeWindows(after_grant=(0, b""))
-    outcome, said = serve_check(fake)
-    assert outcome == "fixed"
-    assert "Windows won't let its virtual" in said and "Restart Windows" in said
+    doctor = doctor_for(fake)
+    assert doctor.state() == "vm-refused"
+    assert doctor.fix() == "fixed"
     assert len(fake.ran("powershell.exe")) == 1
     assert ["docker", "desktop", "restart", "--detach"] in fake.calls
-    assert "Docker Desktop is restarting" in said
+    assert doctor.state() == "starting"  # checked again, not the answer from before
+    assert not doctor.fixing
 
 
-def test_declining_or_no_console_changes_nothing_and_says_restart_windows():
-    fake = FakeWindows()
-    outcome, said = serve_check(fake, answer="n")
-    assert outcome == "declined" and "Restart Windows" in said
-    assert fake.ran("powershell.exe") == []
-    fake = FakeWindows()
-    outcome, said = serve_check(fake, interactive=False)
-    assert outcome == "told" and "Start menu" in said
-    assert fake.ran("powershell.exe") == []
-
-
-def test_a_declined_prompt_or_a_fix_that_didnt_take_says_so():
-    fake = FakeWindows(grant=1)  # the box was closed
-    outcome, said = serve_check(fake)
-    assert outcome == "failed" and "didn't work" in said
+def test_a_declined_prompt_or_a_fix_that_didnt_take_says_which():
+    fake = FakeWindows(grant=1)  # the box was closed, or no administrator access
+    assert doctor_for(fake).fix() == "declined"
     assert not [c for c in fake.calls if c[:2] == ["docker", "desktop"]]
-    fake = FakeWindows(grant=0, after_grant=None)  # granted, but still refused
-    assert serve_check(fake)[0] == "failed"
+    fake = FakeWindows(grant=0, after_grant=None)  # it ran, but Windows still refuses
+    assert doctor_for(fake).fix() == "still-refused"
 
 
-def test_docker_desktop_is_started_if_it_cant_be_restarted(monkeypatch, tmp_path):
-    app = tmp_path / "Docker Desktop.exe"
-    app.write_bytes(b"")
-    monkeypatch.setattr(windows_vm, "docker_desktop", lambda: app)
+def test_one_administrator_prompt_at_a_time():
+    fake = FakeWindows(after_grant=(0, b""))
+    doctor = doctor_for(fake)
+    inner: list[str] = []
+
+    def prompt_showing(command, **options):
+        if Path(command[0]).name.lower() == "powershell.exe":
+            assert doctor.fixing
+            inner.append(doctor.fix())  # a second click while the box is up
+        return fake.run(command, **options)
+
+    doctor._run = prompt_showing
+    assert doctor.fix() == "fixed"
+    assert inner == ["busy"]
+
+
+def test_start_opens_docker_desktop_only_when_its_closed(docker_app):
+    fake = FakeWindows(wsl=(0, b""), desktop_open=False)
+    assert doctor_for(fake).start() == "starting"
+    assert fake.opened == [[str(docker_app)]]
+    fake = FakeWindows(wsl=(0, b""), desktop_open=True)
+    assert doctor_for(fake).start() == "starting"
+    assert fake.opened == []
+    fake = FakeWindows()  # the VM may not start: opening Docker wouldn't help
+    assert doctor_for(fake).start() == "vm-refused"
+    assert fake.opened == []
+
+
+def test_at_start_a_closed_docker_desktop_is_opened_and_says_so(docker_app):
+    fake = FakeWindows(wsl=(0, b""), desktop_open=False)
+    said: list[str] = []
+    assert windows_vm.check_before_serve(doctor_for(fake), say=said.append) == "starting"
+    assert fake.opened == [[str(docker_app)]]
+    assert "Opening Docker Desktop" in "\n".join(said)
+
+
+def test_at_start_a_refused_vm_points_to_the_page_and_never_prompts():
+    """The fix needs administrator access the person may still have to turn
+    on, so DataLab's window never asks: the page's button waits for them."""
+    fake = FakeWindows()
+    said: list[str] = []
+    assert windows_vm.check_before_serve(doctor_for(fake), say=said.append) == "vm-refused"
+    text = "\n".join(said)
+    assert "temporary administrator access" in text and "Fix it" in text
+    assert fake.ran("powershell.exe") == []
+    fake = FakeWindows(docker=True)
+    said.clear()
+    assert windows_vm.check_before_serve(doctor_for(fake), say=said.append) == "ready"
+    assert said == []
+
+
+def test_docker_desktop_is_started_if_it_cant_be_restarted(docker_app):
     opened = []
 
     def no_cli(command, **options):
         raise FileNotFoundError(command[0])
 
     windows_vm.restart_docker(no_cli, lambda command, **options: opened.append(command))
-    assert opened == [[str(app)]]
+    assert opened == [[str(docker_app)]]
 
 
 # ------------------------------------------------------------ the installer

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from datalab import __version__, datalock, db, updates
 from datalab.api.code import build_code_router
 from datalab.api.conversations import build_conversations_router
+from datalab.api.docker import build_docker_router
 from datalab.api.exports import build_exports_router
 from datalab.api.files import Previews, build_files_router, build_preview_router
 from datalab.api.github import GitHubServices, build_github_router
@@ -71,6 +72,7 @@ from datalab.web import (
     add_session_routes,
     mount_web_ui,
 )
+from datalab.windows_vm import DockerDoctor
 
 VERSION = __version__
 
@@ -103,6 +105,7 @@ def create_app(
     web_dist: Path | None = None,
     recovery: updates.Recovery | None = None,
     practice_database: PracticeDatabaseKeeper | None = None,
+    docker_doctor: DockerDoctor | None = None,
 ) -> FastAPI:
     require_data_folder_lock(settings)
     connection = db.connect(settings.database_file)
@@ -403,6 +406,10 @@ def create_app(
         SupportServices(settings, connection, destinations, github)
     )
     app.include_router(support_router)
+    # Docker on Windows: how it stands, and the fixes the page offers (api/docker.py).
+    docker_doctor = docker_doctor or DockerDoctor()
+    app.state.docker_doctor = docker_doctor
+    app.include_router(build_docker_router(settings, docker_doctor))
     app.add_middleware(RefuseNonText)
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     app.add_middleware(UpdateGateMiddleware, gate=gate)

@@ -13,6 +13,9 @@ vi.mock("@/api/client", () => ({
   SIGNED_OUT: "datalab:signed-out",
   api: { health: vi.fn() },
 }));
+vi.mock("@/api/docker", () => ({
+  dockerApi: { status: vi.fn().mockResolvedValue({ state: "unsupported", fixing: false, admin_access_url: null }) },
+}));
 
 function app(at: string) {
   return render(

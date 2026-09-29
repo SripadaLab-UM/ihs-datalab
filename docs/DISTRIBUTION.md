@@ -851,10 +851,40 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   - The installer's administrator part adds it; Step 2 checks before starting
     Docker and, if it's missing, offers the fix behind one administrator
     prompt.
-  - `datalab serve` on Windows checks too, whenever Docker isn't answering,
-    and offers the same fix in its window, then restarts Docker Desktop
-    (`datalab/windows_vm.py`). This is the part that reaches people through
-    updates.
+  - DataLab itself checks too, whenever Docker isn't answering
+    (`datalab/windows_vm.py`, `api/docker.py`); this is the part that reaches
+    people through updates. While Docker can't run, every page shows a banner
+    at the top: "Open Docker Desktop" when it's closed (DataLab also opens it
+    by itself when it starts, once), a note while it's starting, "run the
+    installer again" when it isn't installed, and, when the right is missing,
+    "How to fix it…", which opens a dialog by itself once a session (until
+    Later). The dialog says to turn on the temporary administrator
+    access first, linking to the page for it when the lab's settings file
+    names one (`[windows] admin_access_url`; otherwise it says where in
+    words: on a Michigan Medicine computer, the profile page), then
+    to press Fix it, which shows one Windows permission box and restarts
+    Docker Desktop. It says what happened: fixed, declined (most often: the
+    administrator access wasn't on yet, so turn it on and press Fix it
+    again), or still blocked (restart Windows). Fix it is refused unless the
+    last check found the VM refused, so it can never raise a prompt while
+    Docker works.
+  - How often it looks, since a check can start WSL's VM: the page asks
+    every 30 seconds while something is wrong and every 5 minutes
+    otherwise (the policy can take the right away while DataLab is open);
+    `GET /api/docker` answers from a check at most 15 seconds old, whoever
+    asks (another page on this computer can send a GET); Check again is a
+    `POST /api/docker/check`, at most every 5 seconds. WSL's VM is only
+    tried while Docker Desktop is open but not answering, never while it's
+    closed, and once it has started it isn't tried again for 5 minutes
+    while Docker Desktop is still starting. One check runs at a time; others
+    get the last answer meanwhile. The practice and real DataLabs check on
+    their own, so with both open each can offer the fix.
+  - The fix is a button, never a question in DataLab's window: in the first
+    real use, the question came before the person could turn on their
+    administrator access, and there was no way back to it without quitting.
+    DataLab's window only says what's wrong and points to the page. Running
+    DataLab itself as an administrator isn't needed, and isn't recommended:
+    only the fix needs it, for a moment.
   - Checking whether the right is there needs an administrator, so both
     start WSL's own system distribution (`wsl.exe --system -e true`), never
     Docker's, and look for that code.
