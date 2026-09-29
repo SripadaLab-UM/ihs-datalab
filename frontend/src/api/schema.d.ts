@@ -2405,6 +2405,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/docker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Status */
+        get: operations["get_status_api_docker_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docker/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start */
+        post: operations["start_api_docker_start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/docker/fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Fix */
+        post: operations["fix_api_docker_fix_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -3158,6 +3209,31 @@ export interface components {
             new: number | null;
             /** Text */
             text: string;
+        };
+        /** DockerFixOut */
+        DockerFixOut: {
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "fixed" | "declined" | "still-refused" | "busy" | "unsupported";
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unsupported" | "ready" | "vm-refused" | "starting" | "stopped" | "unknown";
+        };
+        /** DockerStatusOut */
+        DockerStatusOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "unsupported" | "ready" | "vm-refused" | "starting" | "stopped" | "unknown";
+            /** Fixing */
+            fixing: boolean;
+            /** Admin Access Url */
+            admin_access_url: string | null;
         };
         /** DraftCheckIn */
         DraftCheckIn: {
@@ -10318,6 +10394,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_status_api_docker_get: {
+        parameters: {
+            query?: {
+                fresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerStatusOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_api_docker_start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerStatusOut"];
+                };
+            };
+        };
+    };
+    fix_api_docker_fix_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerFixOut"];
                 };
             };
         };

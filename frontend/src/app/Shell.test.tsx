@@ -16,6 +16,7 @@ vi.mock("@/api/settings", () => ({
     updateCheck: vi.fn().mockReturnValue(new Promise(() => {})),
   },
 }));
+vi.mock("@/api/docker", () => ({ dockerApi: { status: vi.fn().mockResolvedValue({ state: "unsupported", fixing: false, admin_access_url: null }) } }));
 vi.mock("@/api/github", () => ({ githubApi: { status: vi.fn().mockResolvedValue({ available: false }) } }));
 
 function app(at: string) {

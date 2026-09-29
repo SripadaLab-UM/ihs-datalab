@@ -19,6 +19,11 @@ checks the two copies are the same.
 Asking Windows whether the right is there needs an administrator, so DataLab
 finds out by starting WSL's own small system distribution (`wsl.exe
 --system`), never Docker's, and only when Docker isn't answering.
+
+DataLab's page shows how Docker stands and offers the fix as a button
+(api/docker.py, DockerDoctor): on a Michigan Medicine computer the person has
+to turn on their temporary administrator access first, which a question
+asked once in DataLab's window couldn't wait for.
 """
 
 from __future__ import annotations
@@ -27,6 +32,8 @@ import base64
 import os
 import subprocess
 import sys
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
@@ -91,9 +98,18 @@ try {
 
 Run = Callable[..., subprocess.CompletedProcess]
 Probe = Literal["ok", "refused", "unknown"]
-Outcome = Literal[
-    "not-windows", "docker-answers", "vm-starts", "unknown", "told", "declined", "failed", "fixed"
-]
+# How Docker stands, as the page shows it (api/docker.py): "unsupported" off
+# Windows (none of this applies there); "ready" when its engine answers;
+# "vm-refused" when the policy has taken the right away; "starting" while
+# Docker Desktop is open but its engine isn't answering yet; "stopped" when
+# Docker Desktop isn't open; "unknown" when WSL itself couldn't say.
+DockerState = Literal["unsupported", "ready", "vm-refused", "starting", "stopped", "unknown"]
+# What asking for the fix came to: "declined" when the administrator prompt
+# was closed or refused (on a Michigan Medicine computer, most often because
+# the temporary administrator access isn't on); "still-refused" when it ran
+# but Windows still won't let the virtual machine sign in; "busy" when a
+# prompt is already showing.
+FixOutcome = Literal["fixed", "declined", "still-refused", "busy", "unsupported"]
 
 
 def system_dir() -> Path:
@@ -196,47 +212,128 @@ def restart_docker(run: Run = subprocess.run, popen: Callable = subprocess.Popen
         popen([str(app)], close_fds=True)
 
 
-def check_before_serve(
-    *,
-    ask: Callable[[str], str] = input,
-    say: Callable[[str], None] = print,
-    interactive: bool | None = None,
-    run: Run = subprocess.run,
-    popen: Callable = subprocess.Popen,
-    platform: str = sys.platform,
-) -> Outcome:
-    """At DataLab's start on Windows: if Docker isn't answering because its
-    virtual machine may not sign in, say so in plain words and offer to fix
-    it. Never a reason for DataLab not to start."""
+def docker_desktop_running(run: Run = subprocess.run) -> bool:
+    """Whether Docker Desktop's window app is open (its engine may still be starting)."""
+    try:
+        listed = run(
+            [str(system_dir() / "tasklist.exe"), "/FI", "IMAGENAME eq Docker Desktop.exe", "/NH"],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return b"docker desktop.exe" in (listed.stdout or b"").lower()
+
+
+def start_docker(popen: Callable = subprocess.Popen) -> bool:
+    """Open Docker Desktop. It needs no administrator: the installer set its
+    service to start by itself."""
+    app = docker_desktop()
+    if not app.exists():
+        return False
+    popen([str(app)], close_fds=True)
+    return True
+
+
+def docker_state(run: Run = subprocess.run, platform: str = sys.platform) -> DockerState:
     if platform != "win32":
-        return "not-windows"
+        return "unsupported"
     if docker_answers(run):
-        return "docker-answers"
+        return "ready"
     found = probe(run)
-    if found != "refused":
-        return "vm-starts" if found == "ok" else "unknown"
-    say("")
-    say("Docker can't start on this computer right now: Windows won't let its virtual")
-    say("machine sign in. A Windows policy took away a right it needs (this happens on the")
-    say("Michigan Medicine network). Until it's fixed, conversations and workflows can't run.")
-    say("Two ways to fix it:")
-    say("  - Restart Windows (no administrator needed; it can happen again later), or")
-    say("  - Fix it now: DataLab asks Windows for administrator permission once, gives the")
-    say("    right back, and restarts Docker Desktop. If your computer gives you")
-    say("    administrator access for a limited time, request it first.")
-    if interactive is None:
-        interactive = sys.stdin is not None and sys.stdin.isatty()
-    if not interactive:
-        say("To fix it now, open DataLab from its Start menu entry; or restart Windows.")
-        return "told"
-    if ask("Fix it now? [Y/n] ").strip().lower() not in ("", "y", "yes"):
-        say("OK. Restart Windows when you can; DataLab keeps running meanwhile.")
-        return "declined"
-    say("Asking Windows for permission (look for the box; it may be behind this window)...")
-    if not grant(run) or probe(run) == "refused":
-        say("That didn't work (the box was closed, or administrator access has run out).")
-        say("Restart Windows instead; DataLab keeps running meanwhile.")
-        return "failed"
-    restart_docker(run, popen)
-    say("Fixed. Docker Desktop is restarting, which takes a minute or two.")
-    return "fixed"
+    if found == "refused":
+        return "vm-refused"
+    if found == "unknown":
+        return "unknown"
+    return "starting" if docker_desktop_running(run) else "stopped"
+
+
+class DockerDoctor:
+    """How Docker stands on this Windows computer, for DataLab's page, and the
+    two things the page can do about it: open Docker Desktop, and put the
+    virtual machines' right back (one administrator prompt).
+
+    Both the page and DataLab's own start (check_before_serve) ask it, so
+    their answers agree. A check can start WSL's virtual machine, so there's
+    one at a time, and an answer is kept for CACHE_SECONDS.
+    """
+
+    CACHE_SECONDS = 15
+
+    def __init__(
+        self,
+        *,
+        run: Run = subprocess.run,
+        popen: Callable = subprocess.Popen,
+        platform: str = sys.platform,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._run = run
+        self._popen = popen
+        self._platform = platform
+        self._clock = clock
+        self._checking = threading.Lock()
+        self._fixing = threading.Lock()
+        self._state: DockerState | None = None
+        self._checked = 0.0
+
+    @property
+    def fixing(self) -> bool:
+        """Whether an administrator prompt is showing now."""
+        return self._fixing.locked()
+
+    def state(self, *, fresh: bool = False) -> DockerState:
+        with self._checking:
+            stale = self._clock() - self._checked > self.CACHE_SECONDS
+            if fresh or self._state is None or stale:
+                self._state = docker_state(self._run, self._platform)
+                self._checked = self._clock()
+            return self._state
+
+    def start(self) -> DockerState:
+        """Open Docker Desktop if it's closed; how Docker stands then."""
+        if self.state(fresh=True) == "stopped":
+            start_docker(self._popen)
+        return self.state(fresh=True)
+
+    def fix(self) -> FixOutcome:
+        """Show the administrator prompt and put the right back, then restart
+        Docker Desktop. Waits until the prompt is answered."""
+        if self._platform != "win32":
+            return "unsupported"
+        if not self._fixing.acquire(blocking=False):
+            return "busy"
+        try:
+            if not grant(self._run):
+                return "declined"
+            if probe(self._run) == "refused":
+                return "still-refused"
+            restart_docker(self._run, self._popen)
+            return "fixed"
+        finally:
+            self._fixing.release()
+            with self._checking:
+                self._state = None
+
+
+def check_before_serve(doctor: DockerDoctor, *, say: Callable[[str], None] = print) -> DockerState:
+    """At DataLab's start on Windows: open Docker Desktop if it's closed, and
+    if Windows won't let its virtual machine start, say so in DataLab's window
+    too. The page shows the same, with the fix (api/docker.py): the fix needs
+    an administrator, which on a Michigan Medicine computer means turning on
+    the temporary administrator access first, so it's a button there rather
+    than a question here that could only be answered once. Never a reason for
+    DataLab not to start."""
+    state = doctor.state(fresh=True)
+    if state == "stopped":
+        state = doctor.start()
+        if state != "stopped":
+            say("Opening Docker Desktop, which conversations and workflows need (a minute or two).")
+    elif state == "vm-refused":
+        say("")
+        say("Docker can't start on this computer right now: Windows won't let its virtual")
+        say("machine sign in (a Windows policy took away a right it needs; this happens on")
+        say("the Michigan Medicine network). Conversations and workflows can't run until it's")
+        say("fixed. DataLab's page shows how: turn on your temporary administrator access,")
+        say("then click Fix it. Or restart Windows, which fixes it for a while.")
+    return state

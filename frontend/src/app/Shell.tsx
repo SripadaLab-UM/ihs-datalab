@@ -6,6 +6,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 import { api, SIGNED_OUT } from "@/api/client";
 import { Brand, usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
+import { DockerBanner } from "@/features/docker/DockerBanner";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
 import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
@@ -56,6 +57,7 @@ export function Shell() {
         </div>
       )}
       <UpdatingBanner />
+      <DockerBanner />
       <header className="flex items-center gap-4 border-b border-line px-5 lg:gap-8">
         <Brand practice={practice} />
         <nav ref={nav} className="flex min-w-0 gap-1 self-stretch overflow-x-auto">

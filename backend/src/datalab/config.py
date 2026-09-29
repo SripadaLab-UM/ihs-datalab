@@ -188,6 +188,21 @@ UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)
+class WindowsSettings:
+    """`[windows]`: what DataLab on Windows tells people (windows_vm.py)."""
+
+    # Where people turn on their temporary administrator access, which the
+    # fix for Docker's virtual machine needs (Michigan Medicine: the profile
+    # page). None: the page says to ask IT for administrator access instead.
+    admin_access_url: str | None = "https://profile.med.umich.edu"
+
+    def __post_init__(self) -> None:
+        url = self.admin_access_url
+        if url is not None and not re.fullmatch(r"https://[^\s\"'<>]+", url):
+            raise ValueError("windows.admin_access_url must be an https:// address")
+
+
+@dataclass(frozen=True)
 class Settings:
     profile: Profile
     data_dir: Path
@@ -208,6 +223,7 @@ class Settings:
     repos: RepoSettings = field(default_factory=RepoSettings)
     workflows: WorkflowSettings = field(default_factory=WorkflowSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
+    windows: WindowsSettings = field(default_factory=WindowsSettings)
 
     @property
     def settings_file(self) -> Path:
@@ -339,6 +355,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         repos=_section(RepoSettings, raw, "repos"),
         workflows=_section(WorkflowSettings, raw, "workflows"),
         updates=_section(UpdateSettings, raw, "updates"),
+        windows=_section(WindowsSettings, raw, "windows"),
     )
     return _check_models(settings)
 

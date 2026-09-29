@@ -851,10 +851,27 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
   - The installer's administrator part adds it; Step 2 checks before starting
     Docker and, if it's missing, offers the fix behind one administrator
     prompt.
-  - `datalab serve` on Windows checks too, whenever Docker isn't answering,
-    and offers the same fix in its window, then restarts Docker Desktop
-    (`datalab/windows_vm.py`). This is the part that reaches people through
-    updates.
+  - DataLab itself checks too, whenever Docker isn't answering
+    (`datalab/windows_vm.py`, `api/docker.py`); this is the part that reaches
+    people through updates. While Docker can't run, every page shows a banner
+    under the header: "Open Docker Desktop" when it's closed (DataLab also
+    opens it by itself when it starts), a note while it's starting, and, when
+    the right is missing, "How to fix it…", which opens a dialog by itself
+    the first time. The dialog says to turn on the temporary administrator
+    access first (`[windows] admin_access_url`, by default Michigan
+    Medicine's https://profile.med.umich.edu; unset, it says to ask IT), then
+    to press Fix it, which shows one Windows permission box and restarts
+    Docker Desktop. It says what happened: fixed, declined (most often: the
+    administrator access wasn't on yet, so turn it on and press Fix it
+    again), or still blocked (restart Windows). The page checks every 10
+    seconds while something is wrong and every 5 minutes otherwise, since the
+    policy can take the right away while DataLab is open.
+  - The fix is a button, never a question in DataLab's window: in the first
+    real use, the question came before the person could turn on their
+    administrator access, and there was no way back to it without quitting.
+    DataLab's window only says what's wrong and points to the page. Running
+    DataLab itself as an administrator isn't needed, and isn't recommended:
+    only the fix needs it, for a moment.
   - Checking whether the right is there needs an administrator, so both
     start WSL's own system distribution (`wsl.exe --system -e true`), never
     Docker's, and look for that code.
