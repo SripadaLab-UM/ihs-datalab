@@ -20,6 +20,7 @@ Each task is built around a trap the synthetic data carries on purpose
 | `small_cells` | A count under 11 that must be suppressed (directly, as a percentage, or by subtraction) |
 | `person_days` | Text timestamps, several a day: a person-day is a participant and a date, under a stated day rule, not a distinct timestamp |
 | `cohort_coverage` | One cohort for numerator and denominator: people with data outside it, and a participant twice in the cohort's view (no duplicate-join inflation) |
+| `coverage_open` | The same, with the cohort left to the agent |
 | `clob_choices` | Grouping a CLOB column (the dictionary's ANSWERCHOICES) |
 | `bdate_age` | A mixed-case quoted column (`"Bdate"`) in an age calculation |
 | `plan_describe` | A descriptive question gets a describe plan, not an invented exposure and outcome |

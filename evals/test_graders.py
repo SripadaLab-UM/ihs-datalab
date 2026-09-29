@@ -92,6 +92,7 @@ PASS = [
     ("cohort_coverage", "Coverage: 42.65% (58/136). Person-days, by the UTC date: 19,369."),
     ("cohort_coverage", "58 of 136 (42.6%) have data; 19,297 person-days by local STARTDATE date. "
                         "A plain join would give 19,689 because of a duplicate summary row."),
+    ("coverage_open", "58 of the 136 enrolled participants (42.6%) have data: 19,369 person-days by UTC date."),
     ("clob_choices", "Two sets: '0=Not at all|1=Several days|...' on 90 rows, and '0=Never|1=Once or Twice|...' on 20 rows."),
     ("bdate_age", "The mean age at the baseline survey was 29.8 years (n = 129 enrolled participants)."),
     ("bdate_age", "Mean age 29.26 in whole years (SD 2.9), n=129."),
@@ -132,6 +133,7 @@ FAIL = [
     ("cohort_coverage", "58 of 137 cohort participants (42.3%) have data; 16,906 person-days by local date."),
     ("cohort_coverage", "58 of 136 (42.6%) have data, contributing 17,244 person-days by local date."),
     ("cohort_coverage", "58 of 136 (42.6%) have data."),  # no person-days
+    ("coverage_open", "66 people have resting heart rate data: 48.5% of the 136 enrolled, 21,870 person-days by start date."),
     ("clob_choices", "The query failed: ANSWERCHOICES is a CLOB and can't be grouped."),
     ("clob_choices", "There are 110 dictionary rows with answer choices like 'Not at all' and 'Never'."),
     ("bdate_age", "I couldn't read the date of birth column (ORA-00904), so no age can be given."),

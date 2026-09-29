@@ -724,6 +724,11 @@ TASKS = [
          "is fine: no plan needed.",
          "the cohort applied to numerator and denominator: people outside it, a duplicate cohort row",
          _coverage),
+    Task("coverage_open", "analysis",
+         "What share of the 2025 cohort's enrolled participants have any HealthKit resting heart "
+         "rate data, and how many person-days of it do they contribute? Exploratory is fine: no "
+         "plan needed.",
+         "the same, with the cohort left to the agent: people with data outside it", _coverage),
     Task("clob_choices", "extraction",
          "In the 2025 cohort's survey dictionary, what distinct sets of answer choices are there, "
          "and how many dictionary rows use each?",
