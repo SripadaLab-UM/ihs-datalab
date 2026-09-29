@@ -39,13 +39,20 @@ fix**. **How to fix it…** in the banner opens it again at any time.
    minute.
 2. Click **Fix it**. Windows asks whether to allow changes: click **Yes**.
    The box may be behind other windows; DataLab says **Waiting for
-   Windows…** until you answer it.
-3. DataLab gives the permission back and restarts Docker Desktop. The dialog
-   says **Fixed**, and the banner says Docker Desktop is starting. Click
+   Windows…** until you answer it. If the box asks for a username and
+   password, your administrator access was turned on after you signed in to
+   Windows: type your own Michigan Medicine username and password there.
+3. DataLab gives the permission back, then restarts Docker Desktop: it closes
+   it, stops Docker's virtual machine and opens it again, which takes a
+   minute or two. Anything running in Docker stops, so DataLab waits while a
+   conversation, query or workflow is working (it says so; try again once it
+   has finished). The dialog says **Fixed. Docker is running again**. Click
    **Done**.
 
 If the dialog says **Windows didn't give permission**, your administrator
 access most likely wasn't on yet: turn it on, then click **Fix it** again.
+If it says the permission is back but Docker Desktop didn't come back (it
+names what didn't work), **restart Windows**.
 **Check again** looks once more whether Windows lets the virtual machine
 start (it doesn't show Windows' permission box). **Later** closes the
 dialog: it doesn't open by itself again until you next sign in, and the

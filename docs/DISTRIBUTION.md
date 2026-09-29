@@ -868,6 +868,22 @@ Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
     again), or still blocked (restart Windows). Fix it is refused unless the
     last check found the VM refused, so it can never raise a prompt while
     Docker works.
+  - After the right is back, Docker Desktop is restarted afresh
+    (`windows_vm.restart_docker`): once its engine has given up waiting for a
+    VM Windows refused, it never tries again, and `docker desktop restart`
+    left that stuck backend running (0.3.0b3 on the re-test machine; only a
+    Windows restart cleared it). The steps, each with a time limit and none
+    repeated: end Docker Desktop's own processes (`Docker Desktop.exe`,
+    `com.docker.backend.exe`, `com.docker.build.exe`, `docker-sandbox.exe`,
+    by process id, only those running as this account, as tasklist's
+    USERNAME filter gives them; never its SYSTEM service, com.docker.service),
+    `wsl --terminate docker-desktop` (never `wsl --shutdown`), open Docker
+    Desktop, then wait up to 4 minutes for `docker info`. The dialog names
+    the step that didn't work and says to restart Windows. This stops
+    everything in Docker, so the fix is refused while a conversation's turn,
+    a query, a workflow run or a pipeline test is going, and the dialog says
+    so before the button is pressed. On the re-test machine, with Docker
+    working, the restart took 14 seconds.
   - How often it looks, since a check can start WSL's VM: the page asks
     every 30 seconds while something is wrong and every 5 minutes
     otherwise (the policy can take the right away while DataLab is open);

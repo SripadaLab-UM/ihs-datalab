@@ -53,14 +53,24 @@ def test_off_windows_nothing_is_offered(settings):
     assert fake.calls == []
 
 
-def test_fix_answers_once_the_prompt_is_answered_with_how_docker_stands_then(settings):
-    fake = FakeWindows(after_grant=(0, b""))
+def test_fix_answers_once_docker_is_back_with_how_it_stands_then(settings):
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
     fixed = client_for(settings, fake).post("/api/docker/fix").json()
-    assert fixed == {"outcome": "fixed", "state": "starting"}
+    assert fixed == {"outcome": "fixed", "state": "ready", "failed_step": None}
     fake = FakeWindows(grant=1)
     assert client_for(settings, fake).post("/api/docker/fix").json() == {
         "outcome": "declined",
         "state": "vm-refused",
+        "failed_step": None,
+    }
+
+
+def test_fix_says_which_step_of_the_restart_didnt_work(settings):
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=False)
+    assert client_for(settings, fake).post("/api/docker/fix").json() == {
+        "outcome": "restart-failed",
+        "state": "starting",
+        "failed_step": "ready",
     }
 
 
@@ -69,8 +79,19 @@ def test_fix_never_asks_windows_while_docker_works(settings):
     assert client_for(settings, fake).post("/api/docker/fix").json() == {
         "outcome": "not-needed",
         "state": "ready",
+        "failed_step": None,
     }
     assert fake.ran("powershell.exe") == []
+
+
+def test_fix_waits_while_something_in_datalab_is_working(settings):
+    """The restart stops everything in Docker, a conversation's sandbox among
+    them: so no administrator prompt while a turn, query or run is going."""
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
+    app = FastAPI()
+    app.include_router(build_docker_router(settings, doctor_for(fake), working=lambda: True))
+    assert TestClient(app).post("/api/docker/fix").json()["outcome"] == "working"
+    assert fake.ran("powershell.exe") == [] and fake.killed() == []
 
 
 def test_start_opens_a_closed_docker_desktop(settings, installed):
@@ -114,7 +135,7 @@ def test_only_datalabs_own_signed_in_page_can_check_start_or_fix(settings, catal
     """The routes sit behind the sign-in cookie and ApiProtection like every
     other: no other page on this computer can show a Windows administrator
     prompt, open Docker Desktop, or make DataLab start WSL's VM."""
-    fake = FakeWindows(after_grant=(0, b""))
+    fake = FakeWindows(after_grant=(0, b""), ready_after_open=True)
     browser = BrowserSession(settings.port)
     app = create_app(
         settings,
@@ -142,6 +163,7 @@ def test_only_datalabs_own_signed_in_page_can_check_start_or_fix(settings, catal
         # DataLab's own page, as its request() sends it.
         assert client.post("/api/docker/fix", content="{}", headers=JSON).json() == {
             "outcome": "fixed",
-            "state": "starting",
+            "state": "ready",
+            "failed_step": None,
         }
         assert len(fake.ran("powershell.exe")) == 1

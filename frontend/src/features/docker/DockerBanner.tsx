@@ -117,10 +117,28 @@ export function DockerBanner() {
   );
 }
 
-function outcomeText(outcome: DockerFix["outcome"]): { text: string; ok: boolean } {
-  switch (outcome) {
+// Which step of restarting Docker Desktop didn't work (backend windows_vm.restart_docker).
+const RESTART_STEP: Record<NonNullable<DockerFix["failed_step"]>, string> = {
+  stop: "Docker Desktop wouldn't close",
+  terminate: "Docker's virtual machine wouldn't stop",
+  start: "Docker Desktop couldn't be opened",
+  ready: "Docker Desktop didn't get ready within 4 minutes",
+};
+
+function outcomeText(result: DockerFix): { text: string; ok: boolean } {
+  switch (result.outcome) {
     case "fixed":
-      return { ok: true, text: "Fixed. Docker Desktop is restarting: conversations and workflows can start in a minute or two." };
+      return { ok: true, text: "Fixed. Docker is running again: conversations and workflows can start." };
+    case "restart-failed":
+      return {
+        ok: false,
+        text: `Windows lets Docker's virtual machine start again, but ${result.failed_step ? RESTART_STEP[result.failed_step] : "Docker Desktop didn't come back"}. Restart Windows to finish.`,
+      };
+    case "working":
+      return {
+        ok: false,
+        text: "Something in DataLab is working (a conversation, a query or a workflow). Fix it restarts Docker Desktop, which would stop it: wait for it to finish, then click Fix it.",
+      };
     case "declined":
       return {
         ok: false,
@@ -156,7 +174,7 @@ export function DockerFixDialog({
     onSuccess: (fresh) => client.setQueryData(KEY, fresh),
   });
   const url = status.admin_access_url;
-  const outcome = fix.data && outcomeText(fix.data.outcome);
+  const outcome = fix.data && outcomeText(fix.data);
   const vmStarts = recheck.data !== undefined && VM_STARTS.has(recheck.data.state);
   const fixed = fix.data?.outcome === "fixed" || fix.data?.outcome === "not-needed" || vmStarts;
   const waiting = fix.isPending || (status.fixing && !fix.data);
@@ -212,14 +230,16 @@ export function DockerFixDialog({
         </li>
         <li>
           Click <span className="font-medium">Fix it</span>. Windows asks whether to allow changes (the box may be behind
-          other windows): click <span className="font-medium">Yes</span>. DataLab gives the permission back and restarts
-          Docker Desktop.
+          other windows; if it asks for a username and password, that's your own): click{" "}
+          <span className="font-medium">Yes</span>. DataLab gives the permission back, then restarts Docker Desktop, so
+          anything running in Docker stops; it waits while a conversation, query or workflow in DataLab is working.
         </li>
       </ol>
       <p className="mt-3 text-sm text-muted">No administrator access? Restarting Windows fixes it too, for a while.</p>
       {waiting && (
         <p role="status" className="mt-3 text-sm font-medium">
-          Windows is asking for permission: look for its box (it may be behind other windows) and click Yes.
+          Windows is asking for permission: look for its box (it may be behind other windows) and click Yes. Then DataLab
+          restarts Docker Desktop, which takes a minute or two.
         </p>
       )}
       {outcome && (
