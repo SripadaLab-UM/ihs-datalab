@@ -84,7 +84,8 @@ the opt-in `propose_sql` and `suggest_kb_update`.
 | Knowledge writing | data | Knowledge's chat, Edit with agent | catalog only | no | Balanced | off | brief; the proposal as usual | proposed-edit cards, then Save & share |
 | Research | research | Workspace | none: web search and the research proxy instead | yes (may reach the internet) | Balanced | n/a | its own note: brief, cite sources, no claims about the study's data | nothing is shared from it |
 
-Every mode gets the knowledge base copy at `/work/kb`, and every data mode
+Every mode gets the knowledge base copy at `/work/kb` (on the practice
+DataLab there's none, and the agent's instructions say so), and every data mode
 the same read-only database rules (the SQL check, the Data accessed log,
 results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
 `medium`, `high`), and DataLab sends one with every turn.

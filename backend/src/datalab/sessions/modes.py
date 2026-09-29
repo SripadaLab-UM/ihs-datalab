@@ -731,8 +731,22 @@ KNOWLEDGE = (
 )
 
 
-def instructions(mode_id: str) -> str:
-    return MODES[mode_id].instructions + KNOWLEDGE
+# When DataLab copies no knowledge base into conversations (the practice
+# DataLab never does: it doesn't use the lab's repositories). Without it the
+# agent would follow its kb-use guidance, try to read /work/kb/AGENTS.md and
+# index.md, and the answer's checks would list those reads as failed steps.
+NO_KNOWLEDGE = (
+    "\nThis DataLab has no copy of the lab's knowledge base: /work/kb doesn't exist "
+    "here, and there are no lab skills. Don't look for it or read files in it (skip "
+    "the kb-use and kb-propose skills); work from the catalog tools and the data, and "
+    "say so when a lab convention would matter to the answer.\n"
+)
+
+
+def instructions(mode_id: str, *, knowledge_base: bool = True) -> str:
+    """The mode's instructions, and where the knowledge base is: `knowledge_base`
+    is whether DataLab copies it into this mode's conversations."""
+    return MODES[mode_id].instructions + (KNOWLEDGE if knowledge_base else NO_KNOWLEDGE)
 
 
 # --- Express ----------------------------------------------------------------

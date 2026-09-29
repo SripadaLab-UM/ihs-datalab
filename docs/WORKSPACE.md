@@ -100,7 +100,7 @@ The container has deliberately few locations:
 |---|---|---|
 | `/work` | The conversation's workspace, checkpointed after every turn | Yes |
 | `/work/outputs` | Deliverables shown in the Outputs panel and available to export | Yes |
-| `/work/kb` | Fresh copy of the knowledge base; edits become proposals | Yes |
+| `/work/kb` | Fresh copy of the knowledge base; edits become proposals. Not on the practice DataLab (the agent is told so) | Yes |
 | `/inputs` | Files and folders you attached | No |
 | `/data/oracle` | Query results written by DataLab's data service | No |
 

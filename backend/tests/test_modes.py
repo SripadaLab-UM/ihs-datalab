@@ -41,6 +41,9 @@ def test_every_mode_has_its_label_kind_and_starters():
 def test_every_mode_gets_the_knowledge_base_note():
     for mode_id in MODES:
         assert modes.instructions(mode_id).endswith(modes.KNOWLEDGE)
+        # Or, where DataLab copies none (practice), that there isn't one.
+        without = modes.instructions(mode_id, knowledge_base=False)
+        assert without.endswith(modes.NO_KNOWLEDGE) and "/work/kb: use it" not in without
 
 
 def test_workflow_authoring_queries_like_data_extraction():

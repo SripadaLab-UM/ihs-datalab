@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from datalab.app import create_app
 from datalab.sessions import manager as manager_module
+from datalab.sessions import modes as modes_module
 from datalab.sessions import seeds
 from datalab.sessions.containers import Mount
 from datalab.sessions.hooks import TurnInfo
@@ -448,3 +449,24 @@ def test_a_provider_that_fails_is_skipped(app, repos, caplog):
 def test_a_provider_cant_declare_a_whole_drive_or_home_folder(app, root):
     with pytest.raises(ValueError):
         app.state.services.sessions.register_mounts(lambda _: [], roots=[root])
+
+
+def test_without_a_knowledge_base_the_agent_is_told_there_is_none(app):
+    # The practice DataLab copies no knowledge base into conversations, so
+    # the agent is told not to look for one (its reads of /work/kb/AGENTS.md
+    # and index.md would otherwise be failed steps in the answer's checks).
+    manager = app.state.services.sessions
+    store = app.state.services.conversations
+    analysis = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5")
+    assert not manager.seeds_into("kb", "analysis")
+    text = manager._runtime(analysis)._instructions
+    assert text.endswith(modes_module.NO_KNOWLEDGE) and modes_module.KNOWLEDGE not in text
+    assert "/work/kb doesn't exist" in text
+
+    # With a knowledge base seed (the real DataLab's), the usual note.
+    manager.register_workspace_seed("kb", kb_seed([]), into="kb", modes=("analysis",))
+    assert manager.seeds_into("kb", "analysis") and not manager.seeds_into("kb", "research")
+    other = store.create(kind="data", mode="analysis", title="t", model="gpt-5.5")
+    assert manager._runtime(other)._instructions.endswith(modes_module.KNOWLEDGE)
+    research = store.create(kind="research", mode="research", title="t", model="gpt-5.5")
+    assert manager._runtime(research)._instructions.endswith(modes_module.NO_KNOWLEDGE)

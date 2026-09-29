@@ -139,7 +139,11 @@ pages), we can add a local search tool then. Not before.
 ## How edits happen
 
 1. When a session starts, DataLab puts a fresh copy of the knowledge base in
-   the agent's workspace. The copy is up to date with GitHub.
+   the agent's workspace. The copy is up to date with GitHub. The practice
+   DataLab has none: there the agent's instructions end with a note that
+   `/work/kb` doesn't exist (`modes.NO_KNOWLEDGE`, chosen by whether a seed
+   puts `/work/kb` in that mode's conversations), and `kb-use` checks for the
+   folder first, so it doesn't try to read `AGENTS.md` and `index.md` and fail.
 2. The agent edits pages there like any other files. This works in both
    session types.
 3. After each turn, DataLab diffs the copy against the original. If anything
