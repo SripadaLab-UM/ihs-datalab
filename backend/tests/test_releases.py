@@ -310,6 +310,9 @@ def test_check_on_start_off_means_no_request_at_start(tmp_path, github):
     assert check.check_on_start() is None
     assert github.requests == []
     assert check.last.state == "not-checked" and "check_on_start" in check.last.message
+    assert "about once an hour" in check.last.message
+    check.set_every_hour(False)
+    assert "once an hour" not in check.last.message
     github.release("v0.1.0-alpha.3", prerelease=True)
     assert check.check().state == "available"  # "Check now" still works
 
@@ -510,3 +513,161 @@ def test_a_download_larger_than_github_said_is_refused(tmp_path, github):
         ReleaseSource(REPO, http=github.client()).download(
             smaller, tmp_path / "r.txt", sha256=found.expected["requirements.txt"]
         )
+
+
+# ------------------------------------------------------------------ hourly
+
+
+class Waits:
+    """The hourly check's wait, faked: records each wait and says "stop" after `rounds`."""
+
+    def __init__(self, rounds: int, clock: Clock | None = None) -> None:
+        self.rounds = rounds
+        self.clock = clock
+        self.waited: list[float] = []
+
+    def __call__(self, seconds: float) -> bool:
+        if len(self.waited) >= self.rounds:
+            return True
+        self.waited.append(seconds)
+        if self.clock is not None:
+            self.clock.now += seconds
+        return False
+
+
+def hourly_for(check, waits, **kwargs) -> releases.HourlyCheck:
+    kwargs.setdefault("pick", lambda low, high: 120.0)
+    return releases.HourlyCheck(check, wait=waits, **kwargs)
+
+
+def test_the_hourly_check_asks_about_once_an_hour_with_a_little_jitter(tmp_path, github):
+    github.release("v0.1.0-alpha.3")
+    clock = Clock()
+    check = checker(tmp_path, github, clock=clock)
+    picked: list[tuple[float, float]] = []
+
+    def pick(low, high):
+        picked.append((low, high))
+        return 90.0
+
+    waits = Waits(3, clock)
+    hourly_for(check, waits, pick=pick).run()
+    assert waits.waited == [3690.0] * 3
+    assert set(picked) == {(0, releases.HOURLY_JITTER_SECONDS)}
+    lists = [r for r in github.requests if r.url.path.endswith("/releases")]
+    assert len(lists) == 3
+    assert check.last.state == "available"
+
+
+def test_the_jitter_is_up_to_five_minutes_on_top_of_an_hour(tmp_path, github):
+    hourly = releases.HourlyCheck(checker(tmp_path, github))
+    for _ in range(50):
+        assert 3600 <= hourly.next_wait() <= 3600 + 300
+
+
+def test_the_hourly_check_is_skipped_while_an_update_installs(tmp_path, github):
+    clock = Clock()
+    check = checker(tmp_path, github, clock=clock)
+    installing = [True]
+    waits = Waits(2, clock)
+    hourly_for(check, waits, busy=lambda: installing[0]).run()
+    assert github.requests == [] and check.last.state == "not-checked"
+    installing[0] = False
+    hourly_for(check, Waits(1, clock), busy=lambda: installing[0]).run()
+    assert check.last.state == "up-to-date"
+
+
+def test_the_hourly_check_off_asks_nothing(tmp_path, github):
+    clock = Clock()
+    check = checker(tmp_path, github, clock=clock, check_every_hour=False)
+    assert check.every_hour is False
+    hourly_for(check, Waits(3, clock)).run()
+    assert github.requests == []
+
+
+def test_the_persons_choice_overrides_the_settings_file_and_is_kept(tmp_path, github):
+    check = checker(tmp_path, github)
+    assert check.every_hour is True
+    check.set_every_hour(False)
+    assert check.every_hour is False
+    # Kept in the data folder: a new start (a new checker) reads it.
+    again = checker(tmp_path, github)
+    assert again.every_hour is False
+    saved = json.loads((tmp_path / "data" / releases.PREFERENCES).read_text())
+    assert saved == {"check_every_hour": False}
+    again.set_every_hour(True)
+    assert checker(tmp_path, github, check_every_hour=False).every_hour is True
+
+
+def test_an_unreadable_preferences_file_falls_back_to_the_setting(tmp_path, github):
+    folder = tmp_path / "data"
+    folder.mkdir()
+    (folder / releases.PREFERENCES).write_text("{not json")
+    assert checker(tmp_path, github).every_hour is True
+    (folder / releases.PREFERENCES).write_text('{"check_every_hour": "no"}')
+    assert checker(tmp_path, github, check_every_hour=False).every_hour is False
+
+
+def test_the_hourly_check_respects_githubs_wait(tmp_path, github):
+    clock = Clock()
+    check = checker(tmp_path, github, clock=clock)
+    github.answer = lambda request: httpx.Response(
+        403,
+        headers={
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": str(int(clock.now) + 3 * 3600),
+        },
+    )
+    hourly_for(check, Waits(3, clock)).run()
+    # Asked once; the next two rounds fell inside GitHub's wait.
+    assert len(github.requests) == 1 and check.last.state == "rate-limited"
+
+
+class Broken:
+    every_hour = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.last = releases.CheckResult("not-checked", "", "0.1.0", "auto")
+
+    def check(self):
+        self.calls += 1
+        raise RuntimeError("something unexpected")
+
+
+def test_a_failing_round_is_logged_and_the_next_one_still_comes(caplog):
+    broken = Broken()
+    with caplog.at_level("ERROR"):
+        hourly_for(broken, Waits(3)).run()  # type: ignore[arg-type]
+    assert broken.calls == 3
+    assert "hourly update check failed" in caplog.text
+
+
+def test_the_hourly_check_logs_only_when_the_answer_changes(tmp_path, github, caplog):
+    clock = Clock()
+    check = checker(tmp_path, github, clock=clock)
+    with caplog.at_level("INFO", logger="datalab.releases"):
+        hourly_for(check, Waits(3, clock)).run()
+    said = [r for r in caplog.records if r.getMessage().startswith("hourly update check:")]
+    assert len(said) == 1 and "up-to-date" in said[0].getMessage()
+
+
+def test_offline_says_when_it_tries_again(tmp_path, github):
+    def offline(request):
+        raise httpx.ConnectError("offline", request=request)
+
+    github.answer = offline
+    assert "within the hour" in checker(tmp_path, github).check().message
+    off = checker(tmp_path, github, check_every_hour=False)
+    assert "when it next starts" in off.check().message
+
+
+def test_stopping_ends_the_hourly_thread_at_once(tmp_path, github):
+    hourly = releases.HourlyCheck(checker(tmp_path, github))
+    hourly.start()
+    hourly.start()  # once only
+    thread = hourly._thread
+    assert thread is not None and thread.is_alive() and thread.daemon
+    hourly.stop(timeout=5)
+    assert not thread.is_alive()
+    assert github.requests == []

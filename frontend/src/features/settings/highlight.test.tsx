@@ -58,6 +58,7 @@ const CHECK: UpdateCheck = {
   state: "up-to-date", message: "DataLab 0.1.0 is the newest release.", current_version: "0.1.0", channel: "auto",
   checked_at: null, available: null, can_install: false, cannot_install_because: null,
   install: { state: "idle", version: null, message: "", started_at: null, updated_at: null }, updating: false,
+  check_on_start: true, check_every_hour: true,
 }; // prettier-ignore
 
 let reduced = false;

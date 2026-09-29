@@ -59,7 +59,7 @@ export function UpdatesSection() {
   );
 }
 
-/** What the last check found, Check now, and the release on offer. */
+/** What the last check found and when, Check now, checking every hour, and the release on offer. */
 function NewVersions({ initial }: { initial: UpdateCheck }) {
   const queryClient = useQueryClient();
   const live = useUpdateCheck();
@@ -69,6 +69,10 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
     mutationFn: settingsApi.checkForUpdates,
     onSuccess: (next) => queryClient.setQueryData(UPDATE_CHECK, next),
   });
+  const everyHour = useMutation({
+    mutationFn: (on: boolean) => settingsApi.setCheckEveryHour(on),
+    onSuccess: (next) => queryClient.setQueryData(UPDATE_CHECK, next),
+  });
   const working = installing(check);
   const failed = check.install.state === "failed";
   return (
@@ -76,7 +80,11 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
       <div id="updates-check" className="flex scroll-mt-6 flex-wrap items-center gap-3 rounded-[3px] border border-line px-4 py-3">
         <p className="min-w-0 flex-1 text-[15px]" role="status">
           {check.message}
-          {check.checked_at && <span className="block text-xs text-muted">Last checked {when(check.checked_at)}</span>}
+          {check.checked_at && (
+            <span className="block text-xs text-muted" title={when(check.checked_at)}>
+              Last checked {ago(check.checked_at)}
+            </span>
+          )}
         </p>
         {check.state !== "not-configured" && (
           <Button variant="primary" onClick={() => checkNow.mutate()} disabled={checkNow.isPending || working}>
@@ -85,6 +93,25 @@ function NewVersions({ initial }: { initial: UpdateCheck }) {
         )}
       </div>
       {checkNow.error && <p className="mt-2 text-sm text-danger">{checkNow.error.message}</p>}
+      {check.state !== "not-configured" && (
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            className="mt-1 accent-[var(--color-ink)]"
+            checked={everyHour.isPending ? everyHour.variables : check.check_every_hour}
+            disabled={everyHour.isPending}
+            onChange={(event) => everyHour.mutate(event.target.checked)}
+          />
+          <span>
+            Check GitHub for updates every hour while DataLab is open
+            <span className="block text-xs text-muted">
+              {check.check_on_start ? "DataLab also checks each time it starts. " : ""}
+              Checking only looks: installing always waits for you.
+            </span>
+          </span>
+        </label>
+      )}
+      {everyHour.error && <p className="mt-2 text-sm text-danger">{everyHour.error.message}</p>}
 
       {working && (
         <p className="mt-4 flex items-start gap-2 border-l-2 border-attn pl-3 text-sm" role="status">
@@ -316,4 +343,16 @@ function when(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return date.toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** "just now", "12 min ago", "3 hours ago"; older than a day, the date. */
+export function ago(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return iso;
+  const minutes = Math.floor(Math.max(0, now - then) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? "an hour ago" : `${hours} hours ago`;
+  return when(iso);
 }

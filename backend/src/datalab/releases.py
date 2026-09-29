@@ -25,13 +25,22 @@ Which release is offered (docs/DISTRIBUTION.md, "Which releases are offered"):
 Being offline, rate-limited, or unable to see the releases (while the repo
 was private, GitHub answered 404) never shows as an error: the check says it
 couldn't check, and DataLab carries on.
+
+When: once at start (`updates.check_on_start`), about once an hour while
+DataLab is open (`HourlyCheck`; `updates.check_every_hour`, which the person
+can turn off in Settings → Updates), and when the person presses Check now.
+Each is the same `UpdateChecker.check`, so GitHub's "wait until" and the
+minute between checks hold for all of them.
 """
 
 from __future__ import annotations
 
 import contextlib
 import hashlib
+import json
 import logging
+import os
+import random
 import re
 import threading
 import time
@@ -65,6 +74,12 @@ DOWNLOAD_HOSTS = frozenset(
 )
 # Asked for by the person ("Check now"): at most this often.
 MIN_CHECK_SECONDS = 60
+# While DataLab is open: every hour, plus up to five minutes picked at random
+# each time, so DataLabs started together don't ask GitHub at the same moment.
+HOURLY_SECONDS = 60 * 60
+HOURLY_JITTER_SECONDS = 5 * 60
+# This computer's choice of checking every hour, in the data folder.
+PREFERENCES = "update-preferences.json"
 _TIMEOUT = httpx.Timeout(connect=10, read=30, write=10, pool=10)
 _HEADERS = {"accept": "application/vnd.github+json", "x-github-api-version": "2022-11-28"}
 _WHEEL = re.compile(r"datalab-([A-Za-z0-9.+!]+)-py3-none-any\.whl")
@@ -402,28 +417,60 @@ class UpdateChecker:
         self.source = source or ReleaseSource(settings.updates.repository)
         self._clock = clock
         self._lock = threading.Lock()
+        # Separate from _lock, which is held while GitHub answers.
+        self._preferences_lock = threading.Lock()
         self._checked_at: float | None = None
         channel = settings.updates.channel
-        off = not settings.updates.check_on_start
         if not self.keys:
             message = BAD_KEY if invalid else NOT_CONFIGURED
             if invalid:
                 log.error("release_keys.py pins %d key(s) that aren't Ed25519 keys", len(invalid))
             self._last = CheckResult("not-configured", message, current, channel)
             return
-        self._last = CheckResult(
-            "not-checked",
-            "Checking for updates when DataLab starts is off (updates.check_on_start). "
-            "Check now to look."
-            if off
-            else "Not checked yet.",
-            current,
-            channel,
-        )
+        # Said by `last` when checking at start is off.
+        self._last = CheckResult("not-checked", "Not checked yet.", current, channel)
 
     @property
     def last(self) -> CheckResult:
-        return self._last
+        last = self._last
+        if last.state == "not-checked" and not self.settings.updates.check_on_start:
+            # Said as things stand now: checking every hour can be turned on or off.
+            then = (
+                "DataLab checks about once an hour while it's open, or Check now to look."
+                if self.every_hour
+                else "Check now to look."
+            )
+            return replace(
+                last,
+                message="Checking for updates when DataLab starts is off "
+                f"(updates.check_on_start). {then}",
+            )
+        return last
+
+    @property
+    def every_hour(self) -> bool:
+        """Whether DataLab checks about once an hour while it's open: the
+        person's choice on this computer, else `updates.check_every_hour`."""
+        chosen = self._read_preferences().get("check_every_hour")
+        return chosen if isinstance(chosen, bool) else self.settings.updates.check_every_hour
+
+    def set_every_hour(self, on: bool) -> None:
+        """Keep the person's choice (Settings → Updates) in the data folder."""
+        path = self.settings.data_dir / PREFERENCES
+        with self._preferences_lock:
+            chosen = self._read_preferences()
+            chosen["check_every_hour"] = bool(on)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = path.with_name(f".{PREFERENCES}.partial")
+            temporary.write_text(json.dumps(chosen, indent=1) + "\n", encoding="utf-8")
+            os.replace(temporary, path)
+
+    def _read_preferences(self) -> dict[str, Any]:
+        try:
+            raw = json.loads((self.settings.data_dir / PREFERENCES).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}  # none yet, or unreadable: the settings file's value holds
+        return raw if isinstance(raw, dict) else {}
 
     def check_on_start(self) -> CheckResult | None:
         """At startup, if `updates.check_on_start` allows it."""
@@ -503,9 +550,10 @@ class UpdateChecker:
 
     def _problem(self, problem: CheckProblem) -> str:
         if problem.state == "offline":
+            again = "within the hour" if self.every_hour else "when it next starts"
             return (
                 "Couldn't reach GitHub to check for updates (no internet connection?). "
-                "DataLab checks again when it next starts."
+                f"DataLab checks again {again}."
             )
         if problem.state == "rate-limited":
             until = (
@@ -522,6 +570,73 @@ class UpdateChecker:
                 f"public yet). Ask {contact} when a new version is out."
             )
         return f"Couldn't check for updates: {problem}"
+
+
+class HourlyCheck:
+    """Checks for updates about once an hour while DataLab is open.
+
+    A daemon thread that waits an hour (plus a random few minutes), then calls
+    `UpdateChecker.check`, which asks GitHub no more than that already does:
+    never while GitHub asked DataLab to wait, nor within a minute of the last
+    check. A round is skipped while checking every hour is off or an update is
+    being installed. `stop` ends it at once; nothing waits on it at start."""
+
+    def __init__(
+        self,
+        checker: UpdateChecker,
+        *,
+        busy: Callable[[], bool] = lambda: False,
+        interval: float = HOURLY_SECONDS,
+        jitter: float = HOURLY_JITTER_SECONDS,
+        pick: Callable[[float, float], float] = random.uniform,
+        wait: Callable[[float], bool] | None = None,
+    ) -> None:
+        self.checker = checker
+        self._busy = busy
+        self.interval = interval
+        self.jitter = jitter
+        self._pick = pick
+        self._stopped = threading.Event()
+        # Waits this long; True once DataLab is stopping (tests pass a fake).
+        self._wait = wait or self._stopped.wait
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self.run, name="update-check-hourly", daemon=True)
+        self._thread.start()
+
+    def stop(self, timeout: float = 2.0) -> None:
+        self._stopped.set()
+        if self._thread is not None:
+            self._thread.join(timeout)
+
+    def run(self) -> None:
+        while not self._wait(self.next_wait()) and not self._stopped.is_set():
+            self.round()
+
+    def next_wait(self) -> float:
+        return self.interval + self._pick(0, self.jitter)
+
+    def round(self) -> CheckResult | None:
+        """One hourly check, unless it's off or an update is being installed.
+        A failure is logged; the next round comes an hour later all the same."""
+        try:
+            if not self.checker.every_hour or self._busy():
+                return None
+            before = self.checker.last
+            after = self.checker.check()
+        except Exception:
+            log.exception("the hourly update check failed; DataLab tries again in an hour")
+            return None
+        if _offered(before) != _offered(after):
+            log.info("hourly update check: %s (%s)", after.state, after.message)
+        return after
+
+
+def _offered(result: CheckResult) -> tuple[str, str | None]:
+    return result.state, result.release.version if result.release else None
 
 
 # ------------------------------------------------------------------ helpers

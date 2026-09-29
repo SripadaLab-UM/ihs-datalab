@@ -244,6 +244,10 @@ def _serve(settings, *, open_browser: bool) -> int:
     threading.Thread(
         target=app.state.update_checker.check_on_start, name="update-check", daemon=True
     ).start()
+    # And about once an hour while DataLab is open (Settings → Updates can turn
+    # that off); stopped as DataLab quits.
+    hourly = app.state.hourly_update_check
+    hourly.start()
     # On Windows, a policy can stop Docker's virtual machine from starting;
     # this says so in DataLab's window and offers to fix it, while DataLab runs.
     threading.Thread(target=_check_windows_vm, name="windows-vm-check", daemon=True).start()
@@ -271,7 +275,10 @@ def _serve(settings, *, open_browser: bool) -> int:
         server.should_exit = True
 
     app.state.shutdown = shutdown
-    server.run()
+    try:
+        server.run()
+    finally:
+        hourly.stop()
     return 0
 
 

@@ -2169,6 +2169,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/updates/every-hour": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Every Hour
+         * @description Turn checking about once an hour while DataLab is open on or off, on
+         *     this computer. Takes effect at the next hourly round; asks GitHub nothing.
+         */
+        put: operations["set_every_hour_api_settings_updates_every_hour_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/updates/install": {
         parameters: {
             query?: never;
@@ -5807,6 +5828,15 @@ export interface components {
             install: components["schemas"]["UpdateInstallOut"];
             /** Updating */
             updating: boolean;
+            /** Check On Start */
+            check_on_start: boolean;
+            /** Check Every Hour */
+            check_every_hour: boolean;
+        };
+        /** UpdateEveryHourIn */
+        UpdateEveryHourIn: {
+            /** On */
+            on: boolean;
         };
         /** UpdateHistoryOut */
         UpdateHistoryOut: {
@@ -9884,6 +9914,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+        };
+    };
+    set_every_hour_api_settings_updates_every_hour_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateEveryHourIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateCheckOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

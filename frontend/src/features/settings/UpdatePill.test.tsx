@@ -25,6 +25,8 @@ const CHECK: UpdateCheck = {
   cannot_install_because: null,
   install: { state: "idle", version: null, message: "", started_at: null, updated_at: null },
   updating: false,
+  check_on_start: true,
+  check_every_hour: true,
 };
 
 const RELEASE = {

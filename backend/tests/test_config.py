@@ -34,7 +34,7 @@ def test_sections_are_read_from_their_tables(settings_file):
         "[playground]\npreview_rows = 50\n"
         '[repos]\nknowledge = "SripadaLab-UM/ihs-knowledge"\n'
         "[workflows]\nmax_concurrent_runs = 2\n"
-        "[updates]\ncheck_on_start = false\n"
+        "[updates]\ncheck_on_start = false\ncheck_every_hour = false\n"
     )
     settings = load_settings("practice")
     assert settings.playground.preview_rows == 50
@@ -42,6 +42,8 @@ def test_sections_are_read_from_their_tables(settings_file):
     assert settings.repos.pipelines is None
     assert settings.workflows == WorkflowSettings(max_concurrent_runs=2)
     assert settings.updates.check_on_start is False
+    assert settings.updates.check_every_hour is False
+    assert UpdateSettings().check_every_hour is True
     assert settings.updates.repository == UpdateSettings.repository
     assert settings.updates.channel == "auto"
 
@@ -65,6 +67,7 @@ def test_sections_are_frozen(settings_file):
         ("[playground]\npreview_rowz = 5\n", "Unknown settings in [playground]"),
         ('[playground]\npreview_rows = "5"\n', "playground.preview_rows"),
         ("[updates]\ncheck_on_start = 1\n", "updates.check_on_start"),
+        ('[updates]\ncheck_every_hour = "yes"\n', "updates.check_every_hour"),
         ("[workflows]\nmax_concurrent_runs = true\n", "workflows.max_concurrent_runs"),
         ("[repos]\nknowledge = 3\n", "repos.knowledge"),
         ('repos = "x"\n', "[repos]"),

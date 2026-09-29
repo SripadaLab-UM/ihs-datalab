@@ -12,7 +12,7 @@ import { DestinationKeysSection } from "./DestinationKeysSection";
 import { DiagnosticsSection } from "./DiagnosticsSection";
 import { untilSettled } from "./PracticeDatabase";
 import { StorageSection } from "./StorageSection";
-import { UpdatesSection } from "./UpdatesSection";
+import { ago, UpdatesSection } from "./UpdatesSection";
 
 // GitHub has its own tests (GitHubSection.test.tsx).
 vi.mock("./GitHubSection", () => ({ GitHubSection: () => null }));
@@ -40,6 +40,7 @@ vi.mock("@/api/settings", async (original) => ({
     updates: vi.fn(),
     updateCheck: vi.fn(),
     checkForUpdates: vi.fn(),
+    setCheckEveryHour: vi.fn(),
     installUpdate: vi.fn(),
     diagnostics: vi.fn(),
     destinationKeys: vi.fn(),
@@ -315,6 +316,8 @@ const UP_TO_DATE: UpdateCheck = {
   cannot_install_because: null,
   install: IDLE,
   updating: false,
+  check_on_start: true,
+  check_every_hour: true,
 };
 
 const AVAILABLE: UpdateCheck = {
@@ -516,4 +519,44 @@ it("says updates aren't set up until a release key is pinned, with nothing to pr
   expect(await screen.findByText(/Updates aren't set up/)).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Install update…" })).toBeNull();
+});
+
+it("turns the hourly check off and on, and says when it last checked", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-09-27T10:12:30+00:00"));
+  try {
+    mocked.updates.mockResolvedValue(updatesWith(UP_TO_DATE));
+    mocked.updateCheck.mockResolvedValue(UP_TO_DATE);
+    mocked.setCheckEveryHour.mockResolvedValueOnce({ ...UP_TO_DATE, check_every_hour: false });
+    wrap(<UpdatesSection />);
+    expect(await screen.findByText("Last checked 12 min ago")).toBeTruthy();
+    const box = screen.getByRole("checkbox", {
+      name: /Check GitHub for updates every hour while DataLab is open/,
+    }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(screen.getByText(/also checks each time it starts/)).toBeTruthy();
+    fireEvent.click(box);
+    await waitFor(() => expect(mocked.setCheckEveryHour).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(box.checked).toBe(false));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("offers no hourly check while updates aren't set up", async () => {
+  const off: UpdateCheck = { ...UP_TO_DATE, state: "not-configured", checked_at: null, message: "Updates aren't set up." };
+  mocked.updates.mockResolvedValue(updatesWith(off));
+  mocked.updateCheck.mockResolvedValue(off);
+  wrap(<UpdatesSection />);
+  expect(await screen.findByText("Updates aren't set up.")).toBeTruthy();
+  expect(screen.queryByRole("checkbox")).toBeNull();
+});
+
+it("says how long ago, in words", () => {
+  const now = new Date("2026-09-27T12:00:00Z").getTime();
+  expect(ago("2026-09-27T11:59:40Z", now)).toBe("just now");
+  expect(ago("2026-09-27T11:48:00Z", now)).toBe("12 min ago");
+  expect(ago("2026-09-27T10:59:00Z", now)).toBe("an hour ago");
+  expect(ago("2026-09-27T07:00:00Z", now)).toBe("5 hours ago");
+  expect(ago("2026-09-25T07:00:00Z", now)).not.toMatch(/ago/);
 });
