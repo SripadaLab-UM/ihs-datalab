@@ -15,7 +15,8 @@ it("listens for every event type the chat handles", () => {
   // The cases of the transcript's switch over event types.
   const start = transcript.indexOf("switch (event.type) {");
   const body = transcript.slice(start, transcript.indexOf("\n    }\n", start));
-  const chat = source("Chat.tsx");
+  // The chat, and its hooks that refresh on events (moved from Chat.tsx).
+  const chat = ["Chat.tsx", "chatHooks.ts"].map(source).join("\n");
   const handled = new Set([
     ...names(body, /case "([a-z_]+)"/g),
     ...names(transcript, /event\.type === "([a-z_]+)"/g),

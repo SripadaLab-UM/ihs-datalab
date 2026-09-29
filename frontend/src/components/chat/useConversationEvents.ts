@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { ConversationEvent } from "./transcript";
 
-// Every event type the backend emits (backend sessions/runtime.py and manager.py).
+// Every event type the backend emits (backend sessions/: runtime.py, manager.py and its parts).
 // A type left out never reaches the page (useConversationEvents.test.ts checks
 // that every type the chat handles is here).
 export const EVENT_TYPES = [
