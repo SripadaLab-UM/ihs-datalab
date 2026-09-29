@@ -48,7 +48,7 @@ from datalab.knowledge.suggestions import KbSuggestions
 from datalab.practice_db import PracticeDatabaseKeeper
 from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
-from datalab.releases import UpdateChecker
+from datalab.releases import HourlyCheck, UpdateChecker
 from datalab.repos.github import GitHubAuth
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
@@ -353,7 +353,8 @@ def create_app(
         build_provenance_router(ProvenanceServices(conversations, sessions, access_log))
     )
     # Checking GitHub for a newer release happens here in the host process
-    # only (`datalab serve` asks once at start, if `updates.check_on_start`).
+    # only (`datalab serve` asks once at start, if `updates.check_on_start`,
+    # and starts the hourly check).
     update_checker = UpdateChecker(settings)
     app.state.update_checker = update_checker
 
@@ -375,6 +376,10 @@ def create_app(
         stop_sessions=sessions.close_all,
         shutdown=request_shutdown,
         gate=gate,
+    )
+    # Not while an update is being installed, or DataLab is restarting into it.
+    app.state.hourly_update_check = HourlyCheck(
+        update_checker, busy=lambda: updater.running() or gate.closed_for is not None
     )
     app.include_router(
         build_settings_router(

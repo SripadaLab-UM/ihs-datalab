@@ -183,13 +183,22 @@ class TestStartup:
             def check_on_start(self) -> None:
                 test.checks.append("checked")
 
+        class Hourly:
+            def start(self) -> None:
+                test.checks.append("hourly started")
+
+            def stop(self) -> None:
+                test.checks.append("hourly stopped")
+
         def create_app(settings, **_):
             from types import SimpleNamespace
 
             from datalab import db
 
             db.connect(settings.database_file).close()
-            app = SimpleNamespace(state=SimpleNamespace(update_checker=Checker()))
+            app = SimpleNamespace(
+                state=SimpleNamespace(update_checker=Checker(), hourly_update_check=Hourly())
+            )
             test.apps.append(app)
             return app
 
@@ -223,9 +232,11 @@ class TestStartup:
 
         assert serve() == 0
         deadline = time.monotonic() + 5
-        while not self.checks and time.monotonic() < deadline:
+        while "checked" not in self.checks and time.monotonic() < deadline:
             time.sleep(0.01)
-        assert self.checks == ["checked"]
+        # At start, in the background; and hourly, stopped once the server returns.
+        assert sorted(self.checks) == ["checked", "hourly started", "hourly stopped"]
+        assert self.checks.index("hourly started") < self.checks.index("hourly stopped")
         # The updater quits DataLab through this, to restart it.
         [server], [app] = self.servers, self.apps
         assert server.should_exit is False  # type: ignore[attr-defined]

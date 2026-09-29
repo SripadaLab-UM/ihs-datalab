@@ -3,7 +3,7 @@ title: "Settings & Safety"
 summary: Save or replace the U-M GPT key, test the connections, sign in to GitHub, pick light or dark, check for updates, tidy disk use, and run the Safety check.
 order: 31
 screens: /settings, /settings/*
-keywords: settings, connections, password, key, toolkit key, api key, keychain, database, oracle, vpn, u-m gpt, test connection, github, account, appearance, theme, dark, light, dark mode, updates, update available, check now, storage, disk, space, backups, remove, cleanup, safety check, diagnostics
+keywords: settings, connections, password, key, toolkit key, api key, keychain, database, oracle, vpn, u-m gpt, test connection, github, account, appearance, theme, dark, light, dark mode, updates, update available, check now, every hour, hourly, last checked, storage, disk, space, backups, remove, cleanup, safety check, diagnostics
 ---
 
 # Settings & Safety
@@ -16,7 +16,8 @@ or on Connections the first time.
 
 Two entries at the top right of every screen lead here too:
 
-- **Update available** appears when a newer DataLab is out, and opens
+- **Update available** appears when a newer DataLab is out (DataLab checks
+  when it starts and about once an hour while it's open), and opens
   [Updates](#updates).
 - **GitHub** shows your GitHub account, or **Sign in**, and opens
   [Connections](#connections). The practice DataLab never signs in to GitHub,
@@ -76,10 +77,20 @@ to its own practice folder.
 
 ## Updates
 
-What the last check for a newer DataLab found, and when, with **Check now**.
-When there is one, its release notes and **Install update** (always
-confirmed) are here too, with the installed version, recent updates and the
-database backups taken before them.
+What the last check for a newer DataLab found, and how long ago ("Last
+checked 12 min ago"), with **Check now**. When there is a newer version, its
+release notes and **Install update** (always confirmed) are here too, with
+the installed version, recent updates and the database backups taken before
+them.
+
+DataLab checks by itself when it starts and, while **Check GitHub for
+updates every hour while DataLab is open** is ticked (it is unless you
+untick it), about once an hour after that. When a check finds a new
+version, **Update available** appears at the top right within a few
+minutes, and the release is shown here. Checking only looks: nothing is
+installed until you press **Install update** and confirm. Untick it to check
+only at start and when you press **Check now**; the choice is kept for this
+computer (the practice DataLab keeps its own).
 
 ## Storage
 

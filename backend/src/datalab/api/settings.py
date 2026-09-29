@@ -12,7 +12,8 @@
 - **Updates** shows the installed version, what the last check for a newer
   release found (releases.py), an update in progress, what the startup
   recovery did, recent updates and the backups. **Install update** runs the
-  updater (updater.py), only once the person has confirmed.
+  updater (updater.py), only once the person has confirmed. The person can
+  turn the hourly check off or on for this computer.
 - **Diagnostics** builds the metadata-only report (diagnostics.py).
 - **Feedback contact** says whom the toolbar's Feedback goes to: the lab's
   `repos.access_contact`, and the email address in it, if it has one.
@@ -295,6 +296,14 @@ class UpdateCheckOut(BaseModel):
     install: UpdateInstallOut
     # An update is being installed: nothing new can start until DataLab restarts.
     updating: bool
+    # When DataLab asks GitHub by itself: at start (`updates.check_on_start`),
+    # and about once an hour while it's open (the person's choice, below).
+    check_on_start: bool
+    check_every_hour: bool
+
+
+class UpdateEveryHourIn(BaseModel):
+    on: bool
 
 
 class UpdateInstallIn(BaseModel):
@@ -665,6 +674,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             cannot_install_because=why_not,
             install=UpdateInstallOut(**asdict(progress)),
             updating=updater.gate.closed_for is not None,
+            check_on_start=settings.updates.check_on_start,
+            check_every_hour=checker.every_hour,
         )
 
     @router.get("/updates/check")
@@ -676,6 +687,16 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
     async def check_now() -> UpdateCheckOut:
         """Ask GitHub now (at most once a minute; never while GitHub asked to wait)."""
         await asyncio.to_thread(checker.check)
+        return check_state()
+
+    @router.put("/updates/every-hour")
+    def set_every_hour(body: UpdateEveryHourIn) -> UpdateCheckOut:
+        """Turn checking about once an hour while DataLab is open on or off, on
+        this computer. Takes effect at the next hourly round; asks GitHub nothing."""
+        try:
+            checker.set_every_hour(body.on)
+        except OSError:
+            raise HTTPException(503, "DataLab couldn't save that in its data folder.") from None
         return check_state()
 
     @router.post("/updates/install")

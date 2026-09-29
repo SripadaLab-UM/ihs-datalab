@@ -274,6 +274,17 @@ The section says in one line how the last check went and when it ran; the
 full report, check by check, is under **Details**. Run it again after an
 update. See [What DataLab will and won't do](safety.md).
 
+## Update available
+
+A pill at the top right that appears when a newer DataLab is out. DataLab
+checks GitHub when it starts and about once an hour while it's open; the pill
+opens Settings & Safety → Updates.
+
+There you'll find the release notes and **Install update**, which always asks
+first: checking never installs anything. To check only at start and when you
+press **Check now**, untick the hourly check there. See
+[Settings](settings.md#updates).
+
 ## U-M GPT key
 
 Your U-M GPT (Toolkit) API key, which DataLab uses to reach the approved

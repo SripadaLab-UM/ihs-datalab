@@ -79,6 +79,7 @@ _OTHER_LABELS = {
     "workflow-cache": "Built R packages for workflows",
     "workflows-local": "Workflow files on this computer",
     "settings.toml": "Settings",
+    "update-preferences.json": "Whether to check for updates every hour",
     ".lock": "The data folder's lock",
 }
 

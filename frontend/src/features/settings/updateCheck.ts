@@ -1,5 +1,6 @@
 // The check for a newer DataLab release, shared by the shell's pill and Settings → Updates.
-// DataLab's host asks GitHub (at start, and on "Check now"); the page only reads the answer.
+// DataLab's host asks GitHub (at start, about once an hour, and on "Check now"); the page
+// only reads the answer, so a new release shows here within a few minutes of the check.
 import { useQuery } from "@tanstack/react-query";
 
 import { settingsApi, type UpdateCheck } from "@/api/settings";

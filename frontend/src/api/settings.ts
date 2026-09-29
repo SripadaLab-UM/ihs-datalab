@@ -48,10 +48,13 @@ export const settingsApi = {
     }),
 
   updates: () => request<Updates>("/api/settings/updates"),
-  /** What the last check for a newer release found. No network: DataLab asks GitHub at start. */
+  /** What the last check for a newer release found. No network: DataLab asks GitHub at start and hourly. */
   updateCheck: () => request<UpdateCheck>("/api/settings/updates/check"),
   /** Ask GitHub now (DataLab's host does; at most once a minute). */
   checkForUpdates: () => request<UpdateCheck>("/api/settings/updates/check", { method: "POST" }),
+  /** Check about once an hour while DataLab is open, or not (this computer). Asks GitHub nothing. */
+  setCheckEveryHour: (on: boolean) =>
+    request<UpdateCheck>("/api/settings/updates/every-hour", { method: "PUT", body: JSON.stringify({ on }) }),
   /** Install the release on offer. Only after the person confirmed; DataLab restarts at the end. */
   installUpdate: (version: string) =>
     request<UpdateCheck>("/api/settings/updates/install", {

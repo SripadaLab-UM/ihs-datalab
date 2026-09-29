@@ -961,6 +961,22 @@ def test_the_pill_reads_the_last_check_without_asking_github(settings, keychain,
     assert h.client.get("/api/settings/updates").json()["check"]["state"] == "available"
 
 
+def test_the_hourly_check_can_be_turned_off_and_on_without_asking_github(
+    settings, keychain, tmp_path
+):
+    github, checker, update = update_world(settings, tmp_path)
+    h = Harness(settings, checker=checker, updater=update)
+    shown = h.client.get("/api/settings/updates/check").json()
+    assert shown["check_every_hour"] is True and shown["check_on_start"] is True
+    off = h.client.put("/api/settings/updates/every-hour", json={"on": False})
+    assert off.status_code == 200 and off.json()["check_every_hour"] is False
+    assert checker.every_hour is False
+    assert h.client.get("/api/settings/updates").json()["check"]["check_every_hour"] is False
+    on = h.client.put("/api/settings/updates/every-hour", json={"on": True}).json()
+    assert on["check_every_hour"] is True
+    assert github.requests == []
+
+
 def test_installing_needs_confirmation(settings, keychain, tmp_path):
     _, checker, update = update_world(settings, tmp_path)
     h = Harness(settings, checker=checker, updater=update)

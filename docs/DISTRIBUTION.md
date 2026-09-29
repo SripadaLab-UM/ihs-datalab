@@ -146,10 +146,25 @@ protect.
 
 `datalab/releases.py`. DataLab's host process asks the GitHub Releases API of
 the app repo (`[updates] repository`, `SripadaLab-UM/ihs-datalab`) once at
-start, in the background, if `[updates] check_on_start` is on (the default),
-and again when the person presses **Check now** (at most once a minute). The
-browser never makes this call, and containers can't: the check runs only in
-the host.
+start, in the background, if `[updates] check_on_start` is on (the default);
+about once an hour while DataLab is open, if checking every hour is on; and
+when the person presses **Check now** (at most once a minute). The browser
+never makes this call, and containers can't: the check runs only in the host.
+
+- **Every hour** (`releases.HourlyCheck`): a daemon thread started by
+  `datalab serve` waits 60 minutes plus a random 0–5 (picked again each
+  time, so DataLabs opened together don't ask GitHub at the same moment),
+  then runs the same check as Check now, so it asks GitHub nothing more
+  than that does, and never while GitHub asked DataLab to wait. It skips a
+  round while an update is being installed (or DataLab is restarting into
+  one) and while checking every hour is off; a round that fails is logged
+  and the next comes an hour later. It logs (at info) only when the answer
+  changes, and stops as DataLab quits. A new release it finds shows as
+  **Update available** within five minutes (the pages read the last answer
+  that often). `[updates] check_every_hour` (default on) is the starting
+  value; the person can turn it off or on in Settings → Updates, which keeps
+  that choice for this computer's DataLab in the data folder
+  (`update-preferences.json`; practice keeps its own, in its own folder).
 
 - **No sign-in.** The app repo is public, so releases are read without a
   token; the GitHub sign-in (for the lab repos) is never sent. While the repo

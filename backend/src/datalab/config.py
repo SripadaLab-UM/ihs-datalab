@@ -163,6 +163,11 @@ class UpdateSettings:
     # Whether DataLab asks GitHub for a newer release when it starts. "Check
     # now" in Settings → Updates works either way.
     check_on_start: bool = True
+    # Whether DataLab asks again about once an hour while it's open (60
+    # minutes plus up to 5, so installs don't all ask at once). The person can
+    # turn it off or on in Settings → Updates, for this computer (kept in the
+    # data folder's update-preferences.json); this is the starting value.
+    check_every_hour: bool = True
     # Where releases come from: the app repo's GitHub Releases, read without
     # signing in (the repo is public).
     repository: str = "SripadaLab-UM/ihs-datalab"
