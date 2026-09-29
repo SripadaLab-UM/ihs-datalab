@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +15,7 @@ from mcp.client.streamable_http import create_mcp_http_client, streamable_http_c
 
 from datalab.app import create_app
 from datalab.data.catalog import Catalog, Column, TableInfo
-from datalab.data.oracle import QueryFailed
+from datalab.data.oracle import QueryFailed, QueryTimedOut
 from datalab.sessions.tokens import SessionAccess
 from tests.conftest import FakeDatabase, live_server
 
@@ -201,15 +202,48 @@ async def test_who_refused_a_query_is_in_its_error(server, catalog, tmp_path, mo
         "DataLab's SQL check refused this query, so it didn't run: QUESTIONTEXT is a CLOB column"
         in checked.content[0].text
     )
-    assert spelled.content[0].text.endswith(
+    assert (
         '"Bdate" is spelled with lower-case letters, so Oracle needs it in double quotes, '
-        'exactly: "Bdate".'
-    )
-    assert refused.is_error and refused.content[0].text.endswith(
-        "The database refused this query: ORA-00932: inconsistent data types. "
-        "Often a CLOB (long text) column"
+        'exactly: "Bdate".\n[datalab-failure category=validation code=spelling query=q_'
+    ) in spelled.content[0].text
+    assert "[datalab-failure category=validation code=long_text query=q_" in checked.content[0].text
+    assert (
+        refused.is_error
+        and (
+            "The database refused this query: ORA-00932: inconsistent data types. "
+            "Often a CLOB (long text) column\n[datalab-failure category=sql query=q_"
+        )
+        in refused.content[0].text
     )
     assert database.calls == []
+    # The id is the Queries entry's.
+    tagged = re.search(r"query=(q_\w+)\]", refused.content[0].text)
+    assert tagged and services.access_log.for_session("sess1")[-1].id == tagged.group(1)
+
+
+async def test_a_timed_out_query_says_what_to_do_next(server, tmp_path, monkeypatch):
+    base_url, services, database = server
+
+    def slow(*args, **kwargs):
+        raise QueryTimedOut(
+            "Oracle took longer than 120 s to answer one request (DPY-4024), so the query was "
+            "cancelled.",
+            reason="call_timeout",
+            limit_seconds=120,
+            code="DPY-4024",
+        )
+
+    monkeypatch.setattr(database, "extract_to_csv", slow)
+    async with mcp_session(base_url, data_token(services, tmp_path)) as session:
+        result = await session.call_tool(
+            "query", {"sql": "SELECT STUDY_PARTICIPANT_ID FROM IHS_2025.VFITBITDAILYDATA"}
+        )
+    text = result.content[0].text
+    assert result.is_error and "The query timed out after 0 s: Oracle took longer than 120" in text
+    assert "don't run the same query again" in text
+    assert "[datalab-failure category=timeout code=call_timeout query=q_" in text
+    logged = services.access_log.for_session("sess1")[-1]
+    assert logged.status == "failed" and logged.elapsed_ms is not None
 
 
 async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(server, tmp_path):

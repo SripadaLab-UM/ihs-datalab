@@ -52,8 +52,10 @@ decides. It never changes the knowledge base by itself.
 - Write a column spelled with lower-case letters in double quotes, exactly
   (`"Bdate"`, `"interest0"`). A CLOB (long text) column can't go in `SELECT
   DISTINCT`, `GROUP BY`, `ORDER BY`, `UNION`, `MIN`/`MAX`/`COUNT` or a
-  comparison; use `TO_CHAR(SUBSTR(col, 1, 1000))` there (the `sql-extraction`
-  skill has more).
+  comparison; convert it with `TO_CHAR(SUBSTR(col, 1, 1000))` there, without
+  cutting values silently (the `sql-extraction` skill says how).
+- If a query times out, don't run it again as it is: split it (by table or
+  data source, or by date range) or narrow it first.
 - `propose_plan` sends an analysis plan to the person for approval (see
   your mode's instructions for when). An approved plan is frozen.
 - Your work may be reviewed against a rigor checklist after you answer.

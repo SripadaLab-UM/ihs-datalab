@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import secrets
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -127,10 +128,17 @@ class DataService:
             self._log.rejected(
                 query_id=query_id, session_id=session_id, sql=sql, reason=reason, origin=origin
             )
-            raise QueryFailed(reason)
+            failed = QueryFailed(reason, category="connection")
+            failed.query_id = query_id
+            raise failed
         try:
-            checked = check_sql(
-                sql, allowed_schemas=self._allowed_schemas, columns=self._catalog.column_index()
+            # In a thread: a large query takes the check a moment, and the
+            # event loop (every other request) mustn't wait for it.
+            checked = await asyncio.to_thread(
+                check_sql,
+                sql,
+                allowed_schemas=self._allowed_schemas,
+                columns=self._catalog.column_index(),
             )
             _check_binds(checked.binds, binds)
             if allowed_tables is not None:
@@ -143,6 +151,7 @@ class DataService:
                 reason=str(rejection),
                 origin=origin,
             )
+            rejection.query_id = query_id
             raise
 
         tables = [str(t) for t in checked.tables]
@@ -158,6 +167,11 @@ class DataService:
             result_path=out_path,
         )
         cancel = threading.Event()
+        started = time.monotonic()
+
+        def elapsed_ms() -> int:
+            return round((time.monotonic() - started) * 1000)
+
         try:
             async with self._slots:
                 work = asyncio.to_thread(
@@ -172,20 +186,45 @@ class DataService:
                 )
                 result = await _cancel_on_task_cancel(work, cancel)
         except QueryCancelled as error:
-            self._log.finished(query_id, status="cancelled", message=str(error), reason="stopped")
+            error.query_id, error.elapsed_ms = query_id, elapsed_ms()
+            self._log.finished(
+                query_id,
+                status="cancelled",
+                message=str(error),
+                reason="stopped",
+                elapsed_ms=error.elapsed_ms,
+            )
             raise
         except QueryFailed as error:
-            self._log.finished(query_id, status="failed", message=str(error))
+            # Every failed attempt keeps how long it took, and a timeout which
+            # limit it hit (call_timeout or deadline) in the audit log.
+            error.query_id, error.elapsed_ms = query_id, elapsed_ms()
+            self._log.finished(
+                query_id,
+                status="failed",
+                message=str(error),
+                elapsed_ms=error.elapsed_ms,
+                reason=getattr(error, "reason", None),
+            )
             raise
         except asyncio.CancelledError:
             # Stopped just as it finished: the result isn't kept, as the log says.
             out_path.unlink(missing_ok=True)
-            self._log.finished(query_id, status="cancelled", message="Stopped.", reason="stopped")
+            self._log.finished(
+                query_id,
+                status="cancelled",
+                message="Stopped.",
+                reason="stopped",
+                elapsed_ms=elapsed_ms(),
+            )
             raise
         except BaseException:
             # Anything else (a bug, an unexpected error): never left as running.
             self._log.finished(
-                query_id, status="failed", message="The query failed in DataLab; see its log."
+                query_id,
+                status="failed",
+                message="The query failed in DataLab; see its log.",
+                elapsed_ms=elapsed_ms(),
             )
             raise
 

@@ -16,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from datalab.data.failures import read_tag
 from datalab.sessions import codex_config
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.appserver import AppServerClient, AppServerError
@@ -571,7 +572,11 @@ def tool_summary(tool: Any, server: Any, result: Any) -> dict[str, Any] | None:
         }
     if tool == "query" and isinstance(data, dict):
         count = data.get("row_count")
+        query_id = data.get("query_id")
         return {
+            "query_id": query_id
+            if isinstance(query_id, str) and _DATALAB_QUERY_ID.fullmatch(query_id)
+            else None,
             "row_count": count if isinstance(count, int) else None,
             "columns": names(data.get("columns"), 40),
             "result_file": s(data.get("result_file"), 200),
@@ -579,6 +584,45 @@ def tool_summary(tool: Any, server: Any, result: Any) -> dict[str, Any] | None:
             "warnings": [s(w, 200) for w in (data.get("warnings") or [])[:5]],
         }
     return None
+
+
+_DATALAB_QUERY_ID = re.compile(r"q_\d{8}T\d{6}_[0-9a-f]{6}")
+# What the chat shows of a failed tool call's text: enough for the reason.
+MAX_TOOL_ERROR = 1_000
+_TOOL_ERROR_PREFIX = re.compile(r"^Error executing tool [A-Za-z0-9_]+: ")
+
+
+def tool_failure(item: dict[str, Any]) -> tuple[Any, dict[str, Any] | None]:
+    """A failed MCP tool call's error, and its structured failure (failures.py).
+
+    Codex puts a tool's own error in the result (isError, with the text as
+    content) and leaves `error` empty, so the reason is taken from there when
+    `error` has none. It's bounded text, rendered as text by the chat. Only
+    failed calls: a successful result (a query's rows) never gets here.
+    """
+    error = item.get("error")
+    result = item.get("result")
+    text = ""
+    if isinstance(result, dict) and (result.get("isError") or result.get("is_error")):
+        text = "\n".join(
+            c.get("text", "")
+            for c in result.get("content") or []
+            if isinstance(c, dict) and c.get("type") == "text" and isinstance(c.get("text"), str)
+        )
+    elif isinstance(error, dict) and isinstance(error.get("message"), str):
+        text = error["message"]
+    elif isinstance(error, str):
+        text = error
+    if not text:
+        return error, None
+    shown, failure = read_tag(text[-20_000:])
+    shown = _TOOL_ERROR_PREFIX.sub("", shown.strip())[:MAX_TOOL_ERROR]
+    found = (
+        {"category": failure.category, "code": failure.code, "query_id": failure.query_id}
+        if failure
+        else None
+    )
+    return (error if error and not shown else shown or error), found
 
 
 def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
@@ -612,14 +656,19 @@ def _to_event(method: str, params: dict[str, Any]) -> tuple[str, dict[str, Any]]
                 "output": str(item.get("aggregatedOutput") or "")[-20_000:],
             }
         if kind == "mcpToolCall":
+            error, failure = tool_failure(item)
+            failed = bool(error) or failure is not None
             return "tool_call", {
                 "id": item.get("id"),
                 "server": item.get("server"),
                 "tool": item.get("tool"),
                 "arguments": item.get("arguments"),
                 "status": item.get("status"),
-                "error": item.get("error"),
-                "summary": tool_summary(item.get("tool"), item.get("server"), item.get("result")),
+                "error": error or None,
+                "failure": failure,
+                "summary": None
+                if failed
+                else tool_summary(item.get("tool"), item.get("server"), item.get("result")),
             }
         if kind == "fileChange":
             changes = item.get("changes") or []

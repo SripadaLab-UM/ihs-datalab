@@ -6,7 +6,14 @@ text can quote values (23ai says which string wasn't a number), or name the
 database's objects and setup. The one thing taken from it is the identifier
 ORA-00904 names, and only when the query itself contains it, so it's a name
 the query already wrote. Any other error keeps the first line of Oracle's
-message, as before: it names the problem without echoing data values.
+message, as before: it names the problem without echoing data values. The
+exceptions are errors whose first line names the server: ORA-12801 (a
+parallel query server, host and SID) is explained by the error it wraps, and
+errors reaching the database (DPY-6005, ORA-12514, …) say only the code.
+
+Each error also has a category, which travels with it to the agent and the
+chat: validation (DataLab's SQL check), sql, permission, timeout,
+connection, cancelled or result_limit.
 """
 
 from __future__ import annotations
@@ -15,7 +22,10 @@ import re
 
 import oracledb
 
-_CLOB_FIX = "use TO_CHAR(SUBSTR(col, 1, 1000)) there"
+_CLOB_FIX = (
+    "convert it with TO_CHAR(SUBSTR(col, 1, 1000)) there, and check MAX(LENGTH(col)) so "
+    "no value is cut unseen"
+)
 _DATES = (
     "a value couldn't be read as a date in the format given. Check the column's type "
     "with describe_table (a DATE needs no conversion), and write dates as "
@@ -26,6 +36,11 @@ _TOO_LONG = (
     "with SUBSTR, or add ON OVERFLOW TRUNCATE to LISTAGG."
 )
 _UNREADABLE = "Oracle couldn't read the SQL. Check the brackets, commas and keywords near the end."
+_CONVERSION = (
+    "long text converted to ordinary text is longer than Oracle's 4,000 bytes. Convert "
+    "at most 1,000 characters (TO_CHAR(SUBSTR(col, 1, 1000))), and check MAX(LENGTH(col)) "
+    "to see whether any value is cut."
+)
 
 EXPLANATIONS: dict[str, str] = {
     "ORA-00904": (
@@ -88,6 +103,11 @@ EXPLANATIONS: dict[str, str] = {
     "ORA-00933": _UNREADABLE,
     "ORA-00936": _UNREADABLE,
     "ORA-00907": _UNREADABLE,
+    "ORA-22835": _CONVERSION,
+    "ORA-64203": _CONVERSION,
+    "ORA-01031": (
+        "DataLab's account isn't allowed to do that: it can only read the cohort tables."
+    ),
     "ORA-01652": (
         "the query needed more temporary space than the database allows. Narrow it: "
         "fewer rows or columns, or aggregate in the database."
@@ -95,21 +115,61 @@ EXPLANATIONS: dict[str, str] = {
 }
 
 _INVALID_IDENTIFIER = re.compile(r'ORA-00904: ("[^"\r\n]{1,128}"(?:\."[^"\r\n]{1,128}"){0,2}):')
+_ANY_CODE = re.compile(r"\b((?:ORA|DPY|DPI)-\d{4,5})\b")
+# Wraps the real error, and names the parallel server (host and SID).
+_PARALLEL = "ORA-12801"
+_PERMISSION = frozenset({"ORA-00942", "ORA-01031", "ORA-28000", "ORA-01017", "ORA-28001"})
+# Not reaching the database, or losing it: the first line can name the host.
+_CONNECTION_PREFIXES = ("DPY-6", "ORA-12", "ORA-03113", "ORA-03114", "ORA-03135", "DPY-4011")
+_SQL_ERRORS_IN_12 = frozenset({"ORA-12899", _PARALLEL})
+# A single round trip ran longer than the call timeout.
+CALL_TIMEOUT_CODES = frozenset({"DPY-4024", "ORA-03156"})
 
 
 def oracle_code(error: oracledb.Error) -> str | None:
-    """ORA-00932, DPY-4010 and the like, when the error has one."""
+    """ORA-00932, DPY-4010 and the like, when the error has one. For ORA-12801
+    (a parallel query server failed), the error it wraps."""
     first = error.args[0] if error.args else None
     code = getattr(first, "full_code", None)
-    if isinstance(code, str) and code:
-        return code
-    found = re.match(r"((?:ORA|DPY|DPI)-\d{4,5}):", str(error))
-    return found.group(1) if found else None
+    if not (isinstance(code, str) and code):
+        found = re.match(r"((?:ORA|DPY|DPI)-\d{4,5}):", str(error))
+        code = found.group(1) if found else None
+    if code == _PARALLEL:
+        inner = [c for c in _ANY_CODE.findall(str(error)) if c != _PARALLEL]
+        return inner[0] if inner else _PARALLEL
+    return code
+
+
+def category(code: str | None) -> str:
+    """Which kind of failure an Oracle or driver error is."""
+    if code is None:
+        return "sql"
+    if code in CALL_TIMEOUT_CODES:
+        return "timeout"
+    if code in _PERMISSION:
+        return "permission"
+    if code.startswith(_CONNECTION_PREFIXES) and code not in _SQL_ERRORS_IN_12:
+        return "connection"
+    return "sql"
+
+
+def connection_message(code: str | None) -> str:
+    """DataLab's own words for not reaching the database: never the driver's,
+    which name the host and port."""
+    shown = f" ({code})" if code else ""
+    return (
+        f"DataLab couldn't reach the database{shown}. Check the network or VPN "
+        "connection, then try again."
+    )
 
 
 def explain(error: oracledb.Error, sql: str | None = None) -> str:
     """The message a failed query shows: to the agent, in Queries, in the chat."""
     code = oracle_code(error)
+    if category(code) == "connection":
+        return connection_message(code)
+    if code == _PARALLEL:
+        return f"{_PARALLEL}: a parallel query server failed. Try again, or narrow the query."
     explanation = EXPLANATIONS.get(code or "")
     if code is None or explanation is None:
         # The first line of an Oracle error names the problem (e.g. ORA-00942:
@@ -124,7 +184,13 @@ def explain(error: oracledb.Error, sql: str | None = None) -> str:
 
 
 def _written_in(identifier: str, sql: str) -> bool:
-    """Whether the query itself names this identifier (every part of it)."""
+    """Whether the query itself names this identifier: every part of it as a
+    whole name, in any letter case (Oracle upper-cases unquoted names)."""
     parts = [p.strip('"') for p in identifier.split(".")]
-    upper = sql.upper()
-    return all(p and (p in sql or p.upper() in upper) for p in parts)
+    return all(
+        p
+        and re.search(
+            rf"(?<![A-Za-z0-9_$#]){re.escape(p)}(?![A-Za-z0-9_$#])", sql, flags=re.IGNORECASE
+        )
+        for p in parts
+    )
