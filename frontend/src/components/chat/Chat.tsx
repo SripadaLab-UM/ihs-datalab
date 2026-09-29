@@ -479,6 +479,7 @@ function RigorSwitch({ conversation }: { conversation: Conversation }) {
       term="rigor-review"
       on={conversation.rigor_review}
       change={() => api.setRigorReview(conversation.id, !conversation.rigor_review)}
+      busy={conversation.busy}
     />
   );
 }
@@ -498,6 +499,7 @@ function ExpressSwitch({ conversation, compact = false }: { conversation: Conver
       term="express"
       on={conversation.express}
       change={() => api.setExpress(conversation.id, !conversation.express)}
+      busy={conversation.busy}
       compact={compact}
     />
   );
@@ -518,12 +520,15 @@ function ConversationSwitch({
   term,
   on,
   change,
+  busy = false,
   compact = false,
 }: {
   label: string;
   term: "express" | "rigor-review";
   on: boolean;
   change: () => Promise<unknown>;
+  /** The agent is working: a change applies from the next message (DataLab keeps each turn's own). */
+  busy?: boolean;
   compact?: boolean;
 }) {
   const queryClient = useQueryClient();
@@ -535,6 +540,7 @@ function ConversationSwitch({
   return (
     <span className="flex items-center gap-1">
       <label
+        title={busy ? "Applies from your next message: the answer in progress keeps how it started" : undefined}
         className={clsx(
           "flex items-center gap-2 font-sans text-muted hover:text-ink has-[:disabled]:cursor-not-allowed",
           compact ? "text-[12px]" : "text-[13px]",
@@ -1527,6 +1533,9 @@ export function useEffortChoice(): [Effort, (effort: Effort) => void] {
   return [effort, choose];
 }
 
+// The effort picked in each conversation while its Express is on.
+const EXPRESS_EFFORTS = new Map<string, Effort>();
+
 /**
  * The effort for this conversation's next message: with Express on it's Quick
  * unless the person picks another while it's on; otherwise their usual choice.
@@ -1535,14 +1544,22 @@ function useExpressEffort(
   conversation: Conversation,
   [chosen, choose]: [Effort, (effort: Effort) => void],
 ): [Effort, (effort: Effort) => void] {
-  // Picked with Express on, for this conversation; forgotten once it's switched off.
-  const [picked, setPicked] = useState<{ conversation: string; effort: Effort } | null>(null);
+  const { id, express } = conversation;
+  // Kept by conversation for this page (the chat is remade for each one), so
+  // A (Express, Thorough), then B, then A again is still Thorough.
+  const [, changed] = useState(0);
   useEffect(() => {
-    if (!conversation.express) setPicked(null);
-  }, [conversation.express]);
-  if (!conversation.express) return [chosen, choose];
-  const effort = picked?.conversation === conversation.id ? picked.effort : "low";
-  return [effort, (next) => setPicked({ conversation: conversation.id, effort: next })];
+    // Switched off: forgotten, so switching it on again starts at Quick.
+    if (!express) EXPRESS_EFFORTS.delete(id);
+  }, [id, express]);
+  if (!express) return [chosen, choose];
+  return [
+    EXPRESS_EFFORTS.get(id) ?? "low",
+    (next) => {
+      EXPRESS_EFFORTS.set(id, next);
+      changed((n) => n + 1);
+    },
+  ];
 }
 
 function EffortSelect({ effort, onChange }: { effort: Effort; onChange: (effort: Effort) => void }) {

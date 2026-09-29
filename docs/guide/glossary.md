@@ -100,8 +100,10 @@ pick another. What it may read doesn't change: the same data, participant
 level included, the same SQL check, Data accessed log and export rules. In
 the tabs whose work you review before it's saved (Pipelines, Workflows,
 Knowledge, the SQL Playground) that review stays; Express only makes the
-agent brief. Express and the rigor review can't both be on: switching one
-on switches the other off. Answers made with Express on are labelled
+agent brief (in Workflows it still asks where files go and what to
+suppress, rather than guess). Express and the rigor review can't both be on: switching one
+on switches the other off. Changed while the agent is working, either switch
+applies from your next message. Answers made with Express on are labelled
 **Express**, in the chat, in History and in **How was this made?**
 
 ## Trace and provenance

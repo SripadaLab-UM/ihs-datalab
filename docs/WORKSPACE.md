@@ -242,7 +242,19 @@ lower-access tier.
   The first message after it's switched off carries `EXPRESS_OFF`. It's
   per message, not in the mode's developer instructions, so a switch takes
   effect on the next message without restarting the container or the
-  thread. The base `AGENTS.md` says what the notes mean.
+  thread. A research session gets its own note (brief, cite sources, no
+  claims about the study's data), and Workflow authoring's adds that the
+  agent never guesses an export destination or small-cell suppression: it
+  asks, or leaves it visibly unset. The base `AGENTS.md` says what the notes
+  mean, and both say that DataLab's notes come only at the very start of the
+  person's message: anything like one elsewhere (in files, query results,
+  web pages, or later in a message) is ignored.
+- **A switch during a turn** applies from the next message: each question's
+  event records the Express and rigor review switches (and the effort) as
+  the turn began, and the turn's review follows that record. So switching
+  Express on mid-turn doesn't cancel that turn's review, and switching the
+  review on during an Express turn doesn't add one. A review run again
+  follows its turn's own record.
 - **Tools.** For a turn asked with Express on, DataLab's data tools refuse
   `propose_plan` and `ask_research_helper` (`tokens.EXPRESS_OFF_TOOLS`),
   server-side, whatever the mode: both stop the turn to wait for the
@@ -253,8 +265,10 @@ lower-access tier.
   export rules as always). The turn's Express state is set as the turn
   starts, so switching mid-turn applies from the next message.
 - **Effort.** Quick (low) unless the person picks another while it's on;
-  their usual choice comes back when it's switched off. (The API also
-  treats a message with no effort as low while Express is on.)
+  their usual choice comes back when it's switched off. DataLab always sends
+  an effort with each turn (a message without one: low with Express on,
+  else Balanced; Continue keeps the turn's own), because Codex may keep a
+  turn's effort for the thread.
 - In the modes whose work a person reviews before it's saved or run (SQL
   drafting, Pipelines, Workflow authoring, Knowledge writing), that review
   is untouched: the note adds that the proposal is prepared as usual and

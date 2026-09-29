@@ -127,6 +127,40 @@ it("thinks at Quick while it's on, unless the person picks another", async () =>
   expect(effort().value).toBe("low");
 });
 
+it("keeps the effort picked in each Express conversation when coming back to it", () => {
+  const a = { ...base, id: "a", express: true, rigor_review: false };
+  const b = { ...base, id: "b", express: true, rigor_review: false };
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // As the Workspace does: the chat is made again for each conversation.
+  const view = (c: Conversation) => (
+    <QueryClientProvider client={client}>
+      <Chat key={c.id} conversation={c} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(view(a));
+  fireEvent.change(effort(), { target: { value: "high" } });
+  rerender(view(b));
+  expect(effort().value).toBe("low");
+  rerender(view(a));
+  expect(effort().value).toBe("high");
+});
+
+it("says Express in How this answer was made, with the steps behind it", () => {
+  show(base);
+  act(() => {
+    stream.push("user_message", { text: "How many?", express: true });
+    stream.push("turn_started", { turn_id: "t1" });
+    stream.push("command_started", { id: "c1", command: "python count.py" });
+    stream.push("command_finished", { id: "c1", exit_code: 0 });
+    stream.push("answer", { id: "a1", text: "12 interns.", phase: "final_answer" });
+    stream.push("turn_finished", { status: "completed" });
+    stream.push("turn_done");
+  });
+  const made = screen.getByRole("button", { name: /How this answer was made/ });
+  expect(within(made).getByText("Express")).toBeTruthy();
+  expect(within(made).getByText(/1 step/)).toBeTruthy();
+});
+
 it("labels the answers asked with Express, and only those", () => {
   show(base);
   act(() => {

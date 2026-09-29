@@ -103,7 +103,7 @@ def test_migrating_a_database_with_data_backs_it_up_first(tmp_path, monkeypatch)
     [backup] = list_backups(tmp_path / "backups")
     assert backup.name.startswith("0.2.0-") and backup.reason == "migrate"
     assert list(backup.migrations) == [m.name for m in ALL[:FIRST]]
-    # The same conversation, before 0005 and 0013 added their rigor_review and
+    # The same conversation, before 0005 and 0014 added their rigor_review and
     # express columns.
     assert rows(backup.file, "conversations") == [rows(path, "conversations")[0][:-2]]
     assert "attachments" not in _tables(backup.file)  # the layout from before

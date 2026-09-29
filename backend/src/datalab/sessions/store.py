@@ -76,20 +76,30 @@ class ConversationStore:
 
     def set_rigor_review(self, conversation_id: str, on: bool) -> None:
         """Switching the rigor review on switches Express off: never both."""
-        with self._lock:
-            self._db.execute(
-                "UPDATE conversations SET rigor_review = ?, express = express AND NOT ? "
-                "WHERE id = ?",
-                (int(on), int(on), conversation_id),
-            )
+        self.set_switches(conversation_id, rigor_review=on)
 
     def set_express(self, conversation_id: str, on: bool) -> None:
         """Switching Express on switches the rigor review off: never both."""
+        self.set_switches(conversation_id, express=on)
+
+    def set_switches(
+        self, conversation_id: str, *, rigor_review: bool | None = None, express: bool | None = None
+    ) -> None:
+        """Change either switch, or both, in one statement. One switched on
+        switches the other off unless it's given too; both on is refused."""
+        if rigor_review and express:
+            raise ValueError("Express and the rigor review can't both be on.")
+        r = None if rigor_review is None else int(rigor_review)
+        e = None if express is None else int(express)
         with self._lock:
             self._db.execute(
-                "UPDATE conversations SET express = ?, rigor_review = rigor_review AND NOT ? "
-                "WHERE id = ?",
-                (int(on), int(on), conversation_id),
+                "UPDATE conversations SET "
+                "rigor_review = CASE WHEN :r IS NOT NULL THEN :r "
+                "ELSE rigor_review AND NOT COALESCE(:e, 0) END, "
+                "express = CASE WHEN :e IS NOT NULL THEN :e "
+                "ELSE express AND NOT COALESCE(:r, 0) END "
+                "WHERE id = :id",
+                {"r": r, "e": e, "id": conversation_id},
             )
 
     def express_turns(self, conversation_id: str) -> set[int]:

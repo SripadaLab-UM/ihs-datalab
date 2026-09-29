@@ -485,7 +485,12 @@ def test_continue_picks_up_in_the_same_thread_and_the_review_reads_the_original_
                 break
             time.sleep(0.02)
         asked = [e for e in events if e["type"] == "user_message"]
-        assert asked[-1]["data"] == {"text": CONTINUE_TEXT, "continues": True}
+        assert asked[-1]["data"] == {
+            "text": CONTINUE_TEXT,
+            "continues": True,
+            "rigor_review": True,
+            "effort": "medium",  # the turn it picks up had the usual effort
+        }
         assert CONTINUE_TEXT in made[-1].sent[-1]
         # The continued turn's review reads the question it picks up, not "please continue".
         last = store.last(cid, "user_message")

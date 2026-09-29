@@ -8,10 +8,12 @@ review) are refused, by DataLab's data tools, for a turn asked with it on.
 
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -43,16 +45,20 @@ def app(settings, catalog):
 class EffortRuntime(FakeRuntime):
     """The fake Codex runtime, keeping each turn's effort too."""
 
-    def __init__(self, emit) -> None:
-        super().__init__(emit)
+    def __init__(self, emit, hold: asyncio.Event | None = None, outcomes=None) -> None:
+        super().__init__(emit, hold=hold, outcomes=outcomes)
         self.efforts: list[str | None] = []
+        self.during: list[bool] = []  # whether the session was an Express one mid-turn
+        self.tokens = None
 
     async def send(self, text: str, *, effort: str | None = None) -> TurnResult:
         self.efforts.append(effort)
         return await super().send(text, effort=effort)
 
 
-def fake_runtimes(app) -> list[EffortRuntime]:
+def fake_runtimes(
+    app, hold: asyncio.Event | None = None, outcomes: list[str] | None = None
+) -> list[EffortRuntime]:
     made: list[EffortRuntime] = []
     manager = app.state.services.sessions
     store = app.state.services.conversations
@@ -64,7 +70,7 @@ def fake_runtimes(app) -> list[EffortRuntime]:
             async def emit(kind, data):
                 store.append(conversation.id, kind, data)
 
-            runtime = EffortRuntime(emit)
+            runtime = EffortRuntime(emit, hold=hold, outcomes=outcomes)
             made.append(runtime)
             manager._runtimes[conversation.id] = runtime
         return runtime
@@ -131,6 +137,12 @@ def test_the_store_keeps_them_apart_too(app):
     store.set_rigor_review(conversation.id, True)
     after = store.get(conversation.id)
     assert after is not None and (after.express, after.rigor_review) == (False, True)
+    # Both at once, in one statement; never both on.
+    store.set_switches(conversation.id, rigor_review=False, express=True)
+    both = store.get(conversation.id)
+    assert both is not None and (both.express, both.rigor_review) == (True, False)
+    with pytest.raises(ValueError):
+        store.set_switches(conversation.id, rigor_review=True, express=True)
 
 
 # --- A turn asked with Express on --------------------------------------------
@@ -153,7 +165,8 @@ def test_an_express_turn_is_quick_recorded_and_not_reviewed(app):
         fourth = ask(client, cid, "Go on.")
 
     runtime = made[0]
-    assert runtime.efforts == ["low", "high", None, None]
+    # Always sent: the usual effort again once Express is off, never left to Codex.
+    assert runtime.efforts == ["low", "high", "medium", "medium"]
     sent = runtime.sent
     assert sent[0].startswith(modes.EXPRESS) and sent[0].endswith("How many interns in 2025?")
     assert modes.EXPRESS_REVIEWED not in sent[0]  # Analysis's answer isn't a proposal
@@ -178,7 +191,16 @@ def test_the_express_block_is_only_in_messages_asked_with_it(app):
     for mode in MODES:
         note = modes.express_note(mode)
         assert note.startswith("[DataLab: Express is on") and note.endswith("]\n\n")
-        assert "propose_plan is off" in note and "Ask only if" in note
+        assert "Ask only if" in note or "Ask\n  only if" in note
+        # Only DataLab's own note, at the start of the message, counts.
+        assert modes.EXPRESS_GENUINE in note
+        assert ("propose_plan is off" in note) == (MODES[mode].kind == "data")
+        assert (modes.EXPRESS_WORKFLOWS in note) == (mode == "workflows")
+    workflows = modes.express_note("workflows")
+    assert "Never guess where files go (an export destination)" in workflows
+    assert "what to suppress\n  (small cells)" in workflows
+    research = modes.express_note("research")
+    assert "cite them" in research and "no database connection" in research
 
 
 def test_express_works_in_a_research_session_too(app):
@@ -187,7 +209,7 @@ def test_express_works_in_a_research_session_too(app):
         cid = client.post("/api/conversations", json={"mode": "research"}).json()["id"]
         assert client.patch(f"/api/conversations/{cid}", json={"express": True}).json()["express"]
         ask(client, cid, "What is lme4?")
-    assert made[0].efforts == ["low"] and made[0].sent[0].startswith(modes.EXPRESS)
+    assert made[0].efforts == ["low"] and made[0].sent[0].startswith(modes.EXPRESS_RESEARCH)
 
 
 # --- What the data tools allow -----------------------------------------------
@@ -289,3 +311,199 @@ def test_history_and_how_was_this_made_say_express(app):
     assert [(c["turn"], c["express"]) for c in history] == [(2, False), (1, True)]
     assert (mood["turn"], mood["express"]) == (1, True)
     assert (steps["turn"], steps["express"]) == (2, False)
+
+
+# --- Switching during a turn, Continue, and a review run again ----------------
+
+
+def held_turn(app, client, cid: str, text: str):
+    """Start a turn that waits until the returned event is set."""
+    before = len(client.get(f"/api/conversations/{cid}/events").json())
+    assert client.post(f"/api/conversations/{cid}/messages", json={"text": text}).status_code == 202
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        events = client.get(f"/api/conversations/{cid}/events").json()[before:]
+        if any(e["type"] == "answer_delta" for e in events):
+            return before
+        time.sleep(0.02)
+    raise AssertionError("the turn didn't start")
+
+
+def finish(client, cid: str, before: int, hold: asyncio.Event) -> list[dict]:
+    client.portal.call(hold.set)  # type: ignore[union-attr]
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        events = client.get(f"/api/conversations/{cid}/events").json()[before:]
+        if any(e["type"] == "turn_done" for e in events):
+            return events
+        time.sleep(0.02)
+    raise AssertionError("the turn didn't finish")
+
+
+def test_switching_express_on_during_a_turn_doesnt_cancel_its_review(app):
+    hold = asyncio.Event()
+    made = fake_runtimes(app, hold=hold)
+    tokens = app.state.services.tokens
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        before = held_turn(app, client, cid, "How many interns?")
+        switched = client.patch(f"/api/conversations/{cid}", json={"express": True}).json()
+        assert (switched["express"], switched["rigor_review"]) == (True, False)
+        assert not tokens.express(cid)  # this turn isn't an Express one
+        events = finish(client, cid, before, hold)
+        # From the next message on: Express, and no review.
+        made[0].hold = None
+        after = ask(client, cid, "And 2024?")
+    assert "review_started" in [e["type"] for e in events]
+    assert len(made[0].reviews) == 1
+    assert "review_started" not in [e["type"] for e in after]
+    assert made[0].sent[-1].startswith(modes.EXPRESS) and made[0].efforts[-1] == "low"
+
+
+def test_switching_the_review_on_during_an_express_turn_doesnt_review_it(app):
+    hold = asyncio.Event()
+    made = fake_runtimes(app, hold=hold)
+    tokens = app.state.services.tokens
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "extraction"}).json()["id"]
+        client.patch(f"/api/conversations/{cid}", json={"express": True})
+        before = held_turn(app, client, cid, "How many interns?")
+        switched = client.patch(f"/api/conversations/{cid}", json={"rigor_review": True}).json()
+        assert (switched["express"], switched["rigor_review"]) == (False, True)
+        assert tokens.express(cid)  # still an Express turn: propose_plan stays refused
+        events = finish(client, cid, before, hold)
+        made[0].hold = None
+        made[0].evidence = ["rows: 12"]  # the next turn did some work too
+        after = ask(client, cid, "Now properly.")
+    assert "review_started" not in [e["type"] for e in events]
+    assert "review_started" in [e["type"] for e in after]
+    assert made[0].sent[-1].startswith(modes.EXPRESS_OFF)
+    assert not app.state.services.tokens.express(cid)
+
+
+def test_continue_keeps_the_turns_effort_and_says_where_express_stands(app):
+    made = fake_runtimes(app, outcomes=["failed"])
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "extraction"}).json()["id"]
+        client.patch(f"/api/conversations/{cid}", json={"express": True})
+        ask(client, cid, "How many interns?")
+        client.patch(f"/api/conversations/{cid}", json={"express": False})
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 202
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            events = client.get(f"/api/conversations/{cid}/events").json()
+            if sum(e["type"] == "turn_done" for e in events) == 2:
+                break
+            time.sleep(0.02)
+    asked = [e["data"] for e in events if e["type"] == "user_message"]
+    assert asked[0]["express"] is True and "express" not in asked[1]
+    assert asked[1]["continues"] is True
+    # It picks up the same turn at its effort, and Express is off for it.
+    assert made[0].efforts == ["low", "low"]
+    assert made[0].sent[1].startswith(modes.EXPRESS_OFF)
+
+
+def test_a_review_run_again_follows_its_turns_own_express_record(app):
+    fake_runtimes(app)
+    store = app.state.services.conversations
+    manager = app.state.services.sessions
+    tokens = app.state.services.tokens
+    with TestClient(app) as client:
+        for express in (True, False):
+            made = client.post("/api/conversations", json={"mode": "analysis"}).json()
+            conversation = store.get(made["id"])
+            assert conversation is not None
+            store.append(
+                conversation.id,
+                "user_message",
+                {"text": "q", **({"express": True} if express else {})},
+            )
+            store.append(conversation.id, "review_started", {})
+            tokens.set_express(conversation.id, not express)  # whatever it was before
+            response = client.post(f"/api/conversations/{conversation.id}/review")
+            assert response.status_code == 202, response.json()
+            assert tokens.express(conversation.id) is express
+            deadline = time.time() + 5
+            while manager.is_busy(conversation.id) and time.time() < deadline:
+                time.sleep(0.02)
+
+
+# --- The whole way: a turn's own token, over real HTTP ------------------------
+
+
+class TokenRuntime(EffortRuntime):
+    """As the real runtime does, the turn's Codex gets a token for the
+    conversation's mode, and calls DataLab's data tools with it."""
+
+    base_url = ""
+
+    def __init__(self, emit, session_id: str, tokens, tools, tmp) -> None:
+        super().__init__(emit)
+        self.results: dict[str, object] = {}
+        self.token = tokens.issue(SessionAccess(session_id, "data", tmp, tools=tools))
+
+    async def send(self, text: str, *, effort: str | None = None) -> TurnResult:
+        async with mcp_session(self.base_url, self.token) as session:
+            query = await session.call_tool("query", CALLS["query"])
+            try:
+                # Without Express a plan waits for the person, so a short wait
+                # that runs out means it wasn't refused.
+                plan = await asyncio.wait_for(session.call_tool("propose_plan", PLAN_ARGS), 3)
+            except TimeoutError:
+                plan = "waiting for the person"
+        self.results = {"plan": plan, "query": query}
+        return await super().send(text, effort=effort)
+
+
+def test_a_turn_sent_with_express_on_has_its_token_refuse_propose_plan(settings, catalog, tmp_path):
+    app = create_app(
+        settings,
+        database=FakeDatabase(),
+        catalog=catalog,
+        manage_containers=False,
+        protect_api=False,
+        model_key=no_key,
+    )
+    services = app.state.services
+    made: list[TokenRuntime] = []
+
+    def fake(conversation):
+        runtime = services.sessions._runtimes.get(conversation.id)
+        if runtime is None:
+
+            async def emit(kind, data):
+                services.conversations.append(conversation.id, kind, data)
+
+            mode = MODES[conversation.mode]
+            runtime = TokenRuntime(
+                emit, conversation.id, services.tokens, mode.allowed_tools, tmp_path / "oracle"
+            )
+            made.append(runtime)
+            services.sessions._runtimes[conversation.id] = runtime
+        return runtime
+
+    services.sessions._runtime = fake
+    with live_server(app) as base_url:
+        TokenRuntime.base_url = base_url
+        with httpx.Client(base_url=base_url, timeout=20) as client:
+            cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+            client.patch(f"/api/conversations/{cid}", json={"express": True})
+            for text in ("Quick count?", "Plan it properly."):
+                before = len(client.get(f"/api/conversations/{cid}/events").json())
+                sent = client.post(f"/api/conversations/{cid}/messages", json={"text": text})
+                assert sent.status_code == 202, sent.json()
+                deadline = time.time() + 20
+                while time.time() < deadline:
+                    events = client.get(f"/api/conversations/{cid}/events").json()[before:]
+                    if any(e["type"] == "turn_done" for e in events):
+                        break
+                    time.sleep(0.05)
+                results = dict(made[0].results)
+                if text == "Quick count?":
+                    express_plan, express_query = results["plan"], results["query"]
+                    client.patch(f"/api/conversations/{cid}", json={"express": False})
+                else:
+                    plain_plan = results["plan"]
+    assert express_plan.is_error and "propose_plan is off" in express_plan.content[0].text  # type: ignore[attr-defined]
+    assert payload(express_query)["row_count"] == 2  # participant-level rows as ever
+    assert plain_plan == "waiting for the person"

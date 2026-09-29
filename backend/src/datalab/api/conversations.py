@@ -262,15 +262,11 @@ def build_conversations_router(
         get_or_404(conversation_id)
         if body.rigor_review and body.express:
             raise HTTPException(422, "Express and the rigor review can't both be on: choose one.")
-        # Off before on: switching one on switches the other off (the store does).
-        if body.rigor_review is False:
-            store.set_rigor_review(conversation_id, False)
-        if body.express is False:
-            store.set_express(conversation_id, False)
-        if body.rigor_review:
-            store.set_rigor_review(conversation_id, True)
-        if body.express:
-            store.set_express(conversation_id, True)
+        if body.rigor_review is not None or body.express is not None:
+            # One statement: switching one on switches the other off.
+            store.set_switches(
+                conversation_id, rigor_review=body.rigor_review, express=body.express
+            )
         if body.title is not None:
             store.rename(conversation_id, body.title)
             # Other windows showing this conversation pick the new name up.
