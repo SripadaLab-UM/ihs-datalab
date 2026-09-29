@@ -93,6 +93,11 @@ class Share:
     # The workflow check for a commit's tree (service.py), if workflow files
     # are to be checked: pipelines are looked up in that same tree.
     workflows: Callable[[str], WorkflowCheck] | None = None
+    # A person's own edit (edits.py), not an agent's change: the message says so.
+    by_person: bool = False
+    # Stop with a conflict, rather than rebase, if GitHub's main changed any
+    # of `files` since `base`: the person decides what to keep (edits.py).
+    strict: bool = False
 
     @classmethod
     def of_proposal(
@@ -150,6 +155,16 @@ async def _save(clone: Clone, share: Share, tester: Tester) -> SaveResult:
         upstream = await asyncio.to_thread(clone.remote_head)
         if upstream is None:
             return SaveResult("failed", "GitHub's pipelines repo has no main branch.")
+        if share.strict and upstream != share.base:
+            moved = set(await asyncio.to_thread(clone.changed_paths, share.base, upstream))
+            if touched := sorted(p for p in share.files if p in moved):
+                return SaveResult(
+                    "conflict",
+                    f"Someone changed {', '.join(touched)} on GitHub since you started. "
+                    "Nothing was shared.",
+                    upstream=upstream,
+                    conflicts=touched,
+                )
         rebased = await asyncio.to_thread(
             clone.rebase, ours, onto=upstream, old_base=share.base, committer=share.author
         )
@@ -261,9 +276,10 @@ def _message(share: Share, tested: TestRun) -> str:
         subject = f"{share.subject}: {len(changed)} files"
     body = "\n".join(f"- {'deleted' if share.files[p] is None else 'updated'} {p}" for p in changed)
     passed = tested.summary.get("tests", 0)
+    how = "Edited by hand" if share.by_person else "Reviewed"
     return (
         f"{subject}\n\n"
-        f"Reviewed and saved in DataLab by {share.author.name} (@{share.login}).\n"
+        f"{how} and saved in DataLab by {share.author.name} (@{share.login}).\n"
         f"The package's {passed} tests passed on this change.\n\n"
         f"{body}\n\n"
         + "".join(f"{key}: {value}\n" for key, value in share.trailers)
