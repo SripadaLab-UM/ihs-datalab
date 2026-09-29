@@ -181,12 +181,15 @@ async def test_a_database_that_cant_be_reached_fails_the_query(tmp_path, log, mo
 
     monkeypatch.setattr(oracledb, "connect", refuse)
     database = OracleDatabase(PRACTICE_ORACLE, "x", QueryLimits())
-    with pytest.raises(QueryFailed, match="Couldn't connect"):
+    with pytest.raises(QueryFailed, match=r"couldn't reach the database \(DPY-6005\)") as info:
         await service(database, log).run_query(
             session_id="s1", sql=SQL, binds={"d": 1}, results_dir=tmp_path / "r"
         )
+    assert info.value.category == "connection"
     [record] = log.for_session("s1")
     assert record.status == "failed"
+    # Every failed attempt keeps how long it took, and names its query.
+    assert record.elapsed_ms is not None and info.value.query_id == record.id
     assert list((tmp_path / "r").iterdir()) == []
 
 

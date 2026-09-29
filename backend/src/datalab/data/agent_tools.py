@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 from collections.abc import Callable
 from typing import Any
 
@@ -21,9 +20,10 @@ from pydantic import BaseModel
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from datalab.data.catalog import Catalog, Column, TableInfo
+from datalab.data.failures import Failure
 from datalab.data.helpers import find_concept as concept_candidates
 from datalab.data.helpers import join_keys
-from datalab.data.oracle import QueryFailed
+from datalab.data.oracle import QueryFailed, QueryTimedOut
 from datalab.data.service import DataService
 from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
 from datalab.data.sql_lobs import lob_type, sql_name
@@ -55,16 +55,40 @@ and joins with join_paths, then run SELECT queries with query. Qualify
 every table with its schema. Write a column spelled with lower-case letters
 in double quotes, exactly ("Bdate"). A CLOB (long text) column can't be used
 in SELECT DISTINCT, GROUP BY, ORDER BY, UNION, MIN/MAX/COUNT or a comparison:
-use TO_CHAR(SUBSTR(col, 1, 1000)) there. Results are saved as CSV files in
-/data/oracle; work with the file for anything beyond the preview.
+convert it with TO_CHAR(SUBSTR(col, 1, 1000)), and check MAX(LENGTH(col)) so
+no value is cut unseen. If a query times out, split or narrow it before
+trying again. Results are saved as CSV files in /data/oracle; work with the
+file for anything beyond the preview.
 """
 
 
-# How a refused query's error starts, so the agent (and the chat, which shows
-# the step) can tell DataLab's check from the database: frontend activity.ts.
+# How a refused query's error starts, so the agent can tell DataLab's check
+# from the database. The chat reads the tag at its end instead (failures.py).
 CHECK_REFUSED = "DataLab's SQL check refused this query, so it didn't run:"
 DATABASE_REFUSED = "The database refused this query:"
-_ORA = re.compile(r"ORA-\d{5}: ")
+TIMED_OUT_NEXT = (
+    "Split the query (by table or data source, or by date range) or narrow its scope "
+    "before trying again; don't run the same query again."
+)
+
+
+def query_error(error: SqlRejected | QueryFailed) -> str:
+    """The query tool's error: what happened and what to do, then the tag."""
+    if isinstance(error, SqlRejected):
+        text = f"{CHECK_REFUSED} {error}"
+        failure = Failure("validation", error.rule, error.query_id)
+        return f"{text}\n{failure.tag()}"
+    said = str(error)
+    if isinstance(error, QueryTimedOut):
+        took = f" after {error.elapsed_ms / 1000:.0f} s" if error.elapsed_ms is not None else ""
+        text = f"The query timed out{took}: {said} {TIMED_OUT_NEXT}"
+        code = error.reason
+    elif error.category in ("sql", "permission"):
+        text = f"{DATABASE_REFUSED} {said}"
+        code = error.code
+    else:
+        text, code = said, error.code
+    return f"{text}\n{Failure(error.category, code, error.query_id).tag()}"
 
 
 class SqlBind(BaseModel):
@@ -186,11 +210,8 @@ def build_agent_tools(
                 results_dir=access.results_dir,
                 preview_rows=max(0, min(preview_rows, 200)),
             )
-        except SqlRejected as error:
-            raise ToolError(f"{CHECK_REFUSED} {error}") from error
-        except QueryFailed as error:
-            said = str(error)
-            raise ToolError(f"{DATABASE_REFUSED} {said}" if _ORA.match(said) else said) from error
+        except (SqlRejected, QueryFailed) as error:
+            raise ToolError(query_error(error)) from error
         return _json(
             {
                 "query_id": outcome.query_id,
@@ -604,11 +625,16 @@ def _column(column: Column) -> dict[str, Any]:
         notes.append(f"quoted: exact case, always write it as {written}")
     kind = lob_type(column.type)
     if kind == "BLOB":
-        notes.append("BLOB: can't be selected DISTINCT, grouped, sorted or compared")
+        notes.append(
+            "BLOB: can't be selected DISTINCT, grouped, sorted or compared; LENGTH and "
+            "IS NULL work on it"
+        )
     elif kind:
         notes.append(
-            f"{kind} (long text): to select it DISTINCT, group, sort or compare it, use "
-            f"TO_CHAR(SUBSTR({written}, 1, 1000)); LIKE and IS NULL work on it as it is"
+            f"{kind} (long text): to select it DISTINCT, group, sort or compare it, convert "
+            f"it with TO_CHAR(SUBSTR({written}, 1, 1000)), the first 1,000 characters (check "
+            f"MAX(LENGTH({written})) so no value is cut unseen); LIKE and IS NULL work on it "
+            "as it is"
         )
     if notes:
         entry["sql_note"] = "; ".join(notes)

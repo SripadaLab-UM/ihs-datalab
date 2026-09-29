@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from datalab.data.sqlcheck import ORACLE_FUNCTIONS, SqlRejected, TableRef, check_sql
@@ -462,7 +464,7 @@ def survey_rejected(sql: str) -> str:
     return str(info.value)
 
 
-FIX = "Use TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) there instead"
+FIX = "TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) is the first 1,000 characters"
 
 
 class TestLongText:
@@ -501,12 +503,20 @@ class TestLongText:
              "AND a.QUESTIONTEXT = b.QUESTIONTEXT", "a comparison"),
             (f"SELECT CASE QUESTIONTEXT WHEN 'x' THEN 1 END FROM {D}", "a comparison"),
             (f"SELECT DECODE(QUESTIONTEXT, 'x', 1, 0) FROM {D}", "a comparison"),
+            (f"SELECT CASE SURVEYNAME WHEN QUESTIONTEXT THEN 1 END FROM {D}", "a comparison"),
+            (f"SELECT LEAST(QUESTIONTEXT, 'x') FROM {D}", "LEAST()"),
+            (f"SELECT NULLIF(SURVEYNAME, QUESTIONTEXT) FROM {D}", "NULLIF()"),
+            (f"SELECT 1 FROM {D} a NATURAL JOIN {D} b", "a comparison"),
+            (f"SELECT 1 FROM {D} a JOIN {D} b USING (QUESTIONTEXT)", "a comparison"),
+            (f"SELECT LEVEL FROM {D} START WITH SURVEYNAME IS NULL "
+             "CONNECT BY PRIOR QUESTIONTEXT = QUESTIONTEXT", "a comparison"),
         ],
     )  # fmt: skip
     def test_a_clob_where_oracle_cant_use_one(self, sql, context):
         message = survey_rejected(sql)
         assert "QUESTIONTEXT" in message and "CLOB" in message and context in message
         assert "DBMS_LOB.SUBSTR isn't available" in message or "COUNT(" in message
+        assert "ORA-00932" in message
 
     @pytest.mark.parametrize(
         "sql",
@@ -518,6 +528,8 @@ class TestLongText:
             f"SELECT DISTINCT CONCAT(SURVEYNAME, QUESTIONTEXT) FROM {D}",
             f"SELECT DISTINCT REPLACE(QUESTIONTEXT, 'a', 'b') FROM {D}",
             f"SELECT DISTINCT NVL(QUESTIONTEXT, 'none') FROM {D}",
+            f"SELECT DISTINCT NVL2(SURVEYNAME, QUESTIONTEXT, SURVEYNAME) FROM {D}",
+            f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', QUESTIONTEXT, SURVEYNAME) FROM {D}",
             f"SELECT DISTINCT CASE WHEN SURVEYNAME = 'x' THEN QUESTIONTEXT END FROM {D}",
             f"SELECT 1 FROM {D} WHERE UPPER(QUESTIONTEXT) = 'X'",
         ],
@@ -544,6 +556,12 @@ class TestLongText:
         message = survey_rejected(f"SELECT COUNT(QUESTIONTEXT) FROM {D}")
         assert "use COUNT(LENGTH(QUESTIONTEXT))" in message
 
+    def test_the_code_oracle_gives_depends_on_where(self):
+        assert "(ORA-00932; ORA-22849 on newer Oracle)" in survey_rejected(
+            f"SELECT MIN(QUESTIONTEXT) FROM {D}"
+        )
+        assert "the query (ORA-00932)." in survey_rejected(f"SELECT AVG(QUESTIONTEXT) FROM {D}")
+
     def test_a_blob_and_a_made_clob(self):
         assert "LENGTH(PHOTO) and IS NULL work on it" in survey_rejected(
             f"SELECT DISTINCT PHOTO FROM {B}"
@@ -560,10 +578,16 @@ class TestLongText:
         assert survey_rejected(seen) == (
             "SUBSTR(QUESTIONTEXT, 1, 500) is a CLOB, made from the CLOB column QUESTIONTEXT, "
             "and Oracle can't use a CLOB in SELECT DISTINCT: it would refuse the query "
-            "(ORA-00932 or ORA-22848). Use TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) there "
-            "instead: ordinary text of up to 1,000 characters. SUBSTR, UPPER, TRIM or || alone "
-            "still give a CLOB, and DBMS_LOB.SUBSTR isn't available in DataLab. LIKE, IS NULL, "
-            "LENGTH and INSTR work on the CLOB as it is."
+            "(ORA-00932; ORA-22848 on newer Oracle). Convert it to ordinary text there, "
+            "without cutting values silently: TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000)) is the "
+            "first 1,000 characters (always within Oracle's 4,000-byte limit). For a preview, "
+            "that's fine: say it's a preview. For exact grouping or de-duplication, first "
+            "check MAX(LENGTH(QUESTIONTEXT)): if it's 1,000 or less, that conversion is the "
+            "whole value; if not, group by identifying columns instead and fetch the full "
+            "text separately, or report how many values are longer and were cut. Select "
+            "LENGTH(QUESTIONTEXT) beside it so a cut shows. SUBSTR, UPPER, TRIM or || alone "
+            "still give a CLOB, and DBMS_LOB.SUBSTR isn't available in DataLab. LIKE, IS "
+            "NULL, LENGTH and INSTR work on the CLOB as it is."
         )
         survey_ok(
             seen.replace("SUBSTR(QUESTIONTEXT, 1, 500)", "TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 500))")
@@ -592,6 +616,12 @@ class TestLongText:
             f"SELECT SURVEYNAME, COUNT(*) FROM {D} GROUP BY SURVEYNAME ORDER BY 2",
             f"SELECT NVL(QUESTIONTEXT, ANSWERCHOICES) FROM {D}",
             f"SELECT DISTINCT INITCAP(SURVEYNAME), NVL2(QUESTIONTEXT, 'y', 'n') FROM {D}",
+            # The first result decides the type: these are text.
+            f"SELECT DISTINCT NVL(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT NVL2(SURVEYNAME, SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            f"SELECT GREATEST(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+            f"SELECT 1 FROM {D} a JOIN {D} b USING (SURVEYNAME)",
             f"SELECT LISTAGG(TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 50)), '; ') "
             f"WITHIN GROUP (ORDER BY SURVEYNAME) FROM {D}",
             f"WITH d AS (SELECT TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 500)) q FROM {D}) "
@@ -652,3 +682,84 @@ class TestSpelling:
 
     def test_an_unknown_name_keeps_the_general_message(self):
         assert "could not be resolved" in survey_rejected(f"SELECT NOT_A_COLUMN FROM {B}")
+
+
+class TestSpellingIsExplainedOnlyForTheNameRefused:
+    def test_only_the_name_refused_is_explained(self):
+        # From the code review: "Bdate" is right here; NOSUCHCOL is the problem.
+        message = survey_rejected(f'SELECT "Bdate" AS bdate FROM {B} ORDER BY bdate, nosuchcol')
+        assert "NOSUCHCOL" in message and "Bdate" not in message
+
+    def test_the_rule_is_named_for_the_chat(self):
+        with pytest.raises(SqlRejected) as spelling:
+            survey_ok(f"SELECT Bdate FROM {B}")
+        with pytest.raises(SqlRejected) as lob:
+            survey_ok(f"SELECT DISTINCT QUESTIONTEXT FROM {D}")
+        with pytest.raises(SqlRejected) as other:
+            survey_ok("DELETE FROM IHS_2025.T")
+        assert (spelling.value.rule, lob.value.rule, other.value.rule) == (
+            "spelling",
+            "long_text",
+            "check",
+        )
+
+
+TOO_COMPLEX_COLUMNS = {"IHS_2025": {"T": {"A": "VARCHAR2(10)", "Q": "CLOB"}}}
+
+
+class TestTooComplex:
+    """From the code review: the long-text check was exponential, and deep
+    set operations raised RecursionError. Both stay fast, or are refused."""
+
+    def check(self, sql: str):
+        return check_sql(sql, allowed_schemas=COHORTS, columns=TOO_COMPLEX_COLUMNS)
+
+    def nested_coalesce(self, levels: int, width: int = 4, column: str = "A") -> str:
+        ctes = [f"c0 AS (SELECT {column} x FROM IHS_2025.T)"]
+        for i in range(1, levels + 1):
+            args = ", ".join([f"c{i - 1}.x"] * width)
+            ctes.append(f"c{i} AS (SELECT COALESCE({args}) x FROM c{i - 1})")
+        return "WITH " + ", ".join(ctes) + f" SELECT DISTINCT x FROM c{levels}"
+
+    def test_nested_ctes_are_linear(self):
+        started = time.monotonic()
+        self.check(self.nested_coalesce(16))
+        with pytest.raises(SqlRejected, match="is a CLOB"):
+            self.check(self.nested_coalesce(16, column="Q"))
+        assert time.monotonic() - started < 5
+
+    def test_wide_expressions_are_linear(self):
+        # Each level repeats the one below three times: 3**7 leaves.
+        expression = "Q"
+        for _ in range(7):
+            expression = f"NVL({expression}, {expression}) || {expression}"
+        started = time.monotonic()
+        with pytest.raises(SqlRejected):
+            self.check(f"SELECT DISTINCT {expression} FROM IHS_2025.T")
+        assert time.monotonic() - started < 5
+
+    def test_many_union_branches(self):
+        started = time.monotonic()
+        branches = " UNION ".join(["SELECT A FROM IHS_2025.T"] * 1500)
+        try:
+            self.check(branches)
+        except SqlRejected as refused:
+            assert refused.rule == "too_complex"
+        assert time.monotonic() - started < 60
+
+    def test_deep_nesting_is_refused_not_an_error(self):
+        deep = "SELECT " + "UPPER(" * 200 + "A" + ")" * 200 + " FROM IHS_2025.T"
+        with pytest.raises(SqlRejected) as info:
+            self.check(deep)
+        assert info.value.rule == "too_complex"
+        assert "too complex" in str(info.value)
+
+    def test_an_unexpected_error_in_the_long_text_rule_refuses(self, monkeypatch):
+        from datalab.data import sqlcheck
+
+        def broken(*args, **kwargs):
+            raise KeyError("a bug")
+
+        monkeypatch.setattr(sqlcheck, "lob_problem", broken)
+        with pytest.raises(SqlRejected, match="couldn't finish checking"):
+            self.check("SELECT A FROM IHS_2025.T")

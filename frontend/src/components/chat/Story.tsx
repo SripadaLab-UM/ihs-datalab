@@ -5,16 +5,29 @@ import { CodeBlock } from "@/components/code/CodeBlock";
 import { Button, Chip, Icon } from "@/components/ui";
 import { OpenFileContext, workspaceFile } from "@/lib/files";
 
-import type { Detail, QueryRefusal, Row, Step } from "./activity";
-import { refusedBy, shortTable, unwrapShell as unwrap } from "./activity";
+import type { Detail, Row, Step } from "./activity";
+import { shortTable, unwrapShell as unwrap } from "./activity";
 import { Markdown } from "./Markdown";
+import { showQuery } from "./provenance";
 import { ShownStepContext, stepElementId } from "./showStep";
+import type { FailureCategory, ToolFailure } from "./transcript";
 
-const REFUSED: Record<QueryRefusal, string> = {
-  check: "DataLab's SQL check refused this query before it ran. Nothing was read.",
-  database: "The database refused this query. Nothing was read.",
-  other: "This query didn't run. Nothing was read.",
+// What a failed query's card says, by the failure's kind. A query that ran
+// for a while (a timeout, a stop) may have read data, so only the check's
+// refusal says nothing was read.
+const FAILED: Record<FailureCategory, string> = {
+  validation: "DataLab's SQL check refused this query before it ran. Nothing was read.",
+  sql: "The database refused this query. No result was saved.",
+  permission: "The database refused this query: DataLab's account can't read something it names. No result was saved.",
+  timeout: "This query timed out. No complete result was saved.",
+  connection: "DataLab couldn't reach the database. No result was saved.",
+  cancelled: "This query was stopped. No complete result was saved.",
+  result_limit: "The result was larger than the limits allow. No complete result was saved.",
 };
+
+function failedCaption(failure: ToolFailure | null): string {
+  return failure ? FAILED[failure.category] : "This query didn't run. No complete result was saved.";
+}
 
 /**
  * The agent's work, told as a story: plain sentences on hairline rules, each
@@ -382,8 +395,8 @@ export function DetailView({ detail }: { detail: Detail }) {
       return (
         <>
           <Caption>
-            {detail.error
-              ? REFUSED[refusedBy(detail.error)]
+            {detail.error || detail.failure
+              ? failedCaption(detail.failure)
               : `A read-only query${detail.rows === null ? "" : `: ${detail.rows.toLocaleString()} row${detail.rows === 1 ? "" : "s"}`}. It's listed under Queries.`}
           </Caption>
           {detail.sql ? (
@@ -392,6 +405,13 @@ export function DetailView({ detail }: { detail: Detail }) {
             <Mono>(no SQL recorded)</Mono>
           )}
           {detail.error && <p className="mt-2 text-[13px] text-danger">{detail.error}</p>}
+          {detail.queryId && (
+            <div className="mt-2">
+              <Button variant="ghost" className="px-1.5 py-0.5 text-[12px]" onClick={() => showQuery(detail.queryId!)}>
+                <Icon name="db" size={12} /> See it in Queries
+              </Button>
+            </div>
+          )}
           {detail.columns.length > 0 && (
             <div className="mt-2 flex flex-wrap items-center gap-1">
               <span className="mr-1 text-[13px] text-muted">Columns:</span>

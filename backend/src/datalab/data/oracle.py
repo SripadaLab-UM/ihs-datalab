@@ -26,7 +26,13 @@ from typing import Any
 import oracledb
 
 from datalab.config import OracleSettings, QueryLimits
-from datalab.data.oracle_errors import explain
+from datalab.data.oracle_errors import (
+    CALL_TIMEOUT_CODES,
+    connection_message,
+    explain,
+    oracle_code,
+)
+from datalab.data.oracle_errors import category as error_category
 
 # Return CLOBs as strings and dates as datetimes, so rows can be written as CSV.
 oracledb.defaults.fetch_lobs = False
@@ -37,23 +43,55 @@ _ROLE_NAME = re.compile(r"^[A-Z][A-Z0-9_$#]{0,127}$")
 
 
 class QueryFailed(RuntimeError):
-    """The database refused or failed the query. The message is safe to show."""
+    """The database refused or failed the query. The message is safe to show.
+
+    `category` says what kind of failure (oracle_errors.py: sql, permission,
+    timeout, connection, cancelled, result_limit) and `code` the Oracle or
+    driver code, for the agent and the chat. DataLab's data service adds
+    `query_id` and `elapsed_ms` once it has logged the failure."""
+
+    category = "sql"
+
+    def __init__(self, message: str, *, category: str | None = None, code: str | None = None):
+        super().__init__(message)
+        if category is not None:
+            self.category = category
+        self.code = code
+        self.query_id: str | None = None
+        self.elapsed_ms: int | None = None
 
 
 class QueryTimedOut(QueryFailed):
-    pass
+    """`reason` is call_timeout (one round trip to Oracle took longer than
+    `limit_seconds`) or deadline (the whole query did)."""
+
+    category = "timeout"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str = "deadline",
+        limit_seconds: float | None = None,
+        code: str | None = None,
+    ):
+        super().__init__(message, code=code)
+        self.reason = reason
+        self.limit_seconds = limit_seconds
 
 
 class QueryCancelled(QueryFailed):
-    pass
+    category = "cancelled"
 
 
 class LimitExceeded(QueryFailed):
-    pass
+    category = "result_limit"
 
 
 class NotSyntheticDatabase(QueryFailed):
     """The practice port's database has no marker table: not the synthetic one."""
+
+    category = "connection"
 
 
 class MarkerNotVerified(QueryFailed):
@@ -141,9 +179,8 @@ class OracleDatabase:
         except oracledb.Error as error:
             # No database to talk to (it's down, or the port is closed): the
             # query failed, with a message that's safe to show.
-            raise QueryFailed(
-                f"Couldn't connect to the database: {_oracle_message(error)}"
-            ) from error
+            code = oracle_code(error)
+            raise QueryFailed(connection_message(code), category="connection", code=code) from error
         done = threading.Event()
         timed_out = threading.Event()
 
@@ -181,12 +218,27 @@ class OracleDatabase:
             partial.unlink(missing_ok=True)
             if cancel.is_set():
                 raise QueryCancelled("The query was stopped.") from error
+            code = oracle_code(error)
             if timed_out.is_set():
+                limit = self._limits.deadline_seconds
                 raise QueryTimedOut(
-                    f"The query ran longer than {self._limits.deadline_seconds:.0f} seconds "
-                    "and was cancelled."
+                    f"The query ran longer than {limit:.0f} seconds and was cancelled.",
+                    reason="deadline",
+                    limit_seconds=limit,
+                    code=code,
                 ) from error
-            raise QueryFailed(explain(error, sql)) from error
+            if code in CALL_TIMEOUT_CODES:
+                limit = self._limits.round_trip_timeout_seconds
+                raise QueryTimedOut(
+                    f"Oracle took longer than {limit:.0f} s to answer one request ({code}), so "
+                    "the query was cancelled.",
+                    reason="call_timeout",
+                    limit_seconds=limit,
+                    code=code,
+                ) from error
+            raise QueryFailed(
+                explain(error, sql), category=error_category(code), code=code
+            ) from error
         except BaseException:
             partial.unlink(missing_ok=True)
             raise
@@ -446,9 +498,3 @@ def _type_label(column: Any) -> str:
             else f"NUMBER({column.precision})"
         )
     return name
-
-
-def _oracle_message(error: oracledb.Error) -> str:
-    # The first line of an Oracle error names the problem (e.g. ORA-00942: table
-    # or view does not exist) without echoing data values.
-    return str(error).splitlines()[0][:300]

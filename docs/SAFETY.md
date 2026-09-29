@@ -240,13 +240,22 @@ access. It never gains it.
     `PARTITION BY`, `UNION`/`INTERSECT`/`MINUS`, a comparison, or
     `MIN`/`MAX`/`COUNT` and the like (`data/sql_lobs.py`). The fix offered is
     `TO_CHAR(SUBSTR(col, 1, 1000))`, since package calls such as
-    `DBMS_LOB.SUBSTR` stay refused.
+    `DBMS_LOB.SUBSTR` stay refused, with how to tell whether it cuts a value.
+    The work is linear in the query's size, with a budget: a query too deep
+    or large for the check is refused, never run unchecked.
 - **What Oracle's refusals show.** For the errors a query commonly runs into
   (ORA-00904, 00932, 00942, 01722, date formats, …) the agent, Queries and
   the chat get the Oracle code and DataLab's own explanation, not Oracle's
   text, which in 23ai can quote a value (`data/oracle_errors.py`). The one
   part kept is the identifier ORA-00904 names, when the query itself wrote
-  it. Other errors show the first line of Oracle's message, as before.
+  it. Errors whose first line names the server say only DataLab's words:
+  ORA-12801 (a parallel query server's host and SID) is explained by the
+  error it wraps, and not reaching the database (DPY-6005, ORA-12514, …)
+  says only the code. Other errors show the first line of Oracle's message,
+  as before. Each failure carries a category (validation, sql, permission,
+  timeout, connection, cancelled, result_limit) to the agent and the chat
+  (`data/failures.py`), so the chat never labels the SQL check's refusal as
+  Oracle's; the chat shows DataLab's own words for it, never the result's rows.
 - **Guardrails protect the database and the laptop:**
   - an end-to-end deadline that really cancels the query in Oracle;
   - caps on rows and bytes per extraction, which only the user, not the

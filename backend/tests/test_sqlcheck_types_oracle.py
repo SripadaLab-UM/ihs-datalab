@@ -24,7 +24,7 @@ import pytest
 
 from datalab.config import PRACTICE_ORACLE, QueryLimits
 from datalab.data.catalog import Catalog
-from datalab.data.oracle import SYNTHETIC_MARKER, OracleDatabase, QueryFailed
+from datalab.data.oracle import SYNTHETIC_MARKER, OracleDatabase, QueryFailed, QueryTimedOut
 from datalab.data.oracle_errors import EXPLANATIONS
 from datalab.data.sqlcheck import SqlRejected, check_sql
 
@@ -150,6 +150,76 @@ LONG_TEXT = [
 ]
 
 
+# Each function and form the check treats as refusing a CLOB, on its own:
+# every one must fail on Oracle (from the code review).
+REFUSED_FORMS = (
+    [
+        f"SELECT DISTINCT {form} FROM {D}"
+        for form in (
+            "LTRIM(QUESTIONTEXT)",
+            "RTRIM(QUESTIONTEXT)",
+            "TRIM(BOTH 'x' FROM QUESTIONTEXT)",
+            "SUBSTRB(QUESTIONTEXT, 1, 5)",
+            "SUBSTRC(QUESTIONTEXT, 1, 5)",
+            "NLS_UPPER(QUESTIONTEXT)",
+            "NLS_LOWER(QUESTIONTEXT)",
+            "LPAD(QUESTIONTEXT, 10)",
+            "RPAD(QUESTIONTEXT, 10)",
+            "REPLACE(QUESTIONTEXT, 'a', 'b')",
+            "REGEXP_REPLACE(QUESTIONTEXT, 'a', 'b')",
+            "REGEXP_SUBSTR(QUESTIONTEXT, 'a')",
+            "CONCAT(SURVEYNAME, QUESTIONTEXT)",
+            "SURVEYNAME || QUESTIONTEXT",
+            "NVL(QUESTIONTEXT, 'none')",
+            "NVL2(SURVEYNAME, QUESTIONTEXT, SURVEYNAME)",
+            "DECODE(SURVEYNAME, 'x', QUESTIONTEXT, SURVEYNAME)",
+            "CASE WHEN SURVEYNAME = 'x' THEN QUESTIONTEXT END",
+        )
+    ]
+    + [
+        f"SELECT {call} FROM {D}"
+        for call in (
+            "LEAST(QUESTIONTEXT, 'x')",
+            "NULLIF(SURVEYNAME, QUESTIONTEXT)",
+            "STATS_MODE(QUESTIONTEXT)",
+            "MEDIAN(QUESTIONTEXT)",
+            "STDDEV(QUESTIONTEXT)",
+            "VARIANCE(QUESTIONTEXT)",
+            "SUM(QUESTIONTEXT)",
+            "AVG(QUESTIONTEXT)",
+            "APPROX_COUNT_DISTINCT(QUESTIONTEXT)",
+            "FIRST_VALUE(QUESTIONTEXT) OVER (ORDER BY SURVEYNAME)",
+            "LAST_VALUE(QUESTIONTEXT) OVER (ORDER BY SURVEYNAME)",
+            "NTH_VALUE(QUESTIONTEXT, 1) OVER (ORDER BY SURVEYNAME)",
+            "LEAD(QUESTIONTEXT) OVER (ORDER BY SURVEYNAME)",
+            "CASE QUESTIONTEXT WHEN 'x' THEN 1 END",
+            "CASE SURVEYNAME WHEN QUESTIONTEXT THEN 1 END",
+            "MAX(SURVEYNAME) KEEP (DENSE_RANK FIRST ORDER BY QUESTIONTEXT)",
+        )
+    ]
+    + [
+        f"SELECT 1 FROM {D} WHERE SURVEYNAME IN (SELECT QUESTIONTEXT FROM {D})",
+        f"SELECT 1 FROM {D} WHERE QUESTIONTEXT NOT IN ('x')",
+        f"SELECT 1 FROM {D} WHERE QUESTIONTEXT <> 'x'",
+        f"SELECT 1 FROM {D} a NATURAL JOIN {D} b",
+        f"SELECT 1 FROM {D} a JOIN {D} b USING (QUESTIONTEXT)",
+        f"SELECT LEVEL FROM {D} START WITH SURVEYNAME IS NULL "
+        "CONNECT BY PRIOR QUESTIONTEXT = QUESTIONTEXT",
+        f"SELECT COUNT(*) FROM {D} GROUP BY ROLLUP(QUESTIONTEXT)",
+        f"SELECT QUESTIONTEXT FROM {D} INTERSECT SELECT ANSWERCHOICES FROM {D}",
+        f"SELECT DISTINCT TO_CLOB(SURVEYNAME) FROM {D}",
+    ]
+)
+
+
+@pytest.mark.parametrize("sql", REFUSED_FORMS)
+def test_each_form_the_check_refuses_oracle_refuses(oracle, sql):
+    cursor, columns = oracle
+    with pytest.raises(SqlRejected):
+        check(columns, sql)
+    assert run(cursor, sql) in LOB_ERRORS
+
+
 @pytest.mark.parametrize(("refused", "fixed"), LONG_TEXT)
 def test_long_text_the_check_refuses_oracle_refuses(oracle, refused, fixed):
     cursor, columns = oracle
@@ -174,6 +244,16 @@ def test_long_text_the_check_refuses_oracle_refuses(oracle, refused, fixed):
         f"SELECT q FROM (SELECT QUESTIONTEXT q, SURVEYNAME s FROM {D}) ORDER BY s",
         f"SELECT LISTAGG({FIXED}, '; ') WITHIN GROUP (ORDER BY SURVEYNAME) FROM {D} "
         "WHERE ROWNUM <= 3",
+        # The first result decides the type (from the code review).
+        f"SELECT DISTINCT NVL(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+        f"SELECT DISTINCT NVL2(SURVEYNAME, SURVEYNAME, QUESTIONTEXT) FROM {D}",
+        f"SELECT DISTINCT DECODE(SURVEYNAME, 'x', SURVEYNAME, QUESTIONTEXT) FROM {D}",
+        f"SELECT GREATEST(SURVEYNAME, QUESTIONTEXT) FROM {D}",
+        f"SELECT DISTINCT TRANSLATE(QUESTIONTEXT, 'a', 'b'), INITCAP(QUESTIONTEXT) FROM {D}",
+        f"SELECT 1 FROM {D} a JOIN {D} b USING (SURVEYNAME) WHERE ROWNUM <= 3",
+        f"SELECT LEVEL FROM {D} START WITH QUESTIONTEXT LIKE 'x%' "
+        "CONNECT BY NOCYCLE PRIOR SURVEYNAME = SURVEYNAME AND LEVEL < 2",
+        f"SELECT COUNT(LENGTH(QUESTIONTEXT)), MAX(LENGTH(QUESTIONTEXT)) FROM {D}",
     ],
 )
 def test_long_text_the_check_allows_oracle_runs(oracle, sql):
@@ -231,3 +311,74 @@ def test_what_a_refusal_from_oracle_says(tmp_path: Path):
     # 23ai quotes the value that isn't a number; DataLab doesn't pass it on.
     number = refusal(f"SELECT TO_NUMBER(SURVEYNAME) FROM {D} WHERE SURVEYNAME IS NOT NULL")
     assert number == f"ORA-01722: {EXPLANATIONS['ORA-01722']}"
+
+
+# Long text built in the query: 2,100 three-byte characters (6,300 bytes), and
+# 4,500 one-byte ones. The synthetic dictionary's text is all short.
+MULTIBYTE = (
+    "(SELECT "
+    + " || ".join(["TO_CLOB(TO_CHAR(UNISTR(RPAD('\\4e2d', 3500, '\\4e2d'))))"] * 3)
+    + " c FROM DUAL)"
+)
+LONG_ASCII = "(SELECT TO_CLOB(RPAD('x', 4000, 'x')) || TO_CLOB(RPAD('y', 500, 'y')) c FROM DUAL)"
+
+
+def test_the_1000_character_conversion_is_safe_for_any_text(oracle):
+    """What the check's message and the guidance say (external review: no
+    silent truncation): 1,000 characters always fit Oracle's 4,000 bytes;
+    more may not; a cut shows in LENGTH."""
+    cursor, _ = oracle
+    cursor.execute(f"SELECT LENGTH(c), LENGTHB(TO_CHAR(SUBSTR(c, 1, 1000))) FROM {MULTIBYTE}")
+    assert cursor.fetchone() == (2100, 3000)
+    assert run(cursor, f"SELECT DISTINCT TO_CHAR(SUBSTR(c, 1, 1000)) FROM {MULTIBYTE}") is None
+    assert run(cursor, f"SELECT DISTINCT TO_CHAR(SUBSTR(c, 1, 1500)) FROM {MULTIBYTE}") == (
+        "ORA-64203"
+    )
+    assert run(cursor, f"SELECT DISTINCT TO_CHAR(c) FROM {LONG_ASCII}") == "ORA-22835"
+    cursor.execute(
+        f"SELECT LENGTH(c), LENGTH(TO_CHAR(SUBSTR(c, 1, 1000))), "
+        f"CASE WHEN LENGTH(c) > 1000 THEN 1 ELSE 0 END FROM {LONG_ASCII}"
+    )
+    assert cursor.fetchone() == (4500, 1000, 1)  # cut, and it shows
+
+
+def test_blobs_as_the_message_says(oracle):
+    """The synthetic database has no BLOB column, so one is made in the
+    query (TO_BLOB, which the check itself wouldn't allow): DISTINCT, ORDER
+    BY, = and MAX fail; LENGTH and IS NULL work."""
+    cursor, _ = oracle
+    blob = "(SELECT TO_BLOB(HEXTORAW('ABCD')) b FROM DUAL)"
+    for sql in (
+        f"SELECT DISTINCT b FROM {blob}",
+        f"SELECT 1 FROM {blob} ORDER BY b",
+        f"SELECT MAX(b) FROM {blob}",
+        f"SELECT 1 FROM {blob} WHERE b = HEXTORAW('AB')",
+    ):
+        assert run(cursor, sql) in LOB_ERRORS, sql
+    assert run(cursor, f"SELECT LENGTH(b) FROM {blob} WHERE b IS NOT NULL") is None
+
+
+def test_a_round_trip_longer_than_the_call_timeout_is_a_timeout(tmp_path: Path):
+    """DPY-4024 (one round trip over round_trip_timeout_seconds) is a timeout,
+    with its reason and limit, not a generic failure (external review)."""
+    if not PASSWORD:
+        pytest.skip("Set DATALAB_ORACLE_PASSWORD for the synthetic database")
+    database = OracleDatabase(
+        PRACTICE_ORACLE, PASSWORD, QueryLimits(round_trip_timeout_seconds=1, deadline_seconds=60)
+    )
+    slow = "SELECT COUNT(*) FROM all_objects a CROSS JOIN all_objects b CROSS JOIN all_objects c"
+    with pytest.raises(QueryTimedOut) as info:
+        database.extract_to_csv(
+            slow,
+            {},
+            tmp_path / "q.csv",
+            max_rows=10,
+            max_bytes=10**6,
+            preview_rows=1,
+            cancel=threading.Event(),
+        )
+    assert info.value.reason == "call_timeout" and info.value.limit_seconds == 1
+    assert info.value.code == "DPY-4024" and info.value.category == "timeout"
+    assert str(info.value).startswith(
+        "Oracle took longer than 1 s to answer one request (DPY-4024)"
+    )

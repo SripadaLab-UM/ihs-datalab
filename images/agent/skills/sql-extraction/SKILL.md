@@ -43,9 +43,21 @@ Query the IHS database carefully and show your work.
     `GROUP BY`, `ORDER BY`, `PARTITION BY`, `UNION` (without `ALL`),
     `MIN`/`MAX`/`COUNT`, `=`/`IN`/`BETWEEN` or a join. `SUBSTR`, `UPPER`,
     `TRIM` and `||` still return a CLOB. Convert first:
-    `TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000))` is ordinary text of up to 1,000
-    characters. To count them, use `COUNT(LENGTH(col))`.
+    `TO_CHAR(SUBSTR(QUESTIONTEXT, 1, 1000))` is the first 1,000 characters as
+    ordinary text (always within Oracle's 4,000-byte limit, whatever the
+    characters). Don't cut values silently to make a query run:
+    - for a preview, that conversion is fine; say it's a preview;
+    - for exact grouping or de-duplication, check `MAX(LENGTH(col))` first. If
+      it's 1,000 or less, the conversion is the whole value. If not, group by
+      identifying columns (the dictionary's `SURVEYNAME`, `RESULTIDENTIFIER`)
+      and fetch the full text separately, or report that values over 1,000
+      characters were cut, with how many
+      (`SUM(CASE WHEN LENGTH(col) > 1000 THEN 1 ELSE 0 END)`);
+    - select `LENGTH(col)` beside the converted text, so a cut shows.
+    To count them, use `COUNT(LENGTH(col))`.
 12. If a query is rejected (it isn't a single SELECT, or it's too large), read
     the message, narrow the query, and try again. If the database refuses it,
-    the message gives the Oracle code and what to change. Don't try to get
-    around a limit; ask the person instead.
+    the message gives the Oracle code and what to change. If it times out,
+    don't run the same query again: split it (by table or data source, or by
+    date range) or narrow it first. Don't try to get around a limit; ask the
+    person instead.

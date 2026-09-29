@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { activityRows, answerOf, describeCommand, nowLine, queryRefusal, refusedBy, shortTable, tablesIn } from "./activity";
-import type { Item } from "./transcript";
+import { activityRows, answerOf, describeCommand, nowLine, queryRefusal, shortTable, tablesIn } from "./activity";
+import type { Item, ToolFailure } from "./transcript";
 
 // Commands as Codex really sends them (from practice sessions, synthetic data).
 describe("describeCommand", () => {
@@ -72,26 +72,34 @@ describe("activityRows", () => {
     expect(query.type === "step" && query.step.chips.map((c) => c.text)).toEqual(["1 row", "read-only"]);
   });
 
-  it("says who refused a query, with the Oracle code and DataLab's own words for it", () => {
-    const failedWith = (error: string) => {
-      const row = activityRows([{ ...(tool("query", { sql: "SELECT 1 FROM IHS_2025.X" }, null, "failed") as object), error } as Item], false)[0];
+  it("says who refused a query, and why, from its category and code", () => {
+    const failedWith = (failure: ToolFailure | null, error = "x") => {
+      const row = activityRows([{ ...(tool("query", { sql: "SELECT 1 FROM IHS_2025.X" }, null, "failed") as object), error, failure } as Item], false)[0];
       return row.type === "step" ? row.step.chips.map((c) => c.text) : [];
     }; // prettier-ignore
-    expect(failedWith('{"message":"The database refused this query: ORA-00932: inconsistent data types. Often a CLOB"}')).toEqual([
-      "the database refused it: ORA-00932 — inconsistent data types, often a CLOB column sorted, grouped or compared",
+    const f = (category: ToolFailure["category"], code: string | null = null): ToolFailure => ({ category, code, queryId: null });
+    expect(failedWith(f("sql", "ORA-00932"))).toEqual(["the database refused it: ORA-00932 — data types don't match (often a long-text column)"]);
+    expect(failedWith(f("sql", "ORA-00904"))).toEqual(["the database refused it: ORA-00904 — unknown column: check its spelling and quotes"]);
+    expect(failedWith(f("sql", "ORA-00933"))).toEqual(["the database refused it: ORA-00933 — Oracle couldn't read the SQL"]);
+    expect(failedWith(f("sql", "ORA-12345"))).toEqual(["the database refused it: ORA-12345"]);
+    // A local refusal is never labelled Oracle's, whatever its text says.
+    expect(failedWith(f("validation", "long_text"), "The database refused ORA-00932")).toEqual([
+      "the SQL check refused it: long-text column can't be sorted, grouped or compared",
     ]);
-    expect(failedWith("The database refused this query: ORA-00904: a name in the query isn't a column")).toEqual([
-      "the database refused it: ORA-00904 — a column name Oracle doesn't know (check its spelling and quotes)",
-    ]);
-    // A code DataLab has no words for is shown as the code alone: none of Oracle's text.
-    expect(failedWith("The database refused this query: ORA-12345: something 'secret-value'")).toEqual(["the database refused it: ORA-12345"]);
-    // The SQL check's refusal names an ORA code it avoided: it's still the check's.
-    expect(failedWith("DataLab's SQL check refused this query, so it didn't run: QUESTIONTEXT is a CLOB column (ORA-00932 or ORA-22848).")).toEqual([
-      "the SQL check refused it",
-    ]);
-    expect(failedWith("The query ran longer than 300 seconds and was cancelled.")).toEqual(["it didn't run"]);
+    expect(failedWith(f("validation", "spelling"))).toEqual(["the SQL check refused it: column needs quoting"]);
+    expect(failedWith(f("timeout", "call_timeout"))).toEqual(["query timed out"]);
+    expect(failedWith(f("connection", "DPY-6005"))).toEqual(["couldn't reach the database"]);
+    // Without a structured failure (an older event), the text isn't read.
+    expect(failedWith(null, "The database refused this query: ORA-00932")).toEqual(["it didn't run"]);
     expect(queryRefusal(null)).toBe("it didn't run");
-    expect(refusedBy("DataLab's SQL check refused this query, so it didn't run: x")).toBe("check");
+  });
+
+  it("marks a failed query recovered when a later query in the turn succeeded", () => {
+    const failed = { ...(tool("query", { sql: "SELECT 1" }, null, "failed") as object), id: "a", error: "x", failure: { category: "timeout", code: "call_timeout", queryId: null } } as Item; // prettier-ignore
+    const good = { ...(tool("query", { sql: "SELECT 2" }, { row_count: 1 }) as object), id: "b" } as Item;
+    const chips = (rows: ReturnType<typeof activityRows>) => rows.map((r) => (r.type === "step" ? r.step.chips.map((c) => c.text) : []));
+    expect(chips(activityRows([failed, good], false))[0]).toEqual(["query timed out", "recovered"]);
+    expect(chips(activityRows([good, failed], false))[1]).toEqual(["query timed out"]);
   });
 
   it("marks a failed query, and a running step as live", () => {

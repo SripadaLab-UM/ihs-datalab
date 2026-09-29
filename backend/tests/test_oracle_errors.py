@@ -4,7 +4,7 @@ import oracledb
 import pytest
 from oracledb import errors as oracledb_errors
 
-from datalab.data.oracle_errors import EXPLANATIONS, explain, oracle_code
+from datalab.data.oracle_errors import EXPLANATIONS, category, explain, oracle_code
 
 
 def error(message: str) -> oracledb.DatabaseError:
@@ -50,3 +50,60 @@ def test_other_errors_keep_their_first_line():
         "DPY-4010: a bind variable replacement value"
     )
     assert oracle_code(error("ORA-00942: table or view does not exist")) == "ORA-00942"
+
+
+def test_a_parallel_query_error_is_explained_by_the_one_it_wraps():
+    # Production's first line names the parallel server's host and SID.
+    wrapped = error(
+        "ORA-12801: error signaled in parallel query server P001, instance dbhost01:IHSPROD1\n"
+        "ORA-00932: inconsistent datatypes: expected - got CLOB"
+    )
+    said = explain(wrapped)
+    assert said.startswith("ORA-00932: inconsistent data types")
+    assert "dbhost01" not in said and "IHSPROD1" not in said and "P001" not in said
+    alone = explain(error("ORA-12801: error signaled in parallel query server P001, instance h:S"))
+    assert alone == "ORA-12801: a parallel query server failed. Try again, or narrow the query."
+    assert category(oracle_code(wrapped)) == "sql"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "DPY-6005: cannot connect to database (CONNECTION_ID=x). [Errno 61] dbhost01:1521",
+        "ORA-12514: Cannot connect to database. Service IHSPROD is not registered with the "
+        "listener at host 10.1.2.3 port 1521.",
+        "ORA-03113: end-of-file on communication channel\nProcess ID: 1\nSession ID: 2",
+    ],
+)
+def test_not_reaching_the_database_names_no_host(message):
+    said = explain(error(message))
+    code = message.split(":")[0]
+    assert said == (
+        f"DataLab couldn't reach the database ({code}). Check the network or VPN "
+        "connection, then try again."
+    )
+    assert category(code) == "connection"
+
+
+def test_categories():
+    assert category("ORA-00942") == "permission"
+    assert category("DPY-4024") == "timeout"
+    assert category("ORA-12899") == "sql"  # a value too long, not the network
+    assert category("ORA-00932") == "sql"
+    assert category(None) == "sql"
+
+
+def test_the_identifier_must_be_a_whole_name_in_the_query():
+    # "BDATE" is in "BDATES_TABLE" as a substring, not as a name.
+    said = explain(error('ORA-00904: "BDATE": invalid identifier'), "SELECT BDATES_TABLE FROM T")
+    assert '"BDATE"' not in said
+    quoted = explain(
+        error('ORA-00904: "T"."Bdate": invalid identifier'), 'SELECT t."Bdate" FROM T t'
+    )
+    assert '"T"."Bdate"' in quoted
+
+
+def test_long_text_conversion_errors():
+    for code in ("ORA-22835", "ORA-64203"):
+        said = explain(error(f"{code}: Buffer too small (actual: 4500, maximum: 4000)"))
+        assert "1,000 characters" in said and "4500" not in said

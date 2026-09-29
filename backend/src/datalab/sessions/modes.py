@@ -204,12 +204,17 @@ most important limitations and next steps.
     + SUGGEST_KB
 )
 
-# Two Oracle rules queries keep running into, for the modes that write SQL.
+# Oracle rules queries keep running into, for the modes that write SQL.
 ORACLE_NAMES = """\
 - Write a column spelled with lower-case letters in double quotes, exactly
   as describe_table shows it ("Bdate"). A CLOB (long text) column can't go in
   SELECT DISTINCT, GROUP BY, ORDER BY, UNION, MIN/MAX/COUNT or a comparison
-  (SUBSTR of it is still a CLOB): use TO_CHAR(SUBSTR(col, 1, 1000)) there.
+  (SUBSTR of it is still a CLOB): convert it with TO_CHAR(SUBSTR(col, 1, 1000)),
+  the first 1,000 characters. That's a preview unless MAX(LENGTH(col)) is
+  1,000 or less; never cut values silently: select LENGTH(col) beside it, or
+  group by identifying columns and fetch the full text separately.
+- If a query times out, don't run it again as it is: split it (by table or
+  data source, or by date range) or narrow it first.
 """
 
 EXTRACTION = (
