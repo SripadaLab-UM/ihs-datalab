@@ -829,7 +829,20 @@ def _result(check_id: str, promise: str, label: str, ok: bool, detail: str) -> C
 
 
 def _files(root: Path) -> list[Path]:
-    return [p for p in root.rglob("*") if p.is_file() and not p.is_symlink()]
+    """The regular files under `root`, as they are (links not followed). What
+    can't be read is skipped: on Windows, a Linux symlink made in a container
+    is a reparse point that `is_file()` raises WinError 1920 on."""
+    import stat
+
+    found = []
+    for path in root.rglob("*"):
+        try:
+            info = path.lstat()
+        except OSError:
+            continue
+        if stat.S_ISREG(info.st_mode) and not getattr(info, "st_reparse_tag", 0):
+            found.append(path)
+    return found
 
 
 def _holds(path: Path, secrets: list[str], limit: int = 64 * 1024**2) -> bool:

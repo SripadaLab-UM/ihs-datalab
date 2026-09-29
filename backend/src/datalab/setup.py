@@ -344,7 +344,14 @@ def uninstall(*, delete_data: bool | None) -> int:
         if delete_data:
             for folder in existing:
                 shutil.rmtree(folder, ignore_errors=True)
-            print("Deleted.")
+            # Said as it is: a file something still has open stays behind.
+            left = [folder for folder in existing if folder.exists()]
+            if left:
+                print("Deleted, except what couldn't be removed (a file still in use?):")
+                for folder in left:
+                    print(f"  {folder}  ({_size(folder)} left). Delete it yourself.")
+            else:
+                print("Deleted.")
         else:
             print("Kept. You can delete them yourself later.")
     _uninstall_practice_database(chosen)
@@ -465,9 +472,11 @@ def _docker_quiet(*query: str, then: str) -> None:
 
 
 def _size(folder: Path) -> str:
-    total = sum(p.stat().st_size for p in folder.rglob("*") if p.is_file() and not p.is_symlink())
-    for unit in ("bytes", "KB", "MB", "GB"):
-        if total < 1024 or unit == "GB":
-            return f"{total:.0f} {unit}" if unit == "bytes" else f"{total:.1f} {unit}"
-        total /= 1024
-    return ""
+    """How much a data folder holds, never following a link and skipping what
+    can't be read. A conversation's codex-home holds Linux symlinks that Codex
+    made in its container (`tmp/arg0/…/applypatch`); on Windows they're WSL
+    reparse points that can't be opened, and `is_file()` on one raised
+    WinError 1920, which stopped the uninstaller (0.3.0b3)."""
+    from datalab.storage import human, size_of
+
+    return human(size_of(folder))
