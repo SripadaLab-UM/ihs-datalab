@@ -6,7 +6,7 @@ import { type DockerStatus, dockerApi } from "@/api/docker";
 
 import { DockerBanner } from "./DockerBanner";
 
-vi.mock("@/api/docker", () => ({ dockerApi: { status: vi.fn(), start: vi.fn(), fix: vi.fn() } }));
+vi.mock("@/api/docker", () => ({ dockerApi: { status: vi.fn(), check: vi.fn(), start: vi.fn(), fix: vi.fn() } }));
 
 const refused: DockerStatus = { state: "vm-refused", fixing: false, admin_access_url: "https://admin.example.org/jit" };
 
@@ -22,6 +22,8 @@ beforeEach(() => {
   vi.mocked(dockerApi.status).mockReset();
   vi.mocked(dockerApi.start).mockReset();
   vi.mocked(dockerApi.fix).mockReset();
+  vi.mocked(dockerApi.check).mockReset();
+  sessionStorage.clear();
 });
 
 it("shows nothing while Docker is ready, or off Windows", async () => {
@@ -88,4 +90,38 @@ it("offers to open a closed Docker Desktop", async () => {
   expect(await screen.findByText(/Docker Desktop is starting/)).toBeInTheDocument();
   expect(dockerApi.fix).not.toHaveBeenCalled();
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+});
+
+it("the blocked banner is an alert; Later holds for the session, and the banner still reopens the dialog", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue(refused);
+  const first = banner();
+  const dialog = await screen.findByRole("dialog");
+  expect(screen.getByRole("alert")).toHaveTextContent("Windows is blocking its virtual machine");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Later" }));
+  first.unmount();
+  // Another page load in the same session: no dialog by itself, but the banner offers it.
+  banner();
+  expect(await screen.findByRole("button", { name: "How to fix it…" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "How to fix it…" }));
+  expect(await screen.findByRole("dialog")).toBeInTheDocument();
+});
+
+it("check again asks for a new check, and a check that can't tell isn't called fixed", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue(refused);
+  vi.mocked(dockerApi.check).mockResolvedValue({ ...refused, state: "unknown" });
+  banner();
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Check again" }));
+  expect(await within(dialog).findByText(/couldn't tell whether Windows lets it start/)).toBeInTheDocument();
+  expect(within(dialog).getByRole("button", { name: "Fix it" })).toBeEnabled();
+  expect(within(dialog).queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
+  expect(dockerApi.check).toHaveBeenCalledTimes(1);
+});
+
+it("says when Docker Desktop isn't installed", async () => {
+  vi.mocked(dockerApi.status).mockResolvedValue({ state: "not-installed", fixing: false, admin_access_url: null });
+  banner();
+  expect(await screen.findByRole("status")).toHaveTextContent("Run the DataLab installer again");
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
 });

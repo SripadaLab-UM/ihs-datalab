@@ -197,9 +197,16 @@ class WindowsSettings:
     admin_access_url: str | None = None
 
     def __post_init__(self) -> None:
+        # Only a link: one that isn't an https:// address is left out (the page
+        # then says where in words), rather than stopping DataLab from starting.
         url = self.admin_access_url
         if url is not None and not re.fullmatch(r"https://[^\s\"'<>]+", url):
-            raise ValueError("windows.admin_access_url must be an https:// address")
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "windows.admin_access_url isn't an https:// address, so it's ignored"
+            )
+            object.__setattr__(self, "admin_access_url", None)
 
 
 @dataclass(frozen=True)

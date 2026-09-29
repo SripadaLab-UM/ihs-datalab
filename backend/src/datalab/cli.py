@@ -250,12 +250,11 @@ def _serve(settings, *, open_browser: bool) -> int:
     hourly.start()
     # On Windows: opens Docker Desktop if it's closed, and says in DataLab's window
     # when a policy stops its virtual machine (the page offers the fix).
-    threading.Thread(
-        target=_check_windows_vm,
-        args=(app.state.docker_doctor,),
-        name="windows-vm-check",
-        daemon=True,
-    ).start()
+    doctor = getattr(app.state, "docker_doctor", None)
+    if doctor is not None:
+        threading.Thread(
+            target=_check_windows_vm, args=(doctor,), name="windows-vm-check", daemon=True
+        ).start()
 
     class Server(uvicorn.Server):
         async def serve(self, sockets=None) -> None:

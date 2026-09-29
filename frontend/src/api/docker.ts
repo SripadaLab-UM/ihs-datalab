@@ -9,8 +9,10 @@ export type DockerFix = components["schemas"]["DockerFixOut"];
 export type DockerState = DockerStatus["state"];
 
 export const dockerApi = {
-  /** With `fresh`, checks again now rather than using the last few seconds' answer. */
-  status: (fresh = false) => request<DockerStatus>(`/api/docker${fresh ? "?fresh=true" : ""}`),
+  /** The last check's answer (a new one runs at most every 15 seconds). */
+  status: () => request<DockerStatus>("/api/docker"),
+  /** Checks again now: the dialog's Check again. */
+  check: () => request<DockerStatus>("/api/docker/check", { method: "POST", body: "{}" }),
   start: () => request<DockerStatus>("/api/docker/start", { method: "POST", body: "{}" }),
   /** Answers once the person has answered Windows' permission box. */
   fix: () => request<DockerFix>("/api/docker/fix", { method: "POST", body: "{}" }),

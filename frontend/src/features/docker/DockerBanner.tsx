@@ -1,9 +1,10 @@
 // Docker on Windows (backend api/docker.py, windows_vm.py). While Docker can't
-// run, every page says so in a banner under the header, with what to do. When a
+// run, every page says so in a banner at the top, with what to do. When a
 // Windows policy has stopped Docker's virtual machine, a dialog opens by itself
-// and walks through the fix: turn on the temporary administrator access (on a
-// Michigan Medicine computer, from the profile page), then answer one Windows
-// permission box. DataLab never shows that box without the person asking.
+// (once a session, unless put off with Later) and walks through the fix: turn
+// on the temporary administrator access (on a Michigan Medicine computer, from
+// the profile page), then answer one Windows permission box. DataLab never
+// shows that box without the person asking.
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
@@ -13,20 +14,40 @@ import { Button, Icon, Modal } from "@/components/ui";
 const KEY = ["docker"];
 // Nothing to sort out: checked now and then, as a policy can take the right away while DataLab is open.
 const SETTLED = new Set<DockerStatus["state"]>(["ready", "unsupported"]);
+// What a check after the fix means it worked: Windows lets the VM start again.
+const VM_STARTS = new Set<DockerStatus["state"]>(["ready", "starting", "stopped"]);
+// "Later" holds for this browser session (the banner stays and reopens the dialog).
+const LATER = "datalab.docker-fix-later";
 
 export function useDockerStatus() {
   return useQuery({
     queryKey: KEY,
-    queryFn: () => dockerApi.status(),
-    refetchInterval: (query) => (query.state.data && SETTLED.has(query.state.data.state) ? 5 * 60_000 : 10_000),
+    queryFn: dockerApi.status,
+    refetchInterval: (query) => (query.state.data && SETTLED.has(query.state.data.state) ? 5 * 60_000 : 30_000),
     retry: false,
   });
 }
 
-function Bar({ children }: { children: ReactNode }) {
+function putOffUntilLater() {
+  try {
+    sessionStorage.setItem(LATER, "1");
+  } catch {
+    // Private windows may refuse storage: it then opens again next time.
+  }
+}
+
+function putOff(): boolean {
+  try {
+    return sessionStorage.getItem(LATER) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function Bar({ children, urgent = false }: { children: ReactNode; urgent?: boolean }) {
   return (
     <div
-      role="status"
+      role={urgent ? "alert" : "status"}
       className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-attn/30 bg-attn-soft px-4 py-2 text-center text-sm font-medium text-ink"
     >
       <Icon name="alert" size={14} className="shrink-0 text-attn" />
@@ -40,12 +61,13 @@ export function DockerBanner() {
   const docker = useDockerStatus();
   const state = docker.data?.state;
   const [open, setOpen] = useState(false);
-  // The dialog opens by itself once per page; after that the banner's button opens it.
+  // The dialog opens by itself once per page, unless put off this session;
+  // after that the banner's button opens it.
   const opened = useRef(false);
   useEffect(() => {
     if (state === "vm-refused" && !opened.current) {
       opened.current = true;
-      setOpen(true);
+      if (!putOff()) setOpen(true);
     }
   }, [state]);
   const start = useMutation({ mutationFn: dockerApi.start, onSuccess: (status) => client.setQueryData(KEY, status) });
@@ -53,11 +75,19 @@ export function DockerBanner() {
   return (
     <>
       {state === "vm-refused" && (
-        <Bar>
+        <Bar urgent>
           <span>Docker can't start: Windows is blocking its virtual machine, so conversations and workflows can't run.</span>
           <Button className="py-0.5" onClick={() => setOpen(true)}>
             How to fix it…
           </Button>
+        </Bar>
+      )}
+      {state === "not-installed" && (
+        <Bar>
+          <span>
+            Docker Desktop isn't installed, so conversations and workflows can't run. Run the DataLab installer again: it
+            sets Docker Desktop up.
+          </span>
         </Bar>
       )}
       {state === "stopped" && (
@@ -73,7 +103,16 @@ export function DockerBanner() {
           <span>Docker Desktop is starting. Conversations and workflows can start once it's ready (a minute or two).</span>
         </Bar>
       )}
-      {open && <DockerFixDialog status={docker.data} onClose={() => setOpen(false)} />}
+      {open && (
+        <DockerFixDialog
+          status={docker.data}
+          onClose={() => setOpen(false)}
+          onLater={() => {
+            putOffUntilLater();
+            setOpen(false);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -85,30 +124,41 @@ function outcomeText(outcome: DockerFix["outcome"]): { text: string; ok: boolean
     case "declined":
       return {
         ok: false,
-        text: "Windows didn't give permission. Check that your temporary administrator access is on (it can take a minute to turn on), then click Fix it again.",
+        text: "Windows didn't give permission, or the change didn't go through. Check that your temporary administrator access is on (it can take a minute to turn on), then click Fix it again.",
       };
     case "still-refused":
       return { ok: false, text: "That didn't fix it. Restart Windows instead: that puts the permission back too." };
     case "busy":
       return { ok: false, text: "Windows' permission box is already open: look for it (it may be behind other windows)." };
+    case "not-needed":
+      return { ok: true, text: "Windows isn't blocking Docker's virtual machine now, so there's nothing to fix." };
     default:
       return { ok: false, text: "This computer doesn't need this fix." };
   }
 }
 
-export function DockerFixDialog({ status, onClose }: { status: DockerStatus; onClose: () => void }) {
+export function DockerFixDialog({
+  status,
+  onClose,
+  onLater = onClose,
+}: {
+  status: DockerStatus;
+  onClose: () => void;
+  onLater?: () => void;
+}) {
   const client = useQueryClient();
   const fix = useMutation({
     mutationFn: dockerApi.fix,
     onSuccess: (result) => client.setQueryData<DockerStatus>(KEY, (old) => old && { ...old, state: result.state, fixing: false }),
   });
   const recheck = useMutation({
-    mutationFn: () => dockerApi.status(true),
+    mutationFn: dockerApi.check,
     onSuccess: (fresh) => client.setQueryData(KEY, fresh),
   });
   const url = status.admin_access_url;
   const outcome = fix.data && outcomeText(fix.data.outcome);
-  const fixed = fix.data?.outcome === "fixed" || (recheck.data !== undefined && recheck.data.state !== "vm-refused");
+  const vmStarts = recheck.data !== undefined && VM_STARTS.has(recheck.data.state);
+  const fixed = fix.data?.outcome === "fixed" || fix.data?.outcome === "not-needed" || vmStarts;
   const waiting = fix.isPending || (status.fixing && !fix.data);
   return (
     <Modal
@@ -121,7 +171,7 @@ export function DockerFixDialog({ status, onClose }: { status: DockerStatus; onC
           </Button>
         ) : (
           <>
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" onClick={onLater}>
               Later
             </Button>
             <Button disabled={recheck.isPending || waiting} onClick={() => recheck.mutate()}>
@@ -179,9 +229,11 @@ export function DockerFixDialog({ status, onClose }: { status: DockerStatus; onC
       )}
       {!fix.data && recheck.data && (
         <p role="status" className="mt-3 text-sm font-medium">
-          {recheck.data.state === "vm-refused"
-            ? "Still blocked. Follow the steps above, or restart Windows."
-            : "Docker's virtual machine can start again."}
+          {vmStarts
+            ? "Docker's virtual machine can start again."
+            : recheck.data.state === "vm-refused"
+              ? "Still blocked. Follow the steps above, or restart Windows."
+              : "DataLab couldn't tell whether Windows lets it start. Try Fix it, or restart Windows."}
         </p>
       )}
       {(fix.error || recheck.error) && (

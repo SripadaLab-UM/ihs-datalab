@@ -2422,6 +2422,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/docker/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check */
+        post: operations["check_api_docker_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docker/start": {
         parameters: {
             query?: never;
@@ -3216,12 +3233,12 @@ export interface components {
              * Outcome
              * @enum {string}
              */
-            outcome: "fixed" | "declined" | "still-refused" | "busy" | "unsupported";
+            outcome: "fixed" | "declined" | "still-refused" | "busy" | "not-needed" | "unsupported";
             /**
              * State
              * @enum {string}
              */
-            state: "unsupported" | "ready" | "vm-refused" | "starting" | "stopped" | "unknown";
+            state: "unsupported" | "ready" | "not-installed" | "stopped" | "starting" | "vm-refused" | "unknown";
         };
         /** DockerStatusOut */
         DockerStatusOut: {
@@ -3229,7 +3246,7 @@ export interface components {
              * State
              * @enum {string}
              */
-            state: "unsupported" | "ready" | "vm-refused" | "starting" | "stopped" | "unknown";
+            state: "unsupported" | "ready" | "not-installed" | "stopped" | "starting" | "vm-refused" | "unknown";
             /** Fixing */
             fixing: boolean;
             /** Admin Access Url */
@@ -10400,9 +10417,7 @@ export interface operations {
     };
     get_status_api_docker_get: {
         parameters: {
-            query?: {
-                fresh?: boolean;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -10418,13 +10433,24 @@ export interface operations {
                     "application/json": components["schemas"]["DockerStatusOut"];
                 };
             };
-            /** @description Validation Error */
-            422: {
+        };
+    };
+    check_api_docker_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["DockerStatusOut"];
                 };
             };
         };

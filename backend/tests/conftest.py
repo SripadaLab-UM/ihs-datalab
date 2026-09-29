@@ -230,3 +230,15 @@ def live_server(app) -> Iterator[str]:
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+@pytest.fixture
+def docker_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Docker Desktop's program on Windows, where DataLab opens it from
+    (windows_vm.py): a stand-in file, so no test opens the real one."""
+    from datalab import windows_vm
+
+    program = tmp_path / "Docker Desktop.exe"
+    program.write_bytes(b"")
+    monkeypatch.setattr(windows_vm, "docker_desktop", lambda: program)
+    return program

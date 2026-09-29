@@ -100,16 +100,20 @@ Run = Callable[..., subprocess.CompletedProcess]
 Probe = Literal["ok", "refused", "unknown"]
 # How Docker stands, as the page shows it (api/docker.py): "unsupported" off
 # Windows (none of this applies there); "ready" when its engine answers;
-# "vm-refused" when the policy has taken the right away; "starting" while
-# Docker Desktop is open but its engine isn't answering yet; "stopped" when
-# Docker Desktop isn't open; "unknown" when WSL itself couldn't say.
-DockerState = Literal["unsupported", "ready", "vm-refused", "starting", "stopped", "unknown"]
-# What asking for the fix came to: "declined" when the administrator prompt
-# was closed or refused (on a Michigan Medicine computer, most often because
-# the temporary administrator access isn't on); "still-refused" when it ran
-# but Windows still won't let the virtual machine sign in; "busy" when a
-# prompt is already showing.
-FixOutcome = Literal["fixed", "declined", "still-refused", "busy", "unsupported"]
+# "not-installed" when Docker Desktop isn't where its installer puts it;
+# "stopped" when Docker Desktop isn't open; "starting" while it's open but its
+# engine isn't answering yet; "vm-refused" when the policy has taken the right
+# away; "unknown" when WSL itself couldn't say.
+DockerState = Literal[
+    "unsupported", "ready", "not-installed", "stopped", "starting", "vm-refused", "unknown"
+]
+# What asking for the fix came to: "fixed"; "declined" when the administrator
+# prompt was closed or refused (on a Michigan Medicine computer, most often
+# because the temporary administrator access isn't on yet), or when the change
+# itself didn't go through; "still-refused" when it went through but Windows
+# still won't let the virtual machine sign in; "busy" when a prompt is already
+# showing; "not-needed" unless the last check found the VM refused.
+FixOutcome = Literal["fixed", "declined", "still-refused", "busy", "not-needed", "unsupported"]
 
 
 def system_dir() -> Path:
@@ -235,17 +239,26 @@ def start_docker(popen: Callable = subprocess.Popen) -> bool:
     return True
 
 
-def docker_state(run: Run = subprocess.run, platform: str = sys.platform) -> DockerState:
+def docker_state(
+    run: Run = subprocess.run, platform: str = sys.platform, *, probe_vm: bool = True
+) -> DockerState:
+    """How Docker stands now. WSL's virtual machine is only tried while Docker
+    Desktop is open and its engine isn't answering (with `probe_vm`): a
+    closed Docker Desktop is "stopped" without starting anything."""
     if platform != "win32":
         return "unsupported"
     if docker_answers(run):
         return "ready"
+    if not docker_desktop().exists():
+        return "not-installed"
+    if not docker_desktop_running(run):
+        return "stopped"
+    if not probe_vm:
+        return "starting"
     found = probe(run)
     if found == "refused":
         return "vm-refused"
-    if found == "unknown":
-        return "unknown"
-    return "starting" if docker_desktop_running(run) else "stopped"
+    return "starting" if found == "ok" else "unknown"
 
 
 class DockerDoctor:
@@ -254,11 +267,18 @@ class DockerDoctor:
     virtual machines' right back (one administrator prompt).
 
     Both the page and DataLab's own start (check_before_serve) ask it, so
-    their answers agree. A check can start WSL's virtual machine, so there's
-    one at a time, and an answer is kept for CACHE_SECONDS.
+    their answers agree. A check can start WSL's virtual machine, so:
+    - an answer is kept for CACHE_SECONDS, and asking to check again now
+      (`check`, the page's Check again) is ignored within MIN_CHECK_SECONDS;
+    - one check runs at a time, and while one does, others get the last answer
+      rather than waiting for it;
+    - once the virtual machine has started, it isn't tried again for
+      VM_OK_SECONDS while Docker Desktop is still starting.
     """
 
     CACHE_SECONDS = 15
+    MIN_CHECK_SECONDS = 5
+    VM_OK_SECONDS = 300
 
     def __init__(
         self,
@@ -276,6 +296,7 @@ class DockerDoctor:
         self._fixing = threading.Lock()
         self._state: DockerState | None = None
         self._checked = 0.0
+        self._vm_started: float | None = None
 
     @property
     def fixing(self) -> bool:
@@ -283,12 +304,29 @@ class DockerDoctor:
         return self._fixing.locked()
 
     def state(self, *, fresh: bool = False) -> DockerState:
-        with self._checking:
-            stale = self._clock() - self._checked > self.CACHE_SECONDS
-            if fresh or self._state is None or stale:
-                self._state = docker_state(self._run, self._platform)
+        """The last few seconds' answer, or a new one (`fresh`: now)."""
+        if not self._checking.acquire(blocking=self._state is None):
+            return self._state  # type: ignore[return-value]  # a check is running
+        try:
+            if fresh or self._state is None or self._clock() - self._checked > self.CACHE_SECONDS:
+                vm_ok = self._vm_started is not None and (
+                    self._clock() - self._vm_started < self.VM_OK_SECONDS
+                )
+                state = docker_state(self._run, self._platform, probe_vm=not vm_ok)
+                if state == "starting" and not vm_ok:
+                    self._vm_started = self._clock()  # the probe just ran, and the VM started
+                elif state != "starting":
+                    self._vm_started = None
+                self._state = state
                 self._checked = self._clock()
             return self._state
+        finally:
+            self._checking.release()
+
+    def check(self) -> DockerState:
+        """Check again now (the page's Check again), at most every few seconds."""
+        recent = self._state is not None and self._clock() - self._checked < self.MIN_CHECK_SECONDS
+        return self.state(fresh=not recent)
 
     def start(self) -> DockerState:
         """Open Docker Desktop if it's closed; how Docker stands then."""
@@ -298,16 +336,22 @@ class DockerDoctor:
 
     def fix(self) -> FixOutcome:
         """Show the administrator prompt and put the right back, then restart
-        Docker Desktop. Waits until the prompt is answered."""
+        Docker Desktop. Waits until the prompt is answered. Only when the last
+        check found the virtual machine refused: never while Docker works."""
         if self._platform != "win32":
             return "unsupported"
+        if self.state() != "vm-refused":
+            return "not-needed"
         if not self._fixing.acquire(blocking=False):
             return "busy"
         try:
+            # False also when the change itself didn't go through (the script
+            # failed, or the prompt was left unanswered for 10 minutes).
             if not grant(self._run):
                 return "declined"
             if probe(self._run) == "refused":
                 return "still-refused"
+            self._vm_started = self._clock()
             restart_docker(self._run, self._popen)
             return "fixed"
         finally:
@@ -329,7 +373,7 @@ def check_before_serve(doctor: DockerDoctor, *, say: Callable[[str], None] = pri
         state = doctor.start()
         if state != "stopped":
             say("Opening Docker Desktop, which conversations and workflows need (a minute or two).")
-    elif state == "vm-refused":
+    if state == "vm-refused":
         say("")
         say("Docker can't start on this computer right now: Windows won't let its virtual")
         say("machine sign in (a Windows policy took away a right it needs; this happens on")
