@@ -714,8 +714,8 @@ TASKS = [
          "a small cell that must be suppressed", _small_cells),
     Task("person_days", "extraction",
          "How many person-days of resting heart rate data are in the 2025 cohort's HealthKit "
-         "resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? Count every participant "
-         "and source in the view.",
+         "resting heart rate view (VHEALTHKITSAMPLES_RESTINGHEARTRATE)? A person-day is one "
+         "participant on one day, from any source; include every participant in the view.",
          "text timestamps: several a day, some after midnight or another date in UTC", _person_days),
     Task("cohort_coverage", "analysis",
          "Take the 2025 cohort to be the enrolled participants in IHS_2025.VW_IHS_PARTICIPANT_SUMMARY "
