@@ -4,7 +4,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 import { type DockerStatus, dockerApi } from "@/api/docker";
 
-import { DockerBanner } from "./DockerBanner";
+import { DockerBanner, pollEvery } from "./DockerBanner";
 
 vi.mock("@/api/docker", () => ({ dockerApi: { status: vi.fn(), check: vi.fn(), start: vi.fn(), fix: vi.fn() } }));
 
@@ -192,4 +192,36 @@ it("nothing to fix doesn't read as if Docker works", async () => {
   const said = await within(dialog).findByText(/nothing to fix here/);
   expect(said).toHaveTextContent("If Docker still doesn't start, restart Windows.");
   expect(said.className).not.toContain("text-data");
+});
+
+it("a look still on its way when the fix ends doesn't bring the banner back", async () => {
+  // Found on Windows (0.3.0b5): a look asked mid-restart answered "starting" after the fix's
+  // "ready", and the banner stayed until the next look.
+  let fixed: (value: Awaited<ReturnType<typeof dockerApi.fix>>) => void = () => {};
+  vi.mocked(dockerApi.fix).mockReturnValue(new Promise((resolve) => (fixed = resolve)));
+  let late: (value: DockerStatus) => void = () => {};
+  const onItsWay = new Promise<DockerStatus>((resolve) => (late = resolve));
+  vi.mocked(dockerApi.status).mockResolvedValueOnce(refused).mockReturnValue(onItsWay);
+  banner();
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Fix it" }));
+  // The fix looks again once it's under way: that look hasn't answered when the fix ends.
+  await waitFor(() => expect(dockerApi.status).toHaveBeenCalledTimes(2), { timeout: 4000 });
+  fixed({ outcome: "fixed", state: "ready", failed_step: null });
+  expect(await within(dialog).findByText(/Fixed. Docker is running again/)).toBeInTheDocument();
+  late({ ...refused, state: "starting", fixing: true, phase: "restarting" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+it("looks again every few seconds while Docker Desktop is starting or being fixed, rarely once it's ready", () => {
+  const status = (state: DockerStatus["state"], fixing = false): DockerStatus => ({ state, fixing, admin_access_url: null });
+  expect(pollEvery(status("vm-refused", true))).toBe(3_000);
+  expect(pollEvery(status("starting"))).toBe(5_000);
+  expect(pollEvery(status("vm-refused"))).toBe(30_000);
+  expect(pollEvery(status("stopped"))).toBe(30_000);
+  expect(pollEvery(status("ready"))).toBe(5 * 60_000);
+  expect(pollEvery(undefined)).toBe(30_000);
 });
