@@ -59,6 +59,16 @@ jobs:
       # The launcher's icons in <app>\icons: never through a link or junction.
       - name: Launcher icon tests
         run: uv run pytest -q tests/test_launcher_icons.py
+      # Git's read-only object files, which Windows won't delete as they are
+      # (remove_tree's retry; off Windows these pass either way), a clone an
+      # uninstall left half deleted, and what the secret scans can't read.
+      - name: Uninstall and clone clean-up tests
+        run: >-
+          uv run pytest -q tests/test_safety_files.py
+          tests/test_setup.py::test_uninstalling_deletes_the_lab_repos_read_only_git_files
+          tests/test_repos_git.py::test_a_half_deleted_clone_is_set_aside_and_cloned_again
+          tests/test_repos_git.py::test_only_old_staging_folders_are_swept_before_a_clone
+          tests/test_repos_git.py::test_the_read_only_retry_is_for_access_denied_only
 
   upgrade:
     # A data folder from the previous release (the last v* tag) upgrades with

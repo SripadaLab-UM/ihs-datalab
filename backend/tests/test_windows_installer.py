@@ -154,7 +154,7 @@ def test_the_package_name_must_carry_a_version(name, ok):
 
 def test_the_uninstaller_removes_only_what_the_installer_put_in_the_app_folder():
     body = code(UNINSTALL)
-    assert 'foreach ($name in "versions", "bin", "icons")' in body
+    assert 'foreach ($name in "versions", "bin", "icons", "downloads")' in body
     assert "$left.Count -eq 0) { Remove-Tree $Root }" in body
     assert 'Remove-Tree (Join-Path $StateDir "install")' in body
 
@@ -207,7 +207,7 @@ def test_the_start_menu_and_desktop_shortcuts_run_the_shim_with_each_profiles_ic
 
 
 def test_uninstall_removes_the_desktop_shortcuts_and_the_icons():
-    assert 'foreach ($name in "versions", "bin", "icons")' in UNINSTALL
+    assert 'foreach ($name in "versions", "bin", "icons", "downloads")' in UNINSTALL
     part = UNINSTALL[UNINSTALL.index('[Environment]::GetFolderPath("Desktop")') :]
     assert 'foreach ($name in "DataLab.lnk", "DataLab (practice).lnk")' in part
     # Only DataLab's own: a shortcut that runs this DataLab's bin\datalab.cmd,

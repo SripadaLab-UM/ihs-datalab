@@ -318,6 +318,7 @@ function RepoLine({ status, onSync, syncing, error }: { status: KnowledgeStatus;
       ) : (
         status.repo !== "in sync" && <p className={repo.tone === "bad" ? "text-danger" : "text-muted"}>{repo.text}</p>
       )}
+      {status.note && <p className="text-muted">{status.note}</p>}
       {error && <p className="text-danger">{error}</p>}
     </div>
   );

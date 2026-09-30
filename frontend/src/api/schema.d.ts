@@ -3903,6 +3903,8 @@ export interface components {
             behind: number;
             /** Message */
             message?: string | null;
+            /** Note */
+            note?: string | null;
         };
         /** ModeOut */
         ModeOut: {
@@ -4618,6 +4620,8 @@ export interface components {
             behind: number;
             /** Message */
             message?: string | null;
+            /** Note */
+            note?: string | null;
         };
         /**
          * PlaceOut

@@ -263,3 +263,94 @@ def test_the_real_profile_isnt_told_the_key_is_optional(tmp_path, monkeypatch, k
     monkeypatch.setattr(installing, "ask_secret", lambda what, **_: "")
     installing.setup("real", None, update=False)
     assert "optional" not in capsys.readouterr().out
+
+
+def test_uninstalling_measures_a_folder_holding_links_windows_cant_open(
+    tmp_path, monkeypatch, capsys, keychain
+):
+    """Found with 0.3.0b3 on Windows: a conversation's codex-home holds Linux
+    symlinks Codex made in its container (tmp/arg0/…/applypatch). On Windows
+    they're WSL reparse points (tag 0xa000001d) that Path.is_file() raises
+    WinError 1920 on, and measuring the data folder stopped the uninstaller."""
+    import pathlib
+
+    data = tmp_path / "real"
+    arg0 = data / "sessions" / "c_1" / "codex-home" / "tmp" / "arg0" / "codex-arg0X"
+    arg0.mkdir(parents=True)
+    (arg0 / "applypatch").write_bytes(b"")
+    (data / "datalab.sqlite").write_bytes(b"x" * 2048)
+    real_is_file = pathlib.Path.is_file
+
+    def windows_is_file(self, *args, **kwargs):
+        if self.name == "applypatch":
+            error = OSError(22, "The file cannot be accessed by the system")
+            error.winerror = 1920  # type: ignore[attr-defined]
+            raise error
+        return real_is_file(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "is_file", windows_is_file)
+    monkeypatch.setattr(installing, "default_data_dir", lambda profile: tmp_path / profile)
+    monkeypatch.setattr(installing, "_datalab_running", lambda: False)
+    monkeypatch.setattr(installing, "_docker_quiet", lambda *a, **k: None)
+    monkeypatch.setattr(installing, "_uninstall_practice_database", lambda chosen: None)
+
+    assert installing.uninstall(delete_data=True) == 0
+    said = capsys.readouterr().out
+    assert f"{data}  (2.0 KB)" in said and "Deleted." in said
+    assert not data.exists()
+
+
+def test_uninstalling_deletes_the_lab_repos_read_only_git_files(
+    tmp_path, monkeypatch, capsys, keychain
+):
+    """Found with 0.3.0b3 on Windows: git makes a clone's object files
+    read-only, Windows won't delete a read-only file, and the uninstaller
+    left repos/<name>/.git behind while saying "Deleted."."""
+    import os
+    import stat
+
+    data = tmp_path / "real"
+    objects = data / "repos" / "ihs-knowledge" / ".git" / "objects" / "ab"
+    objects.mkdir(parents=True)
+    for name in ("cdef01", "cdef02"):
+        (objects / name).write_bytes(b"x")
+        os.chmod(objects / name, stat.S_IREAD)  # as git leaves them
+    pack = objects.parent / "pack"
+    pack.mkdir()
+    (pack / "pack-1.idx").write_bytes(b"x")
+    os.chmod(pack / "pack-1.idx", stat.S_IREAD)
+    monkeypatch.setattr(installing, "default_data_dir", lambda profile: tmp_path / profile)
+    monkeypatch.setattr(installing, "_datalab_running", lambda: False)
+    monkeypatch.setattr(installing, "_docker_quiet", lambda *a, **k: None)
+    monkeypatch.setattr(installing, "_uninstall_practice_database", lambda chosen: None)
+
+    assert installing.uninstall(delete_data=True) == 0
+    assert "\nDeleted.\n" in capsys.readouterr().out
+    assert not data.exists()
+
+
+def test_a_dangling_link_in_a_data_folder_is_measured_as_itself(tmp_path):
+    folder = tmp_path / "data"
+    folder.mkdir()
+    (folder / "a.txt").write_bytes(b"x" * 10)
+    try:
+        (folder / "applypatch").symlink_to("/usr/local/bin/codex")  # nothing there
+    except OSError:
+        pytest.skip("this computer doesn't allow creating symlinks")
+    assert installing._size(folder).endswith("bytes")
+
+
+def test_uninstalling_says_what_it_couldnt_delete(tmp_path, monkeypatch, capsys, keychain):
+    data = tmp_path / "real"
+    data.mkdir()
+    (data / "datalab.sqlite").write_bytes(b"x" * 10)
+    monkeypatch.setattr(installing, "default_data_dir", lambda profile: tmp_path / profile)
+    monkeypatch.setattr(installing, "_datalab_running", lambda: False)
+    monkeypatch.setattr(installing, "_docker_quiet", lambda *a, **k: None)
+    monkeypatch.setattr(installing, "_uninstall_practice_database", lambda chosen: None)
+    monkeypatch.setattr(installing.git, "remove_tree", lambda folder: None)
+
+    assert installing.uninstall(delete_data=True) == 0
+    said = capsys.readouterr().out
+    assert "Deleted, except what couldn't be removed" in said and str(data) in said
+    assert "\nDeleted.\n" not in said

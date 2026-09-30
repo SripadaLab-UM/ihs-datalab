@@ -379,10 +379,16 @@ class SafetyCheck:
         inspect = await probe.inspect()
         environment = json.dumps(inspect.get("Config", {}).get("Env", []))
         found = any(s in environment for s in known)
-        for path in _files(probe.paths.root):
-            with contextlib.suppress(OSError):
+        files, unreadable = _files(probe.paths.root)
+        for path in files:
+            try:
                 content = path.read_text(encoding="utf-8", errors="ignore")
-                found = found or any(s in content for s in known)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                unreadable += 1
+                continue
+            found = found or any(s in content for s in known)
         return _result(
             "no_keys_in_container",
             PROMISE_NETWORK,
@@ -390,7 +396,9 @@ class SafetyCheck:
             not found,
             "A key was found in the container's environment or files."
             if found
-            else "Checked the environment and every mounted file.",
+            else "Checked the environment and "
+            + ("the mounted files." if unreadable else "every mounted file.")
+            + _unread(unreadable),
         )
 
     async def _no_github_token_in(self, probe: _Probe, *, kind: str) -> CheckResult:
@@ -420,13 +428,18 @@ class SafetyCheck:
         problems = []
         if any(s in started_with for s in known):
             problems.append("in the container's environment or command")
-        if any(_holds(path, known) for path in _files(probe.paths.root)):
+        seen, unreadable = _files(probe.paths.root)
+        held = [_holds(path, known) for path in seen]
+        if any(held):
             problems.append("in a file the container can see")
         sources = [Path(m.get("Source", "/")) for m in inspect.get("Mounts", [])]
         if any(source == repos or repos in source.parents for source in sources):
             problems.append("the lab repos' clones are mounted in it")
-        if any(_holds(path, known) for path in _files(repos)):
+        cloned, unread_clones = _files(repos)
+        held_in_clones = [_holds(path, known) for path in cloned]
+        if any(held_in_clones):
             problems.append("stored in plain text in the lab repos' clones")
+        unreadable += unread_clones + held.count(None) + held_in_clones.count(None)
         return _result(
             check_id,
             PROMISE_NETWORK,
@@ -434,7 +447,8 @@ class SafetyCheck:
             not problems,
             "Found: " + "; ".join(problems)
             if problems
-            else "Checked its environment, command, mounts and files, and the repo clones.",
+            else "Checked its environment, command, mounts and files, and the repo clones."
+            + _unread(unreadable),
         )
 
     async def _locked_down(self, probe: _Probe, *, kind: str) -> CheckResult:
@@ -828,18 +842,52 @@ def _result(check_id: str, promise: str, label: str, ok: bool, detail: str) -> C
     return CheckResult(check_id, promise, label, "pass" if ok else "fail", detail)
 
 
-def _files(root: Path) -> list[Path]:
-    return [p for p in root.rglob("*") if p.is_file() and not p.is_symlink()]
+# Windows reparse tags with this bit set are links of some kind ("name
+# surrogates": symlinks, junctions, WSL's Linux symlinks, 0xA000001D). Others
+# are regular files with extra handling, such as OneDrive's cloud placeholders
+# (0x9000xx1A), which the secret scans should still read.
+_NAME_SURROGATE = 0x20000000
 
 
-def _holds(path: Path, secrets: list[str], limit: int = 64 * 1024**2) -> bool:
+def _files(root: Path) -> tuple[list[Path], int]:
+    """The regular files under `root`, as they are (links not followed), and
+    how many entries couldn't be looked at, so a check never says it read
+    every file when it didn't. One gone meanwhile isn't counted."""
+    import stat
+
+    found, unreadable = [], 0
+    for path in root.rglob("*"):
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            unreadable += 1
+            continue
+        if stat.S_ISREG(info.st_mode) and not (
+            getattr(info, "st_reparse_tag", 0) & _NAME_SURROGATE
+        ):
+            found.append(path)
+    return found, unreadable
+
+
+def _holds(path: Path, secrets: list[str], limit: int = 64 * 1024**2) -> bool | None:
+    """Whether the file holds one of `secrets`; None if it couldn't be read."""
     try:
         if path.stat().st_size > limit:
             return False
         content = path.read_bytes()
-    except OSError:
+    except FileNotFoundError:
         return False
+    except OSError:
+        return None
     return any(s.encode() in content for s in secrets)
+
+
+def _unread(count: int) -> str:
+    if not count:
+        return ""
+    return f" {count} file{'s' if count != 1 else ''} couldn't be read."
 
 
 def _quote(text: str) -> str:

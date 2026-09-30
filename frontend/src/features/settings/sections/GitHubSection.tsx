@@ -244,7 +244,7 @@ function Waiting({ flow, onCancel, cancelling }: { flow: SignIn; onCancel: () =>
 
 interface RepoRowProps {
   what: string;
-  status: (RepoStatusLike & { name?: string | null; last_sync?: string | null }) | undefined;
+  status: (RepoStatusLike & { name?: string | null; last_sync?: string | null; note?: string | null }) | undefined;
   onSync: () => void;
   syncing: boolean;
 }
@@ -322,6 +322,7 @@ function RepoRow({ what, status, onSync, syncing }: RepoRowProps) {
         )}
       </div>
       {status.repo !== "in sync" && <p className={repo.tone === "bad" ? "text-sm text-danger" : "text-sm text-muted"}>{repo.text}</p>}
+      {status.note && <p className="text-sm text-muted">{status.note}</p>}
     </div>
   );
 }

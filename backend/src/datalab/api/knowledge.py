@@ -102,6 +102,8 @@ class KnowledgeStatus(BaseModel):
     ahead: int = 0
     behind: int = 0
     message: str | None = None
+    # Said whatever the state (an unusable copy set aside, and where).
+    note: str | None = None
 
 
 class FindingOut(BaseModel):

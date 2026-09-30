@@ -52,6 +52,82 @@ def test_clone_then_sync_follows_githubs_main(clone, remote):
     assert (clone.path / "qc" / "new.md").read_bytes() == b"x"
 
 
+def test_a_half_deleted_clone_is_set_aside_and_cloned_again(clone, remote):
+    """Found with 0.3.0b5 on Windows: the 0.3.0b3 uninstaller left only
+    .git/objects (git's read-only files), and the next install took that for
+    a clone: every sync said "fatal: not a git repository"."""
+    pack = clone.path / ".git" / "objects" / "pack"
+    pack.mkdir(parents=True)
+    (pack / "pack-1.pack").write_bytes(b"x")
+    (clone.path / ".git" / "info").mkdir()  # what DataLab's protect() then added
+    assert not clone.exists()
+
+    assert clone.sync() == remote.head()
+    assert clone.exists() and clone.ahead_behind() == (0, 0)
+    aside = [p for p in clone.path.parent.iterdir() if p.name.startswith(".ihs-knowledge.broken-")]
+    assert len(aside) == 1 and (aside[0] / ".git" / "objects" / "pack" / "pack-1.pack").exists()
+    # Said whatever the state (in sync here), with where the copy is.
+    assert clone.set_aside() == aside[0]
+    note = clone.set_aside_note("SripadaLab-UM/ihs-knowledge")
+    assert note is not None and str(aside[0]) in note and "unshared changes" in note
+
+    # Broken again: only the newest copy set aside is kept.
+    (clone.path / ".git" / "HEAD").unlink()
+    assert clone.sync() == remote.head()
+    now = [p for p in clone.path.parent.iterdir() if p.name.startswith(".ihs-knowledge.broken-")]
+    assert len(now) == 1 and now[0] != aside[0] and clone.set_aside() == now[0]
+
+
+def test_a_clone_with_no_copy_set_aside_has_no_note(clone, remote):
+    clone.sync()
+    assert clone.set_aside() is None and clone.set_aside_note("o/r") is None
+
+
+def test_a_worktree_clone_counts_as_a_clone(tmp_path):
+    folder = tmp_path / "repos" / "kb"
+    folder.mkdir(parents=True)
+    (folder / ".git").write_text("gitdir: ../elsewhere/.git/worktrees/kb\n")
+    assert Clone(folder, "https://github.com/o/kb.git").exists()
+
+
+def test_only_old_staging_folders_are_swept_before_a_clone(clone, remote):
+    """A clone that stopped part way leaves .<name>.cloning-*: swept once
+    it's an hour old. A newer one may be another DataLab process's."""
+    import time
+
+    parent = clone.path.parent
+    parent.mkdir(parents=True)
+    old, fresh = parent / ".ihs-knowledge.cloning-old", parent / ".ihs-knowledge.cloning-new"
+    for folder in (old, fresh):
+        (folder / ".git").mkdir(parents=True)
+    hours_ago = time.time() - 2 * 60 * 60
+    os.utime(old, (hours_ago, hours_ago))
+    clone.sync()
+    assert not old.exists() and fresh.exists()
+
+
+@pytest.mark.parametrize(("winerror", "deleted"), [(5, True), (32, False)])
+def test_the_read_only_retry_is_for_access_denied_only(tmp_path, monkeypatch, winerror, deleted):
+    """remove_tree's second try, as it runs on Windows (where rmtree fails on
+    a read-only file with WinError 5); not for a file in use (32)."""
+    import stat
+
+    from datalab.repos import git
+
+    monkeypatch.setattr(git, "_WINDOWS", True)
+    target = tmp_path / "pack-1.idx"
+    target.write_bytes(b"x")
+    os.chmod(target, stat.S_IREAD)
+    error = PermissionError(13, "Access is denied")
+    error.winerror = winerror  # type: ignore[attr-defined]
+    git._retry_read_only(os.unlink, str(target), error)
+    assert target.exists() is not deleted
+    monkeypatch.setattr(git, "_WINDOWS", False)
+    if target.exists():
+        git._retry_read_only(os.unlink, str(target), PermissionError(13, "x"))
+        assert target.exists()  # never off Windows
+
+
 def test_a_failed_clone_leaves_nothing_behind(tmp_path):
     clone = Clone(tmp_path / "repos" / "kb", str(tmp_path / "missing.git"), allow_local=True)
     with pytest.raises(GitError):
