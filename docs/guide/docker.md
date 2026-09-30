@@ -44,15 +44,16 @@ fix**. **How to fix it…** in the banner opens it again at any time.
    Windows: type your own Michigan Medicine username and password there.
 3. DataLab gives the permission back, then restarts Docker Desktop: it closes
    it, stops Docker's virtual machine and opens it again, which takes a
-   minute or two. Anything running in Docker stops, so DataLab waits while a
-   conversation, query or workflow is working (it says so; try again once it
-   has finished). The dialog says **Fixed. Docker is running again**. Click
-   **Done**.
+   minute or two, and the button says **Restarting Docker Desktop…**
+   meanwhile. Anything running in Docker stops, so DataLab waits while a
+   conversation, query, workflow or pipeline test is working (it says so;
+   try again once it has finished). The dialog says **Fixed. Docker is
+   running again**. Click **Done**.
 
 If the dialog says **Windows didn't give permission**, your administrator
 access most likely wasn't on yet: turn it on, then click **Fix it** again.
 If it says the permission is back but Docker Desktop didn't come back (it
-names what didn't work), **restart Windows**.
+names what didn't work), click **Done** and **restart Windows**.
 **Check again** looks once more whether Windows lets the virtual machine
 start (it doesn't show Windows' permission box). **Later** closes the
 dialog: it doesn't open by itself again until you next sign in, and the
@@ -62,4 +63,7 @@ No administrator access? **Restart Windows**: that gives the permission back
 too, until the policy runs again. You don't need to run DataLab itself as an
 administrator: only the fix needs it, for a moment, and only when you click
 **Fix it**. If the practice and real DataLabs are both open, each offers the
-fix; fixing it in one fixes it for both.
+fix; fixing it in one fixes it for both, and the other's banner goes away
+within a minute. The restart stops what's running in Docker for both too,
+but only the DataLab you click **Fix it** in waits for its own work: check
+the other isn't in the middle of something first.

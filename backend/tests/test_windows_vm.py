@@ -514,17 +514,22 @@ def test_during_the_fix_the_page_sees_where_it_is_and_cant_open_docker_desktop()
     def watching(command, **options):
         name = Path(command[0]).name.lower()
         if name == "powershell.exe":
-            seen["prompt"] = (doctor.phase, doctor.fixing)
+            probes = len(fake.ran("wsl.exe"))
+            # The last answer while Windows' box shows: a probe then could start
+            # the virtual machine under the grant, and nothing changes until then.
+            answers = (doctor.state(fresh=True), doctor.check())
+            probed = len(fake.ran("wsl.exe")) - probes
+            seen["prompt"] = (doctor.phase, doctor.fixing, *answers, probed)
         if name == "wsl.exe" and "--terminate" in command:  # mid-restart, processes down
             seen["restarting"] = (doctor.phase, doctor.state(), doctor.check(), doctor.start())
         return real_run(command, **options)
 
     doctor._run = watching
     assert doctor.fix() == windows_vm.FixResult("fixed")
-    assert seen["prompt"] == ("prompt", True)
+    assert seen["prompt"] == ("prompt", True, "vm-refused", "vm-refused", 0)
     assert seen["restarting"] == ("restarting", "starting", "starting", "starting")
     assert len(fake.opened) == 1  # the restart's own, not a second from start()
-    assert doctor.phase is None and not doctor.fixing
+    assert doctor.phase is None and not doctor.fixing and doctor._phase is None
 
 
 def test_a_docker_vm_that_isnt_there_counts_as_stopped():

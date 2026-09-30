@@ -481,8 +481,15 @@ class DockerDoctor:
             # Docker Desktop's processes are down on purpose: not "stopped", or
             # the page would offer to open it in the middle of the restart.
             return "starting"
-        if not self._checking.acquire(blocking=self._state is None):
-            return self._state  # type: ignore[return-value]  # a check is running
+        # Read once: the fix's end can clear the cache between two reads.
+        cached = self._state
+        if self.phase == "prompt" and cached is not None:
+            # Nothing changes until the prompt is answered, and a check could
+            # start the virtual machine under the grant.
+            return cached
+        if not self._checking.acquire(blocking=cached is None):
+            assert cached is not None
+            return cached  # a check is running
         try:
             if fresh or self._state is None or self._clock() - self._checked > self.CACHE_SECONDS:
                 vm_ok = self._vm_started is not None and (
@@ -538,9 +545,12 @@ class DockerDoctor:
             failed = restart_docker(self._user(), self._run, self._popen, self._clock, self._sleep)
             return FixResult("fixed") if failed is None else FixResult("restart-failed", failed)
         finally:
-            self._fixing.release()
+            # The cache first: once the lock is free, another fix must not see
+            # the old "vm-refused" and show Windows' box again.
             with self._checking:
                 self._state = None
+                self._phase = None
+            self._fixing.release()
 
 
 def check_before_serve(doctor: DockerDoctor, *, say: Callable[[str], None] = print) -> DockerState:

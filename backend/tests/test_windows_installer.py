@@ -37,10 +37,20 @@ def test_the_shared_block_is_byte_identical_in_both_scripts():
 
 @pytest.mark.parametrize(
     "marker",
-    ["if (-not $Package) {", "$IsUrl =", "if (-not $Requirements) { Write-Host"],
+    [
+        "if (-not $Package) {",
+        "$IsUrl =",
+        "if (-not $Requirements) { Write-Host",
+        "\n$DockerDesktopImages = ",
+        "\nfunction Invoke-Captured(",
+        "\nfunction Get-OwnPids(",
+        "\nfunction Stop-DockerDesktopProcesses {",
+        "\nfunction Stop-DockerVm {",
+    ],
 )
 def test_the_lines_ci_runs_on_their_own_are_still_there(marker):
-    """ci.yml's windows-installer job slices the script at these."""
+    """ci.yml's windows-installer job slices the script at these, or runs
+    these functions on their own."""
     assert INSTALL.count(marker) == 1
 
 

@@ -19,13 +19,20 @@ const VM_STARTS = new Set<DockerStatus["state"]>(["ready", "starting", "stopped"
 // "Later" holds for this browser session (the banner stays and reopens the dialog).
 const LATER = "datalab.docker-fix-later";
 
+/** How often to look again. Every few seconds while a fix is under way, so the dialog
+ * follows its phase, and while Docker Desktop is starting, so the banner goes soon after
+ * it's ready (a cheap check then: the VM isn't tried again). */
+export function pollEvery(status: DockerStatus | undefined): number {
+  if (status?.fixing) return 3_000;
+  if (status?.state === "starting") return 5_000;
+  return status && SETTLED.has(status.state) ? 5 * 60_000 : 30_000;
+}
+
 export function useDockerStatus() {
   return useQuery({
     queryKey: KEY,
     queryFn: dockerApi.status,
-    // Every few seconds while a fix is under way, so the dialog follows its phase.
-    refetchInterval: (query) =>
-      query.state.data?.fixing ? 3_000 : query.state.data && SETTLED.has(query.state.data.state) ? 5 * 60_000 : 30_000,
+    refetchInterval: (query) => pollEvery(query.state.data),
     retry: false,
   });
 }
@@ -174,7 +181,12 @@ export function DockerFixDialog({
     mutationFn: dockerApi.fix,
     // Look again shortly, so the page sees the fix under way (and its phase).
     onMutate: () => void setTimeout(() => void client.invalidateQueries({ queryKey: KEY }), 1_500),
-    onSuccess: (result) => client.setQueryData<DockerStatus>(KEY, (old) => old && { ...old, state: result.state, fixing: false }),
+    // A look still on its way was asked mid-restart ("starting"): it mustn't land after
+    // the fix's own answer and keep the banner up until the next one.
+    onSuccess: async (result) => {
+      await client.cancelQueries({ queryKey: KEY });
+      client.setQueryData<DockerStatus>(KEY, (old) => old && { ...old, state: result.state, fixing: false });
+    },
   });
   const recheck = useMutation({
     mutationFn: dockerApi.check,
@@ -242,7 +254,7 @@ export function DockerFixDialog({
           Click <span className="font-medium">Fix it</span>. Windows asks whether to allow changes (the box may be behind
           other windows; if it asks for a username and password, that's your own): click{" "}
           <span className="font-medium">Yes</span>. DataLab gives the permission back, then restarts Docker Desktop, so
-          anything running in Docker stops; it waits while a conversation, query or workflow in DataLab is working.
+          anything running in Docker stops; it waits while a conversation, query, workflow or pipeline test in DataLab is working.
         </li>
       </ol>
       <p className="mt-3 text-sm text-muted">No administrator access? Restarting Windows fixes it too, for a while.</p>
