@@ -287,7 +287,7 @@ class Knowledge:
             "ahead": 0,
             "behind": 0,
             "message": None,
-            "note": self.clone.set_aside_note(self.repo),
+            "note": self.clone.set_aside_note(self.repo or "the knowledge base"),
         }
         if sign_in.state != "signed in":
             # Why, when the sign-in ran out; else what to do.

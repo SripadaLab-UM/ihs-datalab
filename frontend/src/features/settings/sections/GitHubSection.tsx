@@ -244,7 +244,7 @@ function Waiting({ flow, onCancel, cancelling }: { flow: SignIn; onCancel: () =>
 
 interface RepoRowProps {
   what: string;
-  status: (RepoStatusLike & { name?: string | null; last_sync?: string | null }) | undefined;
+  status: (RepoStatusLike & { name?: string | null; last_sync?: string | null; note?: string | null }) | undefined;
   onSync: () => void;
   syncing: boolean;
 }
