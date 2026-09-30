@@ -300,6 +300,35 @@ def test_uninstalling_measures_a_folder_holding_links_windows_cant_open(
     assert not data.exists()
 
 
+def test_uninstalling_deletes_the_lab_repos_read_only_git_files(
+    tmp_path, monkeypatch, capsys, keychain
+):
+    """Found with 0.3.0b3 on Windows: git makes a clone's object files
+    read-only, Windows won't delete a read-only file, and the uninstaller
+    left repos/<name>/.git behind while saying "Deleted."."""
+    import os
+    import stat
+
+    data = tmp_path / "real"
+    objects = data / "repos" / "ihs-knowledge" / ".git" / "objects" / "ab"
+    objects.mkdir(parents=True)
+    for name in ("cdef01", "cdef02"):
+        (objects / name).write_bytes(b"x")
+        os.chmod(objects / name, stat.S_IREAD)  # as git leaves them
+    pack = objects.parent / "pack"
+    pack.mkdir()
+    (pack / "pack-1.idx").write_bytes(b"x")
+    os.chmod(pack / "pack-1.idx", stat.S_IREAD)
+    monkeypatch.setattr(installing, "default_data_dir", lambda profile: tmp_path / profile)
+    monkeypatch.setattr(installing, "_datalab_running", lambda: False)
+    monkeypatch.setattr(installing, "_docker_quiet", lambda *a, **k: None)
+    monkeypatch.setattr(installing, "_uninstall_practice_database", lambda chosen: None)
+
+    assert installing.uninstall(delete_data=True) == 0
+    assert "\nDeleted.\n" in capsys.readouterr().out
+    assert not data.exists()
+
+
 def test_a_dangling_link_in_a_data_folder_is_measured_as_itself(tmp_path):
     folder = tmp_path / "data"
     folder.mkdir()
@@ -319,7 +348,7 @@ def test_uninstalling_says_what_it_couldnt_delete(tmp_path, monkeypatch, capsys,
     monkeypatch.setattr(installing, "_datalab_running", lambda: False)
     monkeypatch.setattr(installing, "_docker_quiet", lambda *a, **k: None)
     monkeypatch.setattr(installing, "_uninstall_practice_database", lambda chosen: None)
-    monkeypatch.setattr(installing.shutil, "rmtree", lambda path, ignore_errors=False: None)
+    monkeypatch.setattr(installing.git, "remove_tree", lambda folder: None)
 
     assert installing.uninstall(delete_data=True) == 0
     said = capsys.readouterr().out

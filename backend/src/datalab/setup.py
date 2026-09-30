@@ -39,7 +39,7 @@ from datalab.credentials import (
     save_oracle_password,
 )
 from datalab.practice_db.guard import RO_PWD
-from datalab.repos import github
+from datalab.repos import git, github
 from datalab.secret_prompt import ask_secret
 
 AGENT_IMAGE_REPOSITORIES = ("datalab-agent", "ghcr.io/sripadalab-um/datalab-agent")
@@ -343,7 +343,7 @@ def uninstall(*, delete_data: bool | None) -> int:
             delete_data = answer in ("y", "yes")
         if delete_data:
             for folder in existing:
-                shutil.rmtree(folder, ignore_errors=True)
+                git.remove_tree(folder)  # the lab repos' clones are in there
             # Said as it is: a file something still has open stays behind.
             left = [folder for folder in existing if folder.exists()]
             if left:

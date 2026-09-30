@@ -28,11 +28,13 @@ holds anything half-done.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -216,6 +218,28 @@ def clone_path(data_dir: Path, repo: str) -> Path:
     return data_dir / "repos" / repo.split("/")[1]
 
 
+def remove_tree(folder: Path) -> None:
+    """Delete a folder that may hold a clone, as far as it can be deleted.
+
+    On Windows git makes its object files read-only, and a read-only file
+    can't be deleted there: plain `shutil.rmtree` skips them and leaves the
+    clone's `.git` behind. Each such file is made writable and tried once
+    more. Whatever still can't go (a file something has open) is left, so
+    callers check whether `folder` still exists. Links aren't followed.
+    """
+
+    def retry(function: Callable[..., object], path: str, error: BaseException) -> None:
+        if os.name != "nt" or not isinstance(error, PermissionError):
+            return
+        if function not in (os.unlink, os.rmdir):
+            return
+        with contextlib.suppress(OSError):
+            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+            function(path)
+
+    shutil.rmtree(folder, onexc=retry)
+
+
 def _parents(path: str) -> list[str]:
     """Each folder `path` is in, without a trailing slash: a/b/c -> a, a/b."""
     parts = path.split("/")[:-1]
@@ -351,7 +375,7 @@ class Clone:
             self.git("reset", "-q", "--hard", "HEAD", cwd=staging)
             staging.rename(self.path)
         finally:
-            shutil.rmtree(staging, ignore_errors=True)
+            remove_tree(staging)
 
     def remote_head(self) -> str | None:
         return self.resolve(REMOTE_REF)
