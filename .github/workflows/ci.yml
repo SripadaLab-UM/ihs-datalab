@@ -272,3 +272,95 @@ jobs:
           Invoke-Expression $script.Substring($start, $end - $start)
           if ($Requirements -ne (Join-Path $dir "requirements.txt")) { Write-Host "Found: '$Requirements'"; exit 1 }
           Write-Host "Found $Requirements"
+      - name: The installer's Docker Desktop restart ends only this account's processes, and says when it can't
+        # Get-OwnPids, Stop-DockerDesktopProcesses and Stop-DockerVm as they are,
+        # over a table of processes: tasklist, taskkill and wsl.exe answer as
+        # they did on a Michigan Medicine laptop (2026-09-29). Nothing here ends
+        # a real process. Invoke-Captured itself runs for real, on cmd.exe.
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $script = Get-Content (Join-Path $Env:GITHUB_WORKSPACE "installer/windows/install.ps1") -Raw
+          $ast = [System.Management.Automation.Language.Parser]::ParseInput($script, [ref]$null, [ref]$null)
+          foreach ($f in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+            if ($f.Name -in "Invoke-Captured", "Get-OwnPids", "Stop-DockerDesktopProcesses", "Stop-DockerVm") {
+              . ([scriptblock]::Create($f.Extent.Text))
+            }
+          }
+          Invoke-Expression ([regex]::Match($script, "(?m)^\`$DockerDesktopImages = .*$").Value)
+          function Fail($what) { Write-Host "FAILED: $what"; exit 1 }
+
+          $cmd = Join-Path $Env:SystemRoot "System32\cmd.exe"
+          $ran = Invoke-Captured $cmd "/c echo out& echo err 1>&2& exit 3"
+          if ($ran.Code -ne 3 -or $ran.Out -notmatch "out" -or $ran.Out -notmatch "err") { Fail "Invoke-Captured: $($ran | Out-String)" }
+          if ($null -ne (Invoke-Captured $cmd "/c ping -n 5 127.0.0.1 >nul" 1)) { Fail "Invoke-Captured didn't give up after its time" }
+
+          # From here on, the programs answer from the table instead.
+          $SystemDir = "C:\NotUsed"
+          $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+          $script:Unkillable = @(); $script:Ending = @(); $script:Killed = @(); $script:TasklistCode = 0
+          function Start-Sleep { param($Seconds) }  # the wait loop, without the waiting
+          function Invoke-Captured($file, [string]$arguments, $seconds = 30) {
+            $image = [regex]::Match($arguments, '/FI "IMAGENAME eq ([^"]+)"').Groups[1].Value
+            $user = [regex]::Match($arguments, '/FI "USERNAME eq ([^"]+)"').Groups[1].Value
+            switch (Split-Path $file -Leaf) {
+              "tasklist.exe" {
+                # taskkill /F answers before a process has gone: it's gone by the next listing.
+                foreach ($id in $script:Ending) { $script:Table = @($script:Table | Where-Object { $_.Id -ne $id }) }
+                $script:Ending = @()
+                if ($script:TasklistCode -ne 0) { return @{ Code = $script:TasklistCode; Out = "ERROR: Invalid query`r`n" } }
+                $rows = @($script:Table | Where-Object { $_.Image -eq $image -and $_.User -eq $user } |
+                  ForEach-Object { '"{0}","{1}","Console","1","5,284 K"' -f $_.Image, $_.Id })
+                if (-not $rows) { return @{ Code = 0; Out = "INFO: No tasks are running which match the specified criteria.`r`n" } }
+                return @{ Code = 0; Out = ($rows -join "`r`n") + "`r`n" }
+              }
+              "taskkill.exe" {
+                if ($arguments -notmatch '^/F /FI "IMAGENAME eq [^"]+" /FI "USERNAME eq [^"]+" /PID \d+$') { Fail "taskkill $arguments" }
+                $id = [int][regex]::Match($arguments, '/PID (\d+)').Groups[1].Value
+                $hit = @($script:Table | Where-Object { $_.Id -eq $id -and $_.Image -eq $image -and $_.User -eq $user })
+                if (-not $hit) { return @{ Code = 0; Out = "`r`nINFO: No tasks running with the specified criteria.`r`n" } }
+                $script:Killed += $id
+                if ($id -notin $script:Unkillable) { $script:Ending += $id }
+                return @{ Code = 0; Out = "SUCCESS: The process with PID $id has been terminated.`r`n" }
+              }
+              "wsl.exe" {
+                if ($arguments -ne "--terminate docker-desktop") { Fail "wsl $arguments" }
+                return $script:Wsl
+              }
+              default { Fail "ran $file" }
+            }
+          }
+          function Set-Table {
+            $script:Table = @(
+              @{ Image = "Docker Desktop.exe"; Id = 31692; User = $me },
+              @{ Image = "Docker Desktop.exe"; Id = 23420; User = "OTHER\someone" },  # never ended
+              @{ Image = "com.docker.backend.exe"; Id = 26876; User = $me },
+              @{ Image = "com.docker.backend.exe"; Id = 29752; User = $me })
+            $script:Unkillable = @(); $script:Ending = @(); $script:Killed = @(); $script:TasklistCode = 0
+          }
+
+          Set-Table
+          $ids = Get-OwnPids "Docker Desktop.exe"
+          if ($ids.Count -ne 1 -or $ids[0] -ne 31692) { Fail "Get-OwnPids listed $($ids -join ',')" }
+          $none = Get-OwnPids "docker-sandbox.exe"
+          if ($null -eq $none -or $none.Count -ne 0) { Fail "no processes should be an empty list, not `$null" }
+          if (-not (Stop-DockerDesktopProcesses)) { Fail "Stop-DockerDesktopProcesses said it couldn't" }
+          if ((@($script:Killed | Sort-Object) -join ",") -ne "26876,29752,31692") { Fail "ended $($script:Killed -join ',')" }
+          if (-not ($script:Table | Where-Object { $_.Id -eq 23420 })) { Fail "another account's process was ended" }
+
+          Set-Table; $script:Unkillable = @(26876)
+          if (Stop-DockerDesktopProcesses) { Fail "a process that stays should say so" }
+          Set-Table; $script:TasklistCode = 1
+          if ($null -ne (Get-OwnPids "Docker Desktop.exe")) { Fail "a failed tasklist should be `$null" }
+          if (Stop-DockerDesktopProcesses) { Fail "a failed tasklist should say it couldn't" }
+
+          $script:Wsl = @{ Code = 0; Out = "The operation completed successfully. `r`n" }
+          if (-not (Stop-DockerVm)) { Fail "a terminated VM" }
+          $script:Wsl = @{ Code = -1; Out = "There is no distribution with the supplied name.`r`nError code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND`r`n" }
+          if (-not (Stop-DockerVm)) { Fail "a VM that isn't there counts as stopped" }
+          $script:Wsl = @{ Code = 1; Out = "Catastrophic failure`r`n" }
+          if (Stop-DockerVm) { Fail "a failed terminate" }
+          $script:Wsl = $null
+          if (Stop-DockerVm) { Fail "a terminate that didn't answer" }
+          Write-Host "Only this account's Docker Desktop processes end; a stuck one, a failed listing or a failed terminate says so."
+          exit 0

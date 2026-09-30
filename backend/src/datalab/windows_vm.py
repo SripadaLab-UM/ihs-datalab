@@ -481,6 +481,10 @@ class DockerDoctor:
             # Docker Desktop's processes are down on purpose: not "stopped", or
             # the page would offer to open it in the middle of the restart.
             return "starting"
+        if self.phase == "prompt" and self._state is not None:
+            # Nothing changes until the prompt is answered, and a check could
+            # start the virtual machine under the grant.
+            return self._state
         if not self._checking.acquire(blocking=self._state is None):
             return self._state  # type: ignore[return-value]  # a check is running
         try:
@@ -538,6 +542,7 @@ class DockerDoctor:
             failed = restart_docker(self._user(), self._run, self._popen, self._clock, self._sleep)
             return FixResult("fixed") if failed is None else FixResult("restart-failed", failed)
         finally:
+            self._phase = None
             self._fixing.release()
             with self._checking:
                 self._state = None
