@@ -316,7 +316,10 @@ class Clone:
     # Clone and sync ---------------------------------------------------------
 
     def exists(self) -> bool:
-        return (self.path / ".git").is_dir()
+        # HEAD, not only .git: a folder left half deleted (found on Windows,
+        # where an uninstall could delete all but .git/objects' read-only
+        # files) isn't a clone, and every git command in it failed.
+        return (self.path / ".git" / "HEAD").is_file()
 
     def sync(self, *, timeout: float | None = None) -> str:
         """Clone if there's no clone yet, else fetch and fast-forward `main`.
@@ -373,6 +376,12 @@ class Clone:
             )  # fmt: skip
             self.protect(staging / ".git")
             self.git("reset", "-q", "--hard", "HEAD", cwd=staging)
+            if self.path.exists() or self.path.is_symlink():
+                # Something that isn't a clone (see exists) is in the way: set
+                # aside, not deleted, in case something in it is still wanted.
+                self.path.rename(
+                    self.path.parent / f".{self.path.name}.broken-{secrets.token_hex(4)}"
+                )
             staging.rename(self.path)
         finally:
             remove_tree(staging)

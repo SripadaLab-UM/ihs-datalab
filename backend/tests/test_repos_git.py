@@ -52,6 +52,22 @@ def test_clone_then_sync_follows_githubs_main(clone, remote):
     assert (clone.path / "qc" / "new.md").read_bytes() == b"x"
 
 
+def test_a_half_deleted_clone_is_set_aside_and_cloned_again(clone, remote):
+    """Found with 0.3.0b5 on Windows: the 0.3.0b3 uninstaller left only
+    .git/objects (git's read-only files), and the next install took that for
+    a clone: every sync said "fatal: not a git repository"."""
+    pack = clone.path / ".git" / "objects" / "pack"
+    pack.mkdir(parents=True)
+    (pack / "pack-1.pack").write_bytes(b"x")
+    (clone.path / ".git" / "info").mkdir()  # what DataLab's protect() then added
+    assert not clone.exists()
+
+    assert clone.sync() == remote.head()
+    assert clone.exists() and clone.ahead_behind() == (0, 0)
+    aside = [p for p in clone.path.parent.iterdir() if p.name.startswith(".ihs-knowledge.broken-")]
+    assert len(aside) == 1 and (aside[0] / ".git" / "objects" / "pack" / "pack-1.pack").exists()
+
+
 def test_a_failed_clone_leaves_nothing_behind(tmp_path):
     clone = Clone(tmp_path / "repos" / "kb", str(tmp_path / "missing.git"), allow_local=True)
     with pytest.raises(GitError):
