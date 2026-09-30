@@ -144,7 +144,7 @@ def test_the_package_name_must_carry_a_version(name, ok):
 
 def test_the_uninstaller_removes_only_what_the_installer_put_in_the_app_folder():
     body = code(UNINSTALL)
-    assert 'foreach ($name in "versions", "bin", "icons")' in body
+    assert 'foreach ($name in "versions", "bin", "icons", "downloads")' in body
     assert "$left.Count -eq 0) { Remove-Tree $Root }" in body
     assert 'Remove-Tree (Join-Path $StateDir "install")' in body
 

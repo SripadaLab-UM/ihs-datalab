@@ -148,8 +148,9 @@ if ((Test-Path -LiteralPath $Shim) -and (Test-Path -LiteralPath (Join-Path $Root
     & $Shim uninstall @choice
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $uninstalled = $true
-    # Only what install.ps1 puts there; anything else in the folder stays.
-    foreach ($name in "versions", "bin", "icons") { Remove-Tree (Join-Path $Root $name) }
+    # Only what install.ps1 and the in-app updater put there (downloads: a
+    # release while it installs); anything else in the folder stays.
+    foreach ($name in "versions", "bin", "icons", "downloads") { Remove-Tree (Join-Path $Root $name) }
     foreach ($name in "current", "previous") {
         $file = Join-Path $Root $name
         $item = Get-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
