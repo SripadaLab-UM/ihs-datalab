@@ -13,10 +13,11 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { BASE, HERE, open, record } from "./app.mjs";
 
 const [name, ...only] = process.argv.slice(2);
-const { default: walkthrough } = await import(path.join(HERE, "../walkthroughs", `${name}.mjs`));
+const { default: walkthrough } = await import(pathToFileURL(path.join(HERE, "../walkthroughs", `${name}.mjs`)).href);
 const dir = path.resolve(HERE, "../build", name, "takes");
 const manifest = path.join(dir, "..", "takes.json");
 const takes = existsSync(manifest) ? JSON.parse(readFileSync(manifest, "utf8")) : {};
@@ -90,7 +91,8 @@ for (const [shot, spec] of Object.entries(walkthrough.shots)) {
   await spec.act(page, { BASE: walkthrough.site ?? BASE, pause, mark, until, fastForward });
   await mark();
   const { out, seconds } = await stop(0.3);
-  takes[shot] = { file: path.relative(path.join(dir, ".."), out), seconds, rects, ff };
+  // A URL path for the page, with / on Windows too.
+  takes[shot] = { file: path.relative(path.join(dir, ".."), out).split(path.sep).join("/"), seconds, rects, ff };
   writeFileSync(manifest, JSON.stringify(takes, null, 2));
   console.log(`${shot}: ${seconds.toFixed(1)} s, targets ${Object.keys(rects).join(", ") || "none"}`);
 }
