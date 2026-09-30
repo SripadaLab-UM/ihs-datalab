@@ -254,7 +254,7 @@ export function DockerFixDialog({
           Click <span className="font-medium">Fix it</span>. Windows asks whether to allow changes (the box may be behind
           other windows; if it asks for a username and password, that's your own): click{" "}
           <span className="font-medium">Yes</span>. DataLab gives the permission back, then restarts Docker Desktop, so
-          anything running in Docker stops; it waits while a conversation, query or workflow in DataLab is working.
+          anything running in Docker stops; it waits while a conversation, query, workflow or pipeline test in DataLab is working.
         </li>
       </ol>
       <p className="mt-3 text-sm text-muted">No administrator access? Restarting Windows fixes it too, for a while.</p>
