@@ -9,6 +9,8 @@ set -e
 cd "$(dirname "$0")"
 OUT=build/publish
 mkdir -p "$OUT"
+# On Windows (Git Bash), python3 is a Microsoft Store placeholder.
+PY=python3; "$PY" -c "" 2>/dev/null || PY=python
 for v in 09-getting-started 01-how-datalab-works 02-what-datalab-can-do 10-workspace-ask 11-workspace-answer \
          12-sql-playground 13-workflows 15-help 16-research-helper 17-connections; do
   src="build/$v/$v.mp4"
@@ -19,7 +21,7 @@ for v in 09-getting-started 01-how-datalab-works 02-what-datalab-can-do 10-works
     -movflags +faststart "$OUT/$v.mp4"
   ffmpeg -v error -y -i "build/$v/captions.srt" "$OUT/$v.vtt"
   # The thumbnail: just after the opening's narration, agenda complete, no caption.
-  at=$(python3 -c "import json;s=json.load(open('build/$v/timing.json'))['shots'];print(s[0]['end']+0.18)")
+  at=$("$PY" -c "import json;s=json.load(open('build/$v/timing.json'))['shots'];print(s[0]['end']+0.18)")
   ffmpeg -v error -y -ss "$at" -i "$src" -frames:v 1 -vf scale=1280:-1 "$OUT/$v.jpg"
   echo "$v  $(du -h "$src" | cut -f1) -> $(du -h "$OUT/$v.mp4" | cut -f1)"
 done

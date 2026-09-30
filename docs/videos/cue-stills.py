@@ -26,7 +26,7 @@ def seconds(stamp):
 
 
 captions = []
-for block in (build / "captions.srt").read_text().strip().split("\n\n"):
+for block in (build / "captions.srt").read_text(encoding="utf-8").strip().split("\n\n"):
     lines = block.split("\n")
     a, b = map(seconds, lines[1].split(" --> "))
     captions.append((a, b, " ".join(lines[2:])))
@@ -41,7 +41,7 @@ def spoken(shot, phrase):
 
 
 cues, shot = [], None
-for line in (HERE / f"{name}.md").read_text().splitlines():
+for line in (HERE / f"{name}.md").read_text(encoding="utf-8").splitlines():
     if m := re.match(r"\*\*Shot (\d+\.\d+)\*\*", line):
         shot = m.group(1)
     elif (m := re.match(r'\s+- `([\w-]+)` · "(.+?)"', line)) and shot:
