@@ -38,6 +38,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,8 @@ BRANCH = "main"
 REMOTE_REF = f"refs/remotes/origin/{BRANCH}"
 _NETWORK_SECONDS = 120
 _LOCAL_SECONDS = 60
+# A clone staging folder older than this is one a clone left when it stopped.
+_STAGING_SECONDS = 60 * 60
 _ZERO = "0" * 40
 
 # The configuration every command runs with (see the module docstring).
@@ -227,17 +230,29 @@ def remove_tree(folder: Path) -> None:
     more. Whatever still can't go (a file something has open) is left, so
     callers check whether `folder` still exists. Links aren't followed.
     """
+    shutil.rmtree(folder, onexc=_retry_read_only)
 
-    def retry(function: Callable[..., object], path: str, error: BaseException) -> None:
-        if os.name != "nt" or not isinstance(error, PermissionError):
-            return
-        if function not in (os.unlink, os.rmdir):
-            return
-        with contextlib.suppress(OSError):
-            os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
-            function(path)
 
-    shutil.rmtree(folder, onexc=retry)
+_WINDOWS = os.name == "nt"
+
+
+def _retry_read_only(function: Callable[..., object], path: str, error: BaseException) -> None:
+    """remove_tree's second try at a read-only file (Windows only)."""
+    # Access denied (5) only: a file in use (32) won't go on a second try.
+    if not _WINDOWS or getattr(error, "winerror", None) != 5:
+        return
+    if function not in (os.unlink, os.rmdir):
+        return
+    with contextlib.suppress(OSError, NotImplementedError):
+        os.chmod(path, stat.S_IWRITE, follow_symlinks=False)
+        function(path)
+
+
+def _modified(path: Path) -> float:
+    try:
+        return path.lstat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _parents(path: str) -> list[str]:
@@ -318,8 +333,25 @@ class Clone:
     def exists(self) -> bool:
         # HEAD, not only .git: a folder left half deleted (found on Windows,
         # where an uninstall could delete all but .git/objects' read-only
-        # files) isn't a clone, and every git command in it failed.
-        return (self.path / ".git" / "HEAD").is_file()
+        # files) isn't a clone, and every git command in it failed. A .git
+        # file is a worktree's pointer to its repository.
+        git_dir = self.path / ".git"
+        return (git_dir / "HEAD").is_file() or git_dir.is_file()
+
+    def set_aside(self) -> Path | None:
+        """An unusable copy _clone moved out of the way, if there is one."""
+        found = sorted(self.path.parent.glob(f".{self.path.name}.broken-*"), key=_modified)
+        return found[-1] if found else None
+
+    def set_aside_note(self, repo: str) -> str | None:
+        """For the repo's status, whatever its state: where that copy is."""
+        aside = self.set_aside()
+        if aside is None:
+            return None
+        return (
+            f"An unusable copy of {repo} was set aside at {aside}; any unshared changes "
+            "are there. Delete that folder once you don't need it."
+        )
 
     def sync(self, *, timeout: float | None = None) -> str:
         """Clone if there's no clone yet, else fetch and fast-forward `main`.
@@ -367,6 +399,11 @@ class Clone:
 
     def _clone(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # A clone that stopped part way (DataLab quit, say) left its staging
+        # folder. Only old ones: another DataLab process may be cloning now.
+        for earlier in self.path.parent.glob(f".{self.path.name}.cloning-*"):
+            if time.time() - _modified(earlier) > _STAGING_SECONDS:
+                remove_tree(earlier)
         staging = self.path.parent / f".{self.path.name}.cloning-{secrets.token_hex(4)}"
         try:
             # No checkout until the attributes are in place.
@@ -376,9 +413,13 @@ class Clone:
             )  # fmt: skip
             self.protect(staging / ".git")
             self.git("reset", "-q", "--hard", "HEAD", cwd=staging)
-            if self.path.exists() or self.path.is_symlink():
+            if self.path.exists() or self.path.is_symlink() or self.path.is_junction():
                 # Something that isn't a clone (see exists) is in the way: set
-                # aside, not deleted, in case something in it is still wanted.
+                # aside, not deleted, as the person's unshared changes may be
+                # in it; the status says where (see set_aside). Only the
+                # newest is kept.
+                for earlier in self.path.parent.glob(f".{self.path.name}.broken-*"):
+                    remove_tree(earlier)
                 self.path.rename(
                     self.path.parent / f".{self.path.name}.broken-{secrets.token_hex(4)}"
                 )

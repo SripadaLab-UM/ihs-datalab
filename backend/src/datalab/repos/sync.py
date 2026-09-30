@@ -106,6 +106,7 @@ class RepoSync:
             "ahead": 0,
             "behind": 0,
             "message": None,
+            "note": self.clone.set_aside_note(self.repo),
         }
         if sign_in.state != "signed in":
             return {**out, "repo": "signed out", "message": "Sign in to GitHub to use it."}
