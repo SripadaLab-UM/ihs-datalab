@@ -1,0 +1,12 @@
+{
+  "name": "datalab-videos",
+  "private": true,
+  "type": "module",
+  "description": "Renders the videos in docs/videos from their animation pages and narration.",
+  "scripts": {
+    "render": "node render.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

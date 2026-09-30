@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>What DataLab can do (animation)</title>
+<!--
+  Video 2 (docs/videos/02-what-datalab-can-do.md): one shelf of five rows,
+  and an app panel beside it. ?preview plays it with the narration (&t=60
+  starts at 60 s); the renderer calls window.seek(t).
+-->
+<style>
+  @font-face {
+    font-family: "Schibsted Grotesk Variable";
+    src: url("/frontend/node_modules/@fontsource-variable/schibsted-grotesk/files/schibsted-grotesk-latin-wght-normal.woff2") format("woff2");
+    font-weight: 400 900;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/frontend/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  }
+  html, body { margin: 0; background: #fff; }
+  svg { display: block; }
+  #controls { position: fixed; left: 12px; bottom: 12px; display: none; gap: 8px; align-items: center;
+    font: 13px "Schibsted Grotesk Variable", sans-serif; background: #fff; padding: 6px 10px; border: 1px solid #e7e5df; }
+  .preview #controls { display: flex; }
+  .preview svg { width: 100vw; height: auto; max-height: 100vh; }
+</style>
+</head>
+<body>
+<svg id="stage" viewBox="0 0 1920 1080" width="1920" height="1080" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="controls"><audio id="audio" controls src="../build/02-what-datalab-can-do/narration.wav"></audio><span id="clock"></span></div>
+<script type="module">
+import { C, el, text, show, draw, icon, ramp, during, clamp, ease, lerp, loadTiming, spoken, clip } from "./lib.js";
+
+const T = await loadTiming("../build/02-what-datalab-can-do");
+const S = (shot, phrase, offset = 0) => spoken(T, shot, phrase, offset);
+const start = (id) => T.shot[id].start;
+const end = (id) => T.shot[id].end;
+
+const stage = document.getElementById("stage");
+el("rect", { width: 1920, height: 1080, fill: C.paper }, stage);
+const defs = el("defs", {}, stage);
+const marker = el("marker", { id: "arrow", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+el("path", { d: "M0 0 L10 5 L0 10 z", fill: C.muted }, marker);
+const wrap = (parent) => el("g", {}, parent);
+
+// ============================================================================
+// The shelf: five rows, a label on the left and the things on each row.
+// ============================================================================
+
+const X0 = 80, X1 = 1130, ITEMS = 300, ROW_H = 150, TOP = 240;
+const shelf = wrap(stage);
+const heading = wrap(shelf);
+text(heading, X0, 205, "What the AI works with", { label: true });
+
+const ROWS = [
+  ["tools", "Tools", "In the sealed environment"],
+  ["skills", "Skills", "How the lab does things"],
+  ["knowledge", "Knowledge", "Kept in the lab's GitHub"],
+  ["connections", "Connections", "Served by DataLab"],
+  ["workflows", "Workflows", "Run with no AI"],
+];
+const row = Object.fromEntries(ROWS.map(([id, name, sub], i) => {
+  const y = TOP + i * ROW_H;
+  const g = wrap(shelf);
+  const rule = el("path", { d: `M${X0} ${y} H${X1}`, stroke: C.line, "stroke-width": 1.5, pathLength: 1 }, g);
+  const label = wrap(g);
+  const hl = el("rect", { x: X0 - 12, y: y + 14, width: 205, height: 76, rx: 3, fill: C.dataSoft, opacity: 0 }, label);
+  text(label, X0, y + 50, name, { size: 30 });
+  text(label, X0, y + 76, sub, { font: "sans", size: 15, fill: C.muted });
+  return [id, { g, rule, label, hl, y, items: wrap(g), mid: [X1, y + ROW_H / 2] }];
+}));
+
+function tile(parent, x, y, w, h, words, { size = 24, sub, tone = C.ink, fill = C.paper } = {}) {
+  const g = wrap(parent);
+  const lift = wrap(g);
+  el("rect", { x, y, width: w, height: h, rx: 3, fill, stroke: tone, "stroke-width": 1.25 }, lift);
+  text(lift, x + 16, y + (sub ? h / 2 - 2 : h / 2 + size / 3), words, { size, fill: tone === C.ink ? C.ink : tone });
+  if (sub) text(lift, x + 16, y + h / 2 + 20, sub, { font: "sans", size: 14, fill: C.muted });
+  return { g, lift };
+}
+function chip(parent, x, y, words, tone = C.ink) {
+  const g = wrap(parent);
+  const w = words.length * 8.7 + 32;
+  const fill = { [C.data]: C.dataSoft, [C.research]: C.researchSoft, [C.you]: C.youSoft }[tone] ?? C.accentSoft;
+  el("rect", { x, y, width: w, height: 34, rx: 17, fill, stroke: tone, "stroke-width": 1 }, g);
+  text(g, x + 16, y + 23, words, { font: "sans", size: 16, weight: 500, fill: tone });
+  return g;
+}
+
+// Tools.
+const TY = row.tools.y + 22;
+const python = tile(row.tools.items, ITEMS, TY, 210, 58, "Python", { size: 26 });
+const rLang = tile(row.tools.items, ITEMS + 240, TY, 210, 58, "R", { size: 26 });
+const sqlTile = tile(row.tools.items, ITEMS + 480, TY, 210, 58, "SQL", { size: 26 });
+const pkg = (x, words, line = 0) => {
+  const g = wrap(row.tools.items);
+  text(g, x, TY + 92 + line * 22, words, { font: "sans", size: 16, fill: C.muted });
+  return g;
+};
+// Package names under Python and R, each pair shown as it's spoken.
+const PKG = [
+  [pkg(ITEMS, "pandas · statsmodels"), "pandas"],
+  [pkg(ITEMS, "scikit-learn", 1), "scikit-learn"],
+  [pkg(ITEMS + 240, "tidyverse · lme4"), "the tidyverse"],
+  [pkg(ITEMS + 240, "survival · ggplot2", 1), "survival analysis"],
+];
+const sqlSub = pkg(ITEMS + 480, "read-only, via DataLab");
+
+// Skills.
+const SKILLS = ["Statistical review", "Figures for papers", "Reproducible reports", "Data extraction"]
+  .map((words, i) => tile(row.skills.items, ITEMS + i * 208, row.skills.y + 22, 196, 64, words, { size: 18 }));
+
+// Knowledge.
+const PAGES = ["Tables", "Device quirks", "Cleaning rules", "Cohorts", "Checked queries"].map((words, i) => {
+  return tile(row.knowledge.items, ITEMS + i * 166, row.knowledge.y + 22, 154, 64, words, { size: 18 });
+});
+const newPage = chip(row.knowledge.items, ITEMS, row.knowledge.y + 104, "+ 1 page, saved and shared", C.data);
+
+// Connections.
+const database = tile(row.connections.items, ITEMS, row.connections.y + 22, 330, 66, "Study database", { size: 22, sub: "Read-only, logged" });
+const helperTile = tile(row.connections.items, ITEMS + 360, row.connections.y + 22, 330, 66, "Research helper", { size: 22, sub: "You approve each question" });
+
+// Workflows.
+const WY = row.workflows.y + 22;
+const flows = [tile(row.workflows.items, ITEMS, WY, 220, 58, "Weekly export", { size: 21 }),
+  tile(row.workflows.items, ITEMS + 240, WY, 220, 58, "Daily metrics", { size: 21 })];
+const track = el("path", { d: `M${ITEMS + 480} ${WY + 29} H${ITEMS + 700}`, stroke: C.muted, "stroke-width": 1.5, "marker-end": "url(#arrow)", pathLength: 1 }, row.workflows.items);
+const folder = wrap(row.workflows.items);
+icon(folder, "folder", ITEMS + 760, WY + 29, C.ink, 1.1);
+const noAI = chip(row.workflows.items, ITEMS + 480, WY + 74, "No AI in the run", C.data);
+const runs = [0, 1, 2].map((i) => {
+  const g = wrap(row.workflows.items);
+  el("circle", { r: 8, fill: i === 2 ? C.data : C.ink }, g);
+  return g;
+});
+
+// ============================================================================
+// The app panel: footage (or an illustration) for the row in question.
+// ============================================================================
+
+const P = { x: 1200, y: 250, w: 640, h: 360 };
+const overlay = wrap(stage);
+
+function panel(target, heading, kind = "footage") {
+  const g = wrap(overlay);
+  el("path", { d: `M${P.x} ${P.y + P.h / 2} L${target[0] + 6} ${target[1]}`, stroke: C.faint, "stroke-width": 1.25, "stroke-dasharray": "3 4" }, g);
+  el("circle", { cx: target[0] + 6, cy: target[1], r: 4.5, fill: C.faint }, g);
+  el("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: 4, fill: C.paper, stroke: C.faint, "stroke-width": 1.5,
+    ...(kind === "footage" ? { "stroke-dasharray": "8 6" } : {}) }, g);
+  text(g, P.x + 32, P.y + 46, kind === "footage" ? "Footage to record" : "Illustration", { label: true, fill: kind === "footage" ? C.research : C.faint });
+  text(g, P.x + 32, P.y + 96, heading, { size: 34 });
+  return g;
+}
+function lines(g, items) {
+  return items.map(({ words, at = null, mono = false, tone = C.ink, size }, i) => {
+    const p = wrap(g);
+    text(p, P.x + 32, P.y + 150 + i * 44, words, { font: mono ? "mono" : "serif", size: size ?? (mono ? 19 : 23), fill: tone });
+    return { p, at };
+  });
+}
+
+const F = {};
+const addFootage = (shot, target, heading, items, from, to) => {
+  const g = panel(target, heading);
+  F[shot] = { g, parts: lines(g, items), from, to };
+};
+addFootage("2.1", [ITEMS + 460, TY + 29], "How this answer was made", [
+  { words: "A step: the AI runs its own Python", at: S("2.1", "Python and R", 0.5) },
+  { words: "python analyze_steps.py", mono: true, at: S("2.1", "pandas") },
+  { words: "The code, and what it printed", at: S("2.1", "every line of code") },
+], S("2.1", "Python and R", 0.3), end("2.1") + 0.1);
+addFootage("2.2", [ITEMS + 700, TY + 29], "The SQL Playground", [
+  { words: "An editor for your own SQL", at: S("2.2", "write a query yourself") },
+  { words: "Run → the results, previewed", at: S("2.2", "has an editor") },
+  { words: "The catalog of every table, beside it", at: S("2.2", "the catalog") },
+], S("2.2", "And when you'd rather", -0.2), end("2.2") + 0.1);
+addFootage("2.3", [ITEMS + 824, row.skills.y + 54], "How this answer was made", [
+  { words: "23 steps · 2 queries · 4 lab guides read", mono: true, size: 17, at: S("2.3", "each answer shows") },
+], S("2.3", "A skill is loaded", -0.2), end("2.3") + 0.1);
+addFootage("4.1", [ITEMS + 460, WY + 29], "The Workflows tab", [
+  { words: "A workflow's page, and its runs", at: S("4.1", "That becomes a workflow") },
+  { words: "Each run's record: inputs, steps, outputs", at: S("4.1", "keeps a record") },
+  { words: "[ Run again ]   [ Replay ]", mono: true, at: S("4.1", "run it again") },
+], S("4.1", "That becomes a workflow", -0.3), end("4.1") + 0.1);
+
+// 3.1: a knowledge page, as a diagram.
+const pageIllus = panel([ITEMS + 700, row.knowledge.y + 54], "A knowledge page", "illustration");
+{
+  const g = wrap(pageIllus);
+  const x = P.x + 32, y = P.y + 128;
+  el("rect", { x, y, width: 380, height: 196, rx: 3, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, g);
+  text(g, x + 20, y + 40, "Daily step counts", { size: 24 });
+  [["What it means", 150], ["How it's cleaned", 210], ["Known quirks", 170]].forEach(([words, w], i) => {
+    text(g, x + 20, y + 80 + i * 36, words, { font: "sans", size: 14, fill: C.muted });
+    el("rect", { x: x + 150, y: y + 70 + i * 36, width: w, height: 10, rx: 2, fill: C.line }, g);
+  });
+  chip(g, x + 410, y + 16, "reviewed", C.data);
+}
+// 3.2: a proposed edit, as a diagram.
+const editIllus = panel([ITEMS + 700, row.knowledge.y + 54], "A proposed edit", "illustration");
+const EDIT = {};
+{
+  const x = P.x + 32, y = P.y + 124;
+  EDIT.page = wrap(editIllus);
+  el("rect", { x, y, width: 340, height: 170, rx: 3, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, EDIT.page);
+  text(EDIT.page, x + 20, y + 36, "Cohorts", { size: 22 });
+  el("rect", { x: x + 20, y: y + 58, width: 260, height: 10, rx: 2, fill: C.line }, EDIT.page);
+  EDIT.old = wrap(EDIT.page);
+  el("rect", { x: x + 20, y: y + 88, width: 230, height: 10, rx: 2, fill: C.dangerSoft }, EDIT.old);
+  el("path", { d: `M${x + 14} ${y + 93} H${x + 256}`, stroke: C.danger, "stroke-width": 2 }, EDIT.old);
+  text(EDIT.old, x + 300, y + 99, "−", { font: "sans", size: 20, fill: C.danger });
+  EDIT.added = wrap(EDIT.page);
+  el("rect", { x: x + 20, y: y + 118, width: 250, height: 10, rx: 2, fill: C.data, opacity: 0.35 }, EDIT.added);
+  text(EDIT.added, x + 298, y + 129, "+", { font: "sans", size: 20, fill: C.data });
+  EDIT.check = wrap(editIllus);
+  icon(EDIT.check, "tick", x + 390, y + 40, C.data, 1);
+  text(EDIT.check, x + 412, y + 46, "No participant data", { font: "sans", size: 16 });
+  EDIT.save = wrap(editIllus);
+  el("rect", { x: x + 380, y: y + 100, width: 180, height: 40, rx: 20, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, EDIT.save);
+  text(EDIT.save, x + 470, y + 126, "Save & share", { font: "sans", size: 17, anchor: "middle" });
+  el("path", { d: `M${x + 470} ${y + 150} V${y + 190}`, stroke: C.muted, "stroke-width": 1.5, "marker-end": "url(#arrow)" }, EDIT.save);
+  text(EDIT.save, x + 470, y + 214, "The lab's GitHub", { font: "sans", size: 16, fill: C.muted, anchor: "middle" });
+}
+
+// Chapter 5: the requests, in the "you" colour, and where each lands.
+const RIGHT = wrap(overlay);
+text(RIGHT, P.x, P.y - 20, "Requests", { label: true, fill: C.you });
+const REQUESTS = [
+  ["Stata or SAS", "Stata or SAS", [ITEMS + 720, TY + 12]],
+  ["Our figure style", "your figure style", [ITEMS, row.skills.y + 104]],
+  ["What “enrolled” means", "a definition", [ITEMS + 290, row.knowledge.y + 104]],
+  ["Another data source · read-only · logged", "A new data source", [ITEMS, row.connections.y + 104]],
+  ["Email · you review and send", "Even email", [ITEMS + 440, row.connections.y + 104]],
+].map(([words, phrase, to], i) => ({ g: chip(overlay, 0, 0, words, C.you), at: S("5.2", phrase, -0.3), from: [P.x, P.y + 20 + i * 60], to }));
+
+const rules = wrap(overlay);
+text(rules, P.x + P.w / 2, P.y + 150, "Added inside", { size: 44, anchor: "middle" });
+text(rules, P.x + P.w / 2, P.y + 205, "the same safety rules", { size: 44, anchor: "middle" });
+text(rules, P.x + P.w / 2, P.y + 260, "More in Help", { label: true, anchor: "middle" });
+
+// Chapter labels, and the agenda.
+const chapters = [
+  ["2.1", "3.1", "01 · The toolkit"],
+  ["3.1", "4.1", "02 · The lab's knowledge"],
+  ["4.1", "5.1", "03 · Workflows"],
+  ["5.1", null, "04 · Asking for more"],
+].map(([from, to, words]) => { const g = wrap(overlay); text(g, 80, 70, words, { label: true }); return { from, to, g }; });
+
+// The opening: the title from the first frame, and the agenda, faint until
+// each line is spoken, so the screen is never empty while the narrator talks.
+const agenda = wrap(overlay);
+text(agenda, 600, 250, "What DataLab can do", { size: 84 });
+text(agenda, 604, 300, "And how it grows", { label: true });
+text(agenda, 660, 405, "This video covers", { label: true });
+const AGENDA = [
+  ["The toolkit", "the toolkit"],
+  ["The lab's knowledge", "the lab's knowledge"],
+  ["Workflows", "a repeatable workflow"],
+  ["Asking for more", "ask for something new"],
+].map(([words, phrase], i) => {
+  const g = wrap(agenda);
+  text(g, 630, 490 + i * 90, String(i + 1), { size: 44, fill: C.faint, anchor: "end" });
+  text(g, 660, 490 + i * 90, words, { size: 52 });
+  return { g, at: S("1.1", phrase, -0.4) };
+});
+
+const caption = text(stage, 960, 1046, "", { font: "sans", size: 31, weight: 450, anchor: "middle" });
+caption.setAttribute("stroke", C.paper);
+caption.setAttribute("stroke-width", 10);
+caption.setAttribute("paint-order", "stroke");
+caption.setAttribute("stroke-linejoin", "round");
+const fadeOut = el("rect", { width: 1920, height: 1080, fill: C.paper, opacity: 0 }, stage);
+
+// ============================================================================
+// The timeline
+// ============================================================================
+
+function frameAt(t) {
+  // 1.1: what this video covers, then the shelf's frame.
+  show(agenda, Math.min(ramp(t, 0, 0.5), 1 - ramp(t, end("1.1") + 0.2, 0.6)), 0);
+  for (const a of AGENDA) a.g.setAttribute("opacity", lerp(0.22, 1, ramp(t, a.at, 0.5)).toFixed(3));
+  const built = end("1.1") + 0.6;
+  show(heading, ramp(t, built), 0);
+  ROWS.forEach(([id], i) => {
+    draw(row[id].rule, ramp(t, built + i * 0.12, 0.8));
+    show(row[id].label, ramp(t, built + 0.3 + i * 0.12));
+  });
+  for (const c of chapters) show(c.g, during(t, start(c.from) - 0.4, c.to ? start(c.to) - 0.7 : T.duration - 0.8), 0);
+
+  // 2.1: Python and R.
+  show(python.g, ramp(t, S("2.1", "Python and R", -0.2)));
+  show(rLang.g, ramp(t, S("2.1", "Python and R", 0.4)));
+  PKG.forEach(([g, phrase]) => show(g, ramp(t, S("2.1", phrase, -0.1), 0.4), 4));
+  row.tools.hl.setAttribute("opacity", during(t, start("2.1"), end("2.1") + 0.2));
+
+  // 2.2: SQL, and the study database.
+  show(sqlTile.g, ramp(t, S("2.2", "writes SQL", -0.3)));
+  show(sqlSub, ramp(t, S("2.2", "read-only", -0.2), 0.4), 4);
+  show(database.g, ramp(t, S("2.2", "For the study database", -0.2)));
+  show(helperTile.g, ramp(t, S("2.2", "through DataLab", 0.2)));
+  row.connections.hl.setAttribute("opacity", during(t, start("2.2"), S("2.2", "And when you'd rather")));
+
+  // 2.3: skills; one lifts, as if loaded.
+  SKILLS.forEach((s, i) => show(s.g, ramp(t, S("2.3", "short written guides", -0.4 + i * 0.25), 0.5)));
+  const loaded = during(t, S("2.3", "A skill is loaded", -0.2), end("2.3") + 0.3, 0.4);
+  SKILLS[0].lift.setAttribute("transform", `translate(0 ${(-10 * loaded).toFixed(2)})`);
+  row.skills.hl.setAttribute("opacity", during(t, start("2.3"), end("2.3") + 0.2));
+
+  // 3.1–3.2: knowledge.
+  PAGES.forEach((p, i) => show(p.g, ramp(t, S("3.1", i < 3 ? "What each table means" : "cohort definitions", -0.3 + (i % 3) * 0.3), 0.5)));
+  row.knowledge.hl.setAttribute("opacity", during(t, start("3.1"), end("3.2") + 0.2));
+  show(pageIllus, during(t, S("3.1", "It's a set of plain pages", -0.3), end("3.1") + 0.1, 0.3), 0);
+  show(editIllus, during(t, start("3.2") + 0.2, end("3.2") + 0.1, 0.3), 0);
+  show(EDIT.old, ramp(t, S("3.2", "proposes an edit", 0.2), 0.4), 0);
+  show(EDIT.added, ramp(t, S("3.2", "proposes an edit", 0.7), 0.4), 0);
+  show(EDIT.save, ramp(t, S("3.2", "until you save it", -0.6), 0.4), 0);
+  show(EDIT.check, ramp(t, S("3.2", "A check makes sure", -0.1), 0.4), 0);
+  show(newPage, ramp(t, S("3.2", "better informed", -0.8), 0.5));
+
+  // 4.1: workflows.
+  flows.forEach((f, i) => show(f.g, ramp(t, S("4.1", i ? "a set of daily metrics" : "a regular export", -0.3))));
+  draw(track, ramp(t, S("4.1", "That becomes a workflow"), 0.7));
+  show(folder, ramp(t, S("4.1", "That becomes a workflow", 0.4)));
+  show(noAI, ramp(t, S("4.1", "with no AI involved", -0.3)));
+  [S("4.1", "DataLab runs it"), S("4.1", "run it again", -0.2), S("4.1", "replay the original", -0.2)].forEach((t0, i) => {
+    const p = clamp((t - t0) / 1.4);
+    const vis = Math.min(clamp((t - t0) / 0.15), 1 - clamp((t - t0 - 1.5) / 0.3));
+    runs[i].style.display = vis > 0 ? "" : "none";
+    runs[i].setAttribute("opacity", vis.toFixed(3));
+    runs[i].setAttribute("transform", `translate(${lerp(ITEMS + 480, ITEMS + 735, ease(p))} ${WY + 29})`);
+  });
+  row.workflows.hl.setAttribute("opacity", during(t, start("4.1"), end("4.1") + 0.2));
+
+  // 5.1: the five pieces, one after another.
+  ["tools", "skills", "knowledge", "connections", "workflows"].forEach((id) => {
+    const at = S("5.1", id === "tools" ? "tools, skills" : id);
+    row[id].hl.setAttribute("opacity", Math.max(+row[id].hl.getAttribute("opacity"), during(t, at - 0.1, end("5.1") + 0.2, 0.3)));
+  });
+
+  // 5.2: the requests drop onto their rows.
+  show(RIGHT, during(t, start("5.2") - 0.2, end("5.2") + 0.2, 0.4), 0);
+  for (const r of REQUESTS) {
+    const appear = ramp(t, r.at - 0.9, 0.4);
+    const fly = ramp(t, r.at, 1.0);
+    r.g.style.display = appear > 0 ? "" : "none";
+    r.g.setAttribute("opacity", appear.toFixed(3));
+    r.g.setAttribute("transform", `translate(${lerp(r.from[0], r.to[0], fly).toFixed(1)} ${lerp(r.from[1], r.to[1], fly).toFixed(1)})`);
+  }
+
+  // 5.3: the close.
+  show(rules, ramp(t, start("5.3") + 0.2, 0.7), 0);
+
+  for (const [, f] of Object.entries(F)) {
+    show(f.g, during(t, f.from, f.to, 0.3), 0);
+    for (const part of f.parts) show(part.p, part.at === null ? 1 : ramp(t, part.at, 0.4), 5);
+  }
+
+  const c = T.captions.find((c) => t >= c.start && t < c.end + 0.15);
+  caption.textContent = c ? c.text : "";
+  fadeOut.setAttribute("opacity", ramp(t, T.duration - 0.7, 0.6));
+}
+
+// The footage in each app panel: a crop of a walkthrough's take (lib.js clip).
+const CLIPS = {
+  "2.1": { v: "11-workspace-answer", shot: "2.3", target: "made", at: 8.4, from: 1.5 },
+  "2.2": { v: "12-sql-playground", shot: "2.2", target: "editor", at: 91.3, from: 86 },
+  "2.3": { v: "11-workspace-answer", shot: "2.3", target: "made", at: 1.1, from: 0.5 },
+  "4.1": { v: "13-workflows", shot: "4.1", target: "pinned", at: 5.0, from: 1.0 },
+};
+const CLIP = {};
+for (const [shot, spec] of Object.entries(CLIPS)) CLIP[shot] = await clip(F[shot].g, { x: P.x, y: P.y, w: P.w, h: P.h }, spec);
+
+window.audit = {
+  windows: [...Object.entries(F).map(([shot, f]) => ({ shot, g: f.g })), { shot: "3.1", g: pageIllus }, { shot: "3.2", g: editIllus }],
+  subjects: { "2.1": python.g, "2.2": sqlTile.g, "2.3": SKILLS[0].g, "3.1": PAGES[0].g, "3.2": PAGES[0].g, "4.1": flows[0].g },
+};
+window.duration = T.duration;
+window.seek = async (t) => {
+  frameAt(t);
+  await Promise.all(Object.entries(CLIP)
+    .filter(([shot]) => t > F[shot].from - 0.5 && t < F[shot].to + 0.5)
+    .map(([shot, c]) => c.seek(Math.max(0, t - F[shot].from))));
+};
+await document.fonts.ready;
+await window.seek(0);
+window.ready = true;
+
+if (location.search.includes("preview")) {
+  document.body.classList.add("preview");
+  const audio = document.getElementById("audio");
+  const clock = document.getElementById("clock");
+  const at = new URLSearchParams(location.search).get("t");
+  if (at) audio.currentTime = +at;
+  const tick = () => { frameAt(audio.currentTime); clock.textContent = audio.currentTime.toFixed(1) + " s"; requestAnimationFrame(tick); };
+  tick();
+}
+</script>
+</body>
+</html>

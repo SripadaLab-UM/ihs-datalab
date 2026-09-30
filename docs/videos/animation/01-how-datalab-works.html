@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How DataLab works (animation)</title>
+<!--
+  Video 1 (docs/videos/01-how-datalab-works.md): one question on one map.
+  ?preview plays it with the narration (&t=60 starts at 60 s); the renderer
+  calls window.seek(t). Footage windows show a placeholder until recorded.
+-->
+<style>
+  @font-face {
+    font-family: "Schibsted Grotesk Variable";
+    src: url("/frontend/node_modules/@fontsource-variable/schibsted-grotesk/files/schibsted-grotesk-latin-wght-normal.woff2") format("woff2");
+    font-weight: 400 900;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/frontend/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  }
+  html, body { margin: 0; background: #fff; }
+  svg { display: block; }
+  #controls { position: fixed; left: 12px; bottom: 12px; display: none; gap: 8px; align-items: center;
+    font: 13px "Schibsted Grotesk Variable", sans-serif; background: #fff; padding: 6px 10px; border: 1px solid #e7e5df; }
+  .preview #controls { display: flex; }
+  .preview svg { width: 100vw; height: auto; max-height: 100vh; }
+</style>
+</head>
+<body>
+<svg id="stage" viewBox="0 0 1920 1080" width="1920" height="1080" xmlns="http://www.w3.org/2000/svg"></svg>
+<div id="controls"><audio id="audio" controls src="../build/01-how-datalab-works/narration.wav"></audio><span id="clock"></span></div>
+<script type="module">
+import { C, el, text, show, draw, icon, ICON, ramp, during, clamp, ease, lerp, loadTiming, spoken, clip } from "./lib.js";
+
+const T = await loadTiming("../build/01-how-datalab-works");
+const S = (shot, phrase, offset = 0) => spoken(T, shot, phrase, offset);
+const start = (id) => T.shot[id].start;
+const end = (id) => T.shot[id].end;
+const QUESTION = "Did daily steps change during the intern year?";
+
+const stage = document.getElementById("stage");
+el("rect", { width: 1920, height: 1080, fill: C.paper }, stage);
+const defs = el("defs", {}, stage);
+for (const [id, color] of [["arrow", C.muted], ["arrow-data", C.data]]) {
+  const marker = el("marker", { id, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs);
+  el("path", { d: "M0 0 L10 5 L0 10 z", fill: color }, marker);
+}
+
+const wrap = (parent) => el("g", {}, parent);
+
+// ============================================================================
+// The map, in its own coordinates, placed at (77, 40) and scaled 0.92.
+// ============================================================================
+
+const MAP = { x: 77, y: 40, s: 0.92 };
+const onScreen = ([x, y]) => [MAP.x + MAP.s * x, MAP.y + MAP.s * y];
+const diagram = el("g", { transform: `translate(${MAP.x} ${MAP.y}) scale(${MAP.s})` }, stage);
+const L = { frames: wrap(diagram), wires: wrap(diagram), blocks: wrap(diagram), chips: wrap(diagram), movers: wrap(diagram) };
+const routes = el("g", { visibility: "hidden" }, diagram);
+
+function frame({ x, y, w, h, label, sub, tone = C.ink, width = 1.25 }) {
+  const g = wrap(L.frames);
+  const r = el("rect", { x, y, width: w, height: h, rx: 4, fill: "none", stroke: tone, "stroke-width": width, pathLength: 1 }, g);
+  const t = wrap(g);
+  if (label) text(t, x + 20, y + 34, label, { label: true, fill: tone === C.ink ? C.faint : tone });
+  if (sub) text(t, x + 20, y + 58, sub, { font: "sans", size: 16, fill: C.muted });
+  return { g, r, t };
+}
+
+function block({ x, y, w, h, title, sub }) {
+  const g = wrap(L.blocks);
+  const hl = el("rect", { x, y, width: w, height: h, rx: 3, fill: C.dataSoft, opacity: 0 }, g);
+  el("rect", { x, y, width: w, height: h, rx: 3, fill: "none", stroke: C.ink, "stroke-width": 1.25 }, g);
+  text(g, x + 18, y + (sub ? 37 : 44), title, { size: 25 });
+  if (sub) text(g, x + 18, y + 62, sub, { font: "sans", size: 15, fill: C.muted });
+  return { g, hl, at: [x + w - 8, y + h - 8] };
+}
+
+function wire(d, { head = false } = {}) {
+  return el("path", { d, fill: "none", stroke: C.muted, "stroke-width": 1.5, pathLength: 1,
+    ...(head ? { "marker-end": "url(#arrow)" } : {}) }, L.wires);
+}
+
+function mover(d, { label, color = C.ink, iconName, labelDy = -16 } = {}) {
+  const route = el("path", { d, fill: "none" }, routes);
+  const g = wrap(L.movers);
+  const body = wrap(g);
+  if (iconName) {
+    el("circle", { r: 17, fill: C.paper }, body);
+    ICON[iconName](body, color);
+  } else {
+    el("circle", { r: 9, fill: color }, body);
+  }
+  const lab = label ? text(g, 0, 0, label, { font: "sans", size: 17, weight: 500, fill: color }) : null;
+  const x = wrap(g);
+  el("circle", { r: 15, fill: C.paper, stroke: C.danger, "stroke-width": 1.5 }, x);
+  ICON.cross(x);
+  const ok = wrap(g);
+  el("circle", { r: 15, fill: C.dataSoft, stroke: C.data, "stroke-width": 1.5 }, ok);
+  icon(ok, "tick", 0, 1, C.data, 0.8);
+  return { g, body, lab, x, ok, route, len: 0, labelDy };
+}
+
+/** Move along the route from t0 over dur. With stop, it's refused at the end;
+    with tested, the refusal then turns into a tick (the Safety check). */
+function move(m, t, t0, dur, { stop = false, hold = 1.1, tested = false } = {}) {
+  m.len ||= m.route.getTotalLength();
+  const arrive = t0 + dur;
+  const leave = stop ? arrive + hold : arrive;
+  const vis = Math.min(clamp((t - t0) / 0.15), 1 - clamp((t - leave) / 0.35));
+  if (vis <= 0) return void (m.g.style.display = "none");
+  m.g.style.display = "";
+  m.g.setAttribute("opacity", vis.toFixed(3));
+  const p = m.route.getPointAtLength(ease(clamp((t - t0) / dur)) * m.len);
+  m.body.setAttribute("transform", `translate(${p.x} ${p.y})`);
+  if (m.lab) { m.lab.setAttribute("x", p.x + 20); m.lab.setAttribute("y", p.y + m.labelDy); }
+  const xp = stop ? ramp(t, arrive, 0.25) : 0;
+  const okp = stop && tested ? ramp(t, arrive + 0.6, 0.3) : 0;
+  m.x.style.display = xp > 0 && okp < 1 ? "" : "none";
+  m.x.setAttribute("transform", `translate(${p.x} ${p.y}) scale(${((0.5 + 0.5 * xp) * (1 - okp)).toFixed(3)})`);
+  m.ok.style.display = okp > 0 ? "" : "none";
+  m.ok.setAttribute("transform", `translate(${p.x} ${p.y}) scale(${okp.toFixed(3)})`);
+}
+
+function chip(parent, x, y, words, tone = C.ink) {
+  const g = wrap(parent);
+  const w = words.length * 9.2 + 32;
+  const fill = tone === C.data ? C.dataSoft : tone === C.research ? C.researchSoft : C.accentSoft;
+  el("rect", { x, y, width: w, height: 34, rx: 17, fill, stroke: tone, "stroke-width": 1 }, g);
+  text(g, x + 16, y + 23, words, { font: "sans", size: 16, weight: 500, fill: tone });
+  return g;
+}
+
+// ---- Frames ------------------------------------------------------------------
+const computer = frame({ x: 80, y: 100, w: 1400, h: 900, label: "Your computer" });
+const datalab = frame({ x: 520, y: 170, w: 880, h: 350 });
+text(datalab.t, 548, 218, "DataLab", { size: 30 });
+const dataBox = frame({ x: 160, y: 600, w: 660, h: 290, label: "Data session", sub: "A sealed environment per conversation", tone: C.data, width: 1.75 });
+const researchBox = frame({ x: 1000, y: 600, w: 400, h: 290, label: "Research session", sub: "Web yes, database no", tone: C.research, width: 1.75 });
+
+// ---- Outside the computer ----------------------------------------------------
+function outside({ x, y, w = 300, h = 100, title, sub }) {
+  const g = wrap(L.blocks);
+  el("rect", { x, y, width: w, height: h, rx: 3, fill: C.sunken, stroke: C.ink, "stroke-width": 1.25 }, g);
+  text(g, x + 18, y + 40, title, { size: 25 });
+  if (sub) text(g, x + 18, y + 66, sub, { font: "sans", size: 15, fill: C.muted });
+  return g;
+}
+const gpt = outside({ x: 1560, y: 230, title: "U-M GPT", sub: "U-M's approved GPT service" });
+const database = outside({ x: 1560, y: 395, title: "Study database", sub: "Read-only for DataLab" });
+const web = outside({ x: 1560, y: 770, title: "The web", sub: "Papers, packages, methods" });
+
+// ---- Inside the computer -----------------------------------------------------
+const browser = wrap(L.blocks);
+el("rect", { x: 140, y: 180, width: 280, height: 120, rx: 3, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, browser);
+el("path", { d: "M140 206 H420", stroke: C.line, "stroke-width": 1.25 }, browser);
+for (const cx of [156, 170, 184]) el("circle", { cx, cy: 193, r: 4, fill: C.line }, browser);
+text(browser, 330, 198, "Browser", { font: "sans", size: 13, fill: C.faint, anchor: "middle" });
+text(browser, 156, 240, "Did daily steps change", { size: 19, italic: true });
+text(browser, 156, 266, "during the intern year?", { size: 19, italic: true });
+
+// DataLab's own parts: two columns of three, then the relay and data service.
+// Cards travel the gap between the columns (x 775) and under the first row (y 320).
+const cell = (col, row, title) => block({ x: col ? 790 : 560, y: 240 + row * 90, w: 200, h: 70, title });
+const plan = cell(0, 0, "Plan");
+const planLock = wrap(plan.g);
+icon(planLock, "lock", 735, 262, C.data, 0.9);
+const rigor = cell(1, 0, "Rigor review");
+const checkpoints = cell(0, 1, "Checkpoints");
+const checkTick = wrap(checkpoints.g);
+icon(checkTick, "tick", 742, 350, C.data, 0.9);
+const log = cell(1, 1, "Log");
+const logLines = [0, 1, 2].map((i) => el("path", { d: `M890 ${352 + i * 14} H970`, stroke: C.muted, "stroke-width": 2, pathLength: 1 }, log.g));
+const exportB = cell(0, 2, "Export");
+const safety = cell(1, 2, "Safety check");
+const relay = block({ x: 1060, y: 235, w: 310, h: 90, title: "Relay", sub: "Adds the GPT key" });
+icon(relay.g, "key", 1330, 268, C.ink, 1.2);
+const dataService = block({ x: 1060, y: 395, w: 310, h: 100, title: "Data service", sub: "Login in the keychain" });
+icon(dataService.g, "lock", 1335, 428, C.ink, 1.2);
+
+const folder = wrap(L.blocks);
+icon(folder, "folder", 200, 455, C.ink, 1.3);
+text(folder, 200, 503, "A folder you chose", { font: "sans", size: 17, anchor: "middle" });
+
+function agentAt(x, y) {
+  const g = wrap(L.blocks);
+  el("rect", { x, y, width: 200, height: 90, rx: 45, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, g);
+  text(g, x + 100, y + 54, "AI agent", { size: 24, anchor: "middle" });
+  return g;
+}
+const agent = agentAt(220, 690);
+const workspace = wrap(L.blocks);
+const workspaceHl = el("rect", { x: 455, y: 770, width: 150, height: 104, rx: 3, fill: C.dataSoft, opacity: 0 }, workspace);
+icon(workspace, "folder", 530, 808, C.ink, 1.2);
+text(workspace, 530, 860, "Workspace", { font: "sans", size: 16, anchor: "middle" });
+const madeFiles = wrap(L.blocks);
+icon(madeFiles, "file", 500, 732, C.ink, 1);
+icon(madeFiles, "table", 548, 732, C.ink, 0.9);
+const files = wrap(L.blocks);
+icon(files, "folder", 710, 808, C.ink, 1.2);
+text(files, 710, 860, "Your files", { font: "sans", size: 16, anchor: "middle" });
+const filesLock = wrap(files);
+icon(filesLock, "lock", 744, 790, C.data, 0.85);
+
+const door = wrap(L.blocks);
+el("rect", { x: 700, y: 589, width: 80, height: 22, rx: 2, fill: C.paper, stroke: C.ink, "stroke-width": 1.5 }, door);
+text(door, 792, 584, "Gateway", { label: true });
+const researchDoor = wrap(L.blocks);
+el("rect", { x: 1120, y: 589, width: 80, height: 22, rx: 2, fill: C.paper, stroke: C.ink, "stroke-width": 1.5 }, researchDoor);
+const researchAgent = agentAt(1040, 690);
+const proxy = wrap(L.blocks);
+el("rect", { x: 1350, y: 740, width: 100, height: 50, rx: 3, fill: C.paper, stroke: C.research, "stroke-width": 1.5 }, proxy);
+text(proxy, 1400, 771, "Proxy", { font: "sans", size: 16, anchor: "middle", fill: C.research });
+const helper = wrap(L.blocks);
+el("rect", { x: 840, y: 910, width: 250, height: 62, rx: 3, fill: C.paper, stroke: C.ink, "stroke-width": 1.25, "stroke-dasharray": "5 4" }, helper);
+text(helper, 858, 948, "Research helper", { size: 21 });
+
+const keyChip = chip(L.chips, 530, 632, "The key stays outside");
+const checks = ["One read-only query", "Checked before it runs", "A time limit", "A size limit"].map((words, i) => {
+  const g = wrap(L.blocks);
+  icon(g, "tick", 1580, 537 + i * 36, C.data, 0.9);
+  text(g, 1602, 543 + i * 36, words, { font: "sans", size: 18 });
+  return g;
+});
+const matched = chip(L.chips, 140, 312, "✓ All numbers matched", C.data);
+
+// Chapter 5: each habit on its spot.
+const habits = [
+  [140, 136, "1  Say what you want, and why", "Ask the way"],
+  [1100, 924, "2  Read it before you send it", "Read every research question"],
+  [700, 182, "3  The plan · rigor review on", "Treat the plan"],
+  [140, 312, "4  Check flagged numbers", "check flagged numbers"],
+].map(([x, y, words, phrase]) => ({ g: chip(L.chips, x, y, words, C.research), at: S("5.1", phrase, -0.2) }));
+
+// ---- Wires -------------------------------------------------------------------
+const W = {
+  browser: wire("M420 240 H518", { head: true }),
+  gatewayUp: wire("M740 589 V560 H1030 V280 H1058 M1030 445 H1058"),
+  toGpt: wire("M1370 280 H1558", { head: true }),
+  toDb: wire("M1370 445 H1558", { head: true }),
+  toFolder: wire("M560 455 H238", { head: true }),
+  research: wire("M1160 589 V560 H1030"),
+  toWeb: wire("M1450 765 H1500 V820 H1558", { head: true }),
+};
+const logToBrowser = el("path", { d: "M790 365 H775 V320 H540 V252 H424", fill: "none", stroke: C.data, "stroke-width": 1.75,
+  "stroke-dasharray": "8 7", "marker-end": "url(#arrow-data)" }, L.wires);
+const busLabel = text(L.wires, 1045, 540, "Two kinds of request only", { label: true });
+
+// ---- Movers ------------------------------------------------------------------
+const FROM_AGENT = "M420 735 H740 V600";
+const DOOR_TO_BUS = "M740 600 V560 H1030";
+const AGENT_TO_BROWSER = "M420 735 H740 V560 H775 V320 H540 V250 H422";
+const BROWSER_TO_AGENT = "M422 250 H540 V320 H775 V560 H740 V735 H420";
+const M = {
+  escape: mover("M220 735 H160", { label: "outside", color: C.muted, labelDy: -20 }),
+  model: mover(`${FROM_AGENT} V560 H1030 V300`, { label: "model" }),
+  data: mover(`${FROM_AGENT} V560 H1030 V445`, { label: "data", labelDy: 26 }),
+  other: mover(FROM_AGENT, { label: "anything else", color: C.muted }),
+  toRelay: mover(`${DOOR_TO_BUS} V280 H1080`, { label: "model" }),
+  withKey: mover("M1370 280 H1560", { iconName: "key", label: "adds the key", labelDy: -22 }),
+  webSearch: mover(`${DOOR_TO_BUS} V280 H1062`, { label: "web search", color: C.muted, labelDy: -60 }),
+  fetchLink: mover(`${DOOR_TO_BUS} V280 H1062`, { label: "fetch a link", color: C.muted, labelDy: 66 }),
+  planIn: mover("M420 735 H740 V560 H775 V275 H700", { iconName: "card" }),
+  planOut: mover("M560 275 H530 V250 H422", { iconName: "card" }),
+  toData: mover(`${DOOR_TO_BUS} V445 H1080`, { label: "data", labelDy: 26 }),
+  query: mover("M1370 445 H1560"),
+  result: mover("M1560 445 H1030 V560 H740 V735 H530 V790", { iconName: "table" }),
+  toWeb: mover("M1240 735 H1300 V765 H1450 H1500 V820 H1560", { color: C.research, label: "web", labelDy: -18 }),
+  noDb: mover("M1160 600 V560 H1030 V445 H1058", { label: "database", color: C.muted, labelDy: 72 }),
+  question: mover("M320 780 V941 H840", { iconName: "card" }),
+  answer: mover("M840 941 H320 V780"),
+  reply: mover(AGENT_TO_BROWSER, { iconName: "card" }),
+  review: mover("M790 275 H775 V320 H540 V250 H422", { iconName: "card", color: C.data }),
+  exportFile: mover("M560 455 H240", { iconName: "file" }),
+  exportReport: mover("M560 455 H240", { iconName: "file", color: C.data }),
+  // The Safety check replays part 1's refusals.
+  t_escape: mover("M220 735 H160", { label: "outside", color: C.muted, labelDy: -20 }),
+  t_other: mover(FROM_AGENT, { label: "anything else", color: C.muted }),
+  t_noDb: mover("M1160 600 V560 H1030 V445 H1058", { label: "write", color: C.muted, labelDy: 72 }),
+  t_web: mover(`${DOOR_TO_BUS} V280 H1062`, { label: "web search", color: C.muted, labelDy: -60 }),
+};
+
+// ============================================================================
+// Around the map
+// ============================================================================
+
+const overlay = wrap(stage);
+const chapters = [
+  ["2.1", "3.1", "01 · The question goes in"],
+  ["3.1", "4.1", "02 · The answer comes back"],
+  ["4.1", "5.1", "03 · How the AI is tested"],
+  ["5.1", "5.2", "04 · Good habits"],
+].map(([from, to, words]) => {
+  const g = wrap(overlay);
+  text(g, 80, 70, words, { label: true });
+  return { from, to, g };
+});
+
+// Chapter 1: what the video covers.
+// The opening: the title from the first frame, and the agenda, faint until
+// each line is spoken, so the screen is never empty while the narrator talks.
+const agenda = wrap(overlay);
+text(agenda, 600, 250, "How DataLab works", { size: 84 });
+text(agenda, 604, 300, "One question, from start to finish", { label: true });
+text(agenda, 660, 405, "This video covers", { label: true });
+const AGENDA = [
+  ["The question goes in", "where the question goes"],
+  ["The answer comes back", "how the answer comes back"],
+  ["How the AI is tested", "how the AI itself is tested"],
+  ["Good habits", "a few habits"],
+].map(([words, phrase], i) => {
+  const g = wrap(agenda);
+  text(g, 630, 490 + i * 90, String(i + 1), { size: 44, fill: C.faint, anchor: "end" });
+  text(g, 660, 490 + i * 90, words, { size: 52 });
+  return { g, at: S("1.1", phrase, -0.3) };
+});
+
+// Footage windows: 16:9, pinned to their spot on the map by a leader line.
+const SPOT = { dl: [600, 150], rs: [872, 560], tl: [90, 110] };
+const WIN = { w: 640, h: 360 };
+function pinned(spot, target, g) {
+  const [x, y] = SPOT[spot];
+  const [tx, ty] = onScreen(target);
+  el("path", { d: `M${clamp(tx, x, x + WIN.w)} ${clamp(ty, y, y + WIN.h)} L${tx} ${ty}`, stroke: C.faint, "stroke-width": 1.25, "stroke-dasharray": "3 4" }, g);
+  el("circle", { cx: tx, cy: ty, r: 4.5, fill: C.faint }, g);
+  return [x, y];
+}
+function footage(spot, target, heading, items) {
+  const g = wrap(overlay);
+  const [x, y] = pinned(spot, target, g);
+  el("rect", { x, y, width: WIN.w, height: WIN.h, rx: 4, fill: C.paper, stroke: C.faint, "stroke-width": 1.5, "stroke-dasharray": "8 6" }, g);
+  text(g, x + 32, y + 46, "Footage to record", { label: true, fill: C.research });
+  text(g, x + 32, y + 96, heading, { size: 36 });
+  const parts = items.map((item, i) => {
+    const { words, at = null, mono = false, tone = C.ink, size } = typeof item === "string" ? { words: item } : item;
+    const p = wrap(g);
+    text(p, x + 32, y + 150 + i * 44, words, { font: mono ? "mono" : "serif", size: size ?? (mono ? 19 : 23), fill: tone });
+    return { p, at };
+  });
+  return { g, parts, x, y };
+}
+
+const typing = { node: null };
+const F = {
+  "2.1": (() => {
+    const f = footage("dl", [420, 240], "New conversation", [
+      { words: "Data session · database access, web blocked", size: 21, tone: C.data },
+    ]);
+    el("rect", { x: f.x + 32, y: f.y + 210, width: 576, height: 60, rx: 3, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, f.g);
+    typing.node = text(f.g, f.x + 50, f.y + 249, "", { size: 23, italic: true });
+    return f;
+  })(),
+  "2.6": footage("rs", plan.at, "The plan card", [
+    { words: "Question · Estimand · Exposure · Outcome", at: S("2.6", "the question, the estimand") },
+    { words: "Covariates · Cohort, time window, exclusions", at: S("2.6", "the cohort") },
+    { words: "[ Approve plan ]", mono: true, at: S("2.6", "approve it") },
+    { words: "“Approved by you and frozen …”", tone: C.data, at: S("2.6", "it's frozen") },
+  ]),
+  "2.8": footage("dl", [850, 912], "The approval card", [
+    { words: "What will be sent: the question, as written", at: S("2.8", "you see exactly") },
+    { words: "[ Don't send ]   [ Send to the research helper ]", mono: true, size: 17, at: S("2.8", "and you decide") },
+  ]),
+  "3.1": footage("rs", checkpoints.at, "History", [
+    "The checkpoints, one per turn",
+    { words: "[ Restore files ]", mono: true, at: S("3.1", "a bad step") },
+  ]),
+  "3.2": footage("dl", [280, 300], "The answer", [
+    { words: "✓ all 7 numbers matched to this turn's outputs", mono: true, size: 17, tone: C.data, at: S("3.2", "checks every number") },
+    { words: "1 of 7 numbers not matched to this turn's outputs", mono: true, size: 17, tone: C.research, at: S("3.2", "and flags any") },
+  ]),
+  "3.3": footage("rs", rigor.at, "Rigor review", [
+    { words: "The Rigor review switch, in the header", at: S("3.3", "With rigor review on") },
+    { words: "The review, under the answer", at: S("3.3", "a second pass") },
+    { words: "the plan · causal language · sample sizes · uncertainty · privacy", size: 17, tone: C.muted, at: S("3.3", "the plan, causal") },
+  ]),
+  "3.4": footage("rs", log.at, "The SQL, and the Queries tab", [
+    { words: "SELECT … FROM … WHERE …", mono: true, at: S("3.4", "the exact SQL") },
+    { words: "Queries: tables · when · rows · result file", at: S("3.4", "lists every query") },
+  ]),
+  "3.5": footage("rs", exportB.at, "Export", [
+    { words: "Choose files → Export, to a folder you chose", at: S("3.5", "unless you export it") },
+    { words: "Export conversation → one HTML report", at: S("3.5", "The whole conversation") },
+  ]),
+  "3.6": footage("tl", safety.at, "Settings → Run safety check", [
+    { words: "Checking… (about 20 s)   [sped up]", mono: true, size: 17, tone: C.muted },
+    { words: "Every check passed", mono: true, tone: C.data, at: S("3.6", "tests it for real") },
+    { words: "The AI can't touch anything else on your computer", size: 18, at: S("3.6", "tries to reach the web") },
+    { words: "The AI can't change or damage the research database", size: 18, at: S("3.6", "looks for keys") },
+  ]),
+};
+
+// When each footage window is up: from once its subject is on the map, to
+// before the next window arrives, so two are never on screen together.
+const SHOWN = {
+  "2.1": [start("2.1") + 0.3, end("2.1") + 0.1],
+  "2.6": [S("2.6", "analysis plan", 0.2), end("2.6") + 0.1],
+  "2.8": [S("2.8", "If a data session", 0.3), S("2.8", "is deleted", 0.1)],
+  "3.1": [S("3.1", "saves a checkpoint"), end("3.1") + 0.1],
+  "3.2": [S("3.2", "On arrival", -0.2), end("3.2") + 0.1],
+  "3.3": [start("3.3") + 0.3, end("3.3") + 0.1],
+  "3.4": [start("3.4") + 0.2, end("3.4") + 0.1],
+  "3.5": [start("3.5") + 0.3, end("3.5") + 0.1],
+  "3.6": [start("3.6") + 0.3, end("3.6") + 0.1],
+};
+
+// Chapter 4: questions with known answers, a slide of its own.
+const traps = wrap(overlay);
+text(traps, 960, 250, "Questions with known answers", { size: 60, anchor: "middle" });
+text(traps, 960, 300, "On a synthetic database", { label: true, anchor: "middle" });
+const TRAPS = [["Duplicate", "rows"], ["Screened,", "never enrolled"], ["Empty", "tables"], ["Small", "groups"], ["Who stops", "answering"]];
+const cards = TRAPS.map((lines, i) => {
+  const g = el("g", {}, traps);
+  const face = el("g", {}, g);
+  el("rect", { x: -120, y: -150, width: 240, height: 300, rx: 4, fill: C.sunken, stroke: C.ink, "stroke-width": 1.25 }, face);
+  text(face, 0, 26, "?", { size: 90, anchor: "middle", fill: C.faint });
+  const back = el("g", {}, g);
+  el("rect", { x: -120, y: -150, width: 240, height: 300, rx: 4, fill: C.paper, stroke: C.ink, "stroke-width": 1.25 }, back);
+  text(back, 0, -100, "Trap", { label: true, anchor: "middle", fill: C.research });
+  lines.forEach((line, j) => text(back, 0, -8 + j * 38, line, { size: 30, anchor: "middle" }));
+  const tick = el("g", {}, g);
+  icon(tick, "tick", 0, 200, C.data, 2);
+  return { g, face, back, tick, cx: 360 + i * 300 };
+});
+
+// The close.
+const quiet = el("rect", { width: 1920, height: 1000, fill: C.paper, opacity: 0 }, overlay);
+const endCard = wrap(overlay);
+text(endCard, 960, 500, "One question, start to finish", { size: 60, anchor: "middle" });
+text(endCard, 960, 560, "More in Help", { label: true, anchor: "middle" });
+
+const caption = text(stage, 960, 1046, "", { font: "sans", size: 31, weight: 450, anchor: "middle" });
+caption.setAttribute("stroke", C.paper);
+caption.setAttribute("stroke-width", 10);
+caption.setAttribute("paint-order", "stroke");
+caption.setAttribute("stroke-linejoin", "round");
+const fadeOut = el("rect", { width: 1920, height: 1080, fill: C.paper, opacity: 0 }, stage);
+
+// ============================================================================
+// The timeline
+// ============================================================================
+
+function frameAt(t) {
+  // 1.1: what this video covers.
+  show(agenda, Math.min(ramp(t, 0, 0.5), 1 - ramp(t, end("1.1") + 0.2, 0.6)), 0);
+  for (const a of AGENDA) a.g.setAttribute("opacity", lerp(0.22, 1, ramp(t, a.at, 0.5)).toFixed(3));
+  draw(computer.r, ramp(t, end("1.1") + 0.5, 1.1));
+  show(computer.t, ramp(t, end("1.1") + 1.0));
+
+  for (const c of chapters) show(c.g, during(t, start(c.from) - 0.4, start(c.to) - 0.7), 0);
+
+  // 2.1: the question, in the browser.
+  show(browser, ramp(t, start("2.1") - 0.3));
+  const typed = clamp((t - S("2.1", "did daily steps")) / 2.2);
+  typing.node.textContent = QUESTION.slice(0, Math.floor(typed * QUESTION.length));
+
+  // 2.2: DataLab.
+  draw(datalab.r, ramp(t, start("2.2") + 0.1, 1.0));
+  show(datalab.t, ramp(t, start("2.2") + 0.5));
+  draw(W.browser, ramp(t, S("2.2", "the page comes from"), 0.8));
+
+  // 2.3: the sealed box.
+  draw(dataBox.r, ramp(t, S("2.3", "the AI gets", -0.2), 1.0));
+  show(dataBox.t, ramp(t, S("2.3", "its own sealed environment")));
+  show(agent, ramp(t, S("2.3", "its own sealed environment", 0.3)));
+  show(workspace, ramp(t, S("2.3", "its workspace", -0.2)));
+  show(files, ramp(t, S("2.3", "the files you attach", -0.2)));
+  show(filesLock, ramp(t, S("2.3", "read but not change")), 0);
+  dataBox.r.setAttribute("stroke-width", lerp(1.75, 4, ramp(t, S("2.3", "no route"), 0.6)));
+  move(M.escape, t, S("2.3", "no route", 0.2), 0.9, { stop: true });
+
+  // 2.4: one door.
+  show(door, ramp(t, S("2.4", "one door", -0.2)));
+  draw(W.gatewayUp, ramp(t, S("2.4", "A gateway"), 1.3));
+  show(busLabel, ramp(t, S("2.4", "two kinds")), 0);
+  move(M.model, t, S("2.4", "calls to the AI model", -0.3), 1.7);
+  move(M.data, t, S("2.4", "calls for data", -0.3), 1.7);
+  move(M.other, t, S("2.4", "Everything else", -0.2), 1.0, { stop: true, hold: 1.3 });
+
+  // 2.5: the relay and the key.
+  show(relay.g, ramp(t, Math.min(S("2.5", "DataLab's relay", -0.4), start("2.5") + 0.6)));
+  move(M.toRelay, t, start("2.5"), 1.5);
+  relay.hl.setAttribute("opacity", during(t, S("2.5", "checks each one"), S("2.5", "and sends it on", 1.2)));
+  show(gpt, ramp(t, S("2.5", "and sends it on", -0.6)));
+  draw(W.toGpt, ramp(t, S("2.5", "and sends it on", -0.4), 0.6));
+  move(M.withKey, t, S("2.5", "and sends it on"), 1.6);
+  show(keyChip, during(t, S("2.5", "The key never enters", -0.1), end("2.5") + 0.8));
+  move(M.webSearch, t, S("2.5", "like a web search", -1.0), 1.5, { stop: true, hold: 1.2 });
+  move(M.fetchLink, t, S("2.5", "a link for the provider", -0.9), 1.5, { stop: true, hold: 1.6 });
+
+  // 2.6: the plan.
+  show(plan.g, ramp(t, start("2.6") + 0.3));
+  move(M.planIn, t, start("2.6") + 0.6, 1.6);
+  move(M.planOut, t, S("2.6", "You edit it", -0.8), 0.9);
+  show(planLock, ramp(t, S("2.6", "it's frozen"), 0.4), 0);
+
+  // 2.7: the data service.
+  show(dataService.g, ramp(t, Math.min(S("2.7", "data service", -0.5), start("2.7") + 0.6)));
+  move(M.toData, t, start("2.7"), 1.5);
+  show(database, ramp(t, S("2.7", "The database login")));
+  draw(W.toDb, ramp(t, S("2.7", "The database login"), 0.6));
+  const checksGo = 1 - ramp(t, end("2.7") + 0.8, 0.4);
+  ["one read-only query", "checks it before", "how long", "how much"]
+    .forEach((phrase, i) => show(checks[i], Math.min(ramp(t, S("2.7", phrase, -0.15), 0.4), checksGo)));
+  move(M.query, t, S("2.7", "how much it can return", 0.9), 0.8);
+  const resultAt = S("2.7", "The result comes back", -0.2);
+  move(M.result, t, resultAt, 2.2);
+  show(log.g, ramp(t, S("2.7", "written to a log", -0.6)));
+  logLines.forEach((line, i) => draw(line, ramp(t, S("2.7", "written to a log", 0.1 + i * 0.25), 0.4)));
+
+  // 2.8: research sessions and the helper.
+  const researchAt = S("2.8", "That's a research session", -0.3);
+  draw(researchBox.r, ramp(t, researchAt, 1.0));
+  show(researchBox.t, ramp(t, researchAt + 0.4));
+  show(researchAgent, ramp(t, researchAt + 0.5));
+  show(researchDoor, ramp(t, researchAt + 0.5));
+  draw(W.research, ramp(t, researchAt + 0.7, 0.6));
+  show(proxy, ramp(t, S("2.8", "with the internet", -0.4)));
+  show(web, ramp(t, S("2.8", "with the internet", -0.2)));
+  draw(W.toWeb, ramp(t, S("2.8", "with the internet"), 0.6));
+  move(M.toWeb, t, S("2.8", "with the internet", 0.2), 1.4);
+  move(M.noDb, t, S("2.8", "no connection to the database", -0.2), 1.3, { stop: true, hold: 1.4 });
+  const helperIn = S("2.8", "The helper gets", -0.5);
+  const helperNow = Math.min(ramp(t, S("2.8", "If a data session", -0.2)), 1 - ramp(t, S("2.8", "is deleted", 0.2), 0.7));
+  show(helper, Math.max(helperNow, during(t, habits[1].at, start("5.2"))));
+  move(M.question, t, helperIn + 0.2, 1.3);
+  move(M.answer, t, S("2.8", "answers", -0.1), 1.1);
+
+  // 3.1: work, and a checkpoint.
+  show(madeFiles, ramp(t, start("3.1") + 0.3, 0.5));
+  show(checkpoints.g, ramp(t, S("3.1", "saves a checkpoint", -0.8)));
+  show(checkTick, ramp(t, S("3.1", "saves a checkpoint", 0.3), 0.4), 0);
+  workspaceHl.setAttribute("opacity", Math.max(
+    during(t, resultAt + 2.1, resultAt + 3.3, 0.3),
+    during(t, start("3.1"), S("3.1", "saves a checkpoint", 1.4), 0.3)));
+  checkpoints.hl.setAttribute("opacity", during(t, S("3.1", "saves a checkpoint"), end("3.1") + 0.3));
+
+  // 3.2: the answer comes back, and its numbers are checked.
+  move(M.reply, t, S("3.2", "travels back", -0.4), 2.0);
+  show(matched, during(t, S("3.2", "checks every number"), end("3.2") + 0.3, 0.4));
+
+  // 3.3: the rigor review.
+  show(rigor.g, ramp(t, start("3.3") - 0.2));
+  move(M.review, t, S("3.3", "a second pass", 0.6), 1.4);
+
+  // 3.4: the SQL and the queries.
+  logToBrowser.setAttribute("opacity", during(t, S("3.4", "lists every query", -0.4), end("3.4") + 0.3, 0.5));
+
+  // 3.5: export.
+  show(exportB.g, ramp(t, start("3.5") - 0.2));
+  show(folder, ramp(t, start("3.5") + 0.2));
+  draw(W.toFolder, ramp(t, S("3.5", "export it", -0.3), 0.7));
+  move(M.exportFile, t, S("3.5", "export it"), 1.2);
+  move(M.exportReport, t, S("3.5", "The whole conversation"), 1.2);
+
+  // 3.6: the Safety check replays the refusals, and each one is tested.
+  show(safety.g, ramp(t, start("3.6") - 0.2));
+  const test = { stop: true, tested: true, hold: 2.2 };
+  move(M.t_escape, t, S("3.6", "tries to reach the web", -0.3), 0.9, test);
+  move(M.t_other, t, S("3.6", "looks for keys", -0.4), 0.9, test);
+  move(M.t_noDb, t, S("3.6", "confirms the database", -0.4), 1.1, test);
+  move(M.t_web, t, S("3.6", "and more", -0.6), 1.1, test);
+
+  // 4.1: questions with known answers. The map steps aside for it.
+  const aside = during(t, start("4.1") - 0.5, end("4.1") + 0.3, 0.5);
+  diagram.setAttribute("opacity", (1 - aside).toFixed(3));
+  show(traps, during(t, start("4.1") - 0.2, end("4.1") + 0.3, 0.5), 0);
+  cards.forEach((card, i) => {
+    const flip = ramp(t, S("4.1", "Each question hides a trap", -0.4 + i * 0.4), 0.6);
+    const sx = Math.max(0.02, Math.abs(Math.cos(Math.PI * flip)));
+    card.g.setAttribute("transform", `translate(${card.cx} 560) scale(${sx.toFixed(3)} 1)`);
+    card.face.style.display = flip < 0.5 ? "" : "none";
+    card.back.style.display = flip < 0.5 ? "none" : "";
+    show(card.tick, ramp(t, S("4.1", "graded independently", -0.2 + i * 0.3), 0.3), 0);
+  });
+
+  // Highlights: a block lights while it's the subject.
+  plan.hl.setAttribute("opacity", Math.max(during(t, S("2.6", "it's frozen"), end("2.6") + 0.4), during(t, habits[2].at, habits[3].at)));
+  rigor.hl.setAttribute("opacity", Math.max(during(t, S("3.3", "a second pass", -0.3), end("3.3") + 0.3), during(t, S("5.1", "keep rigor review on"), habits[3].at)));
+  log.hl.setAttribute("opacity", during(t, start("3.4"), end("3.4") + 0.3));
+  exportB.hl.setAttribute("opacity", Math.max(during(t, S("3.5", "export it", -0.3), end("3.5") + 0.3)));
+  safety.hl.setAttribute("opacity", during(t, S("3.6", "The Safety check", -0.2), end("3.6") + 0.3));
+
+  // 4.1: each habit on its spot.
+  for (const h of habits) show(h.g, during(t, h.at, start("5.2") - 0.2, 0.5));
+
+  // 4.2: the close.
+  quiet.setAttribute("opacity", ramp(t, start("5.2") - 0.3, 0.8).toFixed(3));
+  show(endCard, ramp(t, start("5.2"), 0.8));
+
+  for (const [shot, f] of Object.entries(F)) {
+    show(f.g, during(t, ...SHOWN[shot], 0.3), 0);
+    for (const part of f.parts) show(part.p, part.at === null ? 1 : ramp(t, part.at, 0.4), 5);
+  }
+
+  const c = T.captions.find((c) => t >= c.start && t < c.end + 0.15);
+  caption.textContent = c ? c.text : "";
+  fadeOut.setAttribute("opacity", ramp(t, T.duration - 0.7, 0.6));
+}
+
+// The footage in each window: a crop of a walkthrough's take (see lib.js clip).
+const SIDE = { x: 1536, y: 47, width: 384, height: 330 };
+const CLIPS = {
+  "2.1": { v: "10-workspace-ask", shot: "2.1", target: "modes", at: 2.3, from: 1.5 },
+  "2.6": { v: "10-workspace-ask", shot: "5.1", target: "field", at: 10.7, from: 0.7 },
+  "3.1": { v: "11-workspace-answer", shot: "3.2", rect: SIDE, from: 6 },
+  "3.2": { v: "11-workspace-answer", shot: "2.2", target: "popover", at: 2.6, from: 1.2 },
+  "3.3": { v: "11-workspace-answer", shot: "2.1", target: "checks", at: 5.1, from: 3.5 },
+  "3.4": { v: "11-workspace-answer", shot: "3.2", rect: SIDE, from: 0.8 },
+  "3.5": { v: "11-workspace-answer", shot: "4.1", target: "dialog", at: 2.6, from: 1.5 },
+  "3.6": { v: "14-settings", shot: "3.1", rect: { x: 704, y: 95, width: 736, height: 420 }, from: 0.8 },
+};
+const CLIP = {};
+for (const [shot, spec] of Object.entries(CLIPS)) {
+  const f = F[shot];
+  CLIP[shot] = await clip(f.g, { x: f.x, y: f.y, w: WIN.w, h: WIN.h }, spec);
+}
+
+// For the renderer's audit (render.mjs --audit): each window and what it points at.
+window.audit = {
+  windows: Object.entries(F).map(([shot, f]) => ({ shot, g: f.g })),
+  subjects: { "2.1": browser, "2.6": plan.g, "2.8": helper, "3.1": checkpoints.g, "3.2": browser,
+    "3.3": rigor.g, "3.4": log.g, "3.5": exportB.g, "3.6": safety.g },
+};
+
+window.duration = T.duration;
+window.seek = async (t) => {
+  frameAt(t);
+  await Promise.all(Object.entries(CLIP)
+    .filter(([shot]) => t > SHOWN[shot][0] - 0.5 && t < SHOWN[shot][1] + 0.5)
+    .map(([shot, c]) => c.seek(Math.max(0, t - SHOWN[shot][0]))));
+};
+await document.fonts.ready;
+await window.seek(0);
+window.ready = true;
+
+if (location.search.includes("preview")) {
+  document.body.classList.add("preview");
+  const audio = document.getElementById("audio");
+  const clock = document.getElementById("clock");
+  const at = new URLSearchParams(location.search).get("t");
+  if (at) audio.currentTime = +at;
+  const tick = () => { frameAt(audio.currentTime); clock.textContent = audio.currentTime.toFixed(1) + " s"; requestAnimationFrame(tick); };
+  tick();
+}
+</script>
+</body>
+</html>

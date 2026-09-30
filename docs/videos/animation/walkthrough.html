@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Walkthrough</title>
+<!--
+  Draws any tab walkthrough: walkthrough.html?v=12-sql-playground.
+  It reads the script (../<v>.md: the title, subtitle, agenda and spotlight
+  cues), the narration's timing, and the takes (build/<v>/takes.json), and
+  draws any moment through window.seek(t). ?preview plays it with sound.
+-->
+<style>
+  @font-face {
+    font-family: "Schibsted Grotesk Variable";
+    src: url("/frontend/node_modules/@fontsource-variable/schibsted-grotesk/files/schibsted-grotesk-latin-wght-normal.woff2") format("woff2");
+    font-weight: 400 900;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/frontend/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+    font-weight: 400;
+  }
+  @font-face {
+    font-family: "IBM Plex Mono";
+    src: url("/frontend/node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+    font-weight: 700;
+  }
+  html, body { margin: 0; background: #fff; }
+  #frame { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #fff; }
+  #frame video { position: absolute; inset: 0; width: 1920px; height: 1080px; display: none; }
+  #frame svg { position: absolute; inset: 0; }
+  #controls { position: fixed; left: 12px; bottom: 12px; display: none; gap: 8px; align-items: center;
+    font: 13px "Schibsted Grotesk Variable", sans-serif; background: #fff; padding: 6px 10px; border: 1px solid #e7e5df; }
+  .preview #controls { display: flex; }
+  .preview #frame { transform-origin: 0 0; }
+</style>
+</head>
+<body>
+<div id="frame"><svg id="stage" viewBox="0 0 1920 1080" width="1920" height="1080" xmlns="http://www.w3.org/2000/svg"></svg></div>
+<div id="controls"><audio id="audio" controls></audio><span id="clock"></span></div>
+<script type="module">
+import { C, FONT, el, text, show, ramp, during, clamp, ease, lerp, loadTiming, spoken } from "./lib.js";
+
+const NAME = new URLSearchParams(location.search).get("v");
+const BUILD = `../build/${NAME}`;
+let TERM_EVENTS = [];
+const [T, script, takes] = await Promise.all([
+  loadTiming(BUILD),
+  fetch(`../${NAME}.md`).then((r) => r.text()),
+  fetch(`${BUILD}/takes.json`).then((r) => (r.ok ? r.json() : {})),
+  fetch(`${BUILD}/terminal.json`).then((r) => (r.ok ? r.json() : null)).then((j) => (TERM_EVENTS = j?.events ?? [])),
+]);
+document.getElementById("audio").src = `${BUILD}/narration.wav`;
+
+// ---- The script: title, subtitle, agenda, and each shot's spotlight cues ----
+const title = script.match(/^# (?:Walkthrough: )?(.+)$/m)[1];
+const subtitle = script.match(/^\| Subtitle \| (.+?) \|$/m)?.[1] ?? "";
+const help = script.match(/^\| Help guide \| \[(.+?)\]/m)?.[1] ?? title;
+const cues = {}, agendaLines = [], TERMS = {};
+let shot = null;
+for (const line of script.split("\n")) {
+  const s = line.match(/^\*\*Shot (\d+\.\d+)\*\*/);
+  if (s) { shot = s[1]; cues[shot] = []; continue; }
+  const a = line.match(/^\s+- agenda · (.+?) · "(.+)"$/);
+  if (a && shot) agendaLines.push({ words: a[1], at: spoken(T, shot, a[2], -0.3) });
+  const c = line.match(/^\s+- `([\w-]+)` · "(.+?)"(?: · (.+))?$/);
+  if (c && shot) cues[shot].push({ id: c[1], at: spoken(T, shot, c[2], -0.15), label: c[3] ?? "" });
+  // Terminal shots: `- term · "from" · "to"` replays the recording between
+  // two lines ("" carries on; "end" to the end); `- typed · "text"` and
+  // `- window · "text"` add labelled illustration lines to it, or in a new
+  // window of their own.
+  const tm = line.match(/^\s+- term · "(.*?)" · "(.*?)"$/);
+  if (tm && shot) (TERMS[shot] ??= { lines: [] }).range = [tm[1], tm[2]];
+  const il = line.match(/^\s+- (typed|window) · "(.*)"$/);
+  if (il && shot) { (TERMS[shot] ??= { lines: [] }).lines.push(il[2]); TERMS[shot].kind ??= il[1]; }
+}
+
+// ---- Shots on the timeline: each lasts until the next one starts ----
+const SHOTS = T.shots.map((s, i) => ({ ...s, until: T.shots[i + 1]?.start ?? T.duration, take: takes[s.shot] }));
+const shotAt = (t) => SHOTS.findLast((s) => t >= (s === SHOTS[0] ? 0 : s.start)) ?? SHOTS[0];
+const firstTake = SHOTS.find((s) => s.take);
+const lastTake = SHOTS.findLast((s) => s.take);
+
+// ---- Terminal shots: the recording's lines between two markers, in order ----
+const EV = TERM_EVENTS;
+let pos = 0;
+for (const s of SHOTS) {
+  const tm = TERMS[s.shot];
+  if (!tm?.range) continue;
+  const find = (text, from) => EV.findIndex((e, k) => k >= from && e[1].includes(text));
+  const [a, b] = tm.range;
+  tm.from = a ? find(a, pos) : pos;
+  tm.to = b === "end" ? EV.length - 1 : find(b, Math.max(tm.from, 0));
+  if (tm.from < 0 || tm.to < tm.from) {
+    // Not recorded yet: the shot shows the terminal as the last one left it.
+    console.warn(`terminal markers for ${s.shot} not in the recording`);
+    tm.from = pos; tm.to = pos - 1; tm.missing = true;
+    continue;
+  }
+  pos = tm.to + 1;
+}
+const firstTerm = SHOTS.find((s) => TERMS[s.shot]?.range);
+const COMMAND = 'sh "$HOME/Downloads/DataLab-Mac/Install DataLab.command"';
+
+/** Where in its take a moment of the shot falls. A take plays in real time
+    and holds its last frame; a fast-forward (the model at work) is squeezed
+    so the take ends with the shot. */
+function takeTime(s, local) {
+  const { seconds, ff = [] } = s.take;
+  const room = s.until - s.start;
+  if (!ff.length || (seconds <= room && ff[0][2] == null)) return { at: clamp(local, 0, seconds - 0.05), fast: false };
+  const [a, b, by] = ff[0];
+  // Squeezed to end by its phrase, or else to leave room for the rest.
+  const squeezed = Math.max(0.8, by != null ? by - 0.3 - a : room - a - (seconds - b));
+  if (local < a) return { at: local, fast: false };
+  // Eased, so the footage speeds up and slows down rather than jumping.
+  if (local < a + squeezed) return { at: a + (b - a) * ease((local - a) / squeezed), fast: true, p: (local - a) / squeezed, squeezed };
+  return { at: Math.min(b + (local - a - squeezed), seconds - 0.05), fast: false };
+}
+
+// ---- The footage ----
+const frame = document.getElementById("frame");
+const stage = document.getElementById("stage");
+const videos = {};
+for (const s of SHOTS) {
+  if (!s.take) continue;
+  const v = document.createElement("video");
+  v.src = `${BUILD}/${s.take.file}`;
+  v.muted = true;
+  v.preload = "auto";
+  frame.insertBefore(v, stage);
+  videos[s.shot] = v;
+}
+await Promise.all(Object.values(videos).map((v) => new Promise((ok) => (v.readyState >= 2 ? ok() : v.addEventListener("loadeddata", ok, { once: true })))));
+const seekVideo = (v, at) => new Promise((ok) => {
+  if (Math.abs(v.currentTime - at) < 0.005) return ok();
+  v.addEventListener("seeked", ok, { once: true });
+  v.currentTime = at;
+});
+
+// ---- The overlay: spotlight, label, "sped up", captions, opening and close ----
+const wrap = (p) => el("g", {}, p);
+const dim = el("path", { fill: C.ink, "fill-rule": "evenodd", opacity: 0 }, stage);
+const ring = el("rect", { fill: "none", stroke: C.paper, "stroke-width": 3, rx: 8, opacity: 0 }, stage);
+const labelG = wrap(stage);
+const labelBox = el("rect", { rx: 17, height: 36, fill: C.ink }, labelG);
+const labelText = text(labelG, 0, 0, "", { font: "sans", size: 19, weight: 600, fill: C.paper });
+const fast = wrap(stage);
+el("rect", { x: 1700, y: 60, width: 140, height: 34, rx: 17, fill: C.ink, opacity: 0.85 }, fast);
+text(fast, 1770, 83, "Sped up ▸▸", { font: "sans", size: 16, weight: 600, fill: C.paper, anchor: "middle" });
+
+const capBox = el("rect", { rx: 6, fill: C.paper, opacity: 0.94 }, stage);
+const caption = text(stage, 960, 1046, "", { font: "sans", size: 30, weight: 450, anchor: "middle" });
+
+const paper = el("rect", { width: 1920, height: 1080, fill: C.paper }, stage);
+const opening = wrap(stage);
+text(opening, 600, 250, title, { size: 84 });
+text(opening, 604, 300, subtitle, { label: true });
+text(opening, 660, 405, "This video covers", { label: true });
+const AGENDA = agendaLines.map((a, i) => {
+  const g = wrap(opening);
+  text(g, 630, 490 + i * 90, String(i + 1), { size: 44, fill: C.faint, anchor: "end" });
+  text(g, 660, 490 + i * 90, a.words, { size: 52 });
+  return { g, at: a.at };
+});
+const closing = wrap(stage);
+text(closing, 960, 500, title, { size: 72, anchor: "middle" });
+text(closing, 960, 560, `More in Help · ${help}`, { label: true, anchor: "middle" });
+
+// The terminal, drawn to match the filmed Terminal takes: full frame, the
+// Mac's dark "Basic" theme, the same text size.
+const TW = { x: 0, y: 0, w: 1920, h: 1080, top: 0, font: 27, line: 36.5 };
+const term = wrap(stage);
+el("rect", { width: 1920, height: 1080, fill: "#1a1a1a" }, term);
+const termTitle = { textContent: "" };
+const termLines = wrap(term);
+const illus = wrap(term);
+el("rect", { x: 1720, y: 20, width: 170, height: 36, rx: 18, fill: C.researchSoft, stroke: C.research }, illus);
+text(illus, 1805, 44, "Illustration", { font: "sans", size: 18, weight: 600, fill: C.research, anchor: "middle" });
+const probe = text(stage, 0, -100, "M".repeat(50), { font: "mono", size: TW.font });
+const CW = probe.getComputedTextLength() / 50;
+probe.remove();
+const COLS = Math.floor((TW.w - 32) / CW), ROWS = Math.floor((TW.h - 20) / TW.line);
+
+/** Draws terminal text: bold between \x01 and \x02; home-folder paths blurred. */
+function drawScreen(content) {
+  content = content.replace(/\/Users\/[^/\s'"]+/g, "/Users/you");
+  const lines = [];
+  for (const raw of content.split("\n")) {
+    let rest = raw;
+    do { lines.push(rest.slice(0, COLS)); rest = rest.slice(COLS); } while (rest.length);
+  }
+  const shown = lines.slice(-ROWS);
+  termLines.replaceChildren();
+  let bold = false;
+  shown.forEach((ln, i) => {
+    const y = 30 + i * TW.line;
+    const t = el("text", { x: 16, y, "font-family": FONT.mono, "font-size": TW.font, fill: "#e6e6e6", style: "white-space: pre" }, termLines);
+    for (const part of ln.split(/([\x01\x02])/)) {
+      if (part === "\x01") { bold = true; continue; }
+      if (part === "\x02") { bold = false; continue; }
+      if (!part) continue;
+      const span = el("tspan", { "font-weight": bold ? 700 : 400, fill: bold ? "#ffffff" : "#e6e6e6" }, t);
+      span.textContent = part;
+    }
+    // Blurred: the service account (user names are already "you").
+    for (const m of ln.replace(/[\x01\x02]/g, "").matchAll(/SVC_\w+/g)) {
+      el("rect", { x: 16 + m.index * CW, y: y - TW.font + 4, width: m[0].length * CW, height: TW.font + 4, rx: 3, fill: "#4a4a4a" }, termLines);
+    }
+  });
+}
+
+function terminalAt(s, local) {
+  const tm = TERMS[s.shot];
+  if (!tm) return null;
+  if (tm.kind === "window" && !tm.range) {
+    // A window of its own (DataLab starting): its lines, one after another.
+    const n = Math.min(tm.lines.length, Math.floor(local / 1.2) + 1);
+    return { content: tm.lines.slice(0, n).join("\n"), title: "DataLab", illustration: true, fast: false };
+  }
+  // Everything the terminal showed before this shot, then this shot's part.
+  let content = "~ % " + (s === firstTerm && local < 1.0 ? "" : COMMAND) + "\n";
+  const upto = (k) => EV.slice(0, k + 1).map((e) => e[1]).join("");
+  let fast = false, illustration = false;
+  const prior = SHOTS.filter((x) => x.start < s.start && TERMS[x.shot]?.range);
+  const shownBefore = prior.length ? TERMS[prior.at(-1).shot].to : -1;
+  const priorLines = prior.flatMap((x) => TERMS[x.shot].lines);
+  if (tm.range && tm.missing) {
+    content += upto(shownBefore) + priorLines.join("\n");
+  } else if (tm.range) {
+    // A shot with illustration lines opens on its part at once (it carries
+    // on from footage), then types; others replay their part.
+    const atOnce = tm.lines.length > 0;
+    const span = atOnce ? 0 : EV[tm.to][0] - EV[tm.from][0];
+    const room = Math.max(1, s.until - s.start - 1.5 - (tm.lines.length ? 3 : 0));
+    const began = atOnce ? -0.2 : s === firstTerm ? 1.2 : 0.2;
+    const p = Math.min(1, Math.max(0, (local - began) / Math.min(room, Math.max(span, 0.01))));
+    fast = span > room * 1.3 && p > 0 && p < 1;
+    const now = atOnce ? EV[tm.to][0] : EV[tm.from][0] + p * span;
+    // This shot's part runs from its own first line (a later recording may
+    // repeat lines the terminal already showed).
+    let k = tm.from - 1;
+    while (k + 1 <= tm.to && EV[k + 1][0] <= now + 1e-6) k++;
+    const mine = EV.slice(tm.from, k + 1).map((e) => e[1]).join("");
+    content += priorLines.length ? upto(shownBefore) + priorLines.join("\n") + "\n" + mine : upto(tm.from - 1) + mine;
+    // Illustration lines after the recording's part, typed.
+    const after = local - began - Math.min(room, span) - 0.4;
+    if (tm.lines.length && after > 0) {
+      illustration = true;
+      let left = after, typed = [];
+      for (const ln of tm.lines) {
+        if (left <= 0) break;
+        const stars = ln.match(/\*+/)?.[0].length ?? 0;
+        const need = 0.5 + stars * 0.05;
+        if (left >= need) typed.push(ln);
+        else typed.push(ln.replace(/\*+/, "*".repeat(Math.floor((left / need) * stars))));
+        left -= need + 0.4;
+      }
+      content = content.replace(/\n?$/, "") + typed.join("\n");
+    }
+  }
+  return { content, title: "Terminal — sh", illustration, fast };
+}
+
+stage.insertBefore(term, dim); // above the footage, under the spotlight and captions
+const PAD = 10;
+const hole = (r) => `M0 0H1920V1080H0Z M${r.x} ${r.y + 10}a10 10 0 0 1 10 -10H${r.x + r.w - 10}a10 10 0 0 1 10 10V${r.y + r.h - 10}a10 10 0 0 1 -10 10H${r.x + 10}a10 10 0 0 1 -10 -10Z`;
+function rectOf(s, id, at) {
+  const list = s.take?.rects?.[id];
+  if (!list?.length) return null;
+  const r = list.findLast((m) => m.at <= at + 0.05) ?? list[0];
+  return { x: r.x - PAD, y: r.y - PAD, w: r.width + 2 * PAD, h: r.height + 2 * PAD };
+}
+const mix = (a, b, p) => ({ x: lerp(a.x, b.x, p), y: lerp(a.y, b.y, p), w: lerp(a.w, b.w, p), h: lerp(a.h, b.h, p) });
+
+async function frameAt(t) {
+  const s = shotAt(t);
+  const local = t - s.start;
+  const tv = terminalAt(s, local);
+  show(term, tv ? 1 : 0, 0);
+  if (tv) {
+    drawScreen(tv.content);
+    termTitle.textContent = tv.title;
+    show(illus, tv.illustration ? 1 : 0, 0);
+  }
+
+  // The footage: this shot's take, or the nearest one for a shot without.
+  const src = s.take ? s : t < firstTake.start ? firstTake : lastTake;
+  const tt = s.take ? takeTime(s, local) : { at: src === firstTake ? 0 : src.take.seconds - 0.05, fast: false };
+  for (const [id, v] of Object.entries(videos)) v.style.display = id === src.shot ? "block" : "none";
+  await seekVideo(videos[src.shot], tt.at);
+  // The badge fades in and out over a quarter second at each end.
+  const edge = tt.fast ? Math.min(1, tt.p * tt.squeezed / 0.25, (1 - tt.p) * tt.squeezed / 0.25) : 0;
+  show(fast, tv ? (tv.fast ? 1 : 0) : edge, 0);
+
+  // The spotlight: the shot's latest cue, easing from the one before.
+  const list = cues[s.shot] ?? [];
+  const i = list.findLastIndex((c) => local >= c.at - s.start);
+  const cue = list[i];
+  let lit = 0, r = null;
+  if (cue && cue.id !== "none" && s.take) {
+    r = rectOf(s, cue.id, tt.at);
+    const prev = list[i - 1] && list[i - 1].id !== "none" ? rectOf(s, list[i - 1].id, tt.at) : null;
+    const p = ease(clamp((local - (cue.at - s.start)) / 0.45));
+    if (r && prev) r = mix(prev, r, p);
+    lit = prev ? 1 : p;
+  } else if (cue?.id === "none" && list[i - 1] && s.take) {
+    r = rectOf(s, list[i - 1].id, tt.at);
+    lit = 1 - ease(clamp((local - (cue.at - s.start)) / 0.4));
+  }
+  if (r && lit > 0.001) {
+    dim.setAttribute("d", hole(r));
+    dim.setAttribute("opacity", (0.5 * lit).toFixed(3));
+    for (const [k, v] of Object.entries({ x: r.x, y: r.y, width: r.w, height: r.h })) ring.setAttribute(k, v);
+    ring.setAttribute("opacity", lit.toFixed(3));
+    const words = cue?.id !== "none" ? cue.label : list[i - 1]?.label ?? "";
+    labelText.textContent = words;
+    const w = words ? labelText.getComputedTextLength() + 32 : 0;
+    // Below the spotlight, else above it, else (a tall panel) inside its top.
+    const y = r.y + r.h + 50 < 1000 ? r.y + r.h + 12 : r.y - 48 > 56 ? r.y - 48 : r.y + 14;
+    const x = clamp(r.x + (y === r.y + 14 ? 14 : 0), 16, 1904 - w);
+    labelBox.setAttribute("x", x); labelBox.setAttribute("y", y); labelBox.setAttribute("width", w);
+    labelText.setAttribute("x", x + 16); labelText.setAttribute("y", y + 25);
+    show(labelG, words ? lit : 0, 0);
+  } else {
+    dim.setAttribute("opacity", 0); ring.setAttribute("opacity", 0); show(labelG, 0, 0);
+  }
+
+  // The opening, over paper; then the footage; then the close.
+  const open = 1 - ramp(t, firstTake.start - 0.6, 0.6);
+  const close = ramp(t, lastTake.until - 0.1, 0.8);
+  paper.setAttribute("opacity", Math.max(open, close).toFixed(3));
+  show(opening, Math.min(ramp(t, 0, 0.5), open), 0);
+  for (const a of AGENDA) a.g.setAttribute("opacity", lerp(0.22, 1, ramp(t, a.at, 0.5)).toFixed(3));
+  show(closing, close, 0);
+
+  const c = T.captions.find((c) => t >= c.start && t < c.end + 0.15);
+  caption.textContent = c ? c.text : "";
+  if (c) {
+    const w = caption.getComputedTextLength() + 44;
+    for (const [k, v] of Object.entries({ x: 960 - w / 2, y: 1008, width: w, height: 54 })) capBox.setAttribute(k, v);
+  }
+  capBox.setAttribute("opacity", c ? 0.94 : 0);
+}
+
+window.duration = T.duration;
+window.seek = frameAt;
+await document.fonts.ready;
+await frameAt(0);
+window.ready = true;
+
+if (location.search.includes("preview")) {
+  document.body.classList.add("preview");
+  frame.style.transform = `scale(${Math.min(innerWidth / 1920, innerHeight / 1080)})`;
+  const audio = document.getElementById("audio");
+  const clock = document.getElementById("clock");
+  let busy = false;
+  const tick = async () => {
+    if (!busy) { busy = true; await frameAt(audio.currentTime); busy = false; }
+    clock.textContent = audio.currentTime.toFixed(1) + " s";
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+</script>
+</body>
+</html>
