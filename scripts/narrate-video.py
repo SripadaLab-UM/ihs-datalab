@@ -10,7 +10,7 @@ file gives each shot's exact start and end for the animation to follow.
 Output goes to docs/videos/build/<script name>/ (ignored by git): one MP3 per
 shot, narration.wav, timing.json, and captions.srt. Unchanged shots aren't
 re-synthesized. Uses the AWS CLI's configured credentials; nothing here
-reads or prints them. Needs macOS (afconvert) to decode the MP3s.
+reads or prints them. Needs ffmpeg to decode the MP3s.
 
 Polly receives only the narration text, which must never contain study data.
 """
@@ -22,7 +22,6 @@ import json
 import re
 import subprocess
 import sys
-import tempfile
 import wave
 from pathlib import Path
 
@@ -36,7 +35,7 @@ AUDITION_VOICES = ("Matthew", "Stephen", "Ruth", "Danielle", "Joanna")
 
 def read_shots(script: Path) -> list[dict]:
     shots, chapter = [], 0
-    for line in script.read_text().splitlines():
+    for line in script.read_text(encoding="utf-8").splitlines():
         if heading := re.match(r"### Chapter (\d+)", line):
             chapter = int(heading.group(1))
         elif shot := re.match(r"\*\*Shot (\d+\.\d+)\*\*", line):
@@ -52,29 +51,26 @@ def synthesize(text: str, voice: str, dest: Path, profile: str, region: str) -> 
     """Write text as speech to dest (MP3). Returns the characters billed (0 if cached)."""
     request = {"engine": "generative", "voice": voice, "region": region, "text": text}
     record = dest.with_suffix(".request.json")
-    if dest.exists() and record.exists() and json.loads(record.read_text()) == request:
+    if dest.exists() and record.exists() and json.loads(record.read_text(encoding="utf-8")) == request:
         return 0
     result = subprocess.run(
         ["aws", "--profile", profile, "--region", region, "--no-cli-pager", "--output", "json",
          "polly", "synthesize-speech", "--engine", "generative", "--language-code", "en-US",
          "--voice-id", voice, "--output-format", "mp3", "--sample-rate", str(RATE),
          "--text-type", "text", "--text", text, str(dest)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode:
         error = re.search(r"\(([^)]+)\)", result.stderr)
         sys.exit("Polly failed: " + (error.group(1) if error else "connection or configuration error"))
-    record.write_text(json.dumps(request, indent=2))
+    record.write_text(json.dumps(request, indent=2), encoding="utf-8")
     return json.loads(result.stdout).get("RequestCharacters", len(text))
 
 
 def decode(mp3: Path) -> array.array:
-    with tempfile.TemporaryDirectory() as tmp:
-        out = Path(tmp) / "a.wav"
-        subprocess.run(["afconvert", str(mp3), "-o", str(out), "-f", "WAVE",
-                        "-d", f"LEI16@{RATE}", "-c", "1"], check=True)
-        with wave.open(str(out)) as source:
-            samples = array.array("h", source.readframes(source.getnframes()))
+    pcm = subprocess.run(["ffmpeg", "-v", "error", "-i", str(mp3), "-ac", "1", "-ar", str(RATE),
+                          "-f", "s16le", "-"], capture_output=True, check=True).stdout
+    samples = array.array("h", pcm)
     if sys.byteorder != "little":
         samples.byteswap()
     return samples
@@ -158,7 +154,7 @@ def main() -> None:
             print(f"Shot {shot['shot']}: {start:6.2f}s  {len(speech) / RATE:5.2f}s", flush=True)
             track.extend([0] * int(SHOT_GAP * RATE))
         track.extend([0] * int((TAIL - SHOT_GAP) * RATE))
-        with wave.open(str(out / "narration.wav"), "wb") as wav:
+        with wave.Wave_write(str(out / "narration.wav")) as wav:
             wav.setparams((1, 2, RATE, 0, "NONE", "not compressed"))
             if sys.byteorder != "little":
                 track.byteswap()
@@ -170,9 +166,9 @@ def main() -> None:
             "voice": args.voice, "engine": "generative", "duration": round(duration, 3),
             "caption_timing": "shot boundaries exact; breaks within a shot placed at pauses",
             "shots": timing,
-        }, indent=2))
-        (out / "captions.srt").write_text("\n\n".join(
-            f"{i}\n{stamp(a)} --> {stamp(b)}\n{text}" for i, (a, b, text) in enumerate(subtitles, 1)) + "\n")
+        }, indent=2), encoding="utf-8")
+        (out / "captions.srt").write_bytes(("\n\n".join(
+            f"{i}\n{stamp(a)} --> {stamp(b)}\n{text}" for i, (a, b, text) in enumerate(subtitles, 1)) + "\n").encode())
         print(f"Total {duration // 60:.0f}:{duration % 60:04.1f}  ->  {out}/narration.wav")
 
     print(f"New characters billed: {billed} (about ${billed * USD_PER_CHARACTER:.2f})")
