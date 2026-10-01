@@ -7,7 +7,7 @@ Status: **draft for review.**
 | Subtitle | From the website to your first screen |
 | Length | About 3:00 |
 | For | Anyone installing DataLab on a Windows PC for the first time, or updating |
-| Sources | The release website (datalab.cap-study.com, filmed live); File Explorer, PowerShell and the Start menu on a Windows 10 PC, recorded (a Downloads folder holding only the download; a second run of the real 0.3.0-beta.5 installer, on a PC it had already set up, so it asks nothing secret, with the user's name in paths shown as "you"); DataLab itself. Three moments are labelled illustrations: what Step 1 asks the first time (administrator permission and a restart), typing the key at the prompt (keys are never typed on camera), and DataLab's own start window. |
+| Sources | The release website (datalab.cap-study.com, filmed live); File Explorer, PowerShell and the Start menu on a Windows 10 PC, recorded (a Downloads folder holding only the download; a second run of the real 0.3.0-beta.5 installer, on a PC it had already set up, so it asks nothing secret, with the user's name in paths shown as "you"); DataLab itself (the real profile on that PC, just set up, empty). Blurred: File Explorer's navigation pane, and the Start menu's other results and account picture. Three moments are labelled illustrations: what Step 1 asks the first time (administrator permission and a restart), typing the key at the prompt (keys are never typed on camera), and DataLab's own start window. |
 
 ## Rules for this video
 
@@ -110,7 +110,7 @@ Status: **draft for review.**
   - term · "" · "called WSL."
   - typed · "   To do that, Windows needs to:"
   - typed · "     - Turn on WSL and install it (WSL 2.7.14, from Microsoft)"
-  - typed · "     - Install Docker Desktop (from Docker)"
+  - typed · "     - Install Docker Desktop 4.77.0 (from Docker)"
   - typed · "   This needs administrator permission, just this once."
   - typed · "   Ready to continue? [Y/n]"
 - **Narration:**
@@ -180,8 +180,10 @@ Status: **draft for review.**
 
 **Shot 5.3**
 
-- **Visual (DataLab):** The Workspace, then the status buttons (the Mac
-  video's shot, if DataLab looks the same).
+- **Visual (DataLab, real):** The Workspace, then the status buttons. (The
+  real profile on the PC just set up: no conversations yet, and no VPN, so
+  the database isn't tested; nothing is hovered, since the buttons'
+  tooltips name the accounts.)
   - `workspace` · "This is DataLab" · DataLab
   - `status` · "the buttons at the top right" · Is it set up?
   - `none` · "Getting connected"
@@ -206,3 +208,8 @@ Status: **draft for review.**
   says "Michigan Medicine VPN". This one follows the website.
 - The key illustration leaves out the real prompt's "✓ Received N
   characters." line, as the Mac video does.
+- Shot 5.3 shows DataLab's "Update available" badge (a newer release than
+  0.3.0-beta.5 was out when it was filmed). Re-film it after updating if
+  that's a distraction.
+- File Explorer's address bar reads "Windows (Z:) > Downloads": the staged
+  folder is on a drive letter of its own, so no user name shows.

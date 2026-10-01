@@ -56,5 +56,26 @@ export default {
         copy: (page) => page.getByRole("button", { name: "Copy Windows install command" }),
       },
     },
+    // DataLab's first screen, on the real profile of the PC that was just
+    // set up (no conversations yet; no VPN, so the database isn't tested).
+    // Nothing is hovered: the status buttons' tooltips name the accounts.
+    //   FILM_REAL=1 FILM_PORT=8765 FILM_DATA_DIR=<its data folder> FILM_SIGN_IN=<its sign-in link>
+    "5.3": {
+      app: true,
+      async prepare(page, { BASE, pause }) {
+        await page.goto(`${BASE}/workspace`);
+        await page.getByRole("button", { name: /^Database:/ }).waitFor();
+        await pause(1.5);
+      },
+      async act(page, { until, mark }) {
+        await mark();
+        await until("Getting connected", 1.2);
+      },
+      targets: {
+        workspace: (page) => page.locator("main"),
+        // The four status buttons (database, key, GitHub, export folders).
+        status: (page) => page.getByRole("button", { name: /^Database:/ }).locator("xpath=../.."),
+      },
+    },
   },
 };

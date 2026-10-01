@@ -9,6 +9,7 @@ Amazon Polly and the videos are public.
 | 1. How DataLab works | [01-how-datalab-works.md](01-how-datalab-works.md) |
 | 2. What DataLab can do | [02-what-datalab-can-do.md](02-what-datalab-can-do.md) |
 | Getting started on a Mac | [09-getting-started.md](09-getting-started.md) |
+| Getting started on Windows | [09-getting-started-windows.md](09-getting-started-windows.md) |
 | Walkthroughs: Workspace (2), SQL Playground, Workflows, Help, the agent and the web, getting connected | `10-` to `17-*.md` |
 
 ## How a video is made
@@ -99,6 +100,21 @@ spotlight rect for the Desktop shot). The key prompt is a drawn illustration
 (`- typed · "…"` lines in the script, shown in `animation/walkthrough.html`'s
 terminal view, which also draws `- window · "…"` lines and replays
 `terminal.json` from `terminal-rec.py`). Keys are never typed on camera.
+
+### On Windows
+
+`09-getting-started-windows` is made the same way on a Windows PC (Git Bash
+for `publish.sh`; `python` for `python3`). Its desktop footage is recorded by
+`footage/record-windows-setup.ps1` (File Explorer's Extract All, PowerShell
+running the real installer a second time, so it asks nothing secret, and the
+Start menu), then cut, cropped and blurred by `footage/cut-windows-setup.ps1`,
+which adds those takes to `takes.json`; each script's header says what's
+staged and what's blurred. The recorder also writes `terminal.json` (the
+installer's output, user name shown as "you") for the drawn PowerShell in
+shots 3.5 and 4.1. Shot 5.3 is DataLab's first screen on the real profile of
+the PC just set up (no conversations, no VPN), filmed with the website shots
+by `film-walkthrough.mjs` (`app: true`; see the walkthrough for the
+`FILM_*` settings it needs).
 
 ## Publishing
 

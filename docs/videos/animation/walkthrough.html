@@ -185,10 +185,14 @@ const termLines = wrap(term);
 const illus = wrap(term);
 el("rect", { x: 1720, y: 20, width: 170, height: 36, rx: 18, fill: C.researchSoft, stroke: C.research }, illus);
 text(illus, 1805, 44, "Illustration", { font: "sans", size: 18, weight: 600, fill: C.research, anchor: "middle" });
+// Measured in the terminal's own font (not a fallback still showing).
+await document.fonts.load(`${TW.font}px "IBM Plex Mono"`);
 const probe = text(stage, 0, -100, "M".repeat(50), { font: "mono", size: TW.font });
 const CW = probe.getComputedTextLength() / 50;
 probe.remove();
-const COLS = Math.floor((TW.w - 32) / CW), ROWS = Math.floor((TW.h - 20) / TW.line);
+// A Windows terminal stops above the captions, so its last line (often the
+// one the narration is about) isn't covered.
+const COLS = Math.floor((TW.w - 32) / CW), ROWS = Math.floor((TW.h - 20 - (WINDOWS ? 80 : 0)) / TW.line);
 
 /** Draws terminal text: bold between \x01 and \x02; home-folder paths blurred. */
 function drawScreen(content) {
@@ -265,7 +269,9 @@ function terminalAt(s, local) {
         else typed.push(ln.replace(/\*+/, "*".repeat(Math.floor((left / need) * stars))));
         left -= need + 0.4;
       }
-      content = content.replace(/\n?$/, "") + typed.join("\n");
+      // On the Mac the recording ends at the prompt the typing answers; the
+      // Windows one ends with a whole line, so the illustration starts below it.
+      content = (WINDOWS ? content : content.replace(/\n?$/, "")) + typed.join("\n");
     }
   }
   return { content, title: WINDOWS ? "Windows PowerShell" : "Terminal — sh", illustration, fast };

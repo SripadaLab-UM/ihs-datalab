@@ -51,16 +51,24 @@ const { browser, page } = walkthrough.site
       return { browser, page: await context.newPage() };
     })()
   : await open({ width: 1920, height: 1080, mask: walkthrough.mask ?? "paths" });
-const pause = (s) => page.waitForTimeout(s * 1000);
+// A website walkthrough's shot with `app: true` is filmed on DataLab itself
+// (signed in and masked like any DataLab footage), in a page of its own.
+let app = null;
+const shotPage = async (spec) => (spec.app && walkthrough.site
+  ? (app ??= await open({ width: 1920, height: 1080, mask: walkthrough.mask ?? "paths" })).page
+  : sitePage);
+const sitePage = page;
 
 for (const [shot, spec] of Object.entries(walkthrough.shots)) {
+  const page = await shotPage(spec);
+  const pause = (s) => page.waitForTimeout(s * 1000);
   if (!spec.act) continue; // a shot with no footage (the agenda, the end card)
   if (only.length && !only.includes(shot)) {
     // A shot not being re-filmed still sets up the screen for the next one.
     if (spec.replay) await spec.replay(page, { BASE, pause });
     continue;
   }
-  if (spec.prepare) await spec.prepare(page, { BASE: walkthrough.site ?? BASE, pause });
+  if (spec.prepare) await spec.prepare(page, { BASE: spec.app || !walkthrough.site ? BASE : walkthrough.site, pause });
   await page.mouse.move(1900, 1070);
   const began = Date.now();
   const elapsed = () => (Date.now() - began) / 1000;
@@ -88,7 +96,7 @@ for (const [shot, spec] of Object.entries(walkthrough.shots)) {
   };
   const stop = await record(page, shot, { out: dir });
   await mark();
-  await spec.act(page, { BASE: walkthrough.site ?? BASE, pause, mark, until, fastForward });
+  await spec.act(page, { BASE: spec.app || !walkthrough.site ? BASE : walkthrough.site, pause, mark, until, fastForward });
   await mark();
   const { out, seconds } = await stop(0.3);
   // A URL path for the page, with / on Windows too.
@@ -97,3 +105,4 @@ for (const [shot, spec] of Object.entries(walkthrough.shots)) {
   console.log(`${shot}: ${seconds.toFixed(1)} s, targets ${Object.keys(rects).join(", ") || "none"}`);
 }
 await browser.close();
+await app?.browser.close();

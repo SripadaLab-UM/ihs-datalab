@@ -11,7 +11,7 @@ OUT=build/publish
 mkdir -p "$OUT"
 # On Windows (Git Bash), python3 is a Microsoft Store placeholder.
 PY=python3; "$PY" -c "" 2>/dev/null || PY=python
-for v in 09-getting-started 01-how-datalab-works 02-what-datalab-can-do 10-workspace-ask 11-workspace-answer \
+for v in 09-getting-started 09-getting-started-windows 01-how-datalab-works 02-what-datalab-can-do 10-workspace-ask 11-workspace-answer \
          12-sql-playground 13-workflows 15-help 16-research-helper 17-connections; do
   src="build/$v/$v.mp4"
   [ -f "$src" ] || { echo "missing $src"; exit 1; }
