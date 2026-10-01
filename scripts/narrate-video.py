@@ -51,19 +51,19 @@ def synthesize(text: str, voice: str, dest: Path, profile: str, region: str) -> 
     """Write text as speech to dest (MP3). Returns the characters billed (0 if cached)."""
     request = {"engine": "generative", "voice": voice, "region": region, "text": text}
     record = dest.with_suffix(".request.json")
-    if dest.exists() and record.exists() and json.loads(record.read_text()) == request:
+    if dest.exists() and record.exists() and json.loads(record.read_text(encoding="utf-8")) == request:
         return 0
     result = subprocess.run(
         ["aws", "--profile", profile, "--region", region, "--no-cli-pager", "--output", "json",
          "polly", "synthesize-speech", "--engine", "generative", "--language-code", "en-US",
          "--voice-id", voice, "--output-format", "mp3", "--sample-rate", str(RATE),
          "--text-type", "text", "--text", text, str(dest)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     if result.returncode:
         error = re.search(r"\(([^)]+)\)", result.stderr)
         sys.exit("Polly failed: " + (error.group(1) if error else "connection or configuration error"))
-    record.write_text(json.dumps(request, indent=2))
+    record.write_text(json.dumps(request, indent=2), encoding="utf-8")
     return json.loads(result.stdout).get("RequestCharacters", len(text))
 
 
@@ -154,7 +154,7 @@ def main() -> None:
             print(f"Shot {shot['shot']}: {start:6.2f}s  {len(speech) / RATE:5.2f}s", flush=True)
             track.extend([0] * int(SHOT_GAP * RATE))
         track.extend([0] * int((TAIL - SHOT_GAP) * RATE))
-        with wave.open(str(out / "narration.wav"), "wb") as wav:
+        with wave.Wave_write(str(out / "narration.wav")) as wav:
             wav.setparams((1, 2, RATE, 0, "NONE", "not compressed"))
             if sys.byteorder != "little":
                 track.byteswap()
@@ -166,7 +166,7 @@ def main() -> None:
             "voice": args.voice, "engine": "generative", "duration": round(duration, 3),
             "caption_timing": "shot boundaries exact; breaks within a shot placed at pauses",
             "shots": timing,
-        }, indent=2))
+        }, indent=2), encoding="utf-8")
         (out / "captions.srt").write_bytes(("\n\n".join(
             f"{i}\n{stamp(a)} --> {stamp(b)}\n{text}" for i, (a, b, text) in enumerate(subtitles, 1)) + "\n").encode())
         print(f"Total {duration // 60:.0f}:{duration % 60:04.1f}  ->  {out}/narration.wav")

@@ -14,7 +14,8 @@ PY=python3; "$PY" -c "" 2>/dev/null || PY=python
 for v in 09-getting-started 09-getting-started-windows 01-how-datalab-works 02-what-datalab-can-do 10-workspace-ask 11-workspace-answer \
          12-sql-playground 13-workflows 15-help 16-research-helper 17-connections; do
   src="build/$v/$v.mp4"
-  [ -f "$src" ] || { echo "missing $src"; exit 1; }
+  # Each computer renders its own (the Windows video on Windows): skip the rest.
+  [ -f "$src" ] || { echo "$v  not rendered here, skipped"; continue; }
   ffmpeg -v error -y -i "$src" \
     -c:v libx264 -preset slow -crf 28 -pix_fmt yuv420p \
     -af loudnorm=I=-16:TP=-1.5:LRA=11 -ar 48000 -c:a aac -b:a 128k \
