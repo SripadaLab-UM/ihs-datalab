@@ -1,0 +1,151 @@
+WEBVTT
+
+00:00.800 --> 00:04.620
+This video shows how to install DataLab on a Windows PC.
+
+00:04.620 --> 00:06.700
+First, what to have ready.
+
+00:06.700 --> 00:11.900
+Then, how to download DataLab and run its setup, and where your key and password go.
+
+00:11.900 --> 00:15.608
+And last, how to open DataLab, and check it's working.
+
+00:16.808 --> 00:19.208
+Everything starts at the DataLab website.
+
+00:19.208 --> 00:20.408
+Have these ready.
+
+00:20.408 --> 00:25.408
+On Windows, first activate privileged access on your Michigan Medicine profile page:
+
+00:25.408 --> 00:28.108
+setup needs administrator permission once.
+
+00:28.108 --> 00:34.488
+You'll also need your University of Michigan GPT Toolkit API key and the database password,
+
+00:34.488 --> 00:38.548
+both in the email from Aman; the University of Michigan VPN;
+
+00:38.548 --> 00:42.152
+and your GitHub account, for the lab's shared repositories.
+
+00:43.352 --> 00:46.832
+Under Install on Windows, press Download for Windows.
+
+00:47.332 --> 00:51.452
+In your Downloads folder, right-click the ZIP and choose Extract All.
+
+00:51.452 --> 00:54.892
+Choose Downloads as the destination, and press Extract.
+
+00:54.892 --> 00:56.716
+Then go back to the website.
+
+00:57.216 --> 00:59.836
+Copy the setup command with the Copy button.
+
+00:59.836 --> 01:04.944
+Then open PowerShell: press Start, type PowerShell, and press Enter.
+
+01:05.444 --> 01:07.624
+Paste the command and press Enter.
+
+01:07.624 --> 01:09.644
+Setup works through eight steps.
+
+01:09.644 --> 01:13.324
+Step one gets Windows ready: DataLab runs in Docker,
+
+01:13.324 --> 01:18.380
+a sealed-off space on your computer, and Docker needs a Windows feature called WSL.
+
+01:18.880 --> 01:23.800
+The first time, setup lists what Windows needs and asks for administrator permission.
+
+01:23.800 --> 01:26.960
+Press Enter, then click Yes when Windows asks.
+
+01:26.960 --> 01:32.152
+Windows then needs a restart, and setup carries on by itself after you sign in.
+
+01:32.652 --> 01:34.852
+Step two starts Docker Desktop.
+
+01:34.852 --> 01:37.492
+If it shows a welcome screen, you can skip it.
+
+01:37.492 --> 01:41.072
+Docker only needs to be running: it isn't DataLab itself,
+
+01:41.072 --> 01:43.792
+so you won't find anything about the study inside it.
+
+01:43.792 --> 01:47.796
+Steps three to five install DataLab and download what it needs.
+
+01:48.996 --> 01:52.636
+Step six asks for your key, then your database password.
+
+01:52.636 --> 01:55.576
+Paste each one from Aman's email and press Enter.
+
+01:55.576 --> 01:57.596
+Each character shows as a star,
+
+01:57.596 --> 02:01.376
+and both are saved in Windows Credential Manager, not in any file.
+
+02:01.376 --> 02:04.236
+If you skip them now, add them later in DataLab,
+
+02:04.236 --> 02:06.996
+under Settings and Safety, then Connections.
+
+02:07.496 --> 02:09.996
+Step seven offers to sign you in to GitHub,
+
+02:09.996 --> 02:14.756
+for the lab's knowledge base and pipelines; you can also do that later, in Settings.
+
+02:14.756 --> 02:18.396
+Step eight adds DataLab to the Start menu and your Desktop.
+
+02:18.396 --> 02:19.784
+Setup is done.
+
+02:20.984 --> 02:25.784
+To open DataLab, press Start, type DataLab, and press Enter.
+
+02:25.784 --> 02:28.760
+There's also a DataLab shortcut on your Desktop.
+
+02:29.260 --> 02:33.420
+It opens a PowerShell window of its own: leave that open while you work.
+
+02:33.420 --> 02:35.836
+Then your browser opens on DataLab.
+
+02:36.336 --> 02:37.636
+This is DataLab.
+
+02:37.636 --> 02:41.436
+Connect to the VPN, and check the buttons at the top right.
+
+02:41.436 --> 02:44.576
+If the key or password is missing, or you skipped it,
+
+02:44.576 --> 02:47.656
+add it in Settings and Safety, under Connections.
+
+02:47.656 --> 02:50.040
+The video Getting connected shows how.
+
+02:50.540 --> 02:52.300
+That's DataLab installed.
+
+02:52.300 --> 02:55.748
+There's more on the website, under A little help getting started.
