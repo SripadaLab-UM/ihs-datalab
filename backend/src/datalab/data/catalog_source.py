@@ -36,15 +36,15 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import shutil
 import threading
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Literal
 
 from datalab.config import Settings
 from datalab.data.catalog import MAX_TABLE_BYTES, Catalog, shown_name
-from datalab.repos.git import Clone, GitError, clone_path
+from datalab.repos.git import Clone, GitError, clone_path, git_executable
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ Origin = Literal["setting", "knowledge", "data folder"]
 _ASK = "if that doesn't help, ask the DataLab maintainer."
 _NO_GIT = (
     "Git isn't installed on this computer, so DataLab can't read the lab knowledge base. "
-    "Ask the DataLab maintainer."
+    "Run the DataLab installer again, or install Git from git-scm.com, then restart DataLab."
 )
 
 
@@ -219,7 +219,7 @@ class CatalogSource:
                     "The catalog read before, if any, is still used.",
                 )
             except GitError as error:
-                if shutil.which("git") is None:
+                if not Path(git_executable()).is_absolute():
                     return self._missing(_NO_GIT, _NO_GIT)
                 return self._missing(
                     "DataLab couldn't read the lab knowledge base's clone. Sync it again in "
@@ -248,7 +248,7 @@ class CatalogSource:
                 "DataLab's settings.toml.",
             )
         if from_knowledge is None:
-            if shutil.which("git") is None:
+            if not Path(git_executable()).is_absolute():
                 return self._missing(_NO_GIT, _NO_GIT)
             return self._missing(
                 "It comes from the lab knowledge base (generated/schema), which DataLab "

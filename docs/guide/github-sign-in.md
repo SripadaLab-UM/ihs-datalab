@@ -37,6 +37,13 @@ GitHub refuses to renew it; a network problem doesn't sign you out.
 If GitHub says the repository isn't found, your account isn't in the lab's
 DataLab team yet. DataLab says whom to ask.
 
+## "Git isn't installed on this computer"
+
+On Windows, DataLab installs Git for you the first time **Sync** needs it
+(for your account only; no administrator is needed), then carries on. If that
+can't happen, for example with no internet, install Git from git-scm.com,
+restart DataLab and press **Sync** again.
+
 ## Keeping up to date
 
 **Sync** downloads what others have saved. DataLab also syncs by itself

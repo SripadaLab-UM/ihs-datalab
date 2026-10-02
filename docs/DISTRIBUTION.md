@@ -21,7 +21,7 @@ Goal: a colleague with no technical background can install DataLab in about
 | Agent image | Codex, R, Python, and the curated toolkit | Pulled pre-built from the org's container registry, pinned by digest |
 | Gateway and research proxy images | Stock nginx (routes a session's traffic; holds no key) and Squid (research sessions' internet) | Upstream images, pinned by digest in `sessions/containers.py` |
 | Oracle Database Free image | The practice DataLab's synthetic database | Oracle's registry, pinned by digest in `practice_db` (practice only) |
-| Git | Syncs the lab repos | Checked and installed by the installer if missing |
+| Git | Syncs the lab repos | Checked and installed by the installer if missing (Windows: a pinned Git for Windows, for the person only; Mac: Apple command-line tools, not yet installed by the installer) |
 | Lab repos | `ihs-knowledge` and `ihs-pipelines` | Cloned from GitHub into DataLab's data folder |
 | Credentials | U-M GPT key, Oracle password, GitHub sign-in | OS keychain (Keychain on Mac, Credential Manager on Windows) |
 
