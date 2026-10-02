@@ -19,7 +19,8 @@
 #      it asks Windows for permission once and does all of it together. If Windows
 #      then needs a restart, it offers one and carries on by itself after you sign in.
 #   2. Starts Docker Desktop.
-#   3. Installs uv (a Python installer), a pinned version checked by SHA-256 and signature.
+#   3. Installs uv (a Python installer), a pinned version checked by SHA-256 and signature,
+#      and Git for Windows (for you only) if there's no Git yet, checked the same way.
 #   4. Installs DataLab, with its own Python, in your user account (no admin rights).
 #      Each version gets its own folder, so an update installs beside the one in use
 #      and the previous version is kept (docs/DISTRIBUTION.md).
@@ -96,6 +97,11 @@ $DockerVersion = "4.77.0"
 $DockerUrl = "https://desktop.docker.com/win/main/amd64/228796/Docker%20Desktop%20Installer.exe"
 $DockerSha256 = "5b866599f0de9208f4594d64aa33658fa55cbdd64e0db13648cffe12c91795d2"
 $DockerPublisher = "Docker Inc"
+# Git for Windows, which syncing the lab repos needs: pinned like the above.
+$GitVersion = "2.56.0"
+$GitUrl = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.1/Git-2.56.0-64-bit.exe"
+$GitSha256 = "bfe94e7b419b16eee9fecbd1253a98e3d4f49ba8f029630549052278ffe286a6"
+$GitPublisher = "Johannes Schindelin"
 $DockerAgreement = "https://www.docker.com/legal/docker-subscription-service-agreement/"
 
 $StateDir = Join-Path $Env:LOCALAPPDATA "DataLab"
@@ -978,6 +984,32 @@ function Install-PinnedUv {
     Good "uv $UvVersion is ready."
 }
 
+# Makes sure Git is here, as the person (no administrator): any git already on
+# PATH or in Git for Windows' usual folders is kept; otherwise the pinned Git
+# for Windows is installed for this account only.
+function Install-PinnedGit {
+    $known = @(
+        (Join-Path $Env:LOCALAPPDATA "Programs\Git\cmd\git.exe"),
+        (Join-Path $ProgramFilesDir "Git\cmd\git.exe")
+    )
+    if ((Get-Command git.exe -ErrorAction SilentlyContinue) -or ($known | Where-Object { Test-Path -LiteralPath $_ })) {
+        Good "Git is installed already."
+        return
+    }
+    $download = Join-Path $StateDir ("git-download-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force $download | Out-Null
+    try {
+        $exe = Join-Path $download "Git-installer.exe"
+        Save-Download $GitUrl $GitSha256 $GitPublisher $exe
+        Say "Installing Git $GitVersion for your account (a minute)..."
+        $run = Start-Process -FilePath $exe -ArgumentList "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/NOCANCEL", "/SP-", "/CURRENTUSER" -Wait -PassThru
+        if ($run.ExitCode -ne 0) { Stop-Install "Git's installer stopped with code $($run.ExitCode). Install Git from git-scm.com, then run this installer again." }
+    } finally {
+        Remove-Tree $download
+    }
+    Good "Git $GitVersion is ready."
+}
+
 # What of DataLab is running, in words, or "" if nothing: a DataLab process
 # (the side-by-side versions under $root, or an older installer's copy under
 # uv's tools folder), or something listening on DataLab's ports (8765 real,
@@ -1358,13 +1390,14 @@ if (-not (Test-DockerRunning)) {
 }
 Good "Docker Desktop is running."
 
-Step "Step 3 of 8: Installing uv (the tool that installs DataLab)"
+Step "Step 3 of 8: Installing uv (the tool that installs DataLab) and Git"
 # Nothing from the environment may steer uv or pip (another index, checks
 # turned off) or Python.
 @(Get-ChildItem Env: | Where-Object { $_.Name -match '^(UV|PIP)_' -or $_.Name -in 'PYTHONPATH', 'PYTHONHOME', 'VIRTUAL_ENV' }) |
     ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
 Install-PinnedUv
 & $Uv --version
+Install-PinnedGit
 
 Step "Step 4 of 8: Installing DataLab"
 # Beside the data folders: versions\<version>\, current, previous, bin\datalab.cmd.

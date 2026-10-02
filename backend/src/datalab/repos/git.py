@@ -108,6 +108,93 @@ def helper_args(python: str | None = None) -> list[str]:
     ]
 
 
+def git_executable() -> str:
+    """The git to run: the one on PATH, else Git for Windows where DataLab's
+    installer puts it (a DataLab opened before that hasn't got it on PATH).
+    Plain "git" if neither is found."""
+    found = shutil.which("git")
+    if found:
+        return found
+    if sys.platform == "win32":
+        for variable, sub in (("LOCALAPPDATA", "Programs"), ("ProgramFiles", "")):
+            base = os.environ.get(variable)
+            if base:
+                candidate = Path(base) / sub / "Git" / "cmd" / "git.exe"
+                if candidate.is_file():
+                    return str(candidate)
+    return "git"
+
+
+# Git for Windows, pinned like the installer's copy (installer/windows/install.ps1,
+# $GitUrl and friends; tests check they match).
+GIT_FOR_WINDOWS_URL = "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.1/Git-2.56.0-64-bit.exe"
+GIT_FOR_WINDOWS_SHA256 = "bfe94e7b419b16eee9fecbd1253a98e3d4f49ba8f029630549052278ffe286a6"
+GIT_FOR_WINDOWS_PUBLISHER = "Johannes Schindelin"
+_install_lock = threading.Lock()
+
+
+def install_git_for_windows() -> bool:
+    """For a DataLab installed before its installer added Git: downloads the
+    pinned Git for Windows, checks its SHA-256 and publisher's signature, and
+    installs it for this account only (no administrator). True once git is
+    there. Windows only; False (nothing done) elsewhere or on any failure."""
+    if sys.platform != "win32":
+        return False
+    import hashlib
+    import tempfile
+    import urllib.request
+
+    with _install_lock:
+        if Path(git_executable()).is_absolute():
+            return True
+        try:
+            with tempfile.TemporaryDirectory(prefix="datalab-git-") as folder:
+                exe = Path(folder) / "Git-installer.exe"
+                with urllib.request.urlopen(GIT_FOR_WINDOWS_URL, timeout=300) as response:
+                    exe.write_bytes(response.read())
+                if hashlib.sha256(exe.read_bytes()).hexdigest() != GIT_FOR_WINDOWS_SHA256:
+                    return False
+                check = (
+                    "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; "
+                    "if ($s.Status -ne 'Valid') { exit 1 }; "
+                    "if ($s.SignerCertificate.GetNameInfo('SimpleName', $false) -cne $args[1]) "
+                    "{ exit 1 }"
+                )
+                signed = subprocess.run(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-NonInteractive",
+                        "-Command",
+                        check,
+                        str(exe),
+                        GIT_FOR_WINDOWS_PUBLISHER,
+                    ],
+                    capture_output=True,
+                    timeout=120,
+                )
+                if signed.returncode != 0:
+                    return False
+                done = subprocess.run(
+                    [
+                        str(exe),
+                        "/VERYSILENT",
+                        "/NORESTART",
+                        "/SUPPRESSMSGBOXES",
+                        "/NOCANCEL",
+                        "/SP-",
+                        "/CURRENTUSER",
+                    ],
+                    capture_output=True,
+                    timeout=600,
+                )
+                if done.returncode != 0:
+                    return False
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return Path(git_executable()).is_absolute()
+
+
 def git_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     env = {
         k: v
@@ -307,23 +394,35 @@ class Clone:
             self._before_network()
         config = (*_CONFIG, *(("protocol.file.allow=always",) if self._allow_local else ()))
         options = [part for setting in config for part in ("-c", setting)]
-        command = ["git", *options, *(self._helper if network else []), *args]
+        command = [git_executable(), *options, *(self._helper if network else []), *args]
         try:
-            done = subprocess.run(
-                command,
-                cwd=cwd or self.path,
-                input=input,
-                capture_output=True,
-                env=git_env(env),
-                timeout=timeout or (_NETWORK_SECONDS if network else _LOCAL_SECONDS),
-            )
+            try:
+                done = self._run(command, cwd, input, env, network, timeout)
+            except FileNotFoundError:
+                if not install_git_for_windows():
+                    raise
+                command[0] = git_executable()
+                done = self._run(command, cwd, input, env, network, timeout)
         except FileNotFoundError:
-            raise GitError("Git isn't installed on this computer.") from None
+            raise GitError(
+                "Git isn't installed on this computer. Run the DataLab installer again, or "
+                "install Git from git-scm.com, then restart DataLab."
+            ) from None
         except subprocess.TimeoutExpired:
             raise GitError(f"git {args[0]} took too long.") from None
         if check and done.returncode != 0:
             raise GitError(_message(args[0], done.stderr))
         return done
+
+    def _run(self, command, cwd, input, env, network, timeout):
+        return subprocess.run(
+            command,
+            cwd=cwd or self.path,
+            input=input,
+            capture_output=True,
+            env=git_env(env),
+            timeout=timeout or (_NETWORK_SECONDS if network else _LOCAL_SECONDS),
+        )
 
     def text(self, *args: str, **kwargs) -> str:
         return self.git(*args, **kwargs).stdout.decode("utf-8", "replace").strip()
