@@ -131,50 +131,65 @@ GIT_FOR_WINDOWS_URL = "https://github.com/git-for-windows/git/releases/download/
 GIT_FOR_WINDOWS_SHA256 = "bfe94e7b419b16eee9fecbd1253a98e3d4f49ba8f029630549052278ffe286a6"
 GIT_FOR_WINDOWS_PUBLISHER = "Johannes Schindelin"
 _install_lock = threading.Lock()
+# Why the last install_git_for_windows() gave up, for the message the person sees.
+git_install_failure = ""
+
+# Values come in through the environment: `powershell -Command` doesn't fill $args.
+_SIGNATURE_CHECK = (
+    "$s = Get-AuthenticodeSignature -LiteralPath $Env:DATALAB_CHECK_FILE; "
+    "if ($s.Status -ne 'Valid') { Write-Output \"signature $($s.Status)\"; exit 1 }; "
+    "$name = $s.SignerCertificate.GetNameInfo('SimpleName', $false); "
+    'if ($name -cne $Env:DATALAB_CHECK_PUBLISHER) { Write-Output "signed by $name"; exit 1 }'
+)
 
 
 def install_git_for_windows() -> bool:
     """For a DataLab installed before its installer added Git: downloads the
     pinned Git for Windows, checks its SHA-256 and publisher's signature, and
     installs it for this account only (no administrator). True once git is
-    there. Windows only; False (nothing done) elsewhere or on any failure."""
+    there. Windows only; False (nothing done) elsewhere or on any failure,
+    with the reason in `git_install_failure`."""
+    global git_install_failure
     if sys.platform != "win32":
         return False
     import hashlib
+    import logging
     import tempfile
     import urllib.request
+
+    def fail(reason: str) -> bool:
+        global git_install_failure
+        git_install_failure = reason
+        logging.getLogger(__name__).warning("couldn't install Git: %s", reason)
+        return False
 
     with _install_lock:
         if Path(git_executable()).is_absolute():
             return True
+        git_install_failure = ""
         try:
             with tempfile.TemporaryDirectory(prefix="datalab-git-") as folder:
                 exe = Path(folder) / "Git-installer.exe"
-                with urllib.request.urlopen(GIT_FOR_WINDOWS_URL, timeout=300) as response:
-                    exe.write_bytes(response.read())
+                try:
+                    with urllib.request.urlopen(GIT_FOR_WINDOWS_URL, timeout=300) as response:
+                        exe.write_bytes(response.read())
+                except OSError as error:
+                    return fail(f"the download from github.com failed ({error})")
                 if hashlib.sha256(exe.read_bytes()).hexdigest() != GIT_FOR_WINDOWS_SHA256:
-                    return False
-                check = (
-                    "$s = Get-AuthenticodeSignature -LiteralPath $args[0]; "
-                    "if ($s.Status -ne 'Valid') { exit 1 }; "
-                    "if ($s.SignerCertificate.GetNameInfo('SimpleName', $false) -cne $args[1]) "
-                    "{ exit 1 }"
-                )
+                    return fail("the download didn't match its expected checksum")
                 signed = subprocess.run(
-                    [
-                        "powershell",
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-Command",
-                        check,
-                        str(exe),
-                        GIT_FOR_WINDOWS_PUBLISHER,
-                    ],
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command", _SIGNATURE_CHECK],
                     capture_output=True,
                     timeout=120,
+                    env={
+                        **os.environ,
+                        "DATALAB_CHECK_FILE": str(exe),
+                        "DATALAB_CHECK_PUBLISHER": GIT_FOR_WINDOWS_PUBLISHER,
+                    },
                 )
                 if signed.returncode != 0:
-                    return False
+                    said = signed.stdout.decode("utf-8", "replace").strip()
+                    return fail(f"the download isn't signed by its publisher ({said})")
                 done = subprocess.run(
                     [
                         str(exe),
@@ -189,10 +204,12 @@ def install_git_for_windows() -> bool:
                     timeout=600,
                 )
                 if done.returncode != 0:
-                    return False
-        except (OSError, subprocess.SubprocessError):
-            return False
-        return Path(git_executable()).is_absolute()
+                    return fail(f"Git's installer stopped with code {done.returncode}")
+        except (OSError, subprocess.SubprocessError) as error:
+            return fail(str(error))
+        if not Path(git_executable()).is_absolute():
+            return fail("Git installed but DataLab can't find it")
+        return True
 
 
 def git_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -405,8 +422,13 @@ class Clone:
                 done = self._run(command, cwd, input, env, network, timeout)
         except FileNotFoundError:
             raise GitError(
-                "Git isn't installed on this computer. Run the DataLab installer again, or "
-                "install Git from git-scm.com, then restart DataLab."
+                "Git isn't installed on this computer"
+                + (
+                    f", and DataLab couldn't install it: {git_install_failure}"
+                    if git_install_failure
+                    else ""
+                )
+                + ". Install Git from git-scm.com, then restart DataLab."
             ) from None
         except subprocess.TimeoutExpired:
             raise GitError(f"git {args[0]} took too long.") from None
