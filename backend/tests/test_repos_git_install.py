@@ -57,3 +57,24 @@ def test_when_it_cannot_install_it_says_what_to_do(
     clone = git_module.Clone(tmp_path, "https://example.invalid/x.git")
     with pytest.raises(git_module.GitError, match=r"git-scm\.com"):
         clone.git("status", cwd=tmp_path)
+
+
+def test_the_signature_check_reads_its_values_from_the_environment() -> None:
+    # `powershell -Command` doesn't fill $args, so the check must not use it.
+    assert "$args" not in git_module._SIGNATURE_CHECK
+    assert "DATALAB_CHECK_FILE" in git_module._SIGNATURE_CHECK
+    assert "DATALAB_CHECK_PUBLISHER" in git_module._SIGNATURE_CHECK
+
+
+def test_the_reason_it_could_not_install_is_in_the_message(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def run(command, **kwargs):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(git_module.subprocess, "run", run)
+    monkeypatch.setattr(git_module, "install_git_for_windows", lambda: False)
+    monkeypatch.setattr(git_module, "git_install_failure", "the download from github.com failed")
+    clone = git_module.Clone(tmp_path, "https://example.invalid/x.git")
+    with pytest.raises(git_module.GitError, match=r"download from github\.com failed"):
+        clone.git("status", cwd=tmp_path)
