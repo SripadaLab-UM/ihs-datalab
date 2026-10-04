@@ -44,6 +44,10 @@ On Windows, DataLab installs Git for you the first time **Sync** needs it
 can't happen, for example with no internet, install Git from git-scm.com,
 restart DataLab and press **Sync** again.
 
+On a Mac, Git comes with Apple's command-line tools. The installer opens Apple's
+own installer for them if they're missing, and so does **Sync**: press
+**Install** in Apple's window, wait for it to finish, then press **Sync** again.
+
 ## Keeping up to date
 
 **Sync** downloads what others have saved. DataLab also syncs by itself

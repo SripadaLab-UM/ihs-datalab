@@ -21,7 +21,7 @@ Goal: a colleague with no technical background can install DataLab in about
 | Agent image | Codex, R, Python, and the curated toolkit | Pulled pre-built from the org's container registry, pinned by digest |
 | Gateway and research proxy images | Stock nginx (routes a session's traffic; holds no key) and Squid (research sessions' internet) | Upstream images, pinned by digest in `sessions/containers.py` |
 | Oracle Database Free image | The practice DataLab's synthetic database | Oracle's registry, pinned by digest in `practice_db` (practice only) |
-| Git | Syncs the lab repos | Checked and installed by the installer if missing (Windows: a pinned Git for Windows, for the person only; Mac: Apple command-line tools, not yet installed by the installer) |
+| Git | Syncs the lab repos | Checked and installed by the installer if missing (Windows: a pinned Git for Windows, for the person only; Mac: Apple's command-line tools, through Apple's own installer window) |
 | Lab repos | `ihs-knowledge` and `ihs-pipelines` | Cloned from GitHub into DataLab's data folder |
 | Credentials | U-M GPT key, Oracle password, GitHub sign-in | OS keychain (Keychain on Mac, Credential Manager on Windows) |
 
@@ -49,8 +49,10 @@ in the README. The installer then:
    folder of its own (see "Where the app lives" below), so an update never
    replaces the version in use. The installer also
    makes sure **Git** is present, which knowledge and pipeline syncing need.
-   On Mac, Git comes with Apple's command-line tools. On Windows, the
-   installer installs Git for Windows.
+   On Mac, Git comes with Apple's command-line tools: if they're missing, the
+   installer opens Apple's installer (`xcode-select --install`, one Install press
+   for the person) and waits up to 15 minutes. On Windows, the installer installs
+   Git for Windows.
 3. **Pulls the pinned images**, then asks for the keys (`datalab setup`).
    For the practice profile it also pulls Oracle Database Free (from
    Oracle's registry, pinned by digest in `datalab/practice_db`, tried again

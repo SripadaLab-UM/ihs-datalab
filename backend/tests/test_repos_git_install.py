@@ -78,3 +78,56 @@ def test_the_reason_it_could_not_install_is_in_the_message(
     clone = git_module.Clone(tmp_path, "https://example.invalid/x.git")
     with pytest.raises(git_module.GitError, match=r"download from github\.com failed"):
         clone.git("status", cwd=tmp_path)
+
+
+def _mac(monkeypatch: pytest.MonkeyPatch, tools_installed: bool) -> list[list[str]]:
+    import subprocess
+
+    ran: list[list[str]] = []
+
+    def run(command, **kwargs):
+        ran.append(command)
+        code = 0 if command[:2] == ["xcode-select", "-p"] and tools_installed else 1
+        if command[:2] == ["xcode-select", "--install"]:
+            code = 0
+        return subprocess.CompletedProcess(command, code, b"", b"")
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(git_module.subprocess, "run", run)
+    monkeypatch.setattr(git_module, "git_executable", lambda: "/usr/bin/git")
+    return ran
+
+
+def test_a_mac_without_command_line_tools_opens_apples_installer_and_says_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran = _mac(monkeypatch, tools_installed=False)
+    clone = git_module.Clone(tmp_path, "https://example.invalid/x.git")
+    with pytest.raises(git_module.GitError, match=r"press Install"):
+        clone.git("status", cwd=tmp_path)
+    assert ["xcode-select", "--install"] in ran
+    assert not any(command[0] == "/usr/bin/git" for command in ran)  # the stub never runs
+
+
+def test_a_mac_with_command_line_tools_runs_git_as_before(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran = _mac(monkeypatch, tools_installed=True)
+    clone = git_module.Clone(tmp_path, "https://example.invalid/x.git")
+    assert clone.git("status", cwd=tmp_path, check=False).returncode == 1  # the fake's answer
+    assert ["xcode-select", "--install"] not in ran
+    assert any(command[0] == "/usr/bin/git" for command in ran)
+
+
+def test_another_git_on_a_mac_is_used_without_asking_for_the_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _mac(monkeypatch, tools_installed=False)
+    monkeypatch.setattr(git_module, "git_executable", lambda: "/opt/homebrew/bin/git")
+    assert git_module.mac_tools_missing() is False
+    assert ran == []
+
+
+def test_it_asks_for_no_mac_tools_off_a_mac(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert git_module.mac_tools_missing() is False
