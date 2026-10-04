@@ -746,10 +746,15 @@ fi
 
 step "2/7 Git and uv"
 # On a Mac without Apple's command-line tools, /usr/bin/git is only a stub that
-# opens Apple's installer and fails, so Git is there once `xcode-select -p`
-# answers. No xcode-select (not a Mac: the tests' stand-in machine) = nothing to do.
-# DATALAB_GIT_WAIT_SECONDS and DATALAB_GIT_POLL_SECONDS are for tests.
-if command -v xcode-select >/dev/null 2>&1 && ! xcode-select -p >/dev/null 2>&1; then
+# opens Apple's installer and fails. A git anywhere else on PATH (Homebrew,
+# git-scm.com's installer) is used as it is. Otherwise Git is there once
+# `xcode-select -p` answers (the small command-line tools are enough; Xcode
+# isn't needed). No xcode-select (not a Mac: the tests' stand-in machine) = nothing
+# to do. For tests: DATALAB_APPLE_GIT stands in for /usr/bin/git, and
+# DATALAB_GIT_WAIT_SECONDS and DATALAB_GIT_POLL_SECONDS set the wait.
+other_git="$(command -v git 2>/dev/null || true)"
+if [ "$other_git" = "${DATALAB_APPLE_GIT:-/usr/bin/git}" ]; then other_git=""; fi
+if [ -z "$other_git" ] && command -v xcode-select >/dev/null 2>&1 && ! xcode-select -p >/dev/null 2>&1; then
   echo "Git isn't installed. It comes with Apple's command-line tools: a window from Apple"
   echo "is opening. Press Install in it and agree to Apple's terms (a few minutes)."
   xcode-select --install >/dev/null 2>&1 || true
