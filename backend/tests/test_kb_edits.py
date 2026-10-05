@@ -3,8 +3,8 @@
 The Knowledge tab's Edit page: drafts kept on this computer, the check,
 status and review fields, Save & share (through share.save_and_share, to a
 local bare repo standing in for GitHub), and conflicts when GitHub moved on.
-And suggestions from a conversation (suggest_kb_update, or the person's own
-"Propose a Knowledge update"), which never write the knowledge base.
+And suggestions from a conversation (suggest_kb_update, also when the person
+asked for one with Remember in Knowledge), which never write the knowledge base.
 """
 
 from __future__ import annotations
@@ -448,31 +448,88 @@ def test_accepting_a_suggestion_starts_a_reviewable_edit_that_shares_as_usual(la
     assert f"DataLab-Conversation: {cid}" in "\n".join(lab.remote.log("%B"))
 
 
-def test_a_suggestion_can_be_dismissed_and_the_person_can_propose_their_own(lab):
+def test_a_suggestion_can_be_dismissed(lab):
     cid = conversation(lab)
-    good = ran(lab, cid, "q_1")
     made = lab.suggestions.suggest(
         cid, page="qc/zero-steps.md", title="t", text=SECTION, reason="r",
-        evidence_query_ids=[good],
+        evidence_query_ids=[ran(lab, cid, "q_1")],
     )  # fmt: skip
     dismissed = lab.client.post(f"/api/knowledge/suggestions/{cid}/{made['id']}/dismiss").json()
     assert dismissed["status"] == "dismissed"
-    # "Propose a Knowledge update": the person's own, checked the same way.
-    body = {"page": "qc/zero-steps.md", "title": "Zero-step days", "text": SECTION,
-            "evidence_query_ids": [good], "reason": "Worth keeping."}  # fmt: skip
-    refused = lab.client.post(
-        f"/api/knowledge/suggestions/{cid}", json={**body, "evidence_query_ids": ["q_x"]}
-    )
-    assert refused.status_code == 422
-    edit = lab.client.post(f"/api/knowledge/suggestions/{cid}", json=body).json()
-    assert edit["new_page"] and "## Zero-step days" in edit["text"]
+    assert lab.client.get("/api/knowledge/edits").json() == []
+
+
+def remember_turn(lab: Lab, text: str = "Keep this: zero-step days mean not synced.") -> str:
+    """A conversation whose last message was sent with Remember in Knowledge."""
+    made = lab.store.create(kind="data", mode="analysis", title="t", model="m")
+    lab.store.append(made.id, "user_message", {"text": text, "kb_request": True})
+    return made.id
+
+
+def test_remember_in_knowledge_needs_no_query_and_becomes_a_draft_edit(lab):
+    cid = remember_turn(lab)
+    args = {"page": "qc/zero-steps.md", "title": "Zero-step days", "text": SECTION,
+            "reason": "The person asked to keep it; no query here shows it."}  # fmt: skip
+    made = lab.suggestions.suggest(cid, evidence_query_ids=[], **args)
+    assert made["requested"] and made["evidence"] == []
+    # Evidence it does give is still checked.
+    with pytest.raises(SuggestionInvalid, match="Not queries of this conversation"):
+        lab.suggestions.suggest(cid, evidence_query_ids=["q_nope"], **args)
+    edit_id = lab.suggestions.accept_requested(cid, made["id"])
+    assert edit_id is not None
+    edit = lab.client.get(f"/api/knowledge/edits/{edit_id}").json()
+    assert edit["status"] == "draft" and edit["new_page"] and "## Zero-step days" in edit["text"]
     fields, _ = kb.front_matter(edit["text"])
     assert fields and fields["status"] == "draft" and fields["summary"] == "Zero-step days"
-    person = [
-        e.data for e in lab.store.events_of_types_after(cid, 0, ("kb_suggestion",))
-        if e.data["by"] == "person"
-    ]  # fmt: skip
-    assert len(person) == 1
+    assert lab.suggestions.get(cid, made["id"])["status"] == "accepted"
+    # A draft on this computer: nothing on GitHub until the person shares it.
+    assert lab.remote.log("%s")[0] == "Start the knowledge base"
+
+
+def test_remember_in_knowledge_is_still_checked_for_participant_data(lab):
+    cid = remember_turn(lab)
+    with pytest.raises(SuggestionInvalid, match="participant-level data"):
+        lab.suggestions.suggest(
+            cid, page="sources/fitbit.md", title="t", reason="r", evidence_query_ids=[],
+            text="Participant P12345 on 2025-03-02 had 0 steps.",
+        )  # fmt: skip
+    assert lab.store.events_of_types_after(cid, 0, ("kb_suggestion",)) == []
+
+
+def test_only_a_remember_in_knowledge_turn_skips_the_evidence(lab):
+    cid = conversation(lab)
+    with pytest.raises(SuggestionInvalid, match="needs evidence"):
+        lab.suggestions.suggest(
+            cid, page="qc/zero-steps.md", title="t", text=SECTION, reason="r",
+            evidence_query_ids=[],
+        )  # fmt: skip
+    made = lab.suggestions.suggest(
+        cid, page="qc/zero-steps.md", title="t", text=SECTION, reason="r",
+        evidence_query_ids=[ran(lab, cid, "q_1")],
+    )  # fmt: skip
+    assert "requested" not in made
+    # The next message, a Remember in Knowledge one, starts a new turn: the
+    # earlier one's flag doesn't carry over, and nor does this one's back.
+    lab.store.append(cid, "user_message", {"text": "Keep it.", "kb_request": True})
+    again = lab.suggestions.suggest(
+        cid, page="qc/zero-steps.md", title="t", text=SECTION, reason="r", evidence_query_ids=[]
+    )
+    assert again["requested"]
+
+
+def test_a_requested_update_that_cant_be_accepted_stays_open(lab):
+    cid = remember_turn(lab)
+    made = lab.suggestions.suggest(
+        cid, page="qc/zero-steps.md", title="t", text=SECTION, reason="r", evidence_query_ids=[]
+    )
+
+    def broken(conversation_id: str, suggestion_id: str) -> str:
+        raise OSError("GitHub is unreachable")
+
+    lab.suggestions.accept = broken
+    assert lab.suggestions.accept_requested(cid, made["id"]) is None
+    # Its card still offers Accept as proposal.
+    assert lab.suggestions.get(cid, made["id"])["status"] == "open"
 
 
 def test_practice_datalab_has_no_knowledge_base_to_edit(settings, tmp_path):

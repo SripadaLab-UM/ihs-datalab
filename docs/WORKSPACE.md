@@ -27,9 +27,10 @@ a durable, evidence-backed finding (confirmed by a query in the
 conversation) becomes a **Suggested Knowledge update** card under the
 answer, which the person accepts as a draft edit, edits first, or dismisses.
 At most one or two an answer; it never writes the knowledge base. The person
-can make one themselves with **Propose a Knowledge update** over the
-conversation. See [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), "Suggested
-Knowledge updates".
+can ask for one with **Remember in Knowledge** over the conversation: they
+say what to keep, the agent writes it up (citing queries if any show it),
+and it becomes a draft edit at once, to review and Save & share. See
+[KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md), "Suggested Knowledge updates".
 
 Four more modes open only from the tab that docks them, not from **New
 conversation** (built):

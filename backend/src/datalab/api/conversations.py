@@ -75,6 +75,9 @@ class ConversationChange(BaseModel):
 class NewMessage(BaseModel):
     text: str = Field(min_length=1, max_length=100_000)
     effort: Literal["low", "medium", "high", "xhigh"] | None = None
+    # Remember in Knowledge: the text says what the knowledge base should keep,
+    # and the agent writes it up as a Knowledge update (sessions/modes.py: KB_REQUEST).
+    kb_request: bool = False
 
 
 class ApprovalAnswer(BaseModel):
@@ -129,6 +132,8 @@ class ModeOut(BaseModel):
     attachments: bool = True
     # The empty conversation's heading.
     question: str = "What would you like to find out?"
+    # Whether its agent can suggest Knowledge updates, so Remember in Knowledge is offered.
+    remember: bool = False
 
 
 class PlanSectionOut(BaseModel):
@@ -217,6 +222,7 @@ def build_conversations_router(
                 queries=m.queries,
                 attachments=m.attachments,
                 question=m.question,
+                remember="suggest_kb_update" in m.allowed_tools,
             )
             for m in MODES.values()
         ]
@@ -290,8 +296,20 @@ def build_conversations_router(
                 f"This conversation uses {conversation.model}, which isn't approved for DataLab "
                 "any more. Start a new conversation to continue.",
             )
+        if body.kb_request:
+            mode = MODES.get(conversation.mode)
+            # As /modes says (`remember`): the modes whose agent has suggest_kb_update.
+            if mode is None or "suggest_kb_update" not in mode.allowed_tools:
+                raise HTTPException(
+                    409,
+                    "Remember in Knowledge is for Analysis, Data extraction and Data "
+                    "engineering conversations.",
+                )
         try:
-            await sessions.send(conversation, body.text, body.effort)
+            if body.kb_request:
+                await sessions.send(conversation, body.text, body.effort, kb_request=True)
+            else:
+                await sessions.send(conversation, body.text, body.effort)
         except Busy as error:
             raise HTTPException(409, str(error)) from error
         name_after_first_question(conversation, body.text)

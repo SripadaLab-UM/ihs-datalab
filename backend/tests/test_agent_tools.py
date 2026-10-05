@@ -704,6 +704,53 @@ async def test_suggest_kb_update_is_only_for_the_modes_that_name_it(server, tmp_
     assert "isn't available in this mode" in result.content[0].text
 
 
+async def test_remember_in_knowledge_turns_the_agents_update_into_a_draft_edit(
+    settings, catalog, tmp_path
+):
+    """In a turn sent with Remember in Knowledge, the agent's suggestion needs
+    no query and is accepted at once (here a stand-in for the Knowledge routes'
+    accept, which tests/test_kb_edits.py covers); in any other turn it stays a
+    card for the person to decide."""
+    from datalab.sessions.modes import MODES
+
+    app = create_app(
+        settings, database=FakeDatabase(), catalog=catalog, manage_containers=False,
+        protect_api=False,
+    )  # fmt: skip
+    services, suggestions = app.state.services, app.state.kb_suggestions
+    suggestions.turn_running = lambda conversation_id: True
+    accepted: list[str] = []
+
+    def accept(conversation_id: str, suggestion_id: str) -> str:
+        accepted.append(suggestion_id)
+        return "edit_1"
+
+    suggestions.accept = accept
+    cid = services.conversations.create(kind="data", mode="analysis", title="t", model="m").id
+    token = services.tokens.issue(
+        SessionAccess(
+            session_id=cid, kind="data", results_dir=tmp_path / "oracle",
+            tools=MODES["analysis"].allowed_tools,
+        )
+    )  # fmt: skip
+    args = {
+        "page": "qc/zero-steps.md", "title": "Zero-step days", "text": "Treat 0 as missing.",
+        "evidence_query_ids": [], "reason": "The person asked to keep it.",
+    }  # fmt: skip
+    with live_server(app) as base_url:
+        services.conversations.append(cid, "user_message", {"text": "Why zeros?"})
+        async with mcp_session(base_url, token) as session:
+            refused = await session.call_tool("suggest_kb_update", args)
+        assert refused.is_error and "needs evidence" in refused.content[0].text
+        services.conversations.append(
+            cid, "user_message", {"text": "Keep: zeros mean not synced.", "kb_request": True}
+        )
+        async with mcp_session(base_url, token) as session:
+            made = payload(await session.call_tool("suggest_kb_update", args))
+    assert made["status"] == "draft_edit" and "Save & share" in made["note"]
+    assert accepted == [made["suggestion_id"]]
+
+
 async def test_a_refused_tool_names_the_mode_it_isnt_in(server, tmp_path):
     """The refusal's words come from the conversation's mode, not Knowledge
     writing's for every mode."""

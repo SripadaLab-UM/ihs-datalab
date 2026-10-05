@@ -102,6 +102,22 @@ Suggesting a Knowledge update:
   the person asks you to write or change a page.
 """
 
+# Added to a message sent with "Remember in Knowledge" (api/conversations.py:
+# kb_request): the person describes what to keep, and the agent writes it up.
+KB_REQUEST = """\
+[DataLab: the person used Remember in Knowledge. Their message below says what \
+the lab's knowledge base should keep. Write it up as one Knowledge update with \
+`suggest_kb_update` (two only if it's clearly two things for two pages): find \
+the page it belongs on (search_catalog and /work/kb help), a short title, the \
+text to add, general and self-contained, and why it's worth keeping. Give the \
+query_ids of the queries in this conversation that show it; when nothing here \
+shows it, give none (the person's word is the evidence) and say so in the \
+reason. It becomes a draft edit the person reviews and shares in the Knowledge \
+tab. If it can't be written without participant-level data, or isn't a durable, \
+general fact, don't suggest it: say why in one or two lines. Don't edit /work/kb \
+for this.]
+"""
+
 # Correctness checks, for the modes that report numbers (the beta.8 review:
 # timestamps counted as person-days, a numerator from outside the cohort).
 CORRECTNESS = """\

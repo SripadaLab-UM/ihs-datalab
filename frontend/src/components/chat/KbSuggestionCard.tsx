@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { use, useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 
-import { api, type Conversation } from "@/api/client";
+import { api } from "@/api/client";
 import { commitUrl, knowledgeApi } from "@/api/knowledge";
 import { Button, Chip, Icon, Modal } from "@/components/ui";
 
@@ -118,6 +118,8 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
     (outcome.current ?? toggle.current)?.focus();
   }, [acted, actedHere, suggestion.id]);
 
+  // The person's own: asked for with Remember in Knowledge (or the older form).
+  const label = suggestion.requested || suggestion.by === "person" ? "Your Knowledge update" : "Suggested Knowledge update";
   const linkClass = "text-ink underline decoration-faint underline-offset-4 hover:decoration-ink";
   const commitLink = shared?.commit ? (
     commit ? (
@@ -132,7 +134,7 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
   return (
     <section
       ref={card}
-      aria-label={`${suggestion.by === "person" ? "Your Knowledge update" : "Suggested Knowledge update"}: ${suggestion.title}`}
+      aria-label={`${label}: ${suggestion.title}`}
       className={clsx("min-w-0 border-l text-[14px]", compact ? "pl-2" : "pl-3", state === "open" ? "border-you" : "border-line")}
     >
       {/* The row: "+" opens it; Accept (or what came of it) stays beside it. */}
@@ -150,7 +152,7 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <Icon name="book" size={13} className="shrink-0 text-faint" />
-              <span className="dl-label">{suggestion.by === "person" ? "Your Knowledge update" : "Suggested Knowledge update"}</span>
+              <span className="dl-label">{label}</span>
               {chip}
             </span>
             <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
@@ -209,6 +211,7 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
             )}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-sans text-[12.5px] text-muted">
               <span className="dl-label">Evidence</span>
+              {suggestion.evidence.length === 0 && <span>None from this conversation: you asked to keep it</span>}
               {suggestion.evidence.map((e) => (
                 <span key={e.query_id} className="inline-flex items-center gap-1">
                   {openQuery ? (
@@ -268,129 +271,90 @@ export function KbSuggestionCard({ suggestion, conversationId }: { suggestion: K
 }
 
 /**
- * "Propose a Knowledge update": the person turns what this conversation found
- * into a proposal for the knowledge base themselves, with no AI request. A
- * small form (the page, the text, why, and the queries here that show it),
- * checked as the agent's suggestions are; it becomes a draft edit to review
- * and Save & share in the Knowledge tab.
+ * "Remember in Knowledge": the person says, in their own words, what the lab
+ * knowledge base should keep from this conversation, and the conversation's
+ * agent does the rest. What they write is sent as a message (marked as one,
+ * so DataLab asks the agent for a Knowledge update): the agent finds the page,
+ * writes it up and cites the queries here that show it, if any. DataLab checks
+ * it as it checks every suggestion and makes it a draft edit at once, to review
+ * and Save & share in the Knowledge tab. Nothing is shared from here.
  */
-export function ProposeUpdateButton({ conversation }: { conversation: Conversation }) {
+export function RememberButton({
+  mode,
+  onSend,
+  busy,
+}: {
+  /** The conversation's mode: only those whose agent can suggest Knowledge updates offer it. */
+  mode: string;
+  /** Send the text as a Remember in Knowledge message (Chat's own send, so it shows like any other). */
+  onSend: (text: string) => Promise<unknown>;
+  /** The agent is working: one message at a time. */
+  busy: boolean;
+}) {
   const [open, setOpen] = useState(false);
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
   const status = useQuery({ queryKey: ["knowledge-status"], queryFn: knowledgeApi.status });
   const available = status.data?.available ?? false;
+  if (!modes.data?.find((m) => m.id === mode)?.remember) return null;
   return (
     <>
       <Button
         variant="ghost"
         className="px-2 text-[13px]"
         onClick={() => setOpen(true)}
-        disabled={!available}
-        title={available ? "Turn what you found here into a proposal for the lab knowledge base" : `${REAL_ONLY}: practice DataLab has no lab knowledge base`}
+        disabled={!available || busy}
+        title={
+          !available
+            ? `${REAL_ONLY}: practice DataLab has no lab knowledge base`
+            : busy
+              ? "The agent is working: ask once it has answered"
+              : "Tell the agent what the lab knowledge base should keep from this conversation"
+        }
       >
-        <Icon name="book" size={13} /> Propose a Knowledge update
+        <Icon name="book" size={13} /> Remember in Knowledge
       </Button>
-      {open && <ProposeUpdateForm conversation={conversation} onClose={() => setOpen(false)} />}
+      {open && <RememberForm onSend={onSend} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function ProposeUpdateForm({ conversation, onClose }: { conversation: Conversation; onClose: () => void }) {
-  const queryClient = useQueryClient();
-  const listId = useId();
-  const pages = useQuery({ queryKey: ["kb-pages"], queryFn: knowledgeApi.pages });
-  const queries = useQuery({ queryKey: ["data-accessed", conversation.id], queryFn: () => api.dataAccessed(conversation.id) });
-  const usable = (queries.data ?? []).filter((q) => q.status === "succeeded");
-  const [page, setPage] = useState("");
-  const [title, setTitle] = useState("");
+/** The longest description: a Knowledge update's text may be 4,000 characters. */
+const MAX_REMEMBER = 4000;
+
+function RememberForm({ onSend, onClose }: { onSend: (text: string) => Promise<unknown>; onClose: () => void }) {
+  const fieldId = useId();
   const [text, setText] = useState("");
-  const [reason, setReason] = useState("");
-  const [evidence, setEvidence] = useState<Set<string>>(new Set());
-  const propose = useMutation({
-    mutationFn: () =>
-      knowledgeApi.proposeUpdate(conversation.id, { page, title, text, reason, evidence_query_ids: [...evidence] }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["kb-edits"] });
-      onClose();
-    },
-  });
-  const ready = page.trim() && title.trim() && text.trim() && reason.trim() && evidence.size > 0;
-  const field = "rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13.5px] outline-none focus:border-ink";
+  const ask = useMutation({ mutationFn: () => onSend(text.trim()), onSuccess: onClose });
+  const ready = text.trim().length > 0 && !ask.isPending;
   return (
-    <Modal title="Propose a Knowledge update" onClose={onClose}>
+    <Modal title="Remember in Knowledge" onClose={onClose}>
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
           e.preventDefault();
-          if (ready) propose.mutate();
+          if (ready) ask.mutate();
         }}
       >
         <p className="font-sans text-[13px] text-muted">
-          For something durable this conversation showed about the data: a quirk, what a column holds, a definition, a
-          caveat. Not a one-off result, and never participant-level data or small counts.
+          Say what the lab knowledge base should keep from this conversation: a quirk in the data, what a column really
+          holds, a definition, a caveat. The agent finds the page, writes it up, and cites the queries here that show it.
         </p>
-        <label className="flex flex-col gap-1">
-          <span className="dl-label">Page</span>
-          <input
-            autoFocus
-            list={listId}
-            value={page}
-            onChange={(e) => setPage(e.target.value)}
-            placeholder="sources/fitbit.md, or a new page such as qc/zero-step-days.md"
-            className={clsx(field, "font-mono text-[13px]")}
-          />
-          <datalist id={listId}>
-            {(pages.data?.pages ?? [])
-              .filter((p) => p.place === "page")
-              .map((p) => (
-                <option key={p.path} value={p.path} />
-              ))}
-          </datalist>
+        <label htmlFor={fieldId} className="dl-label">
+          What should DataLab remember?
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="dl-label">Title</span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} className={field} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="dl-label">What to add (Markdown)</span>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={5} maxLength={4000} className={clsx(field, "resize-y")} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="dl-label">Why it's worth keeping</span>
-          <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={600} className={clsx(field, "resize-y")} />
-        </label>
-        <fieldset className="flex flex-col gap-1.5">
-          <legend className="dl-label mb-1">Evidence: the queries here that show it</legend>
-          {queries.isPending ? (
-            <p className="font-sans text-[13px] text-muted">Loading this conversation's queries…</p>
-          ) : usable.length === 0 ? (
-            <p className="font-sans text-[13px] text-attn">This conversation has no queries that ran, so there's nothing to cite yet.</p>
-          ) : (
-            usable.map((q) => (
-              <label key={q.id} className="flex cursor-pointer items-baseline gap-2 font-sans text-[13px]">
-                <input
-                  type="checkbox"
-                  checked={evidence.has(q.id)}
-                  onChange={(e) => {
-                    const next = new Set(evidence);
-                    if (e.target.checked) next.add(q.id);
-                    else next.delete(q.id);
-                    setEvidence(next);
-                  }}
-                  className="translate-y-[2px]"
-                />
-                <span>
-                  <span className="text-ink">{q.tables.join(", ") || "A query"}</span>{" "}
-                  <span className="text-faint">
-                    {new Date(q.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {q.id}
-                  </span>
-                </span>
-              </label>
-            ))
-          )}
-        </fieldset>
-        {propose.error && (
+        <textarea
+          id={fieldId}
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={5}
+          maxLength={MAX_REMEMBER}
+          placeholder="For example: a step count of 0 means the tracker wasn't synced that day, not that the intern didn't move."
+          className="resize-y rounded-[3px] border border-line bg-field px-2.5 py-1.5 font-sans text-[13.5px] outline-none focus:border-ink"
+        />
+        {ask.error && (
           <p role="alert" className="font-sans text-[13px] text-danger">
-            {propose.error.message}
+            {ask.error.message}
           </p>
         )}
         <div className="flex flex-col items-end gap-1.5">
@@ -398,13 +362,13 @@ function ProposeUpdateForm({ conversation, onClose }: { conversation: Conversati
             <Button type="button" variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={!ready || propose.isPending}>
-              {propose.isPending ? "Checking…" : "Create the proposal"}
+            <Button type="submit" variant="primary" disabled={!ready}>
+              {ask.isPending ? "Sending…" : "Ask the agent"}
             </Button>
           </div>
           <p className="font-sans text-[12px] text-faint">
             It's checked for participant data, then kept as a draft on this computer. You review it and Save & share it in
-            the Knowledge tab.
+            the Knowledge tab. Never participant-level data or small counts.
           </p>
         </div>
       </form>
