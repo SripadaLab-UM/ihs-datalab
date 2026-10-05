@@ -49,6 +49,8 @@ def test_a_missing_git_is_installed_once_and_the_command_retried(
 def test_when_it_cannot_install_it_says_what_to_do(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(git_module, "git_executable", lambda: "git")  # not found: no Mac stub
+
     def run(command, **kwargs):
         raise FileNotFoundError
 
@@ -69,6 +71,8 @@ def test_the_signature_check_reads_its_values_from_the_environment() -> None:
 def test_the_reason_it_could_not_install_is_in_the_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setattr(git_module, "git_executable", lambda: "git")  # not found: no Mac stub
+
     def run(command, **kwargs):
         raise FileNotFoundError
 
@@ -131,3 +135,17 @@ def test_another_git_on_a_mac_is_used_without_asking_for_the_tools(
 def test_it_asks_for_no_mac_tools_off_a_mac(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(sys, "platform", "linux")
     assert git_module.mac_tools_missing() is False
+
+
+def test_a_mac_where_xcode_select_cannot_run_does_not_claim_the_tools_are_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ran = _mac(monkeypatch, tools_installed=False)
+
+    def run(command, **kwargs):
+        ran.append(command)
+        raise FileNotFoundError
+
+    monkeypatch.setattr(git_module.subprocess, "run", run)
+    assert git_module.mac_tools_missing() is False
+    assert ["xcode-select", "--install"] not in ran
