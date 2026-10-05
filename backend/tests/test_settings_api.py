@@ -826,7 +826,11 @@ def test_diagnostics_hold_metadata_and_nothing_else(tmp_path, keychain, monkeypa
     )  # fmt: skip
     log.finished("q_20260927T100000_aaaaaa", status="failed", message=CANARIES["result"])
     add_run(h.connection, h.root, "run_20260927T100000_bbbbbb", status="failed")
-    h.connection.execute("UPDATE workflow_runs SET workflow_text = ?", (CANARIES["run text"],))
+    # The failure counts cover the last 7 days: the run must start recently, not on a fixed date.
+    h.connection.execute(
+        "UPDATE workflow_runs SET workflow_text = ?, started_at = ?",
+        (CANARIES["run text"], datetime.datetime.now(datetime.UTC).isoformat()),
+    )
     h.connection.execute(
         "INSERT INTO export_destinations (id, name, path, added_at) VALUES ('d', ?, ?, 'now')",
         (CANARIES["destination"], str(tmp_path / CANARIES["destination"])),
