@@ -12,7 +12,7 @@ import { ChatHeader, CompactHeader, ExpressSwitch, RigorSwitch, Title } from "./
 import { Composer, type ComposerNote } from "./Composer";
 import { useEffortChoice, useExpressEffort } from "./effort";
 import { CompactIntro, EmptyState } from "./Intro";
-import { ProposeUpdateButton } from "./KbSuggestionCard";
+import { RememberButton } from "./KbSuggestionCard";
 import type { PendingMessage } from "./Pending";
 import { buildTranscript } from "./transcript";
 import { PendingTurn, TurnView } from "./TurnView";
@@ -83,7 +83,8 @@ export function Chat({
   const queryClient = useQueryClient();
   // A typed message or a starter question (sent as it is, so the agent starts at once).
   const send = useMutation({
-    mutationFn: (message: string) => api.send(conversation.id, message, effort),
+    mutationFn: ({ message, kbRequest }: { message: string; kbRequest?: boolean }) =>
+      kbRequest ? api.send(conversation.id, message, effort, true) : api.send(conversation.id, message, effort),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
   });
   // The message on its way, shown at once with a line under it, until its own
@@ -130,8 +131,9 @@ export function Chat({
    * can be sent until its event arrives (DataLab refuses a second message
    * meanwhile). If it fails, the box gets the text back: the box does that
    * itself for a typed one, `starter` asks for it for a picked one.
+   * `kbRequest`: sent with Remember in Knowledge (its popup keeps the text if it fails).
    */
-  const sendMessage = (text: string, starter = false): Promise<unknown> => {
+  const sendMessage = (text: string, starter = false, kbRequest = false): Promise<unknown> => {
     if (inFlight.current || running || sending) return Promise.reject(new Error("Already sending."));
     inFlight.current = true;
     setDraft(null);
@@ -139,7 +141,7 @@ export function Chat({
     // Made now, before anything waits: what's sent is what the person saw as they pressed Send.
     const message = prepareMessage ? prepareMessage(text) : text;
     return send
-      .mutateAsync(message)
+      .mutateAsync({ message, kbRequest })
       .catch((error: unknown) => {
         setPending(null);
         if (starter) setDraft({ text, key: Date.now() });
@@ -182,7 +184,11 @@ export function Chat({
             onEffort={setEffort}
             actions={
               <>
-                {conversation.kind === "data" && <ProposeUpdateButton conversation={conversation} />}
+                <RememberButton
+                  mode={conversation.mode}
+                  onSend={(text) => sendMessage(text, false, true)}
+                  busy={running || sending}
+                />
                 <ExpressSwitch conversation={conversation} />
                 {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
                 {headerActions}

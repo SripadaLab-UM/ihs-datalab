@@ -257,6 +257,7 @@ def create_app(
     app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
     app.state.services = services
     app.state.sql_drafts = sql_drafts
+    app.state.kb_suggestions = kb_suggestions
     app.router.routes.extend(agent_tools_app.routes)
 
     def model_status(session_id: str, data: dict) -> None:

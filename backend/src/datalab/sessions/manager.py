@@ -171,10 +171,18 @@ class SessionManager:
         return task is not None and not task.done()
 
     async def send(
-        self, conversation: Conversation, text: str, effort: str | None, *, continues: bool = False
+        self,
+        conversation: Conversation,
+        text: str,
+        effort: str | None,
+        *,
+        continues: bool = False,
+        kb_request: bool = False,
     ) -> None:
         """Start a turn. `continues`: it picks up a turn that failed (Continue), so
-        its review reads that turn's question and work too."""
+        its review reads that turn's question and work too. `kb_request`: the
+        person used Remember in Knowledge, so the agent writes up what they
+        describe as a Knowledge update (knowledge/suggestions.py)."""
         if self.is_busy(conversation.id):
             raise Busy("The agent is still working on the previous message.")
         if continues and not self._last_turn_failed(conversation.id):
@@ -198,15 +206,22 @@ class SessionManager:
             # so an Express turn's low effort mustn't outlive it.
             effort = effort or turns.default_effort(self._store, conversation, continues)
             self._tokens.set_express(conversation.id, express)
+            if continues and not kb_request:
+                # Continuing a Remember in Knowledge turn: it still is one.
+                before = self._store.last(conversation.id, "user_message")
+                kb_request = before is not None and before.data.get("kb_request") is True
             note = turns.express_note(self._store, conversation) + turns.workspace_note(
                 self._store, conversation.id
             )
+            if kb_request:
+                note += modes.KB_REQUEST + "\n"
             self._store.append(
                 conversation.id,
                 "user_message",
                 {
                     "text": text,
                     **({"continues": True} if continues else {}),
+                    **({"kb_request": True} if kb_request else {}),
                     **({"express": True} if express else {}),
                     "rigor_review": conversation.rigor_review,
                     "effort": effort,

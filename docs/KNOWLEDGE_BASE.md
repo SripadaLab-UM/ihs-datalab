@@ -306,8 +306,16 @@ unreviewed (see [SAFETY.md](SAFETY.md)).
   accepted or dismissed. It never writes the knowledge base.
 - Accepting it starts an edit of the page (the text as a new section, or a
   new draft page), with where it came from; it's reviewed and shared like
-  any edit. "Propose a Knowledge update" in a Workspace conversation is the
-  person's own, checked the same way (`POST /api/knowledge/suggestions/{conversation}`).
+  any edit.
+- **Remember in Knowledge** over a conversation in those modes: the person
+  describes what to keep, and it's sent as a message with `kb_request`
+  (`POST /api/conversations/{id}/messages`; refused in other modes, and
+  `/api/modes` says which with `remember`). The turn tells the agent to write
+  it up with `suggest_kb_update` (`sessions/modes.py`, `KB_REQUEST`). What it
+  suggests in that turn is `requested`: it may cite no query (the person's
+  word is the evidence; any it cites is still checked), the other checks are
+  the same, and it's accepted into a draft edit at once
+  (`KbSuggestions.accept_requested`). If that fails, it stays an open card.
 
 ## The check
 

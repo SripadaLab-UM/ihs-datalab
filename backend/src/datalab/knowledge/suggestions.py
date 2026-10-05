@@ -3,8 +3,11 @@
 When the agent confirms something durable about the data (a quirk a query
 showed, a definition, a caveat), it can suggest adding it to the knowledge
 base with the `suggest_kb_update` tool (data/agent_tools.py; only in the
-modes that name it, sessions/modes.py). The person can also propose one
-themselves ("Propose a Knowledge update" in the conversation).
+modes that name it, sessions/modes.py). The person can also ask for one:
+"Remember in Knowledge" sends what they describe as a message
+(`kb_request`), and the agent writes it up with the same tool. What it
+suggests in that turn is *requested*: it needs no query as evidence (the
+person's word is), and it's accepted straight away.
 
 A suggestion is checked here and recorded as a `kb_suggestion` event of the
 conversation, then `kb_suggestion_updated` as the person accepts or
@@ -17,14 +20,16 @@ The checks:
 - the page is a page of the knowledge base's layout (existing or new) that
   a person could edit;
 - the evidence is queries that ran, and succeeded, in this conversation
-  (DataLab's own record of them, the Data accessed log);
+  (DataLab's own record of them, the Data accessed log): at least one,
+  unless the person asked for it;
 - the text passes the knowledge base's participant-data scans, and names no
   small counts of people;
-- at most two a turn, from the agent.
+- at most two a turn.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import secrets
 from collections.abc import Callable, Iterable
@@ -33,6 +38,8 @@ from typing import Any
 from datalab.knowledge import check as kb
 from datalab.knowledge.edits import editable_problem
 from datalab.textcheck import lone_surrogate
+
+log = logging.getLogger(__name__)
 
 EVENT = "kb_suggestion"
 UPDATED = "kb_suggestion_updated"
@@ -60,6 +67,9 @@ class KbSuggestions:
         self._store = store
         self._access_log = access_log
         self.turn_running: Callable[[str], bool] = lambda conversation_id: True
+        # Set by the Knowledge routes (api/knowledge.py): accepts a suggestion
+        # into a draft edit of its page and returns the edit's id.
+        self.accept: Callable[[str, str], str] | None = None
 
     def suggest(
         self,
@@ -70,38 +80,39 @@ class KbSuggestions:
         text: str,
         evidence_query_ids: Iterable[str],
         reason: str,
-        by: str = "agent",
     ) -> dict[str, Any]:
-        """Check a suggestion and record it in the conversation (SuggestionInvalid if it
-        can't be). Nothing is written to the knowledge base."""
-        if by == "agent" and not self.turn_running(conversation_id):
+        """Check the agent's suggestion and record it in the conversation
+        (SuggestionInvalid if it can't be). Nothing is written to the knowledge base."""
+        if not self.turn_running(conversation_id):
             raise SuggestionInvalid("A Knowledge update can only be suggested during a turn.")
         if self._store.get(conversation_id) is None:
             raise SuggestionInvalid("No such conversation.")
         asked = self._store.last(conversation_id, "user_message")
-        if by == "agent":
-            if asked is None:
-                raise SuggestionInvalid("A Knowledge update can only be suggested during a turn.")
-            review = self._store.last(conversation_id, "review_started")
-            if review is not None and review.seq > asked.seq:
-                raise SuggestionInvalid("A Knowledge update can't be suggested during a review.")
-            made = self._store.events_of_types_after(conversation_id, asked.seq, (EVENT,))
-            if sum(1 for e in made if e.data.get("by") == "agent") >= MAX_PER_TURN:
-                raise SuggestionInvalid(
-                    f"This answer already suggests {MAX_PER_TURN} Knowledge updates, the most one "
-                    "answer may. Keep the rest for the person to ask about."
-                )
+        if asked is None:
+            raise SuggestionInvalid("A Knowledge update can only be suggested during a turn.")
+        review = self._store.last(conversation_id, "review_started")
+        if review is not None and review.seq > asked.seq:
+            raise SuggestionInvalid("A Knowledge update can't be suggested during a review.")
+        made = self._store.events_of_types_after(conversation_id, asked.seq, (EVENT,))
+        if len(made) >= MAX_PER_TURN:
+            raise SuggestionInvalid(
+                f"This answer already suggests {MAX_PER_TURN} Knowledge updates, the most one "
+                "answer may. Keep the rest for the person to ask about."
+            )
+        # Remember in Knowledge: the person asked for it, so their word is enough.
+        requested = bool(asked.data.get("kb_request"))
         path = page_path(page)
         clean_title = _line(title, "title", MAX_TITLE)
         clean_text = _block(text, "text", MAX_TEXT)
         clean_reason = _block(reason, "reason", MAX_REASON)
-        evidence = self._evidence(conversation_id, evidence_query_ids)
+        evidence = self._evidence(conversation_id, evidence_query_ids, required=not requested)
         _no_participant_data(
             path, {"title": clean_title, "text": clean_text, "reason": clean_reason}
         )
         suggestion = {
             "id": f"ks_{secrets.token_hex(6)}",
-            "by": by,
+            "by": "agent",
+            **({"requested": True} if requested else {}),
             "turn": self._store.count(conversation_id, "user_message"),
             "page": path,
             "title": clean_title,
@@ -111,6 +122,19 @@ class KbSuggestions:
         }
         self._store.append(conversation_id, EVENT, suggestion)
         return suggestion
+
+    def accept_requested(self, conversation_id: str, suggestion_id: str) -> str | None:
+        """Accept a suggestion the person asked for (Remember in Knowledge) into a
+        draft edit, as Accept as proposal would: the edit's id, or None if it
+        couldn't be made. Then the suggestion stays open, and its card still
+        offers Accept as proposal. git and GitHub: call it off the event loop."""
+        if self.accept is None:
+            return None
+        try:
+            return self.accept(conversation_id, suggestion_id)
+        except Exception:
+            log.warning("A requested Knowledge update couldn't be accepted.", exc_info=True)
+            return None
 
     def get(self, conversation_id: str, suggestion_id: str) -> dict[str, Any]:
         """A suggestion as it stands now (status open, accepted or dismissed)."""
@@ -131,8 +155,12 @@ class KbSuggestions:
             conversation_id, UPDATED, {"id": suggestion_id, "status": status, **extra}
         )
 
-    def _evidence(self, conversation_id: str, ids: Iterable[str]) -> list[dict[str, Any]]:
+    def _evidence(
+        self, conversation_id: str, ids: Iterable[str], *, required: bool
+    ) -> list[dict[str, Any]]:
         wanted = list(dict.fromkeys(str(i).strip() for i in ids if str(i).strip()))
+        if not wanted and not required:
+            return []
         if not wanted:
             raise SuggestionInvalid(
                 "A Knowledge update needs evidence: the ids of the queries in this conversation "

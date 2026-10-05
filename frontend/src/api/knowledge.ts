@@ -21,7 +21,6 @@ export type KbEditState = KbEdit["status"];
 export type KbEditSummary = Schemas["EditSummaryOut"];
 export type KbEditCheck = Schemas["EditCheckOut"];
 export type KbReapply = Schemas["ReapplyOut"];
-export type KbSuggestionIn = Schemas["SuggestionIn"];
 export type KbSuggestionOut = Schemas["SuggestionOut"];
 
 const post = (body?: unknown): RequestInit => ({ method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
@@ -85,9 +84,7 @@ export const knowledgeApi = {
     request<KbEdit>(`/api/knowledge/suggestions/${id(conversationId)}/${id(suggestionId)}/accept`, post()),
   dismissSuggestion: (conversationId: string, suggestionId: string) =>
     request<KbSuggestionOut>(`/api/knowledge/suggestions/${id(conversationId)}/${id(suggestionId)}/dismiss`, post()),
-  /** The person's own "Propose a Knowledge update": checked like the agent's, and opened as an edit. */
-  proposeUpdate: (conversationId: string, body: KbSuggestionIn) =>
-    request<KbEdit>(`/api/knowledge/suggestions/${id(conversationId)}`, post(body)),
+  // Remember in Knowledge is a message to the conversation's agent: api.send(…, kbRequest).
 };
 
 /** A commit on GitHub, for a repo named "owner/name". */
