@@ -222,9 +222,10 @@ def mac_tools_missing() -> bool:
     try:
         if subprocess.run(["xcode-select", "-p"], capture_output=True, timeout=30).returncode == 0:
             return False
-        subprocess.run(["xcode-select", "--install"], capture_output=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired):
-        pass
+        return False  # can't tell: run git and let its own error speak
+    with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+        subprocess.run(["xcode-select", "--install"], capture_output=True, timeout=30)
     return True
 
 
