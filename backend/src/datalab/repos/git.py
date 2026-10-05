@@ -212,6 +212,30 @@ def install_git_for_windows() -> bool:
         return True
 
 
+def mac_tools_missing() -> bool:
+    """True on a Mac with no Apple command-line tools (and no Xcode): there
+    /usr/bin/git is only a stub that opens Apple's installer and fails. Starts
+    that installer (`xcode-select --install`) each time it's seen missing;
+    the person finishes it in Apple's window."""
+    if sys.platform != "darwin" or git_executable() != "/usr/bin/git":
+        return False
+    try:
+        if subprocess.run(["xcode-select", "-p"], capture_output=True, timeout=30).returncode == 0:
+            return False
+        subprocess.run(["xcode-select", "--install"], capture_output=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return True
+
+
+MAC_TOOLS_MESSAGE = (
+    "Git isn't installed on this computer. DataLab has opened Apple's installer for its "
+    "command-line tools, which include Git: press Install in its window and wait for it "
+    "to finish, then press Sync again. If no window appeared, run xcode-select --install "
+    "in Terminal."
+)
+
+
 def git_env(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     env = {
         k: v
@@ -411,6 +435,8 @@ class Clone:
             self._before_network()
         config = (*_CONFIG, *(("protocol.file.allow=always",) if self._allow_local else ()))
         options = [part for setting in config for part in ("-c", setting)]
+        if mac_tools_missing():
+            raise GitError(MAC_TOOLS_MESSAGE)
         command = [git_executable(), *options, *(self._helper if network else []), *args]
         try:
             try:

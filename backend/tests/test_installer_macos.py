@@ -1570,3 +1570,65 @@ def test_ctrl_c_at_the_optional_questions_after_done_just_ends(machine):
     assert "Stopped. Run this installer again" not in done.stdout
     assert "Open DataLab now?" not in done.stdout
     assert (root(machine) / "current").read_text() == "0.1.0a3\n"
+
+
+FAKE_XCODE_SELECT = """#!/bin/sh
+# -p answers once the tools are "installed": --install makes them so, unless
+# DATALAB_TEST_XCODE_NEVER is set (the person ignored Apple's window).
+case "$1" in
+  -p) [ -f "$DATALAB_TEST_XCODE" ] ;;
+  --install)
+    echo "--install" >> "$DATALAB_TEST_XCODE.log"
+    [ -n "${DATALAB_TEST_XCODE_NEVER:-}" ] || : > "$DATALAB_TEST_XCODE" ;;
+esac
+"""
+
+
+def with_xcode_select(machine, tmp_path, installed: bool) -> dict[str, str]:
+    executable(machine["tools"] / "xcode-select", FAKE_XCODE_SELECT)
+    # The Mac's own /usr/bin/git, the stub: the first git on PATH, and the one
+    # the installer treats as Apple's.
+    executable(machine["tools"] / "git", "#!/bin/sh\nexit 1\n")
+    state = tmp_path / "xcode"
+    if installed:
+        state.touch()
+    return {
+        "DATALAB_TEST_XCODE": str(state),
+        "DATALAB_APPLE_GIT": str(machine["tools"] / "git"),
+        "DATALAB_GIT_WAIT_SECONDS": "2",
+        "DATALAB_GIT_POLL_SECONDS": "1",
+    }
+
+
+def test_a_mac_without_command_line_tools_gets_apples_installer_before_going_on(machine, tmp_path):
+    env = with_xcode_select(machine, tmp_path, installed=False)
+    done = install(machine, "0.1.0a3", **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert Path(env["DATALAB_TEST_XCODE"] + ".log").read_text(encoding="utf-8") == "--install\n"
+    assert "Git is installed." in done.stdout
+    assert done.stdout.index("Git is installed.") < done.stdout.index("3/7 DataLab")
+
+
+def test_a_mac_with_command_line_tools_is_not_asked_again(machine, tmp_path):
+    env = with_xcode_select(machine, tmp_path, installed=True)
+    done = install(machine, "0.1.0a3", **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert not Path(env["DATALAB_TEST_XCODE"] + ".log").exists()
+    assert "Apple" not in done.stdout.split("3/7 DataLab")[0]
+
+
+def test_ignoring_apples_window_does_not_stop_the_install(machine, tmp_path):
+    env = with_xcode_select(machine, tmp_path, installed=False)
+    done = install(machine, "0.1.0a3", DATALAB_TEST_XCODE_NEVER="1", **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Git still isn't installed" in done.stdout
+    assert (root(machine) / "current").read_text() == "0.1.0a3\n"
+
+
+def test_a_git_installed_another_way_is_used_without_asking_for_the_tools(machine, tmp_path):
+    env = with_xcode_select(machine, tmp_path, installed=False)
+    # The git on PATH isn't Apple's /usr/bin/git (Homebrew's, git-scm.com's).
+    env["DATALAB_APPLE_GIT"] = "/usr/bin/git-the-stub"
+    done = install(machine, "0.1.0a3", **env)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert not Path(env["DATALAB_TEST_XCODE"] + ".log").exists()

@@ -17,7 +17,10 @@
 #      password once, for sudo); otherwise it's copied to Applications. Then it
 #      opens it (its first-run window asks you to accept Docker's agreement) and
 #      waits until it's running. --install-docker answers yes to that offer.
-#   2. Installs uv (a Python installer) for you, if it isn't there already.
+#   2. Makes sure Git is there (syncing the lab repos needs it): if the Mac has no
+#      Apple command-line tools, opens Apple's own installer for them (you press
+#      Install in its window) and waits. Then installs uv (a Python installer), if
+#      it isn't there already.
 #   3. Installs DataLab, with its own Python, in your user account (no admin rights).
 #      Each version gets its own folder, so an update installs beside the one in use
 #      and the previous version is kept (docs/DISTRIBUTION.md).
@@ -741,7 +744,32 @@ if [ "${DATALAB_INSTALL_STOP_AFTER_DOCKER:-}" = 1 ]; then
   exit 0
 fi
 
-step "2/7 uv"
+step "2/7 Git and uv"
+# On a Mac without Apple's command-line tools, /usr/bin/git is only a stub that
+# opens Apple's installer and fails. A git anywhere else on PATH (Homebrew,
+# git-scm.com's installer) is used as it is. Otherwise Git is there once
+# `xcode-select -p` answers (the small command-line tools are enough; Xcode
+# isn't needed). No xcode-select (not a Mac: the tests' stand-in machine) = nothing
+# to do. For tests: DATALAB_APPLE_GIT stands in for /usr/bin/git, and
+# DATALAB_GIT_WAIT_SECONDS and DATALAB_GIT_POLL_SECONDS set the wait.
+other_git="$(command -v git 2>/dev/null || true)"
+if [ "$other_git" = "${DATALAB_APPLE_GIT:-/usr/bin/git}" ]; then other_git=""; fi
+if [ -z "$other_git" ] && command -v xcode-select >/dev/null 2>&1 && ! xcode-select -p >/dev/null 2>&1; then
+  echo "Git isn't installed. It comes with Apple's command-line tools: a window from Apple"
+  echo "is opening. Press Install in it and agree to Apple's terms (a few minutes)."
+  xcode-select --install >/dev/null 2>&1 || true
+  git_waited=0
+  until xcode-select -p >/dev/null 2>&1; do
+    if [ "$git_waited" -ge "${DATALAB_GIT_WAIT_SECONDS:-900}" ]; then
+      echo "Git still isn't installed, so DataLab can't sync the lab repos yet. Carrying on."
+      echo "Install it with: xcode-select --install   (DataLab asks again when you press Sync.)"
+      break
+    fi
+    sleep "${DATALAB_GIT_POLL_SECONDS:-5}"
+    git_waited=$((git_waited + ${DATALAB_GIT_POLL_SECONDS:-5}))
+  done
+  if xcode-select -p >/dev/null 2>&1; then echo "Git is installed."; fi
+fi
 export PATH="$HOME/.local/bin:$PATH"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | sh
