@@ -29,7 +29,6 @@ from datalab.data.service import DataService
 from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
 from datalab.data.sql_lobs import lob_type, sql_name
 from datalab.data.sqlcheck import SqlRejected
-from datalab.dropbox.families import pattern as family_pattern
 from datalab.dropbox.service import LoadRefused, ProcessedData
 from datalab.dropbox.service import NotAvailable as ProcessedNotAvailable
 from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
@@ -77,7 +76,8 @@ files in /data/oracle; work with the file for anything beyond the preview.
 Processed data: list_data_files shows the datasets (files grouped by name
 pattern), and one dataset's files; describe_data_file gives one file's size
 and dates; load_data_file fetches one file into /data/dropbox, read-only.
-Fetch only the files you need: each is downloaded and logged.
+Fetch only the files you need: each is downloaded and logged. /data/dropbox
+holds only what you fetched, so use list_data_files to see what exists.
 """
 
 
@@ -297,7 +297,7 @@ def build_agent_tools(
             """
             _session(ctx, tokens, "describe_data_file")
             try:
-                entry, fetched = await asyncio.to_thread(files.describe, path)
+                entry, fetched, dataset = await asyncio.to_thread(files.describe, path)
             except LoadRefused as error:
                 raise ToolError(str(error)) from error
             return _json(
@@ -305,7 +305,7 @@ def build_agent_tools(
                     "path": entry.path,
                     "size": entry.size,
                     "modified": entry.modified,
-                    "dataset": family_pattern(entry.path),
+                    "dataset": dataset,
                     "already_fetched": fetched,
                 }
             )

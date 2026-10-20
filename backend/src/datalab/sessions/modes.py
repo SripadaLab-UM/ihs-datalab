@@ -805,10 +805,18 @@ database to this conversation.
 """
 
 
+# For both: an empty /data/dropbox isn't an empty folder of data.
+SOURCES_WHERE = """\
+/data/dropbox starts empty: it holds only the files you fetched. To see what
+processed data there is (when asked what data you have, say), call
+list_data_files; don't look on disk.
+"""
+
+
 def sources_note(sources: tuple[str, ...]) -> str:
     if "dropbox" not in sources:
         return ""
-    return SOURCES_BOTH if "database" in sources else SOURCES_DROPBOX
+    return (SOURCES_BOTH if "database" in sources else SOURCES_DROPBOX) + SOURCES_WHERE
 
 
 def instructions(

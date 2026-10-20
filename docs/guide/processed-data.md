@@ -53,6 +53,8 @@ the agent on your next message.
 
 The agent sees the folder as **datasets**: files that differ only by a date,
 year, number or ID are one dataset (for example `fitbit/{year}/daily_{id}.csv`).
+A number that's the same in every file stays in the name, as the 9 of
+`surveys/phq9_wave{n}_{year}.csv` does; an ID never does.
 It fetches only the files it needs. DataLab downloads each one on this
 computer, then puts it in the agent's sandbox, where the agent can read it
 but not change it.
