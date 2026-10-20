@@ -3,7 +3,7 @@ title: Knowledge proposals
 summary: Edit knowledge-base pages yourself or with the agent, review proposed edits and suggested updates, then Save & share them or discard them.
 order: 21
 screens: /knowledge, /knowledge/*
-keywords: knowledge, knowledge base, proposal, edit, edit page, edit with agent, draft, suggested knowledge update, propose, page, skill, save and share, participant data, check, github, conflict
+keywords: knowledge, knowledge base, proposal, edit, edit page, edit with agent, draft, suggested knowledge update, remember in knowledge, remember, propose, page, skill, save and share, participant data, check, github, conflict
 ---
 
 # Knowledge proposals
@@ -137,7 +137,22 @@ data. A suggestion never changes the knowledge base by itself:
 - **Edit first** opens that editor straight away;
 - **Dismiss** sets it aside.
 
-You can make one yourself too: **Propose a Knowledge update** over the
-conversation opens a short form (the page, the text, why, and which of this
-conversation's queries show it). It's checked the same way, and becomes a
-draft edit for you to review and share.
+## Remember in Knowledge
+
+You can ask for one yourself. In an Analysis, Data extraction or Data
+engineering conversation, press **Remember in Knowledge** over the
+conversation, say in your own words what the lab should keep (for example,
+"a step count of 0 means the tracker wasn't synced that day"), and press
+**Ask the agent**. What you wrote is sent to the agent as a message, marked
+**Remember in Knowledge** in the conversation. The agent finds the page it
+belongs on, writes it up, and cites the queries in this conversation that
+show it. If none do, your word is enough, and the card says so under
+**Evidence**.
+
+It's checked like any suggestion, for participant data above all, and then
+made into a draft edit straight away. It shows as **Your Knowledge update**
+with **Review in Knowledge →**. Nothing is shared until you review it there
+and press **Save & share**. If the agent can't write it up (it would need
+participant-level data, say, or isn't a general fact), it says why instead.
+The button waits while the agent is working, and on practice DataLab it's
+there but off, since practice DataLab has no lab knowledge base.

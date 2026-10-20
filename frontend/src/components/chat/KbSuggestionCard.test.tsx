@@ -3,21 +3,21 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { api, type Conversation } from "@/api/client";
+import { api, type Mode } from "@/api/client";
 import { type KbEdit, knowledgeApi, type KnowledgeStatus } from "@/api/knowledge";
 
 import { CompactContext } from "./assistants";
-import { KbSuggestionCard, ProposeUpdateButton } from "./KbSuggestionCard";
+import { KbSuggestionCard, RememberButton } from "./KbSuggestionCard";
 import { ShowQueryContext } from "./provenance";
 import { buildTranscript, type KbSuggestionItem } from "./transcript";
 
 vi.mock("@/api/knowledge", async (original) => ({
   ...(await original<typeof import("@/api/knowledge")>()),
   knowledgeApi: {
-    status: vi.fn(), pages: vi.fn(), getEdit: vi.fn(), acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn(), proposeUpdate: vi.fn(),
+    status: vi.fn(), pages: vi.fn(), getEdit: vi.fn(), acceptSuggestion: vi.fn(), dismissSuggestion: vi.fn(),
   },
 })); // prettier-ignore
-vi.mock("@/api/client", () => ({ api: { dataAccessed: vi.fn() } }));
+vi.mock("@/api/client", () => ({ api: { modes: vi.fn() } }));
 
 const status = (available = true): KnowledgeStatus => ({
   available, repo: available ? "in sync" : "not configured", name: "SripadaLab-UM/ihs-knowledge", signed_in: available,
@@ -40,7 +40,9 @@ const edit = (more: Partial<KbEdit> = {}): KbEdit => ({
   created_at: "", updated_at: "", origin: null, result: null, commit: null, decided_by: null, before: "…", head: "abc1234",
   upstream_changed: false, theirs: null, theirs_state: "text", ...more,
 }); // prettier-ignore
-const conversation = { id: "c_1", kind: "data", mode: "analysis", title: "t", model: "m", created_at: "", updated_at: "", rigor_review: false, express: false, busy: false } as Conversation;
+const mode = (id: string, remember: boolean): Mode => ({
+  id, label: id, kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "", remember,
+}); // prettier-ignore
 
 function Where() {
   const location = useLocation();
@@ -82,11 +84,7 @@ beforeEach(() => {
   vi.mocked(knowledgeApi.getEdit).mockReset().mockResolvedValue(edit());
   vi.mocked(knowledgeApi.acceptSuggestion).mockReset().mockResolvedValue(edit());
   vi.mocked(knowledgeApi.dismissSuggestion).mockReset().mockResolvedValue({ id: "ks_1", status: "dismissed", page: "sources/fitbit.md" });
-  vi.mocked(knowledgeApi.proposeUpdate).mockReset().mockResolvedValue(edit({ id: "ke_10" }));
-  vi.mocked(api.dataAccessed).mockReset().mockResolvedValue([
-    { id: "q_1", started_at: "2026-09-28T10:00:00Z", status: "succeeded", sql_text: "SELECT …", tables: ["IHS_2025.VFITBITDAILYDATA"], row_count: 1, elapsed_ms: 5, result_file: null, message: null },
-    { id: "q_2", started_at: "2026-09-28T10:01:00Z", status: "failed", sql_text: "SELECT …", tables: ["IHS_2025.X"], row_count: null, elapsed_ms: 5, result_file: null, message: "no" },
-  ]); // prettier-ignore
+  vi.mocked(api.modes).mockReset().mockResolvedValue([mode("analysis", true), mode("sql", false)]);
 });
 
 it("reads the suggestion from the conversation's events", () => {
@@ -250,7 +248,7 @@ it("on practice DataLab, the actions say they're for the real DataLab", async ()
   show(
     <>
       <KbSuggestionCard suggestion={suggestion()} conversationId="c_1" />
-      <ProposeUpdateButton conversation={conversation} />
+      <RememberButton mode="analysis" onSend={vi.fn()} busy={false} />
     </>,
   );
   // On the folded row too.
@@ -261,48 +259,76 @@ it("on practice DataLab, the actions say they're for the real DataLab", async ()
   expect(screen.getByText(/Available on the real DataLab: practice DataLab has no lab knowledge base/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Accept as proposal" })).toBeDisabled();
   expect(screen.getByRole("button", { name: /Edit first/ })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /Propose a Knowledge update/ })).toBeDisabled();
-  expect(screen.getByRole("button", { name: /Propose a Knowledge update/ }).title).toContain("Available on the real DataLab");
+  const remember = await screen.findByRole("button", { name: /Remember in Knowledge/ });
+  expect(remember).toBeDisabled();
+  expect(remember.title).toContain("Available on the real DataLab");
 });
 
-it("Propose a Knowledge update: the person's own, with this conversation's queries as evidence", async () => {
-  show(<ProposeUpdateButton conversation={conversation} />);
-  const open = await screen.findByRole("button", { name: /Propose a Knowledge update/ });
+const REMEMBER_EVENTS = [
+  { seq: 1, type: "user_message", data: { text: "Zero steps means not synced.", kb_request: true } },
+  {
+    seq: 2, type: "kb_suggestion",
+    data: {
+      id: "ks_2", by: "agent", requested: true, turn: 1, page: "qc/zero-steps.md", title: "Zero-step days",
+      text: "Treat 0 steps as not synced.", reason: "The person asked to keep it.", evidence: [],
+    },
+  },
+  { seq: 3, type: "kb_suggestion_updated", data: { id: "ks_2", status: "accepted", edit_id: "ke_9" } },
+]; // prettier-ignore
+
+it("Remember in Knowledge: one box, sent to the agent as a marked message", async () => {
+  const onSend = vi.fn().mockResolvedValue(undefined);
+  show(<RememberButton mode="analysis" onSend={onSend} busy={false} />);
+  const open = await screen.findByRole("button", { name: /Remember in Knowledge/ });
   await waitFor(() => expect(open).toBeEnabled());
   fireEvent.click(open);
-  const dialog = await screen.findByRole("dialog", { name: "Propose a Knowledge update" });
-  const create = screen.getByRole("button", { name: "Create the proposal" });
-  expect(create).toBeDisabled();
-  fireEvent.change(screen.getByLabelText("Page"), { target: { value: "qc/zero-step-days.md" } });
-  fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Zero-step days" } });
-  fireEvent.change(screen.getByLabelText("What to add (Markdown)"), { target: { value: "Treat 0 as missing." } });
-  fireEvent.change(screen.getByLabelText("Why it's worth keeping"), { target: { value: "It keeps coming up." } });
-  // Only the queries that ran can be evidence.
-  const boxes = await screen.findAllByRole("checkbox");
-  expect(boxes).toHaveLength(1);
-  expect(dialog.textContent).not.toContain("q_2");
-  expect(create).toBeDisabled();
-  fireEvent.click(boxes[0]);
-  fireEvent.click(create);
-  await waitFor(() =>
-    expect(knowledgeApi.proposeUpdate).toHaveBeenCalledWith("c_1", {
-      page: "qc/zero-step-days.md", title: "Zero-step days", text: "Treat 0 as missing.", reason: "It keeps coming up.", evidence_query_ids: ["q_1"],
-    }),
-  ); // prettier-ignore
+  await screen.findByRole("dialog", { name: "Remember in Knowledge" });
+  const ask = screen.getByRole("button", { name: "Ask the agent" });
+  expect(ask).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("What should DataLab remember?"), {
+    target: { value: "  A step count of 0 means the tracker wasn't synced.  " },
+  });
+  fireEvent.click(ask);
+  await waitFor(() => expect(onSend).toHaveBeenCalledWith("A step count of 0 means the tracker wasn't synced."));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-it("shows why DataLab refused a proposal", async () => {
-  vi.mocked(knowledgeApi.proposeUpdate).mockRejectedValue(new Error("This may hold participant-level data, so it wasn't suggested."));
-  show(<ProposeUpdateButton conversation={conversation} />);
-  const open = await screen.findByRole("button", { name: /Propose a Knowledge update/ });
+it("Remember in Knowledge keeps the text and says why when it couldn't be sent", async () => {
+  const onSend = vi.fn().mockRejectedValue(new Error("The agent is still working on the previous message."));
+  show(<RememberButton mode="analysis" onSend={onSend} busy={false} />);
+  const open = await screen.findByRole("button", { name: /Remember in Knowledge/ });
   await waitFor(() => expect(open).toBeEnabled());
   fireEvent.click(open);
-  for (const [label, value] of [["Page", "qc/x.md"], ["Title", "t"], ["What to add (Markdown)", "P12345"], ["Why it's worth keeping", "r"]]) {
-    fireEvent.change(screen.getByLabelText(label), { target: { value } });
-  }
-  fireEvent.click((await screen.findAllByRole("checkbox"))[0]);
-  fireEvent.click(screen.getByRole("button", { name: "Create the proposal" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("participant-level data");
+  const box = await screen.findByLabelText("What should DataLab remember?");
+  fireEvent.change(box, { target: { value: "Keep this." } });
+  fireEvent.click(screen.getByRole("button", { name: "Ask the agent" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("still working");
   expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(box).toHaveValue("Keep this.");
 });
+
+it("Remember in Knowledge is offered only where the agent can suggest updates, and waits while it works", async () => {
+  show(
+    <>
+      <RememberButton mode="sql" onSend={vi.fn()} busy={false} />
+      <RememberButton mode="analysis" onSend={vi.fn()} busy />
+    </>,
+  );
+  const [only] = await screen.findAllByRole("button", { name: /Remember in Knowledge/ });
+  expect(screen.getAllByRole("button", { name: /Remember in Knowledge/ })).toHaveLength(1);
+  await waitFor(() => expect(only.title).toContain("The agent is working"));
+  expect(only).toBeDisabled();
+});
+
+it("a requested update reads as the person's, with no query needed as evidence", async () => {
+  const turn = buildTranscript(REMEMBER_EVENTS)[0];
+  expect(turn.kbRequest).toBe(true);
+  const item = turn.items.find((i) => i.kind === "kb_suggestion") as KbSuggestionItem;
+  expect(item).toMatchObject({ requested: true, status: "accepted", editId: "ke_9", evidence: [] });
+  show(<KbSuggestionCard suggestion={item} conversationId="c_1" />);
+  expect(screen.getByRole("region", { name: "Your Knowledge update: Zero-step days" })).toBeTruthy();
+  expect(await screen.findByRole("link", { name: "Review in Knowledge →" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { expanded: false, name: /Your Knowledge update/ }));
+  expect(screen.getByText("None from this conversation: you asked to keep it")).toBeTruthy();
+});
+

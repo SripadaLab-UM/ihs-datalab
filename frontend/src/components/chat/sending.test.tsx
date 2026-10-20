@@ -38,7 +38,7 @@ vi.mock("./useConversationEvents", () => ({
 vi.mock("@/api/client", () => ({
   api: {
     modes: vi.fn(async () => [
-      { id: "analysis", label: "Analysis", kind: "data", description: "", starters: ["How did steps change?"] },
+      { id: "analysis", label: "Analysis", kind: "data", description: "", starters: ["How did steps change?"], remember: true },
     ]),
     models: vi.fn(async () => ({ default: "gpt-5.5", available: ["gpt-5.5"] })),
     conversations: vi.fn(async () => []),
@@ -47,6 +47,11 @@ vi.mock("@/api/client", () => ({
     stop: vi.fn(),
     files: vi.fn(async () => []),
   },
+}));
+
+vi.mock("@/api/knowledge", async (original) => ({
+  ...(await original<typeof import("@/api/knowledge")>()),
+  knowledgeApi: { status: vi.fn(async () => ({ available: true })) },
 }));
 
 // jsdom has no layout, so no scrolling.
@@ -233,4 +238,29 @@ it("gives a failed message back as typed, before anything typed since", async ()
   fireEvent.change(box(), { target: { value: "and by week" } });
   await act(async () => sent.reject(new Error("DataLab couldn't be reached.")));
   expect(box().value).toBe("  Steps by month?  \nand by week");
+});
+
+it("Remember in Knowledge goes through the chat's own send: shown at once, and marked for the agent", async () => {
+  const sent = later<Conversation>();
+  vi.mocked(api.send).mockReturnValue(sent.promise);
+  showChat();
+  const remember = await screen.findByRole("button", { name: /Remember in Knowledge/ });
+  await waitFor(() => expect(remember).toBeEnabled());
+  fireEvent.click(remember);
+  fireEvent.change(await screen.findByLabelText("What should DataLab remember?"), {
+    target: { value: "Zero steps means the tracker wasn't synced." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Ask the agent" }));
+  await waitFor(() =>
+    expect(api.send).toHaveBeenCalledWith("c1", "Zero steps means the tracker wasn't synced.", "medium", true),
+  );
+  expect(screen.getByTestId("pending-message")).toHaveTextContent("Zero steps means the tracker wasn't synced.");
+  await act(async () => sent.resolve(conversation));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // One message at a time: nothing else until it's in.
+  fireEvent.change(box(), { target: { value: "And by week?" } });
+  expect(sendButton()).toBeDisabled();
+  act(() => stream.push("user_message", { text: "Zero steps means the tracker wasn't synced.", kb_request: true }));
+  expect(screen.queryByTestId("pending-message")).toBeNull();
+  expect(screen.getByText("Remember in Knowledge", { selector: "span, p" })).toBeTruthy();
 });

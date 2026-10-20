@@ -110,7 +110,8 @@ results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
   tracing, provenance ("How was this made?") and the rigor review; the
   research helper; app skills (`images/agent/skills`) and the `profile-data`
   and `render-report` scripts; the `join_paths` and `find_concept` helpers;
-  Suggested Knowledge updates and Propose a Knowledge update.
+  Suggested Knowledge updates and Remember in Knowledge (the person says
+  what to keep; the agent writes it up as a draft edit to review).
 - planned: "Open research session" from a data session.
 - deferred: cohort plan draft and survey dictionary search as tools (their
   content can live in the knowledge base instead).

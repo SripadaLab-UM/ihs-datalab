@@ -337,7 +337,8 @@ def build_agent_tools(
               IDs, per-person dates, rows or tables of values, or counts of fewer
               than 11 people.
             evidence_query_ids: the query_id of each query in this conversation
-              that shows it (from the `query` tool's results).
+              that shows it (from the `query` tool's results). May be empty only
+              when the person asked for it with Remember in Knowledge.
             reason: why it's worth keeping, in plain words for the reviewer.
             """
             access = _session(ctx, tokens, "suggest_kb_update")
@@ -352,6 +353,21 @@ def build_agent_tools(
                 )
             except SuggestionInvalid as error:
                 raise ToolError(str(error)) from error
+            if suggestion.get("requested"):
+                edit_id = await asyncio.to_thread(
+                    kb_suggestions.accept_requested, access.session_id, suggestion["id"]
+                )
+                if edit_id is not None:
+                    return _json(
+                        {
+                            "status": "draft_edit",
+                            "suggestion_id": suggestion["id"],
+                            "page": suggestion["page"],
+                            "note": "As the person asked, it's now a draft edit of that page, "
+                            "on this computer. Nothing was shared: they review it and press "
+                            "Save & share in the Knowledge tab. Say so in one line.",
+                        }
+                    )
             return _json(
                 {
                     "status": "suggested",

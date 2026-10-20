@@ -383,6 +383,12 @@ access. It never gains it.
   of them stores it. The Safety check looks for the token in both session
   types' containers (environment, command, mounts, files) and, in plain
   text, in the repo clones.
+- A Suggested Knowledge update (`suggest_kb_update`) is checked on the host
+  for participant-like data and small counts before it's even shown, and
+  accepting it only starts a draft edit. Remember in Knowledge (the person
+  asks the agent to write one up) is the same: the check runs, and it's
+  accepted into a draft at once, but nothing is shared until the person
+  reviews it and presses Save & share (`backend/tests/test_kb_edits.py`).
 - Before sharing, DataLab scans the diff for things that look like row-level
   data, such as participant IDs, per-person dates, or pasted tables, and warns
   the user. The scan is an aid; the human review is the control.

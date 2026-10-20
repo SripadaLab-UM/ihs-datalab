@@ -86,15 +86,18 @@ export interface KbProposalItem {
 
 /**
  * A Suggested Knowledge update (backend knowledge/suggestions.py): a durable
- * finding the agent offered with `suggest_kb_update`, or the person's own
- * ("Propose a Knowledge update"). A `kb_suggestion` event, then
- * `kb_suggestion_updated` when it's accepted (an edit to review) or
- * dismissed. It never changes the knowledge base by itself.
+ * finding the agent offered with `suggest_kb_update`, or wrote up because the
+ * person asked (Remember in Knowledge: `requested`, accepted at once). A
+ * `kb_suggestion` event, then `kb_suggestion_updated` when it's accepted (an
+ * edit to review) or dismissed. It never changes the knowledge base by itself.
  */
 export interface KbSuggestionItem {
   kind: "kb_suggestion";
   id: string;
+  /** "person": made with the form that came before Remember in Knowledge. */
   by: "agent" | "person";
+  /** The person asked for it with Remember in Knowledge. */
+  requested: boolean;
   turn: number;
   page: string;
   title: string;
@@ -124,6 +127,8 @@ export interface Turn {
   continues?: boolean;
   /** Asked with Express on (quick answers: low effort, no plans or confirmations). */
   express?: boolean;
+  /** Sent with Remember in Knowledge: the agent writes it up as a Knowledge update. */
+  kbRequest?: boolean;
   /** The question's event, for tabs that link to a turn (the SQL Playground's "How this SQL was created"). */
   seq?: number;
   /** The agent has begun the turn (turn_started): before that, DataLab is starting its sandbox. */
@@ -227,7 +232,15 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
         // A review that never said it finished (DataLab stopped) is over now.
         if (review?.status === "running") review.status = "failed";
         review = undefined;
-        turn = { userText: text(data.text), items: [], status: "running", continues: data.continues === true, express: data.express === true, seq: event.seq };
+        turn = {
+          userText: text(data.text),
+          items: [],
+          status: "running",
+          continues: data.continues === true,
+          express: data.express === true,
+          kbRequest: data.kb_request === true,
+          seq: event.seq,
+        };
         turns.push(turn);
         byId.clear();
         break;
@@ -405,6 +418,7 @@ export function buildTranscript(events: ConversationEvent[]): Turn[] {
           kind: "kb_suggestion",
           id,
           by: data.by === "person" ? "person" : "agent",
+          requested: data.requested === true,
           turn: Number(data.turn) || 0,
           page: text(data.page),
           title: text(data.title),

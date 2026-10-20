@@ -203,6 +203,49 @@ def test_the_first_question_names_the_conversation(app):
     ]
 
 
+def test_remember_in_knowledge_sends_a_turn_that_asks_for_a_knowledge_update(app):
+    """The person's words are the message, as they typed them; the agent is
+    told to write them up with suggest_kb_update. Only in the modes that have it."""
+    made = use_fake_runtime(app)
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        sent = client.post(
+            f"/api/conversations/{cid}/messages",
+            json={"text": "Zero-step days mean the tracker wasn't synced.", "kb_request": True},
+        )
+        assert sent.status_code == 202
+        events = wait_for(client, cid, "turn_done")
+        [asked] = [e["data"] for e in events if e["type"] == "user_message"]
+        assert asked["text"] == "Zero-step days mean the tracker wasn't synced."
+        assert asked["kb_request"] is True
+        first = made[0].sent[0]
+        assert "Remember in Knowledge" in first and "`suggest_kb_update`" in first
+        assert first.endswith("Zero-step days mean the tracker wasn't synced.")
+        # The next, ordinary message isn't one.
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "Thanks"})
+        events = wait_for_count(client, cid, "turn_done", 2)
+        assert "kb_request" not in [e for e in events if e["type"] == "user_message"][1]["data"]
+        assert [text for runtime in made for text in runtime.sent][-1] == "Thanks"
+        for mode in ("sql", "knowledge", "research"):
+            other = client.post("/api/conversations", json={"mode": mode}).json()["id"]
+            refused = client.post(
+                f"/api/conversations/{other}/messages",
+                json={"text": "Keep this", "kb_request": True},
+            )
+            assert refused.status_code == 409, mode
+            assert "Remember in Knowledge is for Analysis" in refused.json()["detail"]
+
+
+def wait_for_count(client, conversation_id: str, event_type: str, count: int) -> list[dict]:
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        events = client.get(f"/api/conversations/{conversation_id}/events").json()
+        if sum(e["type"] == event_type for e in events) >= count:
+            return events
+        time.sleep(0.02)
+    raise AssertionError(f"fewer than {count} {event_type} events")
+
+
 def test_typed_titles_are_one_line_of_visible_text(app):
     """Creating and renaming share one rule: no line breaks, control
     characters, or bidi overrides, and not blank."""
@@ -497,6 +540,22 @@ def test_continue_picks_up_in_the_same_thread_and_the_review_reads_the_original_
         last = store.last(cid, "user_message")
         assert manager._work_began(cid, last).data["text"] == "how many?"
         assert "<question>\nhow many?\n</question>" in made[-1].reviews[-1]
+
+
+def test_continuing_a_remember_in_knowledge_turn_keeps_it_one(app):
+    """A Remember in Knowledge turn that failed, picked up with Continue: what
+    the agent then suggests is still the person's request (no query needed)."""
+    use_fake_runtime(app, outcomes=["failed"])
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={"mode": "analysis"}).json()["id"]
+        client.post(
+            f"/api/conversations/{cid}/messages", json={"text": "Keep this.", "kb_request": True}
+        )
+        wait_for(client, cid, "turn_done")
+        assert client.post(f"/api/conversations/{cid}/continue").status_code == 202
+        events = wait_for_count(client, cid, "turn_done", 2)
+    asked = [e["data"] for e in events if e["type"] == "user_message"]
+    assert asked[-1]["continues"] is True and asked[-1]["kb_request"] is True
 
 
 def test_a_review_cut_short_by_a_restart_can_be_run_again(app):

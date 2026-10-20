@@ -1174,23 +1174,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/knowledge/suggestions/{conversation_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Propose Update */
-        post: operations["propose_update_api_knowledge_suggestions__conversation_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/knowledge/suggestions/{conversation_id}/{suggestion_id}/accept": {
         parameters: {
             query?: never;
@@ -3941,6 +3924,11 @@ export interface components {
              * @default What would you like to find out?
              */
             question: string;
+            /**
+             * Remember
+             * @default false
+             */
+            remember: boolean;
         };
         /** ModelKeyIn */
         ModelKeyIn: {
@@ -4059,6 +4047,11 @@ export interface components {
             text: string;
             /** Effort */
             effort?: ("low" | "medium" | "high" | "xhigh") | null;
+            /**
+             * Kb Request
+             * @default false
+             */
+            kb_request: boolean;
         };
         /** NewPreview */
         NewPreview: {
@@ -5591,19 +5584,6 @@ export interface components {
             id: string;
             /** Freed Bytes */
             freed_bytes: number;
-        };
-        /** SuggestionIn */
-        SuggestionIn: {
-            /** Page */
-            page: string;
-            /** Title */
-            title: string;
-            /** Text */
-            text: string;
-            /** Evidence Query Ids */
-            evidence_query_ids: string[];
-            /** Reason */
-            reason: string;
         };
         /** SuggestionOut */
         SuggestionOut: {
@@ -8266,41 +8246,6 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EditOut"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    propose_update_api_knowledge_suggestions__conversation_id__post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                conversation_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SuggestionIn"];
-            };
-        };
         responses: {
             /** @description Successful Response */
             200: {

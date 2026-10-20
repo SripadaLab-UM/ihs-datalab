@@ -103,6 +103,13 @@ export function TurnView({
     <article className={clsx("flex flex-col", compact ? "gap-3" : "gap-5")} data-question-seq={turn.seq}>
       {turn.userText && <Question text={turn.userText} continues={turn.continues} />}
       {turn.express && <ExpressTag />}
+      {turn.kbRequest && (
+        <p className="-mt-2 flex">
+          <Chip title="Sent with Remember in Knowledge: the agent writes it up as a Knowledge update for you to review">
+            Remember in Knowledge
+          </Chip>
+        </p>
+      )}
       {!finished && folded > 0 && (
         <button
           type="button"

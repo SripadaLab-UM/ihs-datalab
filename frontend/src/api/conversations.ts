@@ -33,10 +33,11 @@ export const conversationsApi = {
   rerunReview: (id: string) => request<Conversation>(`/api/conversations/${id}/review`, { method: "POST" }),
   deleteConversation: (id: string) =>
     request<void>(`/api/conversations/${id}`, { method: "DELETE" }),
-  send: (id: string, text: string, effort?: Effort) =>
+  // `kbRequest`: sent with Remember in Knowledge, so the agent writes it up as a Knowledge update.
+  send: (id: string, text: string, effort?: Effort, kbRequest?: boolean) =>
     request<Conversation>(`/api/conversations/${id}/messages`, {
       method: "POST",
-      body: JSON.stringify({ text, effort }),
+      body: JSON.stringify(kbRequest ? { text, effort, kb_request: true } : { text, effort }),
     }),
   // For a plan sent back, `changeType` asks for another type of analysis instead.
   answerApproval: (id: string, approvalId: string, approve: boolean, question: string, plan?: PlanV2, changeType?: string) =>

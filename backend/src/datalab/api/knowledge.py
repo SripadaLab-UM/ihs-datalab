@@ -344,14 +344,6 @@ class ShareEditIn(BaseModel):
     findings: list[str]
 
 
-class SuggestionIn(BaseModel):
-    page: str
-    title: str
-    text: str
-    evidence_query_ids: list[str]
-    reason: str
-
-
 class SuggestionOut(BaseModel):
     id: str
     status: str
@@ -526,34 +518,22 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
 
     suggestions = services.suggestions or KbSuggestions(services.conversations)
 
-    def accept_suggestion(conversation_id: str, suggestion_id: str) -> EditOut:
+    def accept_suggestion(conversation_id: str, suggestion_id: str) -> Edit:
         found = suggestions.get(conversation_id, suggestion_id)
         if found["status"] != "open":
             raise EditRefused(f"This suggestion was {found['status']} already.")
         edit = edits.from_suggestion(conversation_id, found)
         suggestions.mark(conversation_id, suggestion_id, "accepted", edit_id=edit.id)
-        return detail(edit)
+        return edit
 
-    @router.post("/suggestions/{conversation_id}")
-    async def propose_update(conversation_id: str, body: SuggestionIn) -> EditOut:
-        def work() -> EditOut:
-            knowledge.require_available()
-            made = suggestions.suggest(
-                conversation_id,
-                page=body.page,
-                title=body.title,
-                text=body.text,
-                evidence_query_ids=body.evidence_query_ids,
-                reason=body.reason,
-                by="person",
-            )
-            return accept_suggestion(conversation_id, made["id"])
-
-        return await run(work)
+    # Remember in Knowledge: what the agent writes up is accepted at once.
+    suggestions.accept = lambda conversation_id, suggestion_id: (
+        accept_suggestion(conversation_id, suggestion_id).id
+    )
 
     @router.post("/suggestions/{conversation_id}/{suggestion_id}/accept")
     async def accept_update(conversation_id: str, suggestion_id: str) -> EditOut:
-        return await run(lambda: accept_suggestion(conversation_id, suggestion_id))
+        return await run(lambda: detail(accept_suggestion(conversation_id, suggestion_id)))
 
     @router.post("/suggestions/{conversation_id}/{suggestion_id}/dismiss")
     async def dismiss_update(conversation_id: str, suggestion_id: str) -> SuggestionOut:
