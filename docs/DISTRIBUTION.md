@@ -154,6 +154,13 @@ containers.
   - if an update is interrupted, for example by a crash or power loss, the
     next start detects the half-finished state and finishes or undoes it
     before opening.
+- **Updates never edit `settings.toml` either.** A setting a new feature
+  needs reaches existing installs another way: the release carries it. The
+  release build writes the lab's defaults into the package's `release.json`
+  from repository variables, never the source (today only the Dropbox app
+  key, `vars.LAB_DROPBOX_APP_KEY`), and DataLab uses them where
+  `settings.toml` doesn't say otherwise (`config.py: _dropbox_table`). It's
+  inside the signed package, so it can't be swapped without the signing key.
 
 This replaces the prototype's approach of fast-forwarding a git checkout,
 which needed seven safety gates. There is no checkout on users' machines to
@@ -1014,6 +1021,10 @@ content's hash (`/favicon.svg?v=<sha8>`, `frontend/brandIcons.ts`), in
     "release" environment (see "Release signing"). The update check offers
     only releases with all of these (see "Which releases are offered"); a
     pre-release is tagged `v0.1.0-alpha.3` and marked so.
+- Repository variables the release build reads (Settings → Secrets and
+  variables → Actions → Variables): `LAB_DROPBOX_APP_KEY`, the lab's
+  Dropbox app key for the processed data. It isn't a secret; without it,
+  installs need `[dropbox] app_key` in their settings.
 - Not automated yet: signing the Windows scripts and anything macOS runs
   directly (they need the lab's signing identities), and the Windows test on a
   real managed machine. `release.yml` marks each as a TODO.

@@ -137,3 +137,32 @@ def test_a_development_copy_warns_about_an_unpinned_image(settings_file, monkeyp
     monkeypatch.setenv("DATALAB_AGENT_IMAGE", "datalab-agent:dev")
     assert load_settings("real").agent_image == "datalab-agent:dev"
     assert "NOT PINNED BY DIGEST" in caplog.text
+
+
+RELEASE_KEY = {"lab": {"dropbox": {"app_key": "relkey123456"}}}
+
+
+@pytest.mark.parametrize(
+    ("release", "toml", "expected"),
+    [
+        # An install from before the processed data: the release brings the key.
+        (RELEASE_KEY, "", "relkey123456"),
+        # The lab's own settings win.
+        (RELEASE_KEY, '[dropbox]\napp_key = "ownkey123456"\n', "ownkey123456"),
+        # A development build carries none; a broken one is ignored, never fatal.
+        ({}, "", None),
+        ({"lab": {"dropbox": {"app_key": "Not A Key!"}}}, "", None),
+        ({"lab": "nonsense"}, "", None),
+    ],
+)
+def test_the_release_carries_the_labs_dropbox_app_key(
+    settings_file, monkeypatch, release, toml, expected
+):
+    from datalab import config
+
+    monkeypatch.setattr(config, "_release_info", lambda: release)
+    settings_file.write_text(toml, encoding="utf-8")
+    assert load_settings("real").dropbox.app_key == expected
+    if not toml:
+        # Practice never uses Dropbox, whatever the release says.
+        assert load_settings("practice").dropbox.app_key is None
