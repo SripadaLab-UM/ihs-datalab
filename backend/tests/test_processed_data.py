@@ -396,6 +396,80 @@ def test_calls_name_the_team_space_and_wait_when_asked(client, fake_dropbox):
     assert listing[-1].headers["Authorization"] == "Bearer sl.first"
 
 
+def test_folders_can_be_opened_to_choose_a_subfolder(settings, connection, auth, fake_dropbox):
+    auth.start()
+    auth.finish("GOODCODE")
+    real = replace(settings, profile="real", dropbox=DropboxSettings(app_key="abcdefghij12"))
+    log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
+    data = ProcessedData(real, connection, log, auth=auth)
+    data._client = DropboxClient(
+        auth, http=httpx.Client(transport=httpx.MockTransport(fake_dropbox)), sleep=lambda _: None
+    )
+    assert [f.name for f in data.team_folders()] == ["Study Data"]
+    data.team_folders("id:f")
+    asked = [
+        json.loads(r.content)["path"]
+        for r in fake_dropbox.requests
+        if r.url.path == "/2/files/list_folder"
+    ]
+    assert asked == ["", "id:f"]
+
+
+def test_only_a_folder_id_can_be_opened(app):
+    with TestClient(app) as client:
+        for bad in ("../etc", "/Study Data", "id:a/b"):
+            answer = client.get("/api/processed/folders", params={"inside": bad})
+            assert answer.status_code == 422, bad
+
+
+class WriteAttempts:
+    """Dropbox's write endpoints, answering as a read-only app gets them
+    answered (401 missing_scope), or as a misconfigured one would (200)."""
+
+    def __init__(self, allow: bool) -> None:
+        self.allow = allow
+        self.writes: list[str] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path in ("/2/files/list_folder", "/2/files/list_folder/continue"):
+            entry = {".tag": "file", "path_lower": "/t/a.csv", "rev": "1", "content_hash": "h"}
+            return httpx.Response(200, json={"entries": [entry], "cursor": "c", "has_more": False})
+        self.writes.append(path)
+        if self.allow:
+            return httpx.Response(200, json={})
+        return httpx.Response(
+            401,
+            json={"error_summary": "missing_scope/..", "error": {".tag": "missing_scope"}},
+        )
+
+
+@pytest.mark.parametrize("allow", [False, True])
+def test_the_read_only_check(auth, connection, allow):
+    from datalab.dropbox.check import check_read_only
+
+    auth.start()
+    auth.finish("GOODCODE")
+    index = ProcessedIndex(connection)
+    index.choose("id:t", "/T", "100")
+    dropbox = WriteAttempts(allow)
+    lines: list[str] = []
+    code = check_read_only(
+        auth, index, http=httpx.Client(transport=httpx.MockTransport(dropbox)), say=lines.append
+    )
+    tried = {"/2/files/upload", "/2/files/create_folder_v2", "/2/files/delete_v2",
+             "/2/files/move_v2", "/2/files/copy_v2"}  # fmt: skip
+    assert tried <= set(dropbox.writes)
+    assert not any("sl.first" in line or "rt-1" in line for line in lines)  # no tokens printed
+    if allow:
+        assert code == 1 and lines[-1].startswith("FAIL")
+        # It removes only what it made, by its own made-up names.
+        assert dropbox.writes[-2:] == ["/2/files/delete_v2", "/2/files/delete_v2"]
+    else:
+        assert code == 0 and lines[-1] == "PASS: Dropbox refused every change."
+        assert sum(line.startswith("  refused") for line in lines) == 5
+
+
 def test_errors_about_a_path_are_refusals(client):
     with pytest.raises(DropboxRefused, match="not_found"):
         client.metadata("/nothing")

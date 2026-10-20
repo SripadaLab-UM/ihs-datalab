@@ -22,8 +22,11 @@ export const processedApi = {
   cancel: () => request<ProcessedSignIn>("/api/processed/connect/cancel", post),
   /** Revoke the sign-in, and forget the folder, its list and the downloaded files. */
   disconnect: () => request<ProcessedSignIn>("/api/processed/disconnect", post),
-  /** The folders at the top of the team's Dropbox. */
-  folders: () => request<ProcessedFolder[]>("/api/processed/folders"),
+  /** The folders at the top of the team's Dropbox, or inside one (by its Dropbox id). */
+  folders: (inside?: string) =>
+    request<ProcessedFolder[]>(
+      inside ? `/api/processed/folders?inside=${encodeURIComponent(inside)}` : "/api/processed/folders",
+    ),
   choose: (id: string) => request<Processed>("/api/processed/folder", { method: "POST", body: JSON.stringify({ id }) }),
   refresh: () => request<Processed>("/api/processed/refresh", post),
 };

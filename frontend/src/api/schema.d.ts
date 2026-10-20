@@ -359,7 +359,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Folders */
+        /**
+         * Folders
+         * @description Folders only: `inside` is a folder's Dropbox id from an earlier answer.
+         */
         get: operations["folders_api_processed_folders_get"];
         put?: never;
         post?: never;
@@ -7037,7 +7040,9 @@ export interface operations {
     };
     folders_api_processed_folders_get: {
         parameters: {
-            query?: never;
+            query?: {
+                inside?: string;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7051,6 +7056,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FolderOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

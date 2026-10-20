@@ -91,6 +91,13 @@ def main(argv: list[str] | None = None) -> int:
     source.add_argument("--from-export", type=Path, help="a CSV metadata export folder")
     source.add_argument("--from-database", action="store_true", help="read the configured database")
 
+    processed = commands.add_parser("processed", help="the lab's processed data in Dropbox")
+    processed_commands = processed.add_subparsers(dest="processed_command", required=True)
+    processed_commands.add_parser(
+        "check-read-only",
+        help="show that DataLab's Dropbox sign-in can't change anything in the chosen folder",
+    )
+
     kb_check = commands.add_parser(
         "kb-check", help="check a knowledge base folder (the check GitHub Actions runs)"
     )
@@ -165,6 +172,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "catalog":
         return _build_catalog(settings, args)
+
+    if args.command == "processed":
+        from datalab.dropbox.check import run as check_read_only
+
+        return check_read_only(settings)
     return 2
 
 

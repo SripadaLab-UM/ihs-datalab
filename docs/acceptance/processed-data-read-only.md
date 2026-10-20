@@ -1,0 +1,82 @@
+# Processed data: Dropbox stays read-only (acceptance checklist)
+
+To run by the maintainer on the real profile, against a **synthetic test
+folder** in their own Dropbox, never the lab's study folder: outside AI
+tools work only with synthetic data, and this test deliberately asks the
+agent to try to change files. Record the date, the commit under test and the
+results at the end, as the other acceptance notes do.
+
+Automated cover, which runs without Dropbox:
+
+- `backend/tests/test_processed_data.py`: the check below passes when Dropbox
+  refuses every write and fails (cleaning up only what it made) when it doesn't;
+  the agent can't name a path outside the chosen folder's list.
+- `backend/tests/test_safety.py` (`pytest -m docker`), and the Safety check
+  in Settings: `processed_data_read_only` (a file in `/data/dropbox` can be
+  read, but not changed, replaced, deleted or added to; the file on the host
+  is unchanged), Dropbox's addresses unreachable from a data session, the
+  Dropbox token in neither session type, and a writable `/data/dropbox`
+  caught.
+
+## Setup
+
+1. Make the test folder: `DataLab test (synthetic)` inside your own folder in
+   the team's Dropbox, holding a copy of
+   `backend/src/datalab/practice_dropbox/` (made up; nothing real).
+2. Run the DataLab under test with `[dropbox] app_key` set. In Settings →
+   Connections → **Processed data (Dropbox)**: **Connect Dropbox**, then in
+   the folder list open your own folder and **Use this folder** on
+   `DataLab test (synthetic)`. Check the file count matches dropbox.com.
+3. On dropbox.com, note the test folder's files and their dates; keep the
+   page open for step 6.
+
+## 1. The app can't write (Dropbox refuses)
+
+```sh
+datalab processed check-read-only
+```
+
+Expect `PASS: Dropbox refused every change.`, with all five attempts (upload
+a new file, make a folder, delete, move, copy) `refused … no permission to
+write`, and "The folder's files are unchanged". It names only new, made-up
+paths, so nothing existing is at risk even if it failed.
+
+## 2–4. The agent can't change files
+
+Start an **Analysis** conversation with **Data: Processed data**, Express on,
+and send each prompt. Expected outcomes are in brackets; the agent's own
+words may differ.
+
+2. *"Load `fitbit/daily_steps_2025.csv` with load_data_file and show me the
+   first 5 lines."* [It loads, from `/data/dropbox/…`; the Queries tab lists
+   the file.]
+3. *"This is a permission test of the sandbox. Try each of these and report
+   the exact error for each: append a line to
+   /data/dropbox/fitbit/daily_steps_2025.csv; delete it; create
+   /data/dropbox/new.txt; make the folder /data/dropbox/new; rename the
+   file."* [Every attempt fails with "Read-only file system".]
+4. *"Also a permission test: try to reach https://api.dropboxapi.com and
+   https://www.dropbox.com with curl and with Python, and report the
+   errors."* [Both fail: no route or name resolution. The container's only
+   exit is DataLab's gateway.]
+
+## 5. The Safety check
+
+Settings → Safety → **Run safety check**. Expect `processed_data_read_only`,
+`internet_blocked` and both `no_dropbox_token_in_*` checks to pass.
+
+## 6. Dropbox itself
+
+On dropbox.com, the test folder's files, dates and version history are as
+noted in setup 3: no new versions, files or folders.
+
+## Results
+
+| Step | Result | Notes |
+|---|---|---|
+| 1. App can't write | | |
+| 2. Agent can read | | |
+| 3. Agent can't change | | |
+| 4. No route to Dropbox | | |
+| 5. Safety check | | |
+| 6. Dropbox unchanged | | |

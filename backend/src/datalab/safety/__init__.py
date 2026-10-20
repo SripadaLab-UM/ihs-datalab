@@ -54,6 +54,15 @@ if TYPE_CHECKING:
 Status = Literal["pass", "fail", "skip"]
 
 PROMISE_HOST = "The AI can't touch anything else on your computer"
+# A file the data probe gets in /data/dropbox, to show it can't be changed.
+PROCESSED_CANARY = "safety-canary.csv"
+PROCESSED_CANARY_TEXT = "column\nDataLab safety check: this file must not change\n"
+# Dropbox's own addresses: a data session must reach none of them.
+DROPBOX_URLS = (
+    "https://api.dropboxapi.com",
+    "https://content.dropboxapi.com",
+    "https://www.dropbox.com",
+)
 PROMISE_DATABASE = "The AI can't change or damage the research database"
 PROMISE_NETWORK = "Sensitive data only goes to approved places"
 
@@ -152,10 +161,17 @@ class SafetyCheck:
             host_port=self._port,
             profile=self._settings.profile,
             instance=instance_of(self._settings.data_dir),
+            # A data probe has the processed data's folder, as a conversation
+            # using it does, with a canary file in it.
+            processed=kind == "data",
         )
         token = self._tokens.issue(SessionAccess(session_id, kind, paths.oracle_results))
         paths.create()
         paths.codex_config.write_text("# safety probe\n", encoding="utf-8", newline="\n")
+        if kind == "data":
+            (paths.processed_files / PROCESSED_CANARY).write_text(
+                PROCESSED_CANARY_TEXT, encoding="utf-8", newline="\n"
+            )
         try:
             await containers.start(token)
             yield _Probe(containers, paths)
@@ -181,7 +197,7 @@ class SafetyCheck:
 
         # curl exits 0 only if it got a response, of any status, from somewhere.
         reached = []
-        for url in ("https://example.com", "http://1.1.1.1"):
+        for url in ("https://example.com", "http://1.1.1.1", *DROPBOX_URLS):
             code, _ = await probe.sh(f"curl -sS -m 5 -o /dev/null {_quote(url)}")
             if code == 0:
                 reached.append(url)
@@ -197,7 +213,7 @@ class SafetyCheck:
                 not reached,
                 f"Reached: {', '.join(reached)}"
                 if reached
-                else "Web sites, raw addresses, and this computer are unreachable.",
+                else "Web sites (Dropbox's too), raw addresses, and this computer are unreachable.",
             )
         )
 
@@ -301,6 +317,7 @@ class SafetyCheck:
         results.append(await self._no_github_token_in(probe, kind="data"))
         results.append(await self._no_dropbox_token_in(probe, kind="data"))
         results.append(await self._locked_down(probe, kind="data"))
+        results.append(await self._processed_read_only(probe))
         return results
 
     # Research session --------------------------------------------------------
@@ -497,13 +514,51 @@ class SafetyCheck:
             else "Checked its environment, command and files." + _unread(unreadable),
         )
 
+    async def _processed_read_only(self, probe: _Probe) -> CheckResult:
+        """The processed data's files reach the agent read-only: it can read a
+        file DataLab placed in /data/dropbox, but not change, delete or add one.
+        (DataLab's Dropbox app can't write either: it has read-only scopes.)"""
+        canary = f"/data/dropbox/{PROCESSED_CANARY}"
+        problems = []
+        code, seen = await probe.sh(f"cat {canary}")
+        if code != 0 or PROCESSED_CANARY_TEXT.strip() not in seen:
+            problems.append("a fetched file couldn't be read")
+        attempts = {
+            "changed a fetched file": f"echo changed >> {canary}",
+            "replaced a fetched file": f"echo changed > {canary}.new && mv {canary}.new {canary}",
+            "deleted a fetched file": f"rm -f {canary} && test ! -e {canary}",
+            "added a file": "touch /data/dropbox/added-by-agent",
+            "made a folder": "mkdir /data/dropbox/added-folder",
+        }
+        for what, command in attempts.items():
+            code, _ = await probe.sh(command)
+            if code == 0:
+                problems.append(f"the agent {what}")
+        on_host = probe.paths.processed_files / PROCESSED_CANARY
+        try:
+            unchanged = on_host.read_text(encoding="utf-8") == PROCESSED_CANARY_TEXT
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            problems.append("the file on this computer changed")
+        return _result(
+            "processed_data_read_only",
+            PROMISE_HOST,
+            "The agent can read the processed data's files but not change them",
+            not problems,
+            "; ".join(problems)
+            if problems
+            else "Read a fetched file; changing, replacing, deleting and adding files were "
+            "all refused.",
+        )
+
     async def _locked_down(self, probe: _Probe, *, kind: str) -> CheckResult:
         inspect = await probe.inspect()
         host = inspect.get("HostConfig", {})
         user = inspect.get("Config", {}).get("User", "")
         mounts = {m["Destination"]: m for m in inspect.get("Mounts", [])}
         expected = {"/work", "/codex-home", "/codex-home/config.toml"} | (
-            {"/data/oracle"} if kind == "data" else set()
+            {"/data/oracle", "/data/dropbox"} if kind == "data" else set()
         )
         problems = []
         if host.get("Privileged"):
@@ -518,7 +573,7 @@ class SafetyCheck:
             problems.append(f"unexpected mounts: {sorted(set(mounts) ^ expected)}")
         if any("docker.sock" in (m.get("Source") or "") for m in mounts.values()):
             problems.append("Docker socket mounted")
-        for readonly in ("/codex-home/config.toml", "/data/oracle"):
+        for readonly in ("/codex-home/config.toml", "/data/oracle", "/data/dropbox"):
             if readonly in mounts and mounts[readonly].get("RW"):
                 problems.append(f"{readonly} is writable")
         networks = list(inspect.get("NetworkSettings", {}).get("Networks", {}))

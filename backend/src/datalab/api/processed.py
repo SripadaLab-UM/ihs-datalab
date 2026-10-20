@@ -6,8 +6,10 @@
   approves the app; Dropbox then shows a code, which `POST /connect/finish`
   exchanges. `POST /connect/cancel`, and `POST /disconnect` (which also
   forgets the folder, its file list and the downloaded files).
-- `GET /folders` lists the top of the team space; `POST /folder` chooses one
-  and lists its files; `POST /refresh` brings the list up to date.
+- `GET /folders` lists the folders at the top of the team space, or inside
+  one (`?inside=<id>`), so a subfolder (a test folder in the person's own
+  folder, say) can be chosen; `POST /folder` chooses one and lists its
+  files; `POST /refresh` brings the list up to date.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import asyncio
 from collections.abc import Callable
 from typing import Literal, TypeVar
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from datalab.dropbox.auth import DropboxUnavailable, SignIn, SignInNeeded
@@ -116,8 +118,11 @@ def build_processed_router(processed: ProcessedData) -> APIRouter:
         return _sign_in(await run(processed.disconnect))
 
     @router.get("/folders")
-    async def folders() -> list[FolderOut]:
-        return [_folder(f) for f in await run(processed.team_folders)]
+    async def folders(
+        inside: str = Query(default="", max_length=200, pattern=r"^(id:[A-Za-z0-9_-]+)?$"),
+    ) -> list[FolderOut]:
+        """Folders only: `inside` is a folder's Dropbox id from an earlier answer."""
+        return [_folder(f) for f in await run(lambda: processed.team_folders(inside))]
 
     @router.post("/folder")
     async def choose(body: ChooseIn) -> ProcessedOut:

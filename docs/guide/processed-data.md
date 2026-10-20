@@ -20,8 +20,9 @@ the database.
    them.
 3. Dropbox shows a code. Paste it into **Code from Dropbox**, and click
    **Connect**.
-4. Choose the lab's folder from the list, and click **Use this folder**.
-   DataLab lists the folder's files, names and sizes only, without
+4. Find the lab's folder in the list (click a folder's name to open it, and
+   the path above the list to go back up), and click **Use this folder**
+   beside it. DataLab lists the folder's files, names and sizes only, without
    downloading any.
 
 Your sign-in is kept in this computer's keychain. **Refresh list** picks up

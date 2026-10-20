@@ -145,6 +145,15 @@ access. It never gains it.
   such folder and no file tools; one that doesn't use the database has no
   query or catalog tools (`backend/tests/test_processed_data.py`). Changing
   a conversation's sources restarts its container, like an attachment.
+- **The agent can't change the processed data, and neither can DataLab.**
+  The Safety check gives its data probe a file in `/data/dropbox` and shows
+  the agent can read it but not change, replace, delete or add to it, and that
+  Dropbox's addresses are unreachable (`processed_data_read_only`,
+  `internet_blocked`; `backend/tests/test_safety.py` also shows a writable
+  folder is caught). The Dropbox app has read-only scopes, so Dropbox
+  refuses any change made with DataLab's sign-in: `datalab processed
+  check-read-only` shows it against the chosen folder, naming only new,
+  made-up paths (`docs/acceptance/processed-data-read-only.md`).
 - Model-written code runs only inside containers, never in DataLab's host
   process.
 - **The host runs only DataLab's own code.** Scripts from the lab repos, such

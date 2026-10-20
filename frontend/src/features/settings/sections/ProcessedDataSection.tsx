@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
-import { type Processed, processedApi, type ProcessedSignIn } from "@/api/processed";
+import { type Processed, processedApi, type ProcessedFolder, type ProcessedSignIn } from "@/api/processed";
 import { Button, Chip, Icon } from "@/components/ui";
 import { ago } from "@/features/knowledge/repoState";
 import { formatBytes } from "@/lib/csv";
@@ -232,39 +232,79 @@ function ChooseFolder({
   onChosen: (next: Processed) => void;
   onCancel?: () => void;
 }) {
-  const folders = useQuery({ queryKey: ["processed-folders"], queryFn: processedApi.folders });
-  const [picked, setPicked] = useState("");
-  const choose = useMutation({ mutationFn: () => processedApi.choose(picked), onSuccess: onChosen });
+  // The folders opened so far, from the top of the team space: the last is the one shown.
+  const [trail, setTrail] = useState<ProcessedFolder[]>([]);
+  const open = trail.at(-1);
+  const folders = useQuery({
+    queryKey: ["processed-folders", open?.id ?? ""],
+    queryFn: () => processedApi.folders(open?.id),
+  });
+  const choose = useMutation({ mutationFn: (id: string) => processedApi.choose(id), onSuccess: onChosen });
   return (
     <div className="mt-4 flex flex-col gap-3">
       <p className="text-sm">
         Choose the lab's processed-data folder{current ? <span className="text-muted"> (now {current})</span> : null}.
-        DataLab lists its files, names and sizes only, without downloading any.
+        Open a folder to choose one inside it. DataLab lists the chosen folder's files, names and sizes only, without
+        downloading any.
       </p>
-      {folders.isPending && <p className="text-sm text-muted">Asking Dropbox for your folders…</p>}
+      <nav aria-label="Folder path" className="flex flex-wrap items-center gap-1 text-sm">
+        <button
+          type="button"
+          onClick={() => setTrail([])}
+          className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
+        >
+          Dropbox
+        </button>
+        {trail.map((folder, i) => (
+          <span key={folder.id} className="flex items-center gap-1">
+            <span className="text-faint">/</span>
+            <button
+              type="button"
+              onClick={() => setTrail(trail.slice(0, i + 1))}
+              aria-current={i === trail.length - 1 ? "location" : undefined}
+              className="text-ink underline decoration-faint underline-offset-4 hover:decoration-ink"
+            >
+              {folder.name}
+            </button>
+          </span>
+        ))}
+      </nav>
+      {folders.isPending && <p className="text-sm text-muted">Asking Dropbox for the folders…</p>}
       {folders.error && <p className="text-sm text-danger">{folders.error.message}</p>}
       {folders.data && (
-        <select
-          aria-label="Folder"
-          value={picked}
-          onChange={(e) => setPicked(e.target.value)}
-          className="w-full max-w-md rounded-xl border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-accent"
-        >
-          <option value="">Choose a folder…</option>
+        <ul className="flex max-w-xl flex-col divide-y divide-line rounded-xl border border-line">
+          {folders.data.length === 0 && <li className="px-3 py-2 text-sm text-muted">No folders inside.</li>}
           {folders.data.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-            </option>
+            <li key={f.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+              <Icon name="folder" size={14} className="shrink-0 text-faint" />
+              <button
+                type="button"
+                onClick={() => setTrail([...trail, f])}
+                className="min-w-0 flex-1 truncate text-left hover:underline"
+                aria-label={`Open ${f.name}`}
+              >
+                {f.name}
+              </button>
+              <Button
+                variant="ghost"
+                className="px-2 text-[12.5px]"
+                onClick={() => choose.mutate(f.id)}
+                disabled={choose.isPending}
+                aria-label={`Use ${f.name}`}
+              >
+                Use this folder
+              </Button>
+            </li>
           ))}
-        </select>
+        </ul>
       )}
+      {choose.isPending && <p className="text-sm text-muted">Listing its files…</p>}
       {choose.error && <p className="text-sm text-danger">{choose.error.message}</p>}
-      <div className="flex gap-2">
-        <Button variant="primary" onClick={() => choose.mutate()} disabled={!picked || choose.isPending}>
-          {choose.isPending ? "Listing its files…" : "Use this folder"}
-        </Button>
-        {onCancel && <Button onClick={onCancel}>Cancel</Button>}
-      </div>
+      {onCancel && (
+        <div>
+          <Button onClick={onCancel}>Cancel</Button>
+        </div>
+      )}
     </div>
   );
 }

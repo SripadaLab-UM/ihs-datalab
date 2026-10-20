@@ -161,11 +161,13 @@ class ProcessedData:
 
     # Choosing the folder (Dropbox only) -------------------------------------
 
-    def team_folders(self) -> list[Folder]:
-        """The folders at the top of the person's Dropbox team space."""
+    def team_folders(self, inside: str = "") -> list[Folder]:
+        """The folders in one folder of the person's Dropbox team space (by its
+        id or path; "" for the top), to choose from or open. Only folders: a
+        file is never chosen, and nothing is downloaded."""
         client = self._require_client()
         found: list[Folder] = []
-        for page in client.list_folder("", recursive=False):
+        for page in client.list_folder(inside, recursive=False):
             found += [Folder(i.id, i.path_display, i.name) for i in page.items if i.tag == "folder"]
         return sorted(found, key=lambda f: f.name.lower())
 
