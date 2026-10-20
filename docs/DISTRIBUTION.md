@@ -1021,6 +1021,26 @@ content's hash (`/favicon.svg?v=<sha8>`, `frontend/brandIcons.ts`), in
     "release" environment (see "Release signing"). The update check offers
     only releases with all of these (see "Which releases are offered"); a
     pre-release is tagged `v0.1.0-alpha.3` and marked so.
+- **Before tagging: try it in a dev copy.** A release is offered to everyone
+  on the beta channel within the hour, so try a change on real data first,
+  without releasing it: `scripts/dev-copy.sh` runs the checkout as a second,
+  separate DataLab.
+  - It's on its own port (http://127.0.0.1:8775) with its own data folder
+    (`DataLab/dev-real`) and containers, so the installed DataLab's
+    conversations, data and containers are never touched, and both can run
+    at once.
+  - On first run it copies only the lab's settings (`[oracle]`, `[repos]`,
+    `[dropbox]`, `[windows]`) from the installed DataLab's `settings.toml`,
+    and turns update checks off; after that the copy's settings are its own.
+  - It runs the latest release's pinned agent image, or, with
+    `--build-image`, one built from `images/agent` (it says when that
+    folder has changed since the release).
+  - It shares the keychain: the U-M GPT key, the database password and the
+    GitHub and Dropbox sign-ins. Signing out of GitHub or disconnecting
+    Dropbox in the dev copy does the same for the installed DataLab.
+  - Its Updates page says it can't update itself: it's the checkout.
+  - When it looks right: merge, tag, and the installed DataLab gets it
+    through **Install update**, as everyone does.
 - Repository variables the release build reads (Settings → Secrets and
   variables → Actions → Variables): `LAB_DROPBOX_APP_KEY`, the lab's
   Dropbox app key for the processed data. It isn't a secret; without it,
