@@ -29,7 +29,7 @@ from datalab.config import Settings
 from datalab.data.access_log import AccessLog
 from datalab.dropbox.auth import DropboxAuth, DropboxUnavailable, SignIn, SignInNeeded
 from datalab.dropbox.client import DropboxClient, DropboxRefused, TookTooLong, TooLarge
-from datalab.dropbox.families import Family, families, pattern
+from datalab.dropbox.families import Family, dataset_of, families, pattern
 from datalab.dropbox.index import ProcessedIndex
 from datalab.dropbox.sources import (
     DropboxSource,
@@ -225,16 +225,20 @@ class ProcessedData:
         return [f for f in families(entries) if not wanted or wanted in f.pattern]
 
     def files_of(self, dataset: str, limit: int = 200) -> list[FileEntry]:
-        """The files of one dataset (as `datasets` names it), newest first."""
+        """The files of one dataset (as `datasets` names it, or by its pattern
+        with every number as `{n}`), newest first."""
         self._require_ready()
-        found = [e for e in self.index.files() if pattern(e.path) == dataset.lower().strip()]
+        wanted = dataset.lower().strip()
+        entries = list(self.index.files())
+        keys = {f.key for f in families(entries) if wanted in (f.pattern, f.key)}
+        found = [e for e in entries if pattern(e.path) in keys]
         found.sort(key=lambda e: e.modified or "", reverse=True)
         return found[:limit]
 
-    def describe(self, path: str) -> tuple[FileEntry, bool]:
-        """A file's metadata, and whether it's already downloaded."""
+    def describe(self, path: str) -> tuple[FileEntry, bool, str]:
+        """A file's metadata, whether it's already downloaded, and its dataset's name."""
         entry = self._entry(path)
-        return entry, self._cached_path(entry).is_file()
+        return entry, self._cached_path(entry).is_file(), dataset_of(entry.path, self.index.files())
 
     # One file for an agent --------------------------------------------------
 

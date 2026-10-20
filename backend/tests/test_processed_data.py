@@ -62,6 +62,26 @@ def test_no_participant_id_survives_grouping():
         assert not name_findings(family.pattern), family.pattern
 
 
+def test_a_number_that_never_varies_stays_in_the_name():
+    paths = [
+        "surveys/phq9_wave1_2025.csv",
+        "surveys/phq9_wave2_2025.csv",
+        "surveys/gad7_2024.csv",  # one file: its 7 stays, its year doesn't
+        "mood/2025/IHS00042_v2.csv",  # one file: its ID is hidden even so
+        "logs/run_3.txt",
+        "logs/run_14.txt",
+    ]
+    names = [f.pattern for f in families(FileEntry(p, p, 1) for p in paths)]
+    assert names == [
+        "logs/run_{n}.txt",
+        "mood/{year}/{id}_v2.csv",
+        "surveys/gad7_{year}.csv",
+        "surveys/phq9_wave{n}_{year}.csv",
+    ]
+    for name in names:
+        assert not name_findings(name), name
+
+
 def test_unsafe_relative_paths_are_refused():
     for bad in ("", "/etc/passwd", "a/../b", "./a", "a//b", "a\\b", "C:/x", "a/\x07b"):
         assert not safe_relative(bad), bad
@@ -152,9 +172,12 @@ def test_practice_uses_its_own_synthetic_folder(processed):
     patterns = {f.pattern for f in processed.datasets()}
     assert "fitbit/daily_steps_{year}.csv" in patterns
     assert "mood/{year}/{id}_daily_mood.csv" in patterns
-    assert [f.pattern for f in processed.datasets("surveys")] == [
-        "surveys/phq{n}_wave{n}_{year}.csv"
-    ]
+    assert [f.pattern for f in processed.datasets("surveys")] == ["surveys/phq9_wave{n}_{year}.csv"]
+    # A dataset's files can be asked for by its name, or by its pattern.
+    by_name = processed.files_of("surveys/phq9_wave{n}_{year}.csv")
+    assert len(by_name) == 2 and by_name == processed.files_of("surveys/phq{n}_wave{n}_{year}.csv")
+    _, _, dataset = processed.describe("surveys/phq9_wave1_2025.csv")
+    assert dataset == "surveys/phq9_wave{n}_{year}.csv"
 
 
 def test_a_file_is_fetched_once_and_logged(processed, connection, settings, tmp_path):
@@ -235,6 +258,10 @@ def test_the_instructions_say_which_sources():
     only = modes.instructions("analysis", data_sources=("dropbox",))
     assert "query and\ncatalog tools are off" in only
     assert "Data source" not in modes.instructions("analysis")
+    # An empty /data/dropbox isn't "no data": the agent lists the datasets
+    # (it once looked on disk and said there were none).
+    for text in (both, only):
+        assert "/data/dropbox starts empty" in text and "call\nlist_data_files" in text
 
 
 # --- Signing in to Dropbox ------------------------------------------------------------
