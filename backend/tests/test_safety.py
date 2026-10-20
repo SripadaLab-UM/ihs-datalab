@@ -40,6 +40,17 @@ class WritableProcessedData(SessionContainers):
             folder = self.paths.processed_files
             self._extra_mounts = lambda: ["-v", f"{folder}:/data/dropbox"]
 
+    async def start(self, token: str) -> None:
+        # Writable for the agent's user too: on Linux the mount keeps the
+        # host's owners and modes, so without this the files would still be
+        # protected and the broken mount wouldn't show.
+        folder = self.paths.processed_files
+        if folder.is_dir():
+            os.chmod(folder, 0o777)
+            for item in folder.iterdir():
+                os.chmod(item, 0o666)
+        await super().start(token)
+
 
 class LeakyGateway(SessionContainers):
     """A gateway that forwards everything to DataLab, not just /v1 and /mcp."""
