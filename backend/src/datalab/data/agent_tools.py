@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from mcp.server.mcpserver import Context, MCPServer
@@ -28,13 +29,22 @@ from datalab.data.service import DataService
 from datalab.data.sql_drafts import BindType, DraftInvalid, ProposedBind, SqlDrafts
 from datalab.data.sql_lobs import lob_type, sql_name
 from datalab.data.sqlcheck import SqlRejected
+from datalab.dropbox.families import pattern as family_pattern
+from datalab.dropbox.service import LoadRefused, ProcessedData
+from datalab.dropbox.service import NotAvailable as ProcessedNotAvailable
 from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
 from datalab.sessions import plan_schema
 from datalab.sessions.approvals import Unshowable, clean_question
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.plan_schema import ADDITIONAL, PlanInvalid, clean_plan
 from datalab.sessions.plans import Outcome, PlanDesk
-from datalab.sessions.tokens import SessionAccess, SessionTokens, bearer_token
+from datalab.sessions.tokens import (
+    DATABASE_TOOLS,
+    FILE_TOOLS,
+    SessionAccess,
+    SessionTokens,
+    bearer_token,
+)
 from datalab.textcheck import lone_surrogate, size_text
 from datalab.workflows.model import MAX_FILE_BYTES as MAX_WORKFLOW_BYTES
 from datalab.workflows.model import WorkflowInvalid, problem_positions
@@ -48,17 +58,26 @@ HELPER_APPROVAL = "research_helper"
 PLAN_APPROVAL = "analysis_plan"
 
 INSTRUCTIONS = """\
-Read-only access to the Intern Health Study (IHS) Oracle database, one schema
-per cohort year (for example IHS_2024, IHS_2025). Start with search_catalog
-(or find_concept for a research concept), check columns with describe_table
-and joins with join_paths, then run SELECT queries with query. Qualify
-every table with its schema. Write a column spelled with lower-case letters
-in double quotes, exactly ("Bdate"). A CLOB (long text) column can't be used
-in SELECT DISTINCT, GROUP BY, ORDER BY, UNION, MIN/MAX/COUNT or a comparison:
-convert it with TO_CHAR(SUBSTR(col, 1, 1000)), and check MAX(LENGTH(col)) so
-no value is cut unseen. If a query times out, split or narrow it before
-trying again. Results are saved as CSV files in /data/oracle; work with the
-file for anything beyond the preview.
+Read-only access to the Intern Health Study (IHS) data: the Oracle database
+and, when the conversation uses it, the lab's processed data (cleaned files
+in the lab's Dropbox folder). Which of the two this conversation has is in
+your instructions; tools for the other one are refused.
+
+Database: one schema per cohort year (for example IHS_2024, IHS_2025).
+Start with search_catalog (or find_concept for a research concept), check
+columns with describe_table and joins with join_paths, then run SELECT
+queries with query. Qualify every table with its schema. Write a column
+spelled with lower-case letters in double quotes, exactly ("Bdate"). A CLOB
+(long text) column can't be used in SELECT DISTINCT, GROUP BY, ORDER BY,
+UNION, MIN/MAX/COUNT or a comparison: convert it with TO_CHAR(SUBSTR(col, 1,
+1000)), and check MAX(LENGTH(col)) so no value is cut unseen. If a query
+times out, split or narrow it before trying again. Results are saved as CSV
+files in /data/oracle; work with the file for anything beyond the preview.
+
+Processed data: list_data_files shows the datasets (files grouped by name
+pattern), and one dataset's files; describe_data_file gives one file's size
+and dates; load_data_file fetches one file into /data/dropbox, read-only.
+Fetch only the files you need: each is downloaded and logged.
 """
 
 
@@ -118,6 +137,7 @@ def build_agent_tools(
     check_workflow_text: WorkflowCheck | None = None,
     drafts: SqlDrafts | None = None,
     suggestions: KbSuggestions | None = None,
+    processed: ProcessedData | None = None,
 ) -> MCPServer:
     server = MCPServer(name="ihs-data", instructions=INSTRUCTIONS)
 
@@ -223,6 +243,106 @@ def build_agent_tools(
                 "tables": outcome.tables,
             }
         )
+
+    if processed is not None:
+        files = processed
+
+        @server.tool(annotations=_READ_ONLY)
+        async def list_data_files(
+            ctx: Context, folder: str = "", contains: str = "", dataset: str = "", limit: int = 50
+        ) -> str:
+            """The processed data's datasets, or one dataset's files. Metadata only.
+
+            Files that differ only by a date, year, number or ID are one
+            dataset, named by its pattern, e.g. "fitbit/{year}/daily_{id}.csv".
+            folder: only datasets under this folder, e.g. "fitbit".
+            contains: only datasets whose pattern contains this, e.g. "sleep".
+            dataset: a pattern from an earlier answer: list that dataset's files
+              instead (newest first), to choose one for load_data_file.
+            """
+            _session(ctx, tokens, "list_data_files")
+            limit = max(1, min(limit, 200))
+            try:
+                if dataset:
+                    found = await asyncio.to_thread(files.files_of, dataset, limit)
+                    if not found:
+                        raise ToolError(f"No dataset {dataset!r}. List the datasets first.")
+                    return _json(
+                        {
+                            "dataset": dataset,
+                            "files": [
+                                {"path": e.path, "size": e.size, "modified": e.modified}
+                                for e in found
+                            ],
+                        }
+                    )
+                found_sets = await asyncio.to_thread(files.datasets, folder, contains)
+            except ProcessedNotAvailable as error:
+                raise ToolError(str(error)) from error
+            return _json(
+                {
+                    "datasets": [f.summary() for f in found_sets[:limit]],
+                    "shown": min(limit, len(found_sets)),
+                    "total_datasets": len(found_sets),
+                    "note": "Sizes are in bytes. List a dataset's files with dataset=<pattern>.",
+                }
+            )
+
+        @server.tool(annotations=_READ_ONLY)
+        async def describe_data_file(path: str, ctx: Context) -> str:
+            """One processed-data file's metadata: size, date modified, its dataset,
+            and whether it's already fetched. Nothing is downloaded.
+
+            path: as list_data_files gives it, e.g. "fitbit/2025/daily_steps.csv".
+            """
+            _session(ctx, tokens, "describe_data_file")
+            try:
+                entry, fetched = await asyncio.to_thread(files.describe, path)
+            except LoadRefused as error:
+                raise ToolError(str(error)) from error
+            return _json(
+                {
+                    "path": entry.path,
+                    "size": entry.size,
+                    "modified": entry.modified,
+                    "dataset": family_pattern(entry.path),
+                    "already_fetched": fetched,
+                }
+            )
+
+        @server.tool(annotations=_READ_ONLY)
+        async def load_data_file(path: str, ctx: Context, preview_lines: int = 20) -> str:
+            """Fetch one processed-data file into /data/dropbox, read-only.
+
+            It's downloaded on the host (or taken from DataLab's copy) and
+            logged in the person's Data accessed panel. Fetch only what you need.
+            Read it from the path returned; for a text file, the first lines
+            are returned too.
+            path: as list_data_files gives it.
+            preview_lines: lines of a text file to return (0 for none).
+            """
+            access = _session(ctx, tokens, "load_data_file")
+            if access.processed_dir is None:
+                raise ToolError("This conversation has no processed-data folder.")
+            try:
+                loaded = await asyncio.to_thread(
+                    files.load, access.session_id, access.processed_dir, path
+                )
+            except LoadRefused as error:
+                raise ToolError(str(error)) from error
+            preview = await asyncio.to_thread(
+                _text_preview, loaded.host_path, max(0, min(preview_lines, 200))
+            )
+            return _json(
+                {
+                    "path": loaded.container_path,
+                    "size": loaded.entry.size,
+                    "modified": loaded.entry.modified,
+                    **({"preview": preview} if preview is not None else {}),
+                    "note": "Work with the file at that path; it's read-only. Don't copy "
+                    "participant-level rows into /work beyond what the analysis needs.",
+                }
+            )
 
     if check_workflow_text is not None:
         workflow_check = check_workflow_text
@@ -529,6 +649,22 @@ def _session(ctx: Context, tokens: SessionTokens, tool: str) -> SessionAccess:
         raise ToolError("This session isn't allowed to query data.")
     if not access.allows(tool):
         where = access.mode_label or "this mode"
+        if tool in FILE_TOOLS and "dropbox" in access.mode_sources:
+            raise ToolError(
+                f"{tool} isn't available: this conversation doesn't use the processed data "
+                "(Dropbox). The person chooses a conversation's data sources; they can add "
+                "it from the conversation's header."
+            )
+        if (
+            tool in DATABASE_TOOLS
+            and "database" not in access.sources
+            and ("database" in access.mode_sources)
+        ):
+            raise ToolError(
+                f"{tool} isn't available: this conversation uses the processed data only, "
+                "not the database. The person can add the database from the conversation's "
+                "header."
+            )
         if tool == "propose_sql":
             raise ToolError(
                 f"propose_sql isn't available in {where}: it's for the SQL Playground's "
@@ -675,3 +811,19 @@ async def _require_catalog(service: DataService) -> None:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=1)
+
+
+# Files whose first lines load_data_file returns: plain text formats.
+_TEXT_SUFFIXES = frozenset({".csv", ".tsv", ".txt", ".md", ".json", ".yml", ".yaml", ".log"})
+_PREVIEW_BYTES = 20_000
+
+
+def _text_preview(path: Path, lines: int) -> list[str] | None:
+    """The first `lines` lines of a text file (each cut to 500 characters),
+    or None for another kind of file."""
+    if lines <= 0 or path.suffix.lower() not in _TEXT_SUFFIXES:
+        return None
+    with path.open("rb") as handle:
+        head = handle.read(_PREVIEW_BYTES)
+    text = head.decode("utf-8", "replace")
+    return [line[:500] for line in text.splitlines()[:lines]]

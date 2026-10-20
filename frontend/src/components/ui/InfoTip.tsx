@@ -18,6 +18,7 @@ export const TOOLTIP_TERMS = [
   "checkpoint",
   "export",
   "data-accessed",
+  "data-sources",
   "read-only",
   "practice",
   "proposal",

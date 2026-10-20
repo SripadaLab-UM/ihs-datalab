@@ -77,6 +77,9 @@ async def test_tools_are_listed(server, tmp_path):
         "check_workflow",
         "propose_sql",
         "suggest_kb_update",
+        "list_data_files",
+        "describe_data_file",
+        "load_data_file",
     }
 
 
@@ -278,6 +281,9 @@ async def test_a_catalog_only_session_gets_the_catalog_tools_and_nothing_else(se
             "evidence_query_ids": ["q_1"],
             "reason": "r",
         },
+        "list_data_files": {},
+        "describe_data_file": {"path": "fitbit/daily_steps_2025.csv"},
+        "load_data_file": {"path": "fitbit/daily_steps_2025.csv"},
     }
     assert set(calls) == set(DATA_TOOLS) - CATALOG_TOOLS
     async with mcp_session(base_url, token) as session:

@@ -140,7 +140,13 @@ def workspace_note(store: ConversationStore, conversation_id: str) -> str:
     changes = store.events_of_types_after(
         conversation_id,
         asked.seq if asked else 0,
-        ("files_restored", "input_attached", "input_removed", "input_unavailable"),
+        (
+            "files_restored",
+            "input_attached",
+            "input_removed",
+            "input_unavailable",
+            "sources_changed",
+        ),
     )
     notes = [_note(event.type, event.data) for event in changes]
     return "".join(f"[DataLab: {note}]\n" for note in notes if note) + ("\n" if notes else "")
@@ -199,6 +205,8 @@ def _note(kind: str, data: dict[str, Any]) -> str:
             "to /work since then were undone. Check the files before relying on anything you "
             "remember about them."
         )
+    if kind == "sources_changed":
+        return _sources_note([str(s) for s in data.get("to") or []])
     items = data.get("items") or []
     # Names come from files, so they're quoted: they can't pose as DataLab's words.
     listed = ", ".join(f"{json.dumps(str(i.get('path')))} ({i.get('kind')})" for i in items)
@@ -211,3 +219,14 @@ def _note(kind: str, data: dict[str, Any]) -> str:
         reason = str(data.get("reason", "")).replace(path, "it")
         return f"{json.dumps(path)} isn't available this time ({reason})."
     return ""
+
+
+_SOURCE_NAMES = {"database": "the IHS database", "dropbox": "the lab's processed data (Dropbox)"}
+
+
+def _sources_note(sources: list[str]) -> str:
+    named = [_SOURCE_NAMES[s] for s in sources if s in _SOURCE_NAMES] or [_SOURCE_NAMES["database"]]
+    using = " and ".join(named)
+    off = [n for s, n in _SOURCE_NAMES.items() if s not in sources]
+    tail = f"; {off[0]} is off, and its tools are refused" if off else ""
+    return f"the user changed this conversation's data sources: it now uses {using}{tail}."

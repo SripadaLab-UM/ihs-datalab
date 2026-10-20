@@ -1,0 +1,6 @@
+dataset,column,description
+fitbit/daily_steps_{year}.csv,participant_id,Synthetic study ID
+fitbit/daily_steps_{year}.csv,steps,Steps that day; 0 when the tracker didn't sync
+fitbit/sleep_nightly_{year}.csv,sleep_hours,Hours asleep; empty when not synced
+surveys/phq9_wave{n}_{year}.csv,phq9_total,"PHQ-9 total score, 0-27"
+mood/{year}/{id}_daily_mood.csv,mood,"Daily mood, 1-10, one file per participant"

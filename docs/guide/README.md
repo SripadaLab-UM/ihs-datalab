@@ -31,6 +31,7 @@ This guide is the same text as DataLab's own Help and its tooltips. It's written
 - [Read an answer, its trace, and "How was this made?"](reading-an-answer.md)
 - [Analysis plans and pilots](plans.md)
 - [Export results](exporting.md)
+- [Use the lab's processed data](processed-data.md)
 
 **The other tabs**
 

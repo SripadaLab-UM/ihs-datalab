@@ -188,6 +188,31 @@ UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)
+class DropboxSettings:
+    """`[dropbox]`: the lab's processed study data in Dropbox (dropbox/).
+
+    None means not configured: conversations use the database only. The
+    practice profile never uses Dropbox; it has a synthetic folder instead.
+    """
+
+    # The lab's Dropbox app, for signing in with PKCE. Its app key isn't a
+    # secret; DataLab holds no app secret for it.
+    app_key: str | None = None
+    # The largest file DataLab fetches for an agent, and the most it keeps
+    # downloaded for this person (older files are dropped first).
+    max_file_bytes: int = 2 * 1024**3
+    max_cache_bytes: int = 20 * 1024**3
+
+    def __post_init__(self) -> None:
+        if self.app_key is not None and not re.fullmatch(r"[a-z0-9]{10,32}", self.app_key):
+            raise ValueError("dropbox.app_key must be a Dropbox app key, such as wz…")
+        if self.max_file_bytes < 1024**2:
+            raise ValueError("dropbox.max_file_bytes must be at least 1 MB")
+        if self.max_cache_bytes < self.max_file_bytes:
+            raise ValueError("dropbox.max_cache_bytes must be at least dropbox.max_file_bytes")
+
+
+@dataclass(frozen=True)
 class WindowsSettings:
     """`[windows]`: what DataLab on Windows tells people (windows_vm.py)."""
 
@@ -231,6 +256,7 @@ class Settings:
     workflows: WorkflowSettings = field(default_factory=WorkflowSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
     windows: WindowsSettings = field(default_factory=WindowsSettings)
+    dropbox: DropboxSettings = field(default_factory=DropboxSettings)
 
     @property
     def settings_file(self) -> Path:
@@ -273,14 +299,41 @@ PRACTICE_ORACLE = OracleSettings(
 )
 
 
-def _release_agent_image() -> str | None:
-    """The agent image a release was built for (written by scripts/build-release.sh)."""
+def _release_info() -> dict:
+    """What the release was built with (written by scripts/build-release.sh):
+    its agent image, and the lab's defaults it carries. {} in development."""
     release = Path(__file__).with_name("release.json")
     if release.exists():
         import json
 
-        return json.loads(release.read_text(encoding="utf-8")).get("agent_image")
-    return None
+        raw = json.loads(release.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    return {}
+
+
+def _release_agent_image() -> str | None:
+    """The agent image a release was built for."""
+    return _release_info().get("agent_image")
+
+
+def _dropbox_table(profile: Profile, raw: dict) -> dict:
+    """`[dropbox]` from settings.toml, with the lab's app key from the release
+    when the file doesn't set one: installs from before the processed data
+    get it by updating, with nothing to edit. The file's own value wins; a
+    release value that isn't an app key is ignored (logged), never fatal."""
+    table = raw.get("dropbox", {})
+    if not isinstance(table, dict) or "app_key" in table or profile == "practice":
+        return raw
+    lab = _release_info().get("lab")
+    key = ((lab or {}).get("dropbox") or {}).get("app_key") if isinstance(lab, dict) else None
+    if key is None:
+        return raw
+    if not isinstance(key, str) or not re.fullmatch(r"[a-z0-9]{10,32}", key):
+        import logging
+
+        logging.getLogger(__name__).warning("the release's Dropbox app key is ignored")
+        return raw
+    return {**raw, "dropbox": {**table, "app_key": key}}
 
 
 _PINNED = re.compile(r"[^@\s]+@sha256:[0-9a-f]{64}")
@@ -363,6 +416,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         workflows=_section(WorkflowSettings, raw, "workflows"),
         updates=_section(UpdateSettings, raw, "updates"),
         windows=_section(WindowsSettings, raw, "windows"),
+        dropbox=_section(DropboxSettings, _dropbox_table(profile, raw), "dropbox"),
     )
     return _check_models(settings)
 

@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useEffect, useState } from "react";
 
-import { api, type Checkpoint, type Conversation, type WorkspaceFile } from "@/api/client";
+import { api, type Checkpoint, type Conversation, type FileLoad, type WorkspaceFile } from "@/api/client";
 import { shortTable } from "@/components/chat/activity";
 import { SHOW_QUERY } from "@/components/chat/provenance";
 import { CodeBlock } from "@/components/code/CodeBlock";
@@ -305,6 +305,44 @@ function RestoreDialog({
   );
 }
 
+/** The processed-data files DataLab fetched for the agent, or refused to, newest last. */
+function FilesAccessed({ files }: { files: FileLoad[] }) {
+  return (
+    <section aria-label="Processed-data files" className="mb-4">
+      <p className="dl-label mb-2 flex items-center gap-1.5 !text-data">
+        <Icon name="lock" size={11} /> Read-only · processed-data files fetched
+      </p>
+      <ol className="flex flex-col gap-2">
+        {files.map((f) => (
+          <li key={f.id} className="rounded-[4px] border border-line bg-surface p-3 text-xs">
+            <div className="flex items-center gap-2">
+              <span
+                aria-hidden
+                className={clsx(
+                  "h-2 w-2 shrink-0 rounded-full",
+                  f.status === "succeeded" ? "bg-data" : f.status === "running" ? "dl-breathe bg-attn" : "bg-danger",
+                )}
+              />
+              <span className="min-w-0 flex-1 truncate font-mono text-[12.5px]" title={f.path}>
+                {f.path}
+              </span>
+              <span className="shrink-0 text-muted">
+                {new Date(f.started_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {f.status === "succeeded" && f.size != null && <Chip tone="good">{formatBytes(f.size)}</Chip>}
+              {f.status === "running" && <Chip tone="attn">fetching</Chip>}
+              {f.status !== "succeeded" && f.status !== "running" && <Chip tone="bad">{f.status}</Chip>}
+            </div>
+            {f.message && <p className="mt-2 text-muted">{f.message}</p>}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 function DataAccessed({
   conversationId,
   onOpen,
@@ -317,6 +355,11 @@ function DataAccessed({
   const queries = useQuery({
     queryKey: ["data-accessed", conversationId],
     queryFn: () => api.dataAccessed(conversationId),
+    refetchInterval: 3000,
+  });
+  const files = useQuery({
+    queryKey: ["files-accessed", conversationId],
+    queryFn: () => api.filesAccessed(conversationId),
     refetchInterval: 3000,
   });
   const loaded = queries.data !== undefined;
@@ -332,15 +375,17 @@ function DataAccessed({
     const done = window.setTimeout(() => setLit(null), 4000);
     return () => window.clearTimeout(done);
   }, [shown, loaded]);
-  if (queries.data?.length === 0) {
+  if (queries.data?.length === 0 && files.data?.length === 0) {
     return (
       <EmptyNote icon="db" title="No queries yet">
-        Every read from the study database is listed here: which tables, how many rows, and the exact SQL.
+        Every read from the study database is listed here: which tables, how many rows, and the exact SQL. So is every
+        file fetched from the lab's processed data.
       </EmptyNote>
     );
   }
   return (
     <>
+      {files.data && files.data.length > 0 && <FilesAccessed files={files.data} />}
       <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
         <p className="dl-label flex min-w-[13rem] flex-1 items-center gap-1.5 !text-data">
           <Icon name="lock" size={11} /> Read-only · every query, newest last

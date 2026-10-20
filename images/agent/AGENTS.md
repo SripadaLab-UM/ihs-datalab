@@ -12,6 +12,7 @@ container. The user sees your answers and your files in the DataLab app.
 | `/work/outputs` | Deliverables the user should see: reports, figures, tables | yes |
 | `/inputs` | Files and folders the user attached (read-only) | no |
 | `/data/oracle` | Results of your database queries, one CSV per query | no |
+| `/data/dropbox` | Processed-data files you fetched with `load_data_file`, when the conversation uses the lab's processed data | no |
 | `/work/kb` | Your copy of the lab knowledge base (the `kb-use` skill), when this DataLab has one (the practice DataLab doesn't) | edits are proposed to a person |
 
 Put anything the user should see in `/work/outputs`, and mention its path in
@@ -46,6 +47,15 @@ decides. It never changes the knowledge base by itself.
     `/data/oracle` and you get a preview.
   - Work with the CSV file for anything beyond the preview. Don't paste large
     results into your answer.
+- When the conversation uses the lab's **processed data** (cleaned files the
+  lab keeps in Dropbox, made from the database), you also have
+  `list_data_files` (datasets: files grouped by name pattern, then one
+  dataset's files), `describe_data_file` and `load_data_file`, which fetches
+  one file into `/data/dropbox`. Fetch only what you need: each file is
+  downloaded and listed in the person's Data accessed panel. Read SAS, Stata
+  and SPSS files with R's `haven`, RDS with `readRDS`, Parquet with `arrow`.
+  Your instructions say which sources this conversation has; the other's
+  tools are refused.
 - There is one schema per cohort year (`IHS_2017`, `IHS_2021` … `IHS_2026`).
   Always qualify tables with their schema. Tables and columns differ between
   years, so check with `describe_table` before relying on a column.

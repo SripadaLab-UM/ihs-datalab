@@ -63,6 +63,8 @@ class SessionRuntime:
         tools: frozenset[str] | None = None,
         tools_off: tuple[str, ...] = (),
         mode_label: str | None = None,
+        sources: tuple[str, ...] = ("database",),
+        mode_sources: tuple[str, ...] = ("database",),
     ) -> None:
         self.session_id = session_id
         self.kind: SessionKind = kind
@@ -75,6 +77,8 @@ class SessionRuntime:
         self._tools = tools
         self._tools_off = tools_off
         self._mode_label = mode_label
+        self._sources = sources
+        self._mode_sources = mode_sources
         self._emit = emit
         self._client: AppServerClient | None = None
         self._thread_id: str | None = self._saved_thread_id()
@@ -290,6 +294,9 @@ class SessionRuntime:
                 results_dir=self.paths.oracle_results,
                 tools=self._tools,
                 mode_label=self._mode_label,
+                sources=self._sources,
+                mode_sources=self._mode_sources,
+                processed_dir=self.paths.processed_files if "dropbox" in self._sources else None,
             )
         )
         self.paths.create()

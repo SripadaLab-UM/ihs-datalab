@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from datalab.sessions.tokens import EXPRESS_OFF_TOOLS as _EXPRESS_OFF_TOOLS
+from datalab.sessions.tokens import FILE_TOOLS as _FILE_TOOLS
 from datalab.sessions.tokens import OPT_IN_TOOLS as _OPT_IN_TOOLS
 from datalab.sessions.tokens import TAB_TOOLS as _TAB_TOOLS
 from datalab.sessions.tokens import SessionKind
@@ -60,6 +61,15 @@ class Mode:
         """The ihs-data tools Codex doesn't list in this mode."""
         return tuple(t for t in DATA_TOOLS if t not in self.allowed_tools)
 
+    @property
+    def sources(self) -> tuple[str, ...]:
+        """The data sources a conversation in this mode may choose from."""
+        if self.kind != "data":
+            return ()
+        if FILE_TOOLS & self.allowed_tools:
+            return ("database", "dropbox")
+        return ("database",)
+
 
 # Every ihs-data tool (data/agent_tools.py; a test keeps the two the same).
 DATA_TOOLS = (
@@ -73,6 +83,9 @@ DATA_TOOLS = (
     "ask_research_helper",
     "propose_sql",
     "suggest_kb_update",
+    "list_data_files",
+    "describe_data_file",
+    "load_data_file",
 )
 # The catalog tools: metadata only, never rows.
 CATALOG_TOOLS = frozenset({"search_catalog", "describe_table", "join_paths", "find_concept"})
@@ -83,6 +96,9 @@ OPT_IN_TOOLS = _OPT_IN_TOOLS
 # Suggesting a Knowledge update (suggest_kb_update): the Workspace modes
 # whose findings about the data can be durable. Not the tabs' own chats.
 KB_SUGGESTIONS = frozenset({"suggest_kb_update"})
+# The processed data's tools (tokens.FILE_TOOLS): the Workspace modes that
+# can use the lab's processed data, when the conversation chose it.
+FILE_TOOLS = _FILE_TOOLS
 
 
 SUGGEST_KB = """\
@@ -638,7 +654,7 @@ MODES = {
                 "How did daily step counts change over the intern year?",
                 "Describe the 2025 cohort: size, demographics, and data coverage.",
             ),
-            extra_tools=KB_SUGGESTIONS,
+            extra_tools=KB_SUGGESTIONS | FILE_TOOLS,
         ),
         Mode(
             "extraction",
@@ -650,7 +666,7 @@ MODES = {
                 "Extract daily Fitbit sleep for the 2025 cohort, one row per participant-night.",
                 "Which tables hold PHQ-9 scores, and how do they differ between years?",
             ),
-            extra_tools=KB_SUGGESTIONS,
+            extra_tools=KB_SUGGESTIONS | FILE_TOOLS,
         ),
         Mode(
             "sql",
@@ -677,7 +693,7 @@ MODES = {
                 "Review the attached R script and suggest how to turn it into package functions.",
                 "Write tests for the attached cleaning function.",
             ),
-            extra_tools=KB_SUGGESTIONS,
+            extra_tools=KB_SUGGESTIONS | FILE_TOOLS,
         ),
         Mode(
             "pipelines",
@@ -767,10 +783,45 @@ NO_KNOWLEDGE = (
 )
 
 
-def instructions(mode_id: str, *, knowledge_base: bool = True) -> str:
-    """The mode's instructions, and where the knowledge base is: `knowledge_base`
-    is whether DataLab copies it into this mode's conversations."""
-    return MODES[mode_id].instructions + (KNOWLEDGE if knowledge_base else NO_KNOWLEDGE)
+# The conversation's data sources (sessions/tokens.py: DATA_SOURCES), for the
+# modes that can use the processed data. Its tools are refused otherwise.
+SOURCES_BOTH = """
+Data sources for this conversation: the IHS database and the lab's processed
+data. The processed data is the lab's cleaned files (in its Dropbox folder),
+made from the database by the lab's pipelines; analysts usually start there.
+Find files with list_data_files and fetch only the ones you need with
+load_data_file (into /data/dropbox, read-only). Say which source each number
+comes from. When the two disagree, say so and don't pick one silently: the
+files may be cleaned, filtered or derived differently.
+"""
+
+SOURCES_DROPBOX = """
+Data source for this conversation: the lab's processed data only (its
+cleaned files, in its Dropbox folder), not the database: the query and
+catalog tools are off. Find files with list_data_files and fetch only the
+ones you need with load_data_file (into /data/dropbox, read-only). Where a
+lab convention or the database would matter, say so; the person can add the
+database to this conversation.
+"""
+
+
+def sources_note(sources: tuple[str, ...]) -> str:
+    if "dropbox" not in sources:
+        return ""
+    return SOURCES_BOTH if "database" in sources else SOURCES_DROPBOX
+
+
+def instructions(
+    mode_id: str, *, knowledge_base: bool = True, data_sources: tuple[str, ...] = ("database",)
+) -> str:
+    """The mode's instructions, its data sources, and where the knowledge base
+    is: `knowledge_base` is whether DataLab copies it into this mode's
+    conversations."""
+    return (
+        MODES[mode_id].instructions
+        + sources_note(data_sources)
+        + (KNOWLEDGE if knowledge_base else NO_KNOWLEDGE)
+    )
 
 
 # --- Express ----------------------------------------------------------------

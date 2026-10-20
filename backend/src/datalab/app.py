@@ -27,6 +27,7 @@ from datalab.api.github import GitHubServices, build_github_router
 from datalab.api.inputs import build_inputs_router
 from datalab.api.knowledge import KnowledgeServices, build_knowledge_router
 from datalab.api.pipelines import PipelineServices, build_pipelines_router
+from datalab.api.processed import build_processed_router
 from datalab.api.provenance import ProvenanceServices, build_provenance_router
 from datalab.api.safety import build_safety_router
 from datalab.api.settings import SettingsServices, build_settings_router
@@ -44,6 +45,7 @@ from datalab.data.catalog_source import CatalogSource, Origin
 from datalab.data.oracle import ExtractResult, OracleDatabase, QueryFailed
 from datalab.data.service import Database, DataService
 from datalab.data.sql_drafts import SqlDrafts
+from datalab.dropbox.service import ProcessedData
 from datalab.exports import DestinationStore
 from datalab.knowledge.suggestions import KbSuggestions
 from datalab.practice_db import PracticeDatabaseKeeper
@@ -176,6 +178,9 @@ def create_app(
     # conversation, never written to the knowledge base.
     kb_suggestions = KbSuggestions(conversations, access_log)
     kb_suggestions.turn_running = sessions.turn_running
+    # The lab's processed data (its Dropbox folder; practice's synthetic one).
+    processed = ProcessedData(settings, connection, access_log)
+    sessions.processed = processed
     # One GitHub sign-in for both lab repos: only one object may refresh its
     # tokens, since each refresh replaces the refresh token.
     github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
@@ -204,6 +209,7 @@ def create_app(
         check_workflow_text=workflows_router.runner.check_text,  # type: ignore[attr-defined]
         drafts=sql_drafts,
         suggestions=kb_suggestions,
+        processed=processed,
     )
     agent_tools_app = agent_tools.streamable_http_app(
         streamable_http_path="/mcp",
@@ -227,8 +233,10 @@ def create_app(
             await helper.remove_leftovers(settings)
         # Turns the last run stopped in the middle of, if it didn't close cleanly.
         sessions.end_cut_off_turns()
-        # And the queries it was running, for chat, the Playground and workflows.
+        # And the queries it was running, for chat, the Playground and workflows,
+        # and the processed-data files it was fetching.
         access_log.end_cut_off_queries()
+        access_log.end_cut_off_loads()
         # DataLab's own catalog, if it has none yet. In the background: the
         # database may not be up yet (then it's tried again at the first query).
         # Practice builds it once its database is up (practice_database.on_ready).
@@ -308,8 +316,10 @@ def create_app(
             models=approved_models,
             allowed_models=settings.allowed_models,
             titles=titles,
+            processed_ready=lambda: processed.status().problem,
         )
     )
+    app.include_router(build_processed_router(processed))
     previews = Previews()
     app.state.previews = previews
     app.include_router(build_files_router(conversations, sessions, previews))

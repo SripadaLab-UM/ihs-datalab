@@ -30,6 +30,28 @@ class LeakyContainers(SessionContainers):
         await docker("network", "connect", "bridge", self.agent)
 
 
+class WritableProcessedData(SessionContainers):
+    """The processed data's folder mounted writable: the agent could change a fetched file."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        if self.processed:
+            self.processed = False
+            folder = self.paths.processed_files
+            self._extra_mounts = lambda: ["-v", f"{folder}:/data/dropbox"]
+
+    async def start(self, token: str) -> None:
+        # Writable for the agent's user too: on Linux the mount keeps the
+        # host's owners and modes, so without this the files would still be
+        # protected and the broken mount wouldn't show.
+        folder = self.paths.processed_files
+        if folder.is_dir():
+            os.chmod(folder, 0o777)
+            for item in folder.iterdir():
+                os.chmod(item, 0o666)
+        await super().start(token)
+
+
 class LeakyGateway(SessionContainers):
     """A gateway that forwards everything to DataLab, not just /v1 and /mcp."""
 
@@ -74,11 +96,27 @@ def test_a_sealed_session_passes(app, github_keychain):
     from datalab.repos.github import Tokens, TokenStore
 
     TokenStore().save(Tokens("ghu_not_a_real_token_0123", None, "ghr_not_real_0123", None))
+    # Connected to Dropbox too, likewise made up.
+    from datalab.dropbox import auth as dropbox_auth
+
+    dropbox_auth.TokenStore().save(
+        dropbox_auth.Tokens("sl.not_a_real_token_0123", None, "dropbox_refresh_not_real")
+    )
     results = _run(app, SessionContainers)
     failures = {k: v for k, v in results.items() if v == "fail" and k != "model_reachable"}
     assert failures == {}
     assert results["no_github_token_in_data_session"] == "pass"
     assert results["no_github_token_in_research_session"] == "pass"
+    assert results["no_dropbox_token_in_data_session"] == "pass"
+    assert results["no_dropbox_token_in_research_session"] == "pass"
+    # Fetched files are readable, and can't be changed, deleted or added to.
+    assert results["processed_data_read_only"] == "pass"
+
+
+def test_a_writable_processed_data_folder_is_caught(app):
+    results = _run(app, WritableProcessedData)
+    assert results["processed_data_read_only"] == "fail"
+    assert results["data_container_locked_down"] == "fail"
 
 
 def test_a_leaky_session_is_caught(app):

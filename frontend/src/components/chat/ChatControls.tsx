@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { type ReactNode, useRef, useState } from "react";
 
-import { api, type Conversation, type Effort } from "@/api/client";
+import { api, type Conversation, type DataSource, type Effort } from "@/api/client";
 import { Chip, InfoTip, SessionBadge } from "@/components/ui";
 
 import { ASSISTANTS, type AssistantId } from "./assistants";
@@ -178,6 +178,51 @@ export function RigorSwitch({ conversation }: { conversation: Conversation }) {
       change={() => api.setRigorReview(conversation.id, !conversation.rigor_review)}
       busy={conversation.busy}
     />
+  );
+}
+
+const SOURCE_CHOICES: { label: string; sources: DataSource[] }[] = [
+  { label: "Study database", sources: ["database"] },
+  { label: "Processed data", sources: ["dropbox"] },
+  { label: "Both", sources: ["database", "dropbox"] },
+];
+
+/**
+ * Where the conversation's data comes from: the study database, the lab's processed data
+ * (Dropbox), or both. Only in the modes that can use the processed data. Changing it
+ * restarts the agent's sandbox, so it waits while the agent is working.
+ */
+export function SourcesSelect({ conversation }: { conversation: Conversation }) {
+  const queryClient = useQueryClient();
+  const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const change = useMutation({
+    mutationFn: (sources: DataSource[]) => api.setSources(conversation.id, sources),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+  if (!modes.data?.find((m) => m.id === conversation.mode)?.sources?.includes("dropbox")) return null;
+  const chosen = (conversation.data_sources ?? ["database"]).join();
+  const current = SOURCE_CHOICES.findIndex((c) => c.sources.join() === chosen);
+  return (
+    <span className="flex items-center gap-1">
+      <select
+        value={current}
+        onChange={(e) => change.mutate(SOURCE_CHOICES[Number(e.target.value)].sources)}
+        disabled={conversation.busy || change.isPending}
+        aria-label="Data sources"
+        title={
+          change.error?.message ??
+          (conversation.busy ? "Wait for the agent to finish to change the data" : "Where this conversation's data comes from")
+        }
+        className={clsx("bg-transparent font-sans text-[13px] enabled:hover:text-ink", change.error ? "text-danger" : "text-muted")}
+      >
+        {SOURCE_CHOICES.map((c, i) => (
+          <option key={c.label} value={i}>
+            Data: {c.label}
+          </option>
+        ))}
+      </select>
+      <InfoTip term="data-sources" align="end" />
+    </span>
   );
 }
 

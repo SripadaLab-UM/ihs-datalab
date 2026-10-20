@@ -1,0 +1,59 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
+import { beforeEach, expect, it, vi } from "vitest";
+
+import { type Processed, processedApi } from "@/api/processed";
+
+import { ProcessedDataSection } from "./ProcessedDataSection";
+
+vi.mock("@/api/processed", () => ({
+  processedApi: { status: vi.fn(), folders: vi.fn(), choose: vi.fn(), refresh: vi.fn(), connect: vi.fn() },
+}));
+
+const signedIn: Processed = {
+  source: "dropbox", configured: true, ready: false, problem: "Choose the lab's processed-data folder.",
+  folder: null, files: 0, bytes: 0, indexed_at: null,
+  sign_in: { state: "signed in", account: "Test Person", authorize_url: null, message: null },
+}; // prettier-ignore
+
+beforeEach(() => {
+  vi.mocked(processedApi.status).mockResolvedValue(signedIn);
+  vi.mocked(processedApi.folders).mockImplementation(async (inside?: string) =>
+    inside === "id:mine"
+      ? [{ id: "id:test", name: "DataLab test (synthetic)", path: "/Person/DataLab test (synthetic)" }]
+      : [
+          { id: "id:lab", name: "Lab Study Data", path: "/Lab Study Data" },
+          { id: "id:mine", name: "Person", path: "/Person" },
+        ],
+  );
+  vi.mocked(processedApi.choose).mockResolvedValue({ ...signedIn, ready: true, folder: "/Person/DataLab test (synthetic)" });
+});
+
+function show() {
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <MemoryRouter>
+        <ProcessedDataSection />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+it("opens a folder to choose one inside it, and can go back up", async () => {
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Open Person" }));
+  await screen.findByText("DataLab test (synthetic)");
+  expect(processedApi.folders).toHaveBeenLastCalledWith("id:mine");
+  expect(screen.queryByText("Lab Study Data")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Use DataLab test (synthetic)" }));
+  await waitFor(() => expect(processedApi.choose).toHaveBeenCalledWith("id:test"));
+});
+
+it("goes back to the top from the folder path", async () => {
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Open Person" }));
+  await screen.findByText("DataLab test (synthetic)");
+  fireEvent.click(screen.getByRole("button", { name: "Dropbox" }));
+  expect(await screen.findByText("Lab Study Data")).toBeTruthy();
+});

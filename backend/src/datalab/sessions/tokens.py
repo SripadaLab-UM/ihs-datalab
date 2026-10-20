@@ -20,7 +20,35 @@ SessionKind = Literal["data", "research"]
 # Playground's editor; suggest_kb_update is for the Workspace modes whose
 # findings can be durable (Analysis, Data extraction, Data engineering).
 TAB_TOOLS = frozenset({"propose_sql"})
-OPT_IN_TOOLS = TAB_TOOLS | {"suggest_kb_update"}
+# The processed data's tools (dropbox/): only the modes that name them, and
+# only in a conversation that chose the processed data as a source.
+FILE_TOOLS = frozenset({"list_data_files", "describe_data_file", "load_data_file"})
+OPT_IN_TOOLS = TAB_TOOLS | FILE_TOOLS | {"suggest_kb_update"}
+# The database's tools: a conversation that doesn't use the database has none.
+DATABASE_TOOLS = frozenset(
+    {
+        "search_catalog",
+        "describe_table",
+        "join_paths",
+        "find_concept",
+        "query",
+        "propose_sql",
+        "check_workflow",
+    }
+)
+DataSource = Literal["database", "dropbox"]
+DATA_SOURCES: tuple[DataSource, ...] = ("database", "dropbox")
+
+
+def tools_for_sources(tools: frozenset[str], sources: tuple[str, ...]) -> frozenset[str]:
+    """A mode's tools, less those of the data sources the conversation doesn't use."""
+    if "database" not in sources:
+        tools -= DATABASE_TOOLS
+    if "dropbox" not in sources:
+        tools -= FILE_TOOLS
+    return tools
+
+
 # Tools no turn asked with Express on may use, whatever its mode: each stops
 # the turn to wait for the person (an analysis plan to approve, a research
 # helper question to review before it goes online). Express has no such
@@ -41,6 +69,13 @@ class SessionAccess:
     tools: frozenset[str] | None = None
     # Its mode's name ("Workflow authoring"), for the words of a refusal.
     mode_label: str | None = None
+    # The data sources the conversation chose ("database", "dropbox"), for
+    # the words of a refusal; `tools` already leaves out the others' tools.
+    sources: tuple[str, ...] = ("database",)
+    # The sources its mode could use: a refusal says the person can add one only then.
+    mode_sources: tuple[str, ...] = ("database",)
+    # Where processed-data files it fetches go on the host (/data/dropbox).
+    processed_dir: Path | None = None
 
     def allows(self, tool: str) -> bool:
         if self.tools is None:

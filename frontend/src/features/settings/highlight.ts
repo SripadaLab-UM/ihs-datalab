@@ -19,6 +19,7 @@ export const HIGHLIGHT_TARGETS = {
   "connection-umgpt": { section: "connections", name: "Connections, U-M GPT" },
   "connection-database": { section: "connections", name: "Connections, the study database" },
   "connection-github": { section: "connections", name: "Connections, GitHub" },
+  "connection-processed": { section: "connections", name: "Connections, Processed data (Dropbox)" },
   appearance: { section: "appearance", name: "Appearance" },
   "export-folders": { section: "export-folders", name: "Export folders" },
   "destination-keys": { section: "export-folders", name: "Export folders, Workflow destinations" },
