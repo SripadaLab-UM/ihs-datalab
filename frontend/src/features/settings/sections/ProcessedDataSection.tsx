@@ -275,7 +275,7 @@ function ChooseFolder({
         <ul className="flex max-w-xl flex-col divide-y divide-line rounded-xl border border-line">
           {folders.data.length === 0 && <li className="px-3 py-2 text-sm text-muted">No folders inside.</li>}
           {folders.data.map((f) => (
-            <li key={f.id} className="flex items-center gap-2 px-3 py-1.5 text-sm">
+            <li key={f.id} className="group flex items-center gap-2 px-3 py-1.5 text-sm">
               <Icon name="folder" size={14} className="shrink-0 text-faint" />
               <button
                 type="button"
@@ -285,9 +285,9 @@ function ChooseFolder({
               >
                 {f.name}
               </button>
+              {/* An outlined button, quiet in every row and firm in the row pointed at or tabbed to. */}
               <Button
-                variant="ghost"
-                className="px-2 text-[12.5px]"
+                className="shrink-0 px-2.5 py-1 text-[12.5px] text-muted group-hover:border-ink group-hover:text-ink group-focus-within:border-ink group-focus-within:text-ink"
                 onClick={() => choose.mutate(f.id)}
                 disabled={choose.isPending}
                 aria-label={`Use ${f.name}`}
