@@ -195,14 +195,14 @@ function Waiting({
         </li>
         <li>Dropbox shows a code. Paste it here.</li>
       </ol>
-      <label className="block">
+      <label className="flex flex-col gap-1.5">
         <span className="dl-label">Code from Dropbox</span>
         <input
           value={code}
           onChange={(e) => setCode(e.target.value)}
           autoComplete="off"
           spellCheck={false}
-          className={`mt-1.5 ${field}`}
+          className={field}
         />
       </label>
       {(finish.data?.message ?? flow.message) && (
