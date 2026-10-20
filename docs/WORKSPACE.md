@@ -104,6 +104,7 @@ The container has deliberately few locations:
 | `/work/kb` | Fresh copy of the knowledge base; edits become proposals. Not on the practice DataLab (the agent is told so) | Yes |
 | `/inputs` | Files and folders you attached | No |
 | `/data/oracle` | Query results written by DataLab's data service | No |
+| `/data/dropbox` | Processed-data files DataLab fetched for the agent (`load_data_file`), only in a conversation that uses the lab's processed data | No |
 
 ## Scientific rigor
 

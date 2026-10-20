@@ -225,8 +225,21 @@ The record of every query the agent ran in a conversation: which tables,
 when, how many rows, and the exact SQL. It's the **Queries** tab beside a
 data session's chat.
 
-DataLab also keeps every query in a local audit log, with workflow runs'
-queries too. Both hold only metadata, never result values.
+It also lists every file the agent fetched from the lab's processed data, or
+asked for and was refused. DataLab keeps every query and file in a local
+audit log, with workflow runs' queries too. The log holds only metadata,
+never result values or file names.
+
+## Data sources
+
+Where a conversation's data comes from: the **Study database**, the lab's
+**Processed data** (its cleaned files in Dropbox), or **Both**.
+
+You choose under **Data** when you start an Analysis, Data extraction or
+Data engineering conversation, and can change it later from the **Data:**
+menu in its header. Without the database, the agent has no query or catalog
+tools; without the processed data, it can't list or fetch files. See
+[Use the lab's processed data](processed-data.md).
 
 ## Export
 

@@ -7,6 +7,7 @@ import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 import { CONNECTION_TEST, useConnectionTest } from "@/features/toolbar/ConnectionShortcuts";
 
 import { GitHubSection } from "./GitHubSection";
+import { ProcessedDataSection } from "./ProcessedDataSection";
 import { KeyFeatures } from "./KeyFeatures";
 import { PracticeDatabaseStatus } from "./PracticeDatabase";
 import { FixedOnPractice, Part, Section } from "./Section";
@@ -49,6 +50,7 @@ export function ConnectionsSection() {
           <Database connections={shown} result={test.result?.database} testButton={testButton} />
           {test.result && <p className="-mt-4 text-xs text-muted">Last tested {ago(test.result.checked_at)}</p>}
           <GitHubSection />
+          <ProcessedDataSection />
           <dl className="grid grid-cols-[10rem_1fr] gap-y-1.5 border-t border-line pt-5 text-sm">
             <dt className="text-muted">Profile</dt>
             <dd>{shown.profile === "practice" ? "Practice (synthetic data only)" : "Real data"}</dd>

@@ -493,6 +493,31 @@ own slot, and the shared modules offer extension points:
   **Oracle Database Free** container seeded by our generator, so the SQL
   dialect matches reality. It is used for development, CI, evals, and
   practice mode.
+- **The processed data (`dropbox/`).** The lab's cleaned files in Dropbox,
+  a second source a conversation may choose (`conversations.data_sources`;
+  the session token's tools are narrowed by `tokens.tools_for_sources`).
+  - `auth.py`: the person's Dropbox sign-in with the lab's app (PKCE, no
+    secret; tokens in the keychain, refreshed by the host only).
+  - `client.py`: the read-only API calls (list, list since a cursor,
+    metadata, download with Dropbox's content hash checked), always rooted
+    in the team space (`Dropbox-API-Path-Root`), with back-off on 429.
+  - `index.py`: the chosen folder's file list in SQLite (`processed_files`),
+    refreshed from Dropbox's cursor, so a refresh fetches only changes.
+  - `families.py`: files grouped into datasets by name pattern (dates,
+    years, ID-like codes and numbers replaced), so the agent sees hundreds
+    of datasets, not thousands of files, and patterns never name a person.
+  - `service.py`: `ProcessedData`, used by Settings (`api/processed.py`)
+    and the agent tools `list_data_files`, `describe_data_file` and
+    `load_data_file`. A load is refused unless the path is in the list and
+    within `[dropbox] max_file_bytes`; it's downloaded once into a per-person
+    cache (`processed-cache/`, trimmed to `max_cache_bytes`) and hard-linked
+    (or copied) into the session's `dropbox/`, mounted read-only at
+    `/data/dropbox`. Each load is in the `file_loads` table and the audit log.
+  - Practice uses `sources.LocalSource` on the bundled synthetic folder
+    (`practice_dropbox/`) instead of the API.
+  - A synced Dropbox folder isn't used: its online-only files report 0
+    bytes, carry no macOS online-only flag, and a plain read doesn't
+    download them; and Docker can't read File Provider folders.
 
 ### 6. Research helper
 

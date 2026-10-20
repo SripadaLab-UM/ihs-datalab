@@ -33,6 +33,9 @@ class Conversation:
     # Quick answers: low effort, no plans or confirmations (sessions/modes.py:
     # EXPRESS). Never on together with rigor_review.
     express: bool = False
+    # Where its data comes from: "database", "dropbox" (the lab's processed
+    # data), or both (sessions/tokens.py: DATA_SOURCES).
+    data_sources: tuple[str, ...] = ("database",)
 
 
 @dataclass(frozen=True)
@@ -52,7 +55,14 @@ class ConversationStore:
     # Conversations -----------------------------------------------------------
 
     def create(
-        self, *, kind: SessionKind, mode: str, title: str, model: str, rigor_review: bool = False
+        self,
+        *,
+        kind: SessionKind,
+        mode: str,
+        title: str,
+        model: str,
+        rigor_review: bool = False,
+        data_sources: tuple[str, ...] = ("database",),
     ) -> Conversation:
         now = _now()
         conversation = Conversation(
@@ -64,15 +74,32 @@ class ConversationStore:
             created_at=now,
             updated_at=now,
             rigor_review=rigor_review,
+            data_sources=data_sources,
         )
         with self._lock:
             self._db.execute(
-                "INSERT INTO conversations "
-                "(id, kind, mode, title, model, created_at, updated_at, rigor_review) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (conversation.id, kind, mode, title, model, now, now, int(rigor_review)),
+                "INSERT INTO conversations (id, kind, mode, title, model, created_at, "
+                "updated_at, rigor_review, data_sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    conversation.id,
+                    kind,
+                    mode,
+                    title,
+                    model,
+                    now,
+                    now,
+                    int(rigor_review),
+                    json.dumps(list(data_sources)),
+                ),
             )
         return conversation
+
+    def set_data_sources(self, conversation_id: str, sources: tuple[str, ...]) -> None:
+        with self._lock:
+            self._db.execute(
+                "UPDATE conversations SET data_sources = ? WHERE id = ?",
+                (json.dumps(list(sources)), conversation_id),
+            )
 
     def set_rigor_review(self, conversation_id: str, on: bool) -> None:
         """Switching the rigor review on switches Express off: never both."""
@@ -239,7 +266,18 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         updated_at=row["updated_at"],
         rigor_review=bool(row["rigor_review"]),
         express=bool(row["express"]),
+        data_sources=_sources(row["data_sources"]),
     )
+
+
+def _sources(text: str | None) -> tuple[str, ...]:
+    """The stored list, in DATA_SOURCES' order; the database if it can't be read."""
+    try:
+        raw = json.loads(text or "")
+    except ValueError:
+        raw = None
+    found = tuple(s for s in ("database", "dropbox") if isinstance(raw, list) and s in raw)
+    return found or ("database",)
 
 
 def _now() -> str:

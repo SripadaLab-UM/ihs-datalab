@@ -83,7 +83,7 @@ ENV HOME=/home/agent \
 # Smoke checks for the tools agents rely on most.
 RUN codex --version \
     && python -c "import duckdb, pandas, polars, numpy, scipy, statsmodels, sklearn, matplotlib, seaborn, altair, pyarrow, pdfplumber" \
-    && Rscript -e "suppressMessages({library(dplyr); library(tidyr); library(data.table); library(lubridate); library(ggplot2); library(lme4); library(arrow); library(testthat)})" \
+    && Rscript -e "suppressMessages({library(dplyr); library(tidyr); library(data.table); library(lubridate); library(ggplot2); library(lme4); library(arrow); library(haven); library(testthat)})" \
     && printf 'a,b\n1,2\n3,\n' > /tmp/smoke.csv && profile-data /tmp/smoke.csv > /dev/null && rm /tmp/smoke.csv
 
 ENTRYPOINT []

@@ -20,3 +20,4 @@ after these for anything else.
 | 0012 | knowledge: a person's own page edits (drafts kept on this computer until Save & share) | in use |
 | 0013 | pipelines: a person's own edits (drafts kept on this computer until Save & share) | in use |
 | 0014 | `conversations.express`: the Express switch | in use |
+| 0015 | processed data (Dropbox): `conversations.data_sources`, the chosen folder, its file list, file loads | in use |

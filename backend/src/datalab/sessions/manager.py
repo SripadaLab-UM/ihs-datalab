@@ -21,7 +21,7 @@ import shutil
 import time
 from collections.abc import AsyncIterator, Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from datalab.config import Settings
 from datalab.sessions import modes, mounts, seeds, turns, workfiles
@@ -37,10 +37,16 @@ from datalab.sessions.review import review_turn, trace_turn
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.seeds import Seed
 from datalab.sessions.store import Conversation, ConversationStore, Event
-from datalab.sessions.tokens import SessionTokens
+from datalab.sessions.tokens import SessionTokens, tools_for_sources
 from datalab.sessions.tracing import Source
 
 log = logging.getLogger(__name__)
+
+
+class ProcessedSource(Protocol):
+    """What the session manager needs of the processed data (dropbox/service.py)."""
+
+    def ensure_fresh(self) -> None: ...
 
 
 # What Continue sends: the same thread picks up where a turn stopped part-way.
@@ -83,6 +89,9 @@ class SessionManager:
         self.helper: ResearchHelper | None = None
         # Approved analysis plans, for the rigor review (set by the app).
         self.plans: PlanStore | None = None
+        # The lab's processed data, to refresh its file list before a turn
+        # that uses it (set by the app; dropbox/service.py).
+        self.processed: ProcessedSource | None = None
         self._settings = settings
         self._store = store
         self._tokens = tokens
@@ -196,6 +205,10 @@ class SessionManager:
             await self._make_room(keep=conversation.id)
             if self._seeds:
                 await asyncio.to_thread(self._seed_workspace, conversation)
+            if self.processed is not None and "dropbox" in self.sources_of(conversation):
+                # A stale file list is refreshed first; Dropbox being out of
+                # reach doesn't stop the turn (the old list is used).
+                await asyncio.to_thread(self.processed.ensure_fresh)
             runtime = self._runtime(conversation)
             runtime.begin_turn()
             self._last_used[conversation.id] = time.monotonic()
@@ -329,6 +342,18 @@ class SessionManager:
         finally:
             self._restoring.discard(conversation.id)
 
+    async def change_sources(self, conversation: Conversation, sources: tuple[str, ...]) -> None:
+        """Switch the conversation's data sources. Like changing attachments,
+        the container is confirmed gone first (its tools and mounts are fixed
+        when it starts), and the agent is told on its next message."""
+        before = self.sources_of(conversation)
+        async with self.changing_inputs(conversation):
+            self._store.set_data_sources(conversation.id, sources)
+            self._runtimes.pop(conversation.id, None)
+            self._store.append(
+                conversation.id, "sources_changed", {"from": list(before), "to": list(sources)}
+            )
+
     def answer_approval(
         self,
         conversation_id: str,
@@ -421,9 +446,13 @@ class SessionManager:
     # ------------------------------------------------------------------------
 
     def _containers(self, conversation: Conversation) -> SessionContainers:
-        return self._containers_for(conversation.id, conversation.kind)
+        return self._containers_for(
+            conversation.id, conversation.kind, processed="dropbox" in self.sources_of(conversation)
+        )
 
-    def _containers_for(self, conversation_id: str, kind) -> SessionContainers:
+    def _containers_for(
+        self, conversation_id: str, kind, *, processed: bool = False
+    ) -> SessionContainers:
         return SessionContainers(
             conversation_id,
             kind,
@@ -433,7 +462,18 @@ class SessionManager:
             profile=self._settings.profile,
             instance=instance_of(self._settings.data_dir),
             extra_mounts=lambda: self._extra_mounts(conversation_id),
+            processed=processed,
         )
+
+    def sources_of(self, conversation: Conversation) -> tuple[str, ...]:
+        """The conversation's data sources, as far as its mode allows them
+        (a stored choice its mode can't use, such as after a downgrade, is
+        left out; with none left, the database)."""
+        mode = modes.MODES.get(conversation.mode)
+        if mode is None or mode.kind != "data":
+            return ()
+        kept = tuple(s for s in conversation.data_sources if s in mode.sources)
+        return kept or ("database",)
 
     def _extra_mounts(self, conversation_id: str) -> list[str]:
         """Mounts beyond DataLab's own: attachments, then what providers add."""
@@ -489,6 +529,12 @@ class SessionManager:
                 self._store.append(conversation.id, kind, data)
 
             mode = modes.MODES[conversation.mode]
+            sources = self.sources_of(conversation)
+            tools = (
+                tools_for_sources(mode.allowed_tools, sources)
+                if mode.kind == "data"
+                else mode.tools
+            )
             runtime = SessionRuntime(
                 conversation.id,
                 conversation.kind,
@@ -497,14 +543,18 @@ class SessionManager:
                 self._tokens,
                 model=conversation.model,
                 developer_instructions=modes.instructions(
-                    conversation.mode, knowledge_base=self.seeds_into("kb", conversation.mode)
+                    conversation.mode,
+                    knowledge_base=self.seeds_into("kb", conversation.mode),
+                    data_sources=sources,
                 ),
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
-                tools=mode.allowed_tools if mode.kind == "data" else mode.tools,
-                tools_off=mode.tools_off,
+                tools=tools,
+                tools_off=tuple(t for t in modes.DATA_TOOLS if tools is None or t not in tools),
                 mode_label=mode.label,
+                sources=sources,
+                mode_sources=mode.sources,
             )
             self._runtimes[conversation.id] = runtime
         return runtime

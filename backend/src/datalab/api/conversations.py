@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from typing import Any, Literal
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -40,11 +40,16 @@ def _one_line_title(title: str | None) -> str | None:
     return title
 
 
+DataSource = Literal["database", "dropbox"]
+
+
 class NewConversation(BaseModel):
     mode: str = "analysis"
     # Normally left out: the title is written from the first question.
     title: str = Field(default=DEFAULT_TITLE, max_length=200)
     model: str | None = None
+    # Where its data comes from; left out: the database.
+    data_sources: list[DataSource] | None = Field(default=None, min_length=1, max_length=2)
 
     _one_line = field_validator("title")(_one_line_title)
 
@@ -60,6 +65,8 @@ class ConversationOut(BaseModel):
     rigor_review: bool
     # Quick answers: low effort, no plans or confirmations. Never on with rigor_review.
     express: bool
+    # The database, the lab's processed data (Dropbox), or both; empty for research.
+    data_sources: list[DataSource]
     busy: bool
 
 
@@ -68,6 +75,8 @@ class ConversationChange(BaseModel):
     rigor_review: bool | None = None
     express: bool | None = None
     title: str | None = Field(default=None, min_length=1, max_length=200)
+    # Changing them restarts the agent's container (its tools and folders).
+    data_sources: list[DataSource] | None = Field(default=None, min_length=1, max_length=2)
 
     _one_line = field_validator("title")(_one_line_title)
 
@@ -118,6 +127,16 @@ class QueryRecordOut(BaseModel):
     message: str | None
 
 
+class FileLoadOut(BaseModel):
+    id: str
+    started_at: str
+    status: str
+    path: str
+    size: int | None
+    elapsed_ms: int | None
+    message: str | None
+
+
 class ModeOut(BaseModel):
     id: str
     label: str
@@ -134,6 +153,8 @@ class ModeOut(BaseModel):
     question: str = "What would you like to find out?"
     # Whether its agent can suggest Knowledge updates, so Remember in Knowledge is offered.
     remember: bool = False
+    # The data sources a conversation in it may use ("database", "dropbox").
+    sources: list[DataSource] = []
 
 
 class PlanSectionOut(BaseModel):
@@ -184,7 +205,10 @@ def build_conversations_router(
     models: Callable[[], Awaitable[list[str]]],
     allowed_models: tuple[str, ...] | None = None,
     titles: TitleWriter | None = None,
+    processed_ready: Callable[[], str | None] | None = None,
 ) -> APIRouter:
+    """`processed_ready()` is why the processed data can't be used now, or
+    None when it can (dropbox/service.py); without it, it never can."""
     router = APIRouter(prefix="/api", tags=["conversations"])
 
     def name_after_first_question(conversation: Conversation, question: str) -> None:
@@ -201,7 +225,22 @@ def build_conversations_router(
         writer.start(conversation.id, write)
 
     def out(conversation: Conversation) -> ConversationOut:
-        return ConversationOut(**conversation.__dict__, busy=sessions.is_busy(conversation.id))
+        fields = {**conversation.__dict__, "data_sources": list(sessions.sources_of(conversation))}
+        return ConversationOut(**fields, busy=sessions.is_busy(conversation.id))
+
+    def checked_sources(mode_id: str, asked: Sequence[str]) -> tuple[str, ...]:
+        """The sources asked for, in a fixed order, if this mode can use them now."""
+        mode = MODES[mode_id]
+        sources = tuple(s for s in ("database", "dropbox") if s in asked)
+        if any(s not in mode.sources for s in sources):
+            raise HTTPException(
+                422, f"{mode.label} conversations can't use the processed data (Dropbox)."
+            )
+        if "dropbox" in sources:
+            why = processed_ready() if processed_ready else "The processed data isn't set up."
+            if why:
+                raise HTTPException(409, why)
+        return sources
 
     def get_or_404(conversation_id: str) -> Conversation:
         conversation = store.get(conversation_id)
@@ -223,6 +262,7 @@ def build_conversations_router(
                 attachments=m.attachments,
                 question=m.question,
                 remember="suggest_kb_update" in m.allowed_tools,
+                sources=[s for s in ("database", "dropbox") if s in m.sources],
             )
             for m in MODES.values()
         ]
@@ -249,6 +289,9 @@ def build_conversations_router(
         model = body.model or default_model
         if not model_allowed(model, allowed_models):
             raise HTTPException(422, f"{model!r} isn't approved for DataLab.")
+        sources = (
+            checked_sources(mode.id, body.data_sources) if body.data_sources else ("database",)
+        )
         # The rigor review is on by default in Analysis mode.
         conversation = store.create(
             kind=mode.kind,
@@ -256,6 +299,7 @@ def build_conversations_router(
             title=body.title,
             model=model,
             rigor_review=mode.id == "analysis",
+            data_sources=sources,
         )
         return out(conversation)
 
@@ -264,8 +308,17 @@ def build_conversations_router(
         return out(get_or_404(conversation_id))
 
     @router.patch("/conversations/{conversation_id}")
-    def change_conversation(conversation_id: str, body: ConversationChange) -> ConversationOut:
-        get_or_404(conversation_id)
+    async def change_conversation(
+        conversation_id: str, body: ConversationChange
+    ) -> ConversationOut:
+        conversation = get_or_404(conversation_id)
+        if body.data_sources is not None:
+            sources = checked_sources(conversation.mode, body.data_sources)
+            if sources != sessions.sources_of(conversation):
+                try:
+                    await sessions.change_sources(conversation, sources)
+                except Busy as error:
+                    raise HTTPException(409, str(error)) from error
         if body.rigor_review and body.express:
             raise HTTPException(422, "Express and the rigor review can't both be on: choose one.")
         if body.rigor_review is not None or body.express is not None:
@@ -434,6 +487,23 @@ def build_conversations_router(
                 message=r.message,
             )
             for r in access_log.for_session(conversation_id)
+        ]
+
+    @router.get("/conversations/{conversation_id}/files-accessed")
+    def files_accessed(conversation_id: str) -> list[FileLoadOut]:
+        """The processed-data files DataLab fetched for its agent, or refused."""
+        get_or_404(conversation_id)
+        return [
+            FileLoadOut(
+                id=r.id,
+                started_at=r.started_at,
+                status=r.status,
+                path=r.path,
+                size=r.size,
+                elapsed_ms=r.elapsed_ms,
+                message=r.message,
+            )
+            for r in access_log.files_for_session(conversation_id)
         ]
 
     return router

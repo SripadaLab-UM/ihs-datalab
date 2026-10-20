@@ -247,6 +247,162 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/files-accessed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Files Accessed
+         * @description The processed-data files DataLab fetched for its agent, or refused.
+         */
+        get: operations["files_accessed_api_conversations__conversation_id__files_accessed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Status */
+        get: operations["get_status_api_processed_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/connect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Connect */
+        post: operations["connect_api_processed_connect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/connect/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish */
+        post: operations["finish_api_processed_connect_finish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/connect/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel */
+        post: operations["cancel_api_processed_connect_cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/disconnect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disconnect */
+        post: operations["disconnect_api_processed_disconnect_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Folders */
+        get: operations["folders_api_processed_folders_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/folder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Choose */
+        post: operations["choose_api_processed_folder_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/processed/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh */
+        post: operations["refresh_api_processed_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/files": {
         parameters: {
             query?: never;
@@ -2842,6 +2998,11 @@ export interface components {
             /** Skipped */
             skipped: components["schemas"]["SkippedOut"][];
         };
+        /** ChooseIn */
+        ChooseIn: {
+            /** Id */
+            id: string;
+        };
         /** CodeDiffOut */
         CodeDiffOut: {
             /** Path */
@@ -2884,6 +3045,11 @@ export interface components {
             versions: components["schemas"]["CodeVersionOut"][];
             /** Current */
             current: boolean;
+        };
+        /** CodeIn */
+        CodeIn: {
+            /** Code */
+            code: string;
         };
         /** CodeListingOut */
         CodeListingOut: {
@@ -2976,6 +3142,8 @@ export interface components {
             express?: boolean | null;
             /** Title */
             title?: string | null;
+            /** Data Sources */
+            data_sources?: ("database" | "dropbox")[] | null;
         };
         /** ConversationOut */
         ConversationOut: {
@@ -3000,6 +3168,8 @@ export interface components {
             rigor_review: boolean;
             /** Express */
             express: boolean;
+            /** Data Sources */
+            data_sources: ("database" | "dropbox")[];
             /** Busy */
             busy: boolean;
         };
@@ -3535,6 +3705,23 @@ export interface components {
              */
             resolved: boolean;
         };
+        /** FileLoadOut */
+        FileLoadOut: {
+            /** Id */
+            id: string;
+            /** Started At */
+            started_at: string;
+            /** Status */
+            status: string;
+            /** Path */
+            path: string;
+            /** Size */
+            size: number | null;
+            /** Elapsed Ms */
+            elapsed_ms: number | null;
+            /** Message */
+            message: string | null;
+        };
         /** FileOut */
         FileOut: {
             /** Path */
@@ -3650,6 +3837,15 @@ export interface components {
             message: string;
             /** Line */
             line?: number | null;
+        };
+        /** FolderOut */
+        FolderOut: {
+            /** Id */
+            id: string;
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
         };
         /** FolderTestOut */
         FolderTestOut: {
@@ -3929,6 +4125,11 @@ export interface components {
              * @default false
              */
             remember: boolean;
+            /**
+             * Sources
+             * @default []
+             */
+            sources: ("database" | "dropbox")[];
         };
         /** ModelKeyIn */
         ModelKeyIn: {
@@ -3996,6 +4197,8 @@ export interface components {
             title: string;
             /** Model */
             model?: string | null;
+            /** Data Sources */
+            data_sources?: ("database" | "dropbox")[] | null;
         };
         /**
          * NewDropColumns
@@ -4815,6 +5018,35 @@ export interface components {
              */
             other_rules: string[];
         };
+        /** ProcessedOut */
+        ProcessedOut: {
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "dropbox" | "practice" | "off";
+            /** Configured */
+            configured: boolean;
+            /** Ready */
+            ready: boolean;
+            /** Problem */
+            problem?: string | null;
+            sign_in?: components["schemas"]["SignInOut"] | null;
+            /** Folder */
+            folder?: string | null;
+            /**
+             * Files
+             * @default 0
+             */
+            files: number;
+            /**
+             * Bytes
+             * @default 0
+             */
+            bytes: number;
+            /** Indexed At */
+            indexed_at?: string | null;
+        };
         /** ProposalDetail */
         ProposalDetail: {
             proposal: components["schemas"]["ProposalOut"];
@@ -5228,6 +5460,20 @@ export interface components {
             seen: string | null;
             /** Findings */
             findings: string[];
+        };
+        /** SignInOut */
+        SignInOut: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "signed out" | "waiting" | "signed in" | "failed";
+            /** Authorize Url */
+            authorize_url?: string | null;
+            /** Account */
+            account?: string | null;
+            /** Message */
+            message?: string | null;
         };
         /** SkippedOut */
         SkippedOut: {
@@ -6641,6 +6887,223 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    files_accessed_api_conversations__conversation_id__files_accessed_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileLoadOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_status_api_processed_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessedOut"];
+                };
+            };
+        };
+    };
+    connect_api_processed_connect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    finish_api_processed_connect_finish_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_api_processed_connect_cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    disconnect_api_processed_disconnect_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignInOut"];
+                };
+            };
+        };
+    };
+    folders_api_processed_folders_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderOut"][];
+                };
+            };
+        };
+    };
+    choose_api_processed_folder_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChooseIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessedOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_api_processed_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProcessedOut"];
                 };
             };
         };

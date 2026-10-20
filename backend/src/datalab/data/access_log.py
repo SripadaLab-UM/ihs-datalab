@@ -1,4 +1,5 @@
-"""Records of every query: the Data accessed panel and the audit log.
+"""Records of every query and every processed-data file fetched: the Data
+accessed panel and the audit log.
 
 Two stores, on purpose:
 - the `queries` table keeps the full record (SQL text, bind values) for the
@@ -61,6 +62,22 @@ class QueryRecord:
     result_path: str | None
     message: str | None
     origin: Origin = "conversation"
+
+
+@dataclass(frozen=True)
+class FileLoad:
+    """A file from the processed data that DataLab fetched for an agent."""
+
+    id: str
+    session_id: str
+    started_at: str
+    finished_at: str | None
+    status: str
+    path: str
+    size: int | None
+    content_hash: str | None
+    elapsed_ms: int | None
+    message: str | None
 
 
 class AccessLog:
@@ -212,6 +229,92 @@ class AccessLog:
         }
         with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
+
+    # Files from the processed data (dropbox/) ----------------------------
+
+    def file_started(self, *, load_id: str, session_id: str, path: str) -> None:
+        """A file DataLab is about to fetch for a conversation's agent."""
+        check_owner("conversation", session_id)
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO file_loads (id, session_id, started_at, status, path) "
+                "VALUES (?, ?, ?, 'running', ?)",
+                (load_id, session_id, _now(), path),
+            )
+
+    def file_finished(
+        self,
+        load_id: str,
+        *,
+        status: str,
+        size: int | None = None,
+        content_hash: str | None = None,
+        elapsed_ms: int | None = None,
+        message: str | None = None,
+        cached: bool = False,
+    ) -> None:
+        """How fetching it ended. The audit log gets metadata only: a
+        fingerprint of the path, never the path (it may name a participant)."""
+        with self._lock:
+            self._db.execute(
+                "UPDATE file_loads SET finished_at = ?, status = ?, size = ?, content_hash = ?, "
+                "elapsed_ms = ?, message = ? WHERE id = ?",
+                (_now(), status, size, content_hash, elapsed_ms, message, load_id),
+            )
+            row = self._db.execute("SELECT * FROM file_loads WHERE id = ?", (load_id,)).fetchone()
+            if row is None:
+                return
+            entry = {
+                "ts": row["finished_at"],
+                "event": "file_load",
+                "load_id": load_id,
+                "session_id": row["session_id"],
+                "status": status,
+                "path_sha256": hashlib.sha256(row["path"].encode()).hexdigest(),
+                "bytes": size,
+                "elapsed_ms": elapsed_ms,
+                **({"cached": True} if cached else {}),
+            }
+            with self._audit_file.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry) + "\n")
+
+    def file_refused(self, *, load_id: str, session_id: str, path: str, reason: str) -> None:
+        """A file the agent asked for that DataLab wouldn't fetch."""
+        self.file_started(load_id=load_id, session_id=session_id, path=path)
+        self.file_finished(load_id, status="refused", message=reason)
+
+    def files_for_session(self, session_id: str) -> list[FileLoad]:
+        """A conversation's file loads, oldest first (its Data accessed panel)."""
+        check_owner("conversation", session_id)
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM file_loads WHERE session_id = ? ORDER BY started_at", (session_id,)
+            ).fetchall()
+        return [
+            FileLoad(
+                id=r["id"],
+                session_id=r["session_id"],
+                started_at=r["started_at"],
+                finished_at=r["finished_at"],
+                status=r["status"],
+                path=r["path"],
+                size=r["size"],
+                content_hash=r["content_hash"],
+                elapsed_ms=r["elapsed_ms"],
+                message=r["message"],
+            )
+            for r in rows
+        ]
+
+    def end_cut_off_loads(self) -> int:
+        """End the file loads a previous run of DataLab left running (at startup)."""
+        with self._lock:
+            rows = self._db.execute("SELECT id FROM file_loads WHERE status = 'running'").fetchall()
+        for row in rows:
+            self.file_finished(
+                row["id"], status="failed", message="DataLab stopped before it finished."
+            )
+        return len(rows)
 
     def for_session(self, session_id: str) -> list[QueryRecord]:
         """A conversation's queries (its Data accessed panel)."""

@@ -85,6 +85,12 @@ class SessionPaths:
         return self.root / "oracle"
 
     @property
+    def processed_files(self) -> Path:
+        # Processed-data files DataLab fetched for the agent (dropbox/service.py),
+        # mounted read-only at /data/dropbox when the conversation uses them.
+        return self.root / "dropbox"
+
+    @property
     def checkpoints(self) -> Path:
         # Outside every folder the container can see.
         return self.root / "checkpoints"
@@ -111,7 +117,13 @@ class SessionPaths:
         return self.root / "codex-config.toml"
 
     def create(self) -> None:
-        for folder in (self.work, self.work / "outputs", self.codex_home, self.oracle_results):
+        for folder in (
+            self.work,
+            self.work / "outputs",
+            self.codex_home,
+            self.oracle_results,
+            self.processed_files,
+        ):
             folder.mkdir(parents=True, exist_ok=True)
 
     def prepare_config_mountpoint(self) -> None:
@@ -182,8 +194,12 @@ class SessionContainers:
         # More `docker run` mount arguments, read when the agent starts: the
         # conversation's attached inputs, all read-only (see inputs.py).
         extra_mounts: Callable[[], list[str]] | None = None,
+        # Whether the conversation uses the processed data: its fetched files
+        # are mounted read-only at /data/dropbox (data sessions only).
+        processed: bool = False,
     ) -> None:
         self._extra_mounts = extra_mounts
+        self.processed = processed
         self.session_id = session_id
         self.kind: SessionKind = kind
         self.paths = paths
@@ -365,6 +381,8 @@ class SessionContainers:
         ]  # fmt: skip
         if self.kind == "data":
             mounts += ["-v", f"{self.paths.oracle_results}:/data/oracle:ro"]
+            if self.processed:
+                mounts += ["-v", f"{self.paths.processed_files}:/data/dropbox:ro"]
         if self._extra_mounts:
             # Checks the disk (and maybe slow cloud folders): not on the event loop.
             mounts += await asyncio.to_thread(self._extra_mounts)

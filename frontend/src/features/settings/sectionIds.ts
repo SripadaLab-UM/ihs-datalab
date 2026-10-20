@@ -18,6 +18,9 @@ export const DEFAULT_SECTION: SettingsSectionId = "connections";
 /** GitHub's place in Connections, where the toolbar's GitHub entry links. */
 export const GITHUB_ANCHOR = "connection-github";
 
+/** The processed data's place in Connections, where the new-conversation dialog links. */
+export const PROCESSED_ANCHOR = "connection-processed";
+
 /** Where the last section opened is remembered, in this browser only. */
 export const LAST_SECTION_KEY = "datalab.settings.section";
 
@@ -40,6 +43,7 @@ const ANCHORS: Record<string, SettingsSectionId> = {
   "connection-github": "connections",
   "connection-umgpt": "connections",
   "connection-database": "connections",
+  "connection-processed": "connections",
   "updates-check": "updates",
   diagnostics: "about",
 };

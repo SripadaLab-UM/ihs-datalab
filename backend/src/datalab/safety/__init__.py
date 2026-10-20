@@ -40,6 +40,7 @@ import httpx
 from datalab.config import Settings
 from datalab.credentials import MissingCredential, oracle_password
 from datalab.data.oracle import NotSyntheticDatabase, OracleDatabase
+from datalab.dropbox.auth import saved_token_values as saved_dropbox_tokens
 from datalab.repos.github import saved_token_values
 from datalab.safety import policy
 from datalab.safety.canary import Canaries
@@ -106,8 +107,11 @@ class SafetyCheck:
         previews: Previews | None = None,
         # The saved GitHub tokens, to look for (never shown).
         github_tokens: Callable[[], list[str]] = saved_token_values,
+        # The saved Dropbox tokens, likewise.
+        dropbox_tokens: Callable[[], list[str]] = saved_dropbox_tokens,
     ) -> None:
         self._github_tokens = github_tokens
+        self._dropbox_tokens = dropbox_tokens
         self._settings = settings
         self._tokens = tokens
         self._canaries = canaries
@@ -295,6 +299,7 @@ class SafetyCheck:
 
         results.append(await self._no_secrets_in(probe))
         results.append(await self._no_github_token_in(probe, kind="data"))
+        results.append(await self._no_dropbox_token_in(probe, kind="data"))
         results.append(await self._locked_down(probe, kind="data"))
         return results
 
@@ -359,6 +364,7 @@ class SafetyCheck:
             )
         )
         results.append(await self._no_github_token_in(probe, kind="research"))
+        results.append(await self._no_dropbox_token_in(probe, kind="research"))
         results.append(await self._locked_down(probe, kind="research"))
         return results
 
@@ -449,6 +455,46 @@ class SafetyCheck:
             if problems
             else "Checked its environment, command, mounts and files, and the repo clones."
             + _unread(unreadable),
+        )
+
+    async def _no_dropbox_token_in(self, probe: _Probe, *, kind: str) -> CheckResult:
+        """The Dropbox token is used only by DataLab's own process, which
+        fetches files for the agent. It must not be in the container's
+        environment, command, or any file it can see."""
+        check_id = f"no_dropbox_token_in_{kind}_session"
+        label = f"Your Dropbox sign-in never reaches a {kind} session"
+        try:
+            known = [s for s in self._dropbox_tokens() if len(s) >= 8]
+        except Exception:  # no usable keychain: nothing saved to look for
+            known = []
+        if not known:
+            return CheckResult(
+                check_id,
+                PROMISE_NETWORK,
+                label,
+                "skip",
+                "Dropbox isn't connected, so there's no token to look for.",
+                required=False,
+            )
+        inspect = await probe.inspect()
+        config = inspect.get("Config", {})
+        started_with = json.dumps([config.get("Env"), config.get("Cmd"), inspect.get("Args")])
+        problems = []
+        if any(s in started_with for s in known):
+            problems.append("in the container's environment or command")
+        seen, unreadable = _files(probe.paths.root)
+        held = [_holds(path, known) for path in seen]
+        if any(held):
+            problems.append("in a file the container can see")
+        unreadable += held.count(None)
+        return _result(
+            check_id,
+            PROMISE_NETWORK,
+            label,
+            not problems,
+            "Found: " + "; ".join(problems)
+            if problems
+            else "Checked its environment, command and files." + _unread(unreadable),
         )
 
     async def _locked_down(self, probe: _Probe, *, kind: str) -> CheckResult:

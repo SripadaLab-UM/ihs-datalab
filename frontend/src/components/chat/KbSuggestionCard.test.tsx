@@ -41,7 +41,7 @@ const edit = (more: Partial<KbEdit> = {}): KbEdit => ({
   upstream_changed: false, theirs: null, theirs_state: "text", ...more,
 }); // prettier-ignore
 const mode = (id: string, remember: boolean): Mode => ({
-  id, label: id, kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "", remember,
+  id, label: id, kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "", remember, sources: ["database"],
 }); // prettier-ignore
 
 function Where() {

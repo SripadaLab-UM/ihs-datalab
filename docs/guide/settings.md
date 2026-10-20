@@ -65,6 +65,10 @@ do about it.
 - **GitHub**: who is signed in, and each lab repository's state (in sync,
   behind, no access...), with **Sign in with GitHub**, **Switch account** and
   **Sign out**. See [Sign in to GitHub](github-sign-in.md).
+- **Processed data (Dropbox)**: the lab's cleaned files, with **Connect
+  Dropbox**, the folder chosen (**Use this folder**, **Change folder…**), how
+  many files it lists, **Refresh list** and **Disconnect**. See
+  [Use the lab's processed data](processed-data.md).
 
 The key and the password are kept in your computer's keychain. You can save
 or replace them here, but DataLab never shows them again, and the agent never

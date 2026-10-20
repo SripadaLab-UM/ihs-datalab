@@ -17,7 +17,8 @@ can't change afterwards.
 
 | | 🔒 **Data session** (default) | 🌐 **Research session** |
 |---|---|---|
-| Oracle database | Yes, read-only | No |
+| Oracle database | Yes, read-only, if the conversation uses it | No |
+| The lab's processed data (Dropbox) | Yes, read-only, if the conversation uses it: files DataLab fetched | No |
 | Attached files | Yes, read-only | Yes, with a warning that they may reach the internet |
 | Internet | **No.** U-M GPT only | Yes: web search, papers, package installs |
 | Use it for | Analysis, extraction, workflows | Literature, methods, trying new tools |
@@ -35,8 +36,9 @@ returns an answer and is then deleted.
 ## The promises
 
 1. **The AI can't touch anything else on your computer.**
-   The AI works in a sealed box. It sees only its own workspace and the files
-   or folders you attach, and it can't change the files you attach.
+   The AI works in a sealed box. It sees only its own workspace, the files
+   or folders you attach, and the processed-data files DataLab fetched for
+   it from the lab's folder you chose. It can't change any of them.
 
 2. **The AI can't change or damage the research database.**
    The AI reaches Oracle only through DataLab, using a read-only account. It
@@ -67,7 +69,9 @@ returns an answer and is then deleted.
 
 7. **You can see everything the AI accessed.**
    Each conversation has a **Data accessed** panel. It lists every query the
-   AI ran: which tables, when, how many rows, and where the result went.
+   AI ran: which tables, when, how many rows, and where the result went. It
+   also lists every processed-data file DataLab fetched for the AI, or
+   refused to.
 
 8. **You can check the first three.**
    The **Safety check** in Settings & Safety tests promises 1 to 3 live when
@@ -130,6 +134,17 @@ access. It never gains it.
 - Adding or removing an attachment restarts the conversation's container on
   its next message, because mounts are fixed when a container starts. The
   agent is told what changed.
+- **The lab's processed data (Dropbox) is never mounted.** Docker can't read
+  synced cloud folders reliably, and a synced Dropbox folder's online-only
+  files are empty placeholders anyway. DataLab's host process downloads one
+  file at a time through Dropbox's API, only when the agent asks for a file
+  in the chosen folder's list (a path outside it can't be named), checks its
+  size against the limit before downloading and its content hash after, and
+  places it in the conversation's own folder mounted read-only at
+  `/data/dropbox`. A conversation that doesn't use the processed data has no
+  such folder and no file tools; one that doesn't use the database has no
+  query or catalog tools (`backend/tests/test_processed_data.py`). Changing
+  a conversation's sources restarts its container, like an attachment.
 - Model-written code runs only inside containers, never in DataLab's host
   process.
 - **The host runs only DataLab's own code.** Scripts from the lab repos, such
@@ -291,6 +306,14 @@ access. It never gains it.
 - **The relay forwards exactly what it checked.** It re-serializes each
   request, and refuses one with duplicate keys, since parsers disagree about
   which copy wins.
+- **The Dropbox sign-in never leaves DataLab's host process.** DataLab uses
+  the lab's Dropbox app with PKCE, so it holds no app secret. The person's
+  tokens are kept in the OS keychain; only the host process uses them, to
+  list the chosen folder and download files. The app may only read (file
+  names and contents, and basic account details to find the team folders),
+  never write. The Safety check looks for the token in both session types'
+  containers (environment, command, files). **Disconnect** revokes it on
+  Dropbox.
 - **Agent containers sit on an internal Docker network with no route out.**
   Their only exit is a small **gateway** that holds no secrets:
   - **data sessions:** the gateway forwards only to the relay and to DataLab's
@@ -359,6 +382,11 @@ access. It never gains it.
   and the result's file location.
 - The log is metadata only. It never contains result values.
 - Workflow runs log to the same audit log, attributed to the run.
+- Every processed-data file DataLab fetches for an agent, or refuses to, is
+  in the conversation's **Data accessed** panel with its path, size and
+  timing. The audit log records it with a fingerprint of the path, never the
+  path itself, since a file name may name a participant
+  (`backend/tests/test_processed_data.py`).
 
 ### Shared knowledge base
 

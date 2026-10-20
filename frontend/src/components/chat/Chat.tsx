@@ -8,7 +8,7 @@ import { KnownFilesContext, OpenFileContext } from "@/lib/files";
 
 import { ASSISTANTS, type AssistantId, CompactContext } from "./assistants";
 import { useFollowLatest, useRefreshOnEvents } from "./chatHooks";
-import { ChatHeader, CompactHeader, ExpressSwitch, RigorSwitch, Title } from "./ChatControls";
+import { ChatHeader, CompactHeader, ExpressSwitch, RigorSwitch, SourcesSelect, Title } from "./ChatControls";
 import { Composer, type ComposerNote } from "./Composer";
 import { useEffortChoice, useExpressEffort } from "./effort";
 import { CompactIntro, EmptyState } from "./Intro";
@@ -189,6 +189,7 @@ export function Chat({
                   onSend={(text) => sendMessage(text, false, true)}
                   busy={running || sending}
                 />
+                {conversation.kind === "data" && <SourcesSelect conversation={conversation} />}
                 <ExpressSwitch conversation={conversation} />
                 {conversation.kind === "data" && <RigorSwitch conversation={conversation} />}
                 {headerActions}

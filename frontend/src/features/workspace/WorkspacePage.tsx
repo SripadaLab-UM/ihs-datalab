@@ -3,13 +3,15 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { api, type Conversation, type Mode } from "@/api/client";
+import { api, type Conversation, type DataSource, type Mode } from "@/api/client";
+import { processedApi } from "@/api/processed";
 import { DockedChat } from "@/components/chat/DockedChat";
 import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
 import { SHOW_STEP } from "@/components/chat/showStep";
 import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { settingsLink } from "@/features/settings/highlight";
+import { PROCESSED_ANCHOR } from "@/features/settings/sectionIds";
 import { useConnections, whilePracticeDatabaseStarts } from "@/features/toolbar/ConnectionShortcuts";
 import { type OpenFile, OpenFileContext } from "@/lib/files";
 
@@ -319,6 +321,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const models = useQuery({ queryKey: ["models"], queryFn: api.models, staleTime: 5 * 60_000 });
   const [mode, setMode] = useState("analysis");
   const [model, setModel] = useState("");
+  const [sources, setSources] = useState<SourceChoice>("database");
   const [choosingModel, setChoosingModel] = useState(false);
   // The default is offered while the list loads, or if U-M can't be asked.
   const choices = !models.data
@@ -331,7 +334,8 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const create = useMutation({
-    mutationFn: () => api.createConversation(mode, model || undefined),
+    mutationFn: () =>
+      api.createConversation(mode, model || undefined, offersProcessed ? SOURCE_LISTS[sources] : undefined),
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       navigate(`/workspace/${conversation.id}`);
@@ -340,6 +344,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   });
 
   const chosen = modes.data?.find((m) => m.id === mode);
+  const offersProcessed = Boolean(chosen?.sources?.includes("dropbox"));
   const field = "mt-1.5 w-full rounded-xl border border-line bg-canvas px-3 py-2 text-sm outline-none focus:border-accent";
   const label = "text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint";
   return (
@@ -389,6 +394,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
             </button>
           </p>
         )}
+        {offersProcessed && <SourcePicker value={sources} onChange={setSources} />}
         {chosen && (
           <div
             className={clsx(
@@ -400,7 +406,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
             <span>
               {chosen.kind === "research"
                 ? "Research sessions can use the web but have no connection to the study database. Anything you attach may reach the web."
-                : "Data sessions can query the study database, read-only. Websites are blocked; the model runs on U-M's approved GPT service."}
+                : `${DATA_NOTES[offersProcessed ? sources : "database"]} Websites are blocked; the model runs on U-M's approved GPT service.`}
             </span>
           </div>
         )}
@@ -415,6 +421,76 @@ function NewConversation({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+type SourceChoice = "database" | "dropbox" | "both";
+
+const SOURCE_LISTS: Record<SourceChoice, DataSource[]> = {
+  database: ["database"],
+  dropbox: ["dropbox"],
+  both: ["database", "dropbox"],
+};
+
+const DATA_NOTES: Record<SourceChoice, string> = {
+  database: "Data sessions can query the study database, read-only.",
+  dropbox: "This conversation reads the lab's processed data, fetching only the files it needs, read-only. It has no database.",
+  both: "This conversation can query the study database and read the lab's processed data, read-only.",
+};
+
+const SOURCE_OPTIONS: { id: SourceChoice; label: string; hint: string }[] = [
+  { id: "database", label: "Study database", hint: "The raw study data, with SQL" },
+  { id: "dropbox", label: "Processed data", hint: "The lab's cleaned files in Dropbox" },
+  { id: "both", label: "Both", hint: "Files first, with the database to check them" },
+];
+
+/** Where the conversation's data comes from. The processed data needs Dropbox connected
+ *  and its folder chosen (Settings → Connections), except on the practice DataLab. */
+function SourcePicker({ value, onChange }: { value: SourceChoice; onChange: (next: SourceChoice) => void }) {
+  const processed = useQuery({ queryKey: ["processed-status"], queryFn: processedApi.status });
+  const ready = processed.data?.ready ?? false;
+  useEffect(() => {
+    if (processed.data && !ready && value !== "database") onChange("database");
+  }, [processed.data, ready, value, onChange]);
+  return (
+    <fieldset>
+      <legend className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Data</legend>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        {SOURCE_OPTIONS.map((option) => {
+          const off = option.id !== "database" && !ready;
+          return (
+            <label
+              key={option.id}
+              className={clsx(
+                "flex cursor-pointer flex-col gap-0.5 rounded-xl border p-2.5 text-left text-sm",
+                value === option.id ? "border-ink" : "border-line",
+                off && "cursor-not-allowed opacity-50",
+              )}
+            >
+              <span className="flex items-center gap-1.5">
+                <input
+                  type="radio"
+                  name="data-source"
+                  checked={value === option.id}
+                  disabled={off}
+                  onChange={() => onChange(option.id)}
+                />
+                {option.label}
+              </span>
+              <span className="text-xs text-muted">{option.hint}</span>
+            </label>
+          );
+        })}
+      </div>
+      {processed.data && !ready && (
+        <p className="mt-1.5 text-xs text-muted">
+          {processed.data.problem ?? "The processed data isn't set up."}{" "}
+          <Link {...settingsLink("connections", PROCESSED_ANCHOR)} className="underline">
+            Set it up
+          </Link>
+        </p>
+      )}
+    </fieldset>
   );
 }
 

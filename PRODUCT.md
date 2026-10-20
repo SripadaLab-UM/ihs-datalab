@@ -57,7 +57,8 @@ updating: [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 | Science features: plans, claim tracing, provenance, rigor review | Typed analysis plans (frozen, hashed, revisable), numbers traced to the turn's outputs, "How was this made?", and a rigor review switch (on by default in Analysis). Cohort-confirmation runs, a robustness battery and IHS rigor skills are deferred | implemented |
 | Export is a user action only | The one exception is a workflow a person saved after review and runs, which delivers to its configured destination | implemented |
 | PHI is allowed on local disks | Users' machines are PHI-approved. Clean-up exists for tidiness, not as a safety control | implemented |
-| Exports go to user-chosen local folders | Dated subfolders with a manifest. Dropbox is just a local synced folder (no API), found automatically | implemented |
+| Exports go to user-chosen local folders | Dated subfolders with a manifest. For exports, Dropbox is just a local synced folder (no API), found automatically | implemented |
+| The lab's processed data (Dropbox) is a second data source | Each Analysis, Data extraction or Data engineering conversation chooses the study database, the processed data, or both; its token and folders follow. DataLab reads the folder through Dropbox's API with the lab's read-only app (PKCE, each person signed in as themselves, the token in the keychain), lists it by metadata, and downloads one file at a time for the agent into `/data/dropbox`, logged in Data accessed. A synced folder isn't used: its online-only files are empty placeholders a read doesn't download. Practice has a synthetic folder. The agent-built wiki of the folder is the next step | implemented (source); planned (schema catalog, wiki) |
 | The practice DataLab is a complete install | Its own profile, data folder and launcher; it sets up and starts its synthetic Oracle database itself; the 8 routines ship as read-only built-in workflows; no GitHub, no host files, practice-only exports | implemented |
 | Help is one source of words | `docs/guide/*.md` is bundled as the in-app Help and its tooltips; `docs/USER_GUIDE.md` only lists it | implemented |
 
@@ -71,13 +72,17 @@ tool list, and DataLab's data tools refuse any other
 Tool groups: **catalog** is `search_catalog`, `describe_table`, `join_paths`
 and `find_concept` (metadata only). **All** is catalog plus `query`,
 `check_workflow`, `propose_plan` and `ask_research_helper`: every tool but
-the opt-in `propose_sql` and `suggest_kb_update`.
+the opt-in `propose_sql`, `suggest_kb_update` and **files**.
+**Files** is `list_data_files`, `describe_data_file` and `load_data_file`,
+the lab's processed data. A conversation's data sources narrow its tools
+further: without the database, no catalog, `query`, `propose_sql` or
+`check_workflow`; without the processed data, no files.
 
 | Mode | Session | Opened from | `ihs-data` tools | Attach files | Default effort | Rigor review | What Express changes | A person reviews before it's saved or run |
 |---|---|---|---|---|---|---|---|---|
-| Analysis | data | Workspace (the default) | all + `suggest_kb_update` | yes | Balanced | **on** | no plan, no pilot-then-ask, no research helper (both refused server-side); a brief answer; Quick effort; the rigor review off | `/work/kb` edits and Knowledge suggestions |
-| Data extraction | data | Workspace | all + `suggest_kb_update` | yes | Balanced | off | as Analysis | as Analysis |
-| Data engineering | data | Workspace | all + `suggest_kb_update` | yes | Balanced | off | as Analysis | `/work/pipelines` changes become a Pipelines proposal; `/work/kb` edits |
+| Analysis | data | Workspace (the default) | all + `suggest_kb_update` + files (if chosen) | yes | Balanced | **on** | no plan, no pilot-then-ask, no research helper (both refused server-side); a brief answer; Quick effort; the rigor review off | `/work/kb` edits and Knowledge suggestions |
+| Data extraction | data | Workspace | all + `suggest_kb_update` + files (if chosen) | yes | Balanced | off | as Analysis | as Analysis |
+| Data engineering | data | Workspace | all + `suggest_kb_update` + files (if chosen) | yes | Balanced | off | as Analysis | `/work/pipelines` changes become a Pipelines proposal; `/work/kb` edits |
 | SQL drafting | data | SQL Playground's chat | catalog + `query`, `propose_sql`, `ask_research_helper` | no | Balanced | off (docked chats have no switch) | brief; no research helper; the proposal is prepared as usual | the person uses, edits and runs the proposed query |
 | Pipelines | data | Pipelines' chat | catalog + `query`, `check_workflow`, `ask_research_helper` | no | Balanced | off | brief; no research helper; the proposal as usual | the proposal is reviewed, tested and saved in Pipelines |
 | Workflow authoring | data | Workflows' chat, New workflow | catalog + `query`, `check_workflow`, `ask_research_helper` (no analysis plans) | no | Balanced | off | as Pipelines, and it never guesses a destination or small-cell rule | a Pipelines proposal, or New workflow's review, test and Save |
@@ -111,7 +116,13 @@ results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
   research helper; app skills (`images/agent/skills`) and the `profile-data`
   and `render-report` scripts; the `join_paths` and `find_concept` helpers;
   Suggested Knowledge updates and Remember in Knowledge (the person says
-  what to keep; the agent writes it up as a draft edit to review).
+  what to keep; the agent writes it up as a draft edit to review); the
+  lab's processed data as a data source (Settings → Connections → Processed
+  data, the **Data** choice in New conversation and the chat header, file
+  loads in Queries).
+- planned: the processed data's schema catalog (`generated/processed`) and
+  its agent-built wiki (a `processed/` section of the knowledge base, with a
+  cataloguing queue); knowledge suggestions citing file loads as evidence.
 - planned: "Open research session" from a data session.
 - deferred: cohort plan draft and survey dictionary search as tools (their
   content can live in the knowledge base instead).

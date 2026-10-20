@@ -12,6 +12,8 @@ export type Models = Schemas["ModelsOut"];
 export type QueryRecord = Schemas["QueryRecordOut"];
 export type Effort = NonNullable<Schemas["NewMessage"]["effort"]>;
 export type PlanSchema = Schemas["PlanSchemaOut"];
+export type FileLoad = Schemas["FileLoadOut"];
+export type DataSource = Conversation["data_sources"][number];
 
 export const conversationsApi = {
   modes: () => request<Mode[]>("/api/modes"),
@@ -19,11 +21,17 @@ export const conversationsApi = {
   models: () => request<Models>("/api/models"),
   conversations: () => request<Conversation[]>("/api/conversations"),
   conversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
-  // No title: DataLab writes one from the first question.
-  createConversation: (mode: string, model?: string) =>
+  // No title: DataLab writes one from the first question. No sources: the database.
+  createConversation: (mode: string, model?: string, dataSources?: DataSource[]) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify({ mode, model }),
+      body: JSON.stringify(dataSources ? { mode, model, data_sources: dataSources } : { mode, model }),
+    }),
+  // Restarts the agent's container: its tools and folders follow the sources.
+  setSources: (id: string, dataSources: DataSource[]) =>
+    request<Conversation>(`/api/conversations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ data_sources: dataSources }),
     }),
   rename: (id: string, title: string) =>
     request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
@@ -52,6 +60,8 @@ export const conversationsApi = {
     request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify({ express: on }) }),
   stop: (id: string) => request<Conversation>(`/api/conversations/${id}/stop`, { method: "POST" }),
   dataAccessed: (id: string) => request<QueryRecord[]>(`/api/conversations/${id}/data-accessed`),
+  // The processed-data files DataLab fetched for the agent (or refused).
+  filesAccessed: (id: string) => request<FileLoad[]>(`/api/conversations/${id}/files-accessed`),
   /** Every event in a conversation (the API returns them 1,000 at a time). */
   allEvents: async (id: string) => {
     const all: { seq: number; type: string; data: Record<string, unknown> }[] = [];

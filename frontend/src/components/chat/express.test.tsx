@@ -51,7 +51,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 const base: Conversation = {
   id: "c1", kind: "data", mode: "analysis", title: "Steps", model: "gpt-5.5",
-  created_at: "", updated_at: "", rigor_review: true, express: false, busy: false,
+  created_at: "", updated_at: "", rigor_review: true, express: false, data_sources: ["database"], busy: false,
 }; // prettier-ignore
 
 function show(conversation: Conversation, assistant?: "sql" | "pipelines") {

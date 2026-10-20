@@ -15,9 +15,9 @@ const conversation = (mode: string) => ({ id: "c1", kind: "data", mode, title: "
 beforeEach(() => {
   vi.mocked(api.inputs).mockResolvedValue([]);
   vi.mocked(api.modes).mockResolvedValue([
-    { id: "knowledge", label: "Knowledge writing", kind: "data", description: "", starters: [], tab_only: true, queries: false, attachments: false, question: "?", remember: false },
-    { id: "workflows", label: "Workflow authoring", kind: "data", description: "", starters: [], tab_only: true, queries: true, attachments: false, question: "?", remember: false },
-    { id: "extraction", label: "Data extraction", kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "?", remember: true },
+    { id: "knowledge", label: "Knowledge writing", kind: "data", description: "", starters: [], tab_only: true, queries: false, attachments: false, question: "?", remember: false, sources: ["database"] },
+    { id: "workflows", label: "Workflow authoring", kind: "data", description: "", starters: [], tab_only: true, queries: true, attachments: false, question: "?", remember: false, sources: ["database"] },
+    { id: "extraction", label: "Data extraction", kind: "data", description: "", starters: [], tab_only: false, queries: true, attachments: true, question: "?", remember: true, sources: ["database"] },
   ]); // prettier-ignore
 });
 

@@ -188,6 +188,31 @@ UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 
 
 @dataclass(frozen=True)
+class DropboxSettings:
+    """`[dropbox]`: the lab's processed study data in Dropbox (dropbox/).
+
+    None means not configured: conversations use the database only. The
+    practice profile never uses Dropbox; it has a synthetic folder instead.
+    """
+
+    # The lab's Dropbox app, for signing in with PKCE. Its app key isn't a
+    # secret; DataLab holds no app secret for it.
+    app_key: str | None = None
+    # The largest file DataLab fetches for an agent, and the most it keeps
+    # downloaded for this person (older files are dropped first).
+    max_file_bytes: int = 2 * 1024**3
+    max_cache_bytes: int = 20 * 1024**3
+
+    def __post_init__(self) -> None:
+        if self.app_key is not None and not re.fullmatch(r"[a-z0-9]{10,32}", self.app_key):
+            raise ValueError("dropbox.app_key must be a Dropbox app key, such as wz…")
+        if self.max_file_bytes < 1024**2:
+            raise ValueError("dropbox.max_file_bytes must be at least 1 MB")
+        if self.max_cache_bytes < self.max_file_bytes:
+            raise ValueError("dropbox.max_cache_bytes must be at least dropbox.max_file_bytes")
+
+
+@dataclass(frozen=True)
 class WindowsSettings:
     """`[windows]`: what DataLab on Windows tells people (windows_vm.py)."""
 
@@ -231,6 +256,7 @@ class Settings:
     workflows: WorkflowSettings = field(default_factory=WorkflowSettings)
     updates: UpdateSettings = field(default_factory=UpdateSettings)
     windows: WindowsSettings = field(default_factory=WindowsSettings)
+    dropbox: DropboxSettings = field(default_factory=DropboxSettings)
 
     @property
     def settings_file(self) -> Path:
@@ -363,6 +389,7 @@ def load_settings(profile: Profile | None = None) -> Settings:
         workflows=_section(WorkflowSettings, raw, "workflows"),
         updates=_section(UpdateSettings, raw, "updates"),
         windows=_section(WindowsSettings, raw, "windows"),
+        dropbox=_section(DropboxSettings, raw, "dropbox"),
     )
     return _check_models(settings)
 

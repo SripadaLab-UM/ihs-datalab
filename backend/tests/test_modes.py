@@ -8,6 +8,9 @@ from datalab.sessions import codex_config, modes
 from datalab.sessions.modes import CATALOG_TOOLS, MODES
 from datalab.workflows.model import load_workflow
 
+# The processed data's tools, off in every mode that doesn't name them.
+FILE_TOOL_NAMES = ("list_data_files", "describe_data_file", "load_data_file")
+
 
 def config(mode_id: str) -> dict:
     mode = MODES[mode_id]
@@ -61,11 +64,15 @@ def test_workflow_authoring_queries_like_data_extraction():
         "check_workflow",
         "ask_research_helper",
     }
-    assert workflows.tools_off == ("propose_plan", "propose_sql", "suggest_kb_update")
+    assert workflows.tools_off == (
+        "propose_plan", "propose_sql", "suggest_kb_update", *FILE_TOOL_NAMES
+    )  # fmt: skip
     assert (workflows.attachments, workflows.tab_only) == (False, True)
     assert extraction.tools_off == ("propose_sql",)
     server = config("workflows")["mcp_servers"]["ihs-data"]
-    assert server["disabled_tools"] == ["propose_plan", "propose_sql", "suggest_kb_update"]
+    assert server["disabled_tools"] == [
+        "propose_plan", "propose_sql", "suggest_kb_update", *FILE_TOOL_NAMES
+    ]  # fmt: skip
     assert config("workflows")["web_search"] == "disabled"
 
 
@@ -97,13 +104,13 @@ def test_knowledge_writing_has_the_catalog_only_and_no_attachments():
     server = config("knowledge")["mcp_servers"]["ihs-data"]
     assert server["disabled_tools"] == [
         "query", "check_workflow", "propose_plan", "ask_research_helper", "propose_sql",
-        "suggest_kb_update",
+        "suggest_kb_update", *FILE_TOOL_NAMES,
     ]  # fmt: skip
     assert config("knowledge")["web_search"] == "disabled"
     # Every other mode keeps its tools and attachments, all but the SQL tab's own.
     for other in set(MODES) - {"knowledge", "sql", "pipelines", "workflows"}:
         assert MODES[other].tools is None and "propose_sql" in MODES[other].tools_off
-        assert set(MODES[other].tools_off) <= {"propose_sql", "suggest_kb_update"}
+        assert set(MODES[other].tools_off) <= {"propose_sql", "suggest_kb_update", *FILE_TOOL_NAMES}
         assert MODES[other].queries and MODES[other].attachments
 
 
@@ -115,7 +122,7 @@ def test_only_the_sql_playgrounds_chat_proposes_sql():
     assert "propose_sql" in mode.allowed_tools
     assert [m.id for m in MODES.values() if "propose_sql" in m.allowed_tools] == ["sql"]
     assert config("sql")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
-        "check_workflow", "propose_plan", "suggest_kb_update"
+        "check_workflow", "propose_plan", "suggest_kb_update", *FILE_TOOL_NAMES
     ]  # fmt: skip
     text = mode.instructions
     assert "call `propose_sql` exactly once" in text
@@ -158,7 +165,7 @@ def test_the_pipelines_tabs_chat_explains_edits_and_tests_code():
     assert (mode.kind, mode.queries, mode.attachments, mode.tab_only) == ("data", True, False, True)
     assert mode.allowed_tools == CATALOG_TOOLS | {"query", "check_workflow", "ask_research_helper"}
     assert config("pipelines")["mcp_servers"]["ihs-data"]["disabled_tools"] == [
-        "propose_plan", "propose_sql", "suggest_kb_update"
+        "propose_plan", "propose_sql", "suggest_kb_update", *FILE_TOOL_NAMES
     ]  # fmt: skip
     assert config("pipelines")["web_search"] == "disabled"
     text = mode.instructions
