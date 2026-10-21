@@ -7,6 +7,12 @@ keywords: dropbox, processed data, files, cleaned, folder, data sources, databas
 
 # Use the lab's processed data
 
+> **Not in installed DataLab.** The lab's processed data will come with the
+> lab's central DataLab, which everyone opens in a browser, so that no one's
+> own Dropbox sign-in is kept on their computer. Until then, installed DataLab
+> (real and practice) works from the study database only, and shows nothing
+> described on this page.
+
 The lab keeps cleaned, processed study data in a shared Dropbox folder, made
 from the study database by the lab's pipelines. Analysts usually start
 there. A DataLab conversation can use those files as well as, or instead of,

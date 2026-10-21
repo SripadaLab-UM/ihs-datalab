@@ -153,9 +153,9 @@ class ProcessedData:
             "listing": self._listing,
             "listing_error": self._listing_error,
         }
-        if self._practice:
+        if self._practice and self._settings.dropbox.app_key:
             return Status("practice", True, None, **common)
-        if self.auth is None:
+        if self._practice or self.auth is None:
             return Status(
                 "off",
                 False,

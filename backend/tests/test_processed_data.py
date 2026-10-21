@@ -212,6 +212,22 @@ def test_choosing_another_folder_empties_the_list(connection):
 
 
 @pytest.fixture
+def settings(settings: Settings) -> Settings:
+    # Practice offers its synthetic folder only where the lab has a Dropbox
+    # app, as the real DataLab does: these tests are of a DataLab that has one.
+    return replace(settings, dropbox=DropboxSettings(app_key="abcdefghij12"))
+
+
+def test_practice_offers_nothing_without_the_labs_dropbox_app(settings, connection):
+    bare = replace(settings, dropbox=DropboxSettings(app_key=None))
+    data = ProcessedData(bare, connection, AccessLog(connection, settings.data_dir / "audit.jsonl"))
+    status = data.status()
+    assert status.source == "off" and not status.ready
+    with pytest.raises(NotAvailable):
+        data.start_refresh()
+
+
+@pytest.fixture
 def processed(settings: Settings, connection) -> ProcessedData:
     log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
     data = ProcessedData(settings, connection, log)
@@ -274,7 +290,7 @@ def test_a_file_over_the_limit_is_refused_before_fetching(settings, connection, 
     (root / "big" / "huge.csv").write_bytes(b"x" * (2 * 1024**2))
     (root / ".env").write_text("SECRET=1")
     small = replace(
-        settings, dropbox=DropboxSettings(max_file_bytes=1024**2, max_cache_bytes=1024**2)
+        settings, dropbox=replace(settings.dropbox, max_file_bytes=1024**2, max_cache_bytes=1024**2)
     )
     log = AccessLog(connection, settings.data_dir / "logs" / "audit.jsonl")
     data = ProcessedData(small, connection, log, practice_root=root)
@@ -863,6 +879,23 @@ def test_a_conversation_chooses_its_sources(app):
             {"from": ["database"], "to": ["dropbox"]}
         ]
         assert client.get(f"/api/conversations/{plain['id']}/files-accessed").json() == []
+
+
+def test_without_the_dropbox_app_nothing_offers_the_processed_data(settings, catalog):
+    # Installed DataLab, until the lab's central DataLab: no app key shipped.
+    real = replace(settings, profile="real", dropbox=DropboxSettings(app_key=None))
+    app = create_app(
+        real, database=FakeDatabase(), catalog=catalog, manage_containers=False, protect_api=False
+    )
+    with TestClient(app) as client:
+        assert client.get("/api/processed").json()["source"] == "off"
+        modes = client.get("/api/modes").json()
+        assert modes and all("dropbox" not in m["sources"] for m in modes)
+        assert any(m["sources"] == ["database"] for m in modes)
+        asked = client.post(
+            "/api/conversations", json={"mode": "analysis", "data_sources": ["dropbox"]}
+        )
+        assert asked.status_code == 409
 
 
 def test_settings_show_practices_folder(app):

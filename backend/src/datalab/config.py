@@ -191,8 +191,10 @@ UPDATE_CHANNELS = ("auto", "stable", "pre-release")
 class DropboxSettings:
     """`[dropbox]`: the lab's processed study data in Dropbox (dropbox/).
 
-    None means not configured: conversations use the database only. The
-    practice profile never uses Dropbox; it has a synthetic folder instead.
+    None means not configured: conversations use the database only, and
+    nothing in DataLab offers the processed data. The app key is also the
+    switch for practice DataLab, which never uses Dropbox but mirrors the
+    real one: with it, practice offers a synthetic folder instead.
     """
 
     # The lab's Dropbox app, for signing in with PKCE. Its app key isn't a
@@ -322,7 +324,7 @@ def _dropbox_table(profile: Profile, raw: dict) -> dict:
     get it by updating, with nothing to edit. The file's own value wins; a
     release value that isn't an app key is ignored (logged), never fatal."""
     table = raw.get("dropbox", {})
-    if not isinstance(table, dict) or "app_key" in table or profile == "practice":
+    if not isinstance(table, dict) or "app_key" in table:
         return raw
     lab = _release_info().get("lab")
     key = ((lab or {}).get("dropbox") or {}).get("app_key") if isinstance(lab, dict) else None

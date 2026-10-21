@@ -134,6 +134,11 @@ access. It never gains it.
 - Adding or removing an attachment restarts the conversation's container on
   its next message, because mounts are fixed when a container starts. The
   agent is told what changed.
+- **Installed DataLab doesn't offer the processed data.** Releases carry
+  no Dropbox app key, and without one no mode lists the processed data,
+  Settings doesn't show it, and asking for it is refused
+  (`backend/tests/test_processed_data.py`). The promises below are for a
+  DataLab that has the lab's Dropbox app.
 - **The lab's processed data (Dropbox) is never mounted.** Docker can't read
   synced cloud folders reliably, and a synced Dropbox folder's online-only
   files are empty placeholders anyway. DataLab's host process downloads one

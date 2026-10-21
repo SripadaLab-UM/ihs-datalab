@@ -164,5 +164,6 @@ def test_the_release_carries_the_labs_dropbox_app_key(
     settings_file.write_text(toml, encoding="utf-8")
     assert load_settings("real").dropbox.app_key == expected
     if not toml:
-        # Practice never uses Dropbox, whatever the release says.
-        assert load_settings("practice").dropbox.app_key is None
+        # Practice gets it too: it never uses Dropbox, but the key is its switch
+        # for the synthetic folder, so practice offers what the real one does.
+        assert load_settings("practice").dropbox.app_key == expected
