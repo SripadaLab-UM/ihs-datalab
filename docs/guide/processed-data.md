@@ -23,7 +23,9 @@ the database.
 4. Find the lab's folder in the list (click a folder's name to open it, and
    the path above the list to go back up), and click **Use this folder**
    beside it. DataLab lists the folder's files, names and sizes only, without
-   downloading any.
+   downloading any. A big folder takes a few minutes: Settings shows the files
+   listed so far and how many of its folders are done, and you can leave the
+   page meanwhile; the listing carries on.
 
 Your sign-in is kept in this computer's keychain. **Refresh list** picks up
 files added since; DataLab also refreshes the list before a conversation
@@ -55,6 +57,13 @@ The agent sees the folder as **datasets**: files that differ only by a date,
 year, number or ID are one dataset (for example `fitbit/{year}/daily_{id}.csv`).
 A number that's the same in every file stays in the name, as the 9 of
 `surveys/phq9_wave{n}_{year}.csv` does; an ID never does.
+Files named without numbers group too, when there are many alike: ten or more
+files of one type in a folder, each named differently (a file per person, say),
+are one dataset, `…/{name}.xlsx`, and so are five or more folders that hold the
+same files (`…/{name}/sleep.csv`). Names near the top of the folder, such as
+`Dictionary/variables.xlsx`, stay as they are. Code and caches (`.py`, `.R`,
+`__pycache__` and the like) are in no dataset, though the agent can still find
+and fetch them.
 It fetches only the files it needs. DataLab downloads each one on this
 computer, then puts it in the agent's sandbox, where the agent can read it
 but not change it.

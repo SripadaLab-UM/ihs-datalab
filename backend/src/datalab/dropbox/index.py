@@ -14,7 +14,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from datalab.dropbox.sources import CursorTooOld, FileEntry, Source, path_key
+from datalab.dropbox.sources import CursorTooOld, FileEntry, Progress, Source, path_key
 
 
 @dataclass(frozen=True)
@@ -66,9 +66,10 @@ class ProcessedIndex:
 
     # Refreshing -------------------------------------------------------------
 
-    def refresh(self, source: Source) -> int:
+    def refresh(self, source: Source, progress: Progress | None = None) -> int:
         """Bring the list up to date from `source`; how many files it now has.
-        The source is asked outside the lock (it may take a while)."""
+        The source is asked outside the lock (it may take a while); a whole
+        listing counts its way in `progress`."""
         chosen = self.chosen()
         if chosen is None:
             raise LookupError("No folder is chosen.")
@@ -80,7 +81,7 @@ class ProcessedIndex:
                 changes = None
         whole = changes is None
         if changes is None:
-            changes = source.listing()
+            changes = source.listing(progress)
         folder_path = getattr(source, "folder_path", chosen.folder_path)
         with self._lock, self._transaction():
             current = self._db.execute("SELECT folder_id FROM processed_source").fetchone()

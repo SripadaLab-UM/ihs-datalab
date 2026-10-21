@@ -2,6 +2,8 @@ import clsx from "clsx";
 import { type ButtonHTMLAttributes, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import type { DataSource } from "@/api/client";
+
 import { type AnyIcon, Icon } from "./Icon";
 import { InfoTip } from "./InfoTip";
 
@@ -56,15 +58,32 @@ export function Chip({
 // In a narrow docked panel (its header is a size container), only the icon shows; the name stays for screen readers.
 const SHORT_TEXT = "@max-[22rem]:sr-only";
 
+/** What a data session reads, by its sources (the study database when not given): "processed data". */
+export function dataReach(sources: readonly DataSource[] | undefined): string {
+  const files = sources?.includes("dropbox") ?? false;
+  const database = !files || (sources?.includes("database") ?? false);
+  return files ? (database ? "database and processed data" : "processed data") : "database access";
+}
+
 /** Which kind of session it is. `short`: just its name (a docked chat's header), the rest in the tip. */
-export function SessionBadge({ kind, short = false }: { kind: "data" | "research"; short?: boolean }) {
+export function SessionBadge({
+  kind,
+  short = false,
+  sources,
+}: {
+  kind: "data" | "research";
+  short?: boolean;
+  /** A data conversation's sources; the study database when not given. */
+  sources?: readonly DataSource[];
+}) {
   const size = short ? "text-[12px]" : "text-[13px]";
   // Short, it sits in a narrow panel at the window's right: its tip opens leftwards.
   const align = short ? "end" : undefined;
   return kind === "data" ? (
     <InfoTip term="data-session" align={align}>
       <span className={clsx("inline-flex shrink-0 items-center gap-1.5 font-sans font-medium text-data", size)}>
-        <Icon name="lock" size={short ? 12 : 13} /> {short ? <span className={SHORT_TEXT}>Data session</span> : "Data session · database access, web blocked"}
+        <Icon name="lock" size={short ? 12 : 13} />{" "}
+        {short ? <span className={SHORT_TEXT}>Data session</span> : `Data session · ${dataReach(sources)}, web blocked`}
       </span>
     </InfoTip>
   ) : (

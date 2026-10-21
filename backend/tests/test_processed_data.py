@@ -8,6 +8,8 @@ MockTransport, with response shapes from Dropbox's API documentation."""
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -22,14 +24,16 @@ from datalab.config import DropboxSettings, Settings
 from datalab.data.access_log import AccessLog
 from datalab.dropbox.auth import DropboxAuth, SignInNeeded, TokenStore, pkce_pair
 from datalab.dropbox.client import ContentHasher, DropboxClient, DropboxRefused, content_hash
-from datalab.dropbox.families import families, pattern
+from datalab.dropbox.families import families, is_clutter, pattern, years_in
 from datalab.dropbox.index import ProcessedIndex
-from datalab.dropbox.service import LoadRefused, ProcessedData
+from datalab.dropbox.service import LoadRefused, NotAvailable, ProcessedData
 from datalab.dropbox.sources import (
     Changes,
     CursorTooOld,
+    DropboxSource,
     FileEntry,
     LocalSource,
+    Progress,
     practice_folder,
     safe_relative,
 )
@@ -37,6 +41,7 @@ from datalab.knowledge.check import name_findings
 from datalab.sessions import modes
 from datalab.sessions.tokens import DATABASE_TOOLS, FILE_TOOLS, SessionAccess, tools_for_sources
 from tests.conftest import FakeDatabase
+from tests.lab_shaped_folder import lab_shaped_folder
 from tests.test_agent_tools import mcp_session, payload
 from tests.test_agent_tools import server as server
 from tests.test_inputs_api import FakeContainers
@@ -60,6 +65,55 @@ def test_no_participant_id_survives_grouping():
     assert found[1].files == 40
     for family in found:
         assert not name_findings(family.pattern), family.pattern
+
+
+def test_far_off_years_are_plain_numbers():
+    assert pattern("x/batch_20981231.csv") == "x/batch_{n}.csv"
+    assert pattern("x/run_2037_1995.csv") == "x/run_{n}_{n}.csv"
+    assert pattern("x/steps_2024.csv") == "x/steps_{year}.csv"
+    assert years_in("2085 data/f_1995_20240131.csv") == [2024]
+
+
+def test_code_and_caches_are_in_no_dataset():
+    for path in ("p/code/clean.py", "p/code/model.R", "p/code/__pycache__/m.cpython-311.pyc",
+                 "p/.Rhistory", "p/out/~$results.xlsx", "p/.DS_Store", "p/run.sas"):  # fmt: skip
+        assert is_clutter(path), path
+    for path in ("p/out/results.xlsx", "p/out/fit.RData", "p/report.html", "p/a.sas7bdat"):
+        assert not is_clutter(path), path
+    found = families([FileEntry("p/code/clean.py", "1", 1), FileEntry("p/out/r.csv", "2", 1)])
+    assert [f.pattern for f in found] == ["p/out/r.csv"]
+
+
+def test_names_that_dont_group_merge_only_when_many():
+    def names(count: int) -> list[str]:
+        paths = [f"2018 data/surveys/responses/{'xyz'[i % 3] * (i + 2)}.xlsx" for i in range(count)]
+        return [f.pattern for f in families(FileEntry(p, p, 1) for p in paths)]
+
+    # Nine could be a folder's distinct measures; ten unmatched names are names.
+    assert len(names(9)) == 9
+    assert names(10) == ["{year} data/surveys/responses/{name}.xlsx"]
+    # Near the top, names are the lab's own and stay.
+    shallow = [FileEntry(f"Dictionary/{'abcdefghijkl'[i] * 3}.xlsx", str(i), 1) for i in range(12)]
+    assert len(families(shallow)) == 12
+
+
+def test_grouping_on_a_folder_shaped_like_the_labs():
+    lab = lab_shaped_folder()
+    found = families(lab.entries)
+    patterns = {f.pattern for f in found}
+    assert lab.kept <= patterns
+    # Thousands of files, a few dozen datasets.
+    assert len(lab.entries) > 2000 and len(found) < 40
+    for family in found:
+        segments = family.pattern.split("/")
+        stems = [segment.rsplit(".", 1)[0] for segment in segments]
+        assert not set(segments + stems) & lab.person_names, family.pattern
+        assert not name_findings(family.pattern), family.pattern
+        assert all(2000 <= year <= 2030 for year in family.years), family.pattern
+    members = [path for f in found for path in f.members]
+    assert len(members) == len(set(members))  # each file in one dataset
+    assert set(members) | lab.clutter == {e.path for e in lab.entries}
+    assert not set(members) & lab.clutter
 
 
 def test_a_number_that_never_varies_stays_in_the_name():
@@ -108,7 +162,7 @@ class ScriptedSource:
         self._changes = changes
         self.listed = 0
 
-    def listing(self) -> Changes:
+    def listing(self, progress=None) -> Changes:
         self.listed += 1
         return self._listing
 
@@ -442,6 +496,136 @@ def test_folders_can_be_opened_to_choose_a_subfolder(settings, connection, auth,
     assert asked == ["", "id:f"]
 
 
+class FolderTree:
+    """Dropbox's listing endpoints for a chosen folder `/Study` holding a
+    file and three folders, one of them paged; shapes from the API docs."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str, bool]] = []
+        self.at_once = 0
+        self.most_at_once = 0
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _file(path: str, size: int = 10) -> dict[str, object]:
+        return {".tag": "file", "name": path.rsplit("/", 1)[-1], "id": f"id:{path}",
+                "path_display": path, "path_lower": path.lower(), "size": size,
+                "server_modified": "2025-01-01T00:00:00Z", "content_hash": "h"}  # fmt: skip
+
+    @staticmethod
+    def _folder(path: str) -> dict[str, object]:
+        return {".tag": "folder", "name": path.rsplit("/", 1)[-1], "id": f"id:{path}",
+                "path_display": path, "path_lower": path.lower()}  # fmt: skip
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        body = json.loads(request.content) if request.content else {}
+        if path == "/2/files/get_metadata":
+            return httpx.Response(200, json=self._folder("/Study"))
+        if path == "/2/files/list_folder/get_latest_cursor":
+            self.asked.append(("cursor", body["path"], body["recursive"]))
+            return httpx.Response(200, json={"cursor": "from-before"})
+        if path == "/2/files/list_folder/continue":
+            self.asked.append(("continue", body["cursor"], True))
+            entries = [self._file("/Study/Big/b2.csv")]
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "big-2", "has_more": False}
+            )
+        if path != "/2/files/list_folder":
+            return httpx.Response(404)
+        self.asked.append(("list", body["path"], body["recursive"]))
+        with self._lock:
+            self.at_once += 1
+            self.most_at_once = max(self.most_at_once, self.at_once)
+        time.sleep(0.05)
+        with self._lock:
+            self.at_once -= 1
+        if body["path"] == "id:/Study":
+            entries = [self._file("/Study/README.md"), self._folder("/Study/A"),
+                       self._folder("/Study/Big"), self._folder("/Study/C")]  # fmt: skip
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "top", "has_more": False}
+            )
+        if body["path"] == "id:/Study/Big":
+            entries = [self._folder("/Study/Big"), self._file("/Study/Big/b1.csv")]
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "big-1", "has_more": True}
+            )
+        name = body["path"].rsplit("/", 1)[-1]
+        entries = [self._file(f"/Study/{name}/x.csv"), self._file(f"/Study/{name}/sub/y.csv")]
+        return httpx.Response(200, json={"entries": entries, "cursor": name, "has_more": False})
+
+
+def test_a_folder_is_listed_in_parts_at_once(auth):
+    auth.start()
+    auth.finish("GOODCODE")
+    tree = FolderTree()
+    client = DropboxClient(auth, http=httpx.Client(transport=httpx.MockTransport(tree)))
+    progress = Progress()
+    found = DropboxSource(client, "id:/Study", "/Study").listing(progress)
+    assert sorted(e.path for e in found.changed) == [
+        "A/sub/y.csv", "A/x.csv", "Big/b1.csv", "Big/b2.csv", "C/sub/y.csv", "C/x.csv", "README.md",
+    ]  # fmt: skip
+    # The cursor is taken before anything is listed, for the whole folder:
+    # what changes meanwhile comes back at the next refresh.
+    assert tree.asked[0] == ("cursor", "id:/Study", True) and found.cursor == "from-before"
+    assert ("list", "id:/Study", False) in tree.asked
+    assert {("list", f"id:/Study/{n}", True) for n in ("A", "Big", "C")} <= set(tree.asked)
+    assert tree.most_at_once > 1
+    assert (progress.files, progress.folders_done, progress.folders_total) == (7, 3, 3)
+
+
+class SlowSource:
+    """A listing that waits until it's let go, counting as it goes."""
+
+    label = "slow"
+
+    def __init__(self) -> None:
+        self.go = threading.Event()
+        self.listed = 0
+
+    def listing(self, progress=None) -> Changes:
+        self.listed += 1
+        assert progress is not None
+        progress.folders_total = 2
+        progress.count(files=3, folders=1)
+        self.go.wait(5)
+        return Changes([FileEntry(f"f{n}.csv", f"id:{n}", 1) for n in range(5)], [], None)
+
+    def changes(self, cursor: str) -> Changes:
+        raise CursorTooOld("none")
+
+
+def test_a_refresh_runs_in_the_background_and_shows_how_far_it_has_got(processed):
+    slow = SlowSource()
+    processed._source = lambda: slow
+    processed.start_refresh()
+    for _ in range(100):
+        listing = processed.status().listing
+        if listing is not None and listing.files:
+            break
+        time.sleep(0.01)
+    assert listing is not None
+    assert (listing.files, listing.folders_done, listing.folders_total) == (3, 1, 2)
+    processed.start_refresh()  # joins the one under way
+    slow.go.set()
+    processed.wait_for_listing(5)
+    status = processed.status()
+    assert slow.listed == 1 and status.listing is None and status.files == 5
+    assert status.listing_error is None
+
+
+def test_a_background_refresh_that_fails_says_why(processed):
+    def unreachable():
+        raise NotAvailable("Dropbox couldn't be reached.")
+
+    processed._source = unreachable
+    processed.start_refresh()
+    processed.wait_for_listing(5)
+    status = processed.status()
+    assert status.listing is None and status.listing_error == "Dropbox couldn't be reached."
+
+
 def test_only_a_folder_id_can_be_opened(app):
     with TestClient(app) as client:
         for bad in ("../etc", "/Study Data", "id:a/b"):
@@ -449,37 +633,62 @@ def test_only_a_folder_id_can_be_opened(app):
             assert answer.status_code == 422, bad
 
 
+# Dropbox's own words for an app without a write scope, as a live run on
+# 2026-10-20 got them (HTTP 400), with the app's id made up.
+LIVE_REFUSAL = (
+    'Error in call to API function "files/delete_v2": Your app (ID: 1234567) is not '
+    "permitted to access this endpoint because it does not have the required scope "
+    "'files.content.write'. The owner of the app can enable the scope for the app using "
+    "the Permissions tab on the App Console."
+)
+
+
 class WriteAttempts:
     """Dropbox's write endpoints, answering as a read-only app gets them
-    answered (401 missing_scope), or as a misconfigured one would (200)."""
+    answered (`live`: 400 with Dropbox's words; `scope`: 401 missing_scope),
+    as a misconfigured app would (`allow`: 200), or with an error that proves
+    nothing (`notfound`: 409)."""
 
-    def __init__(self, allow: bool) -> None:
-        self.allow = allow
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
         self.writes: list[str] = []
+        self.listed: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path == "/2/files/get_metadata":
+            asked = json.loads(request.content)["path"]
+            if asked != "/Me/Test (synthetic)":
+                return httpx.Response(409, json={"error_summary": "path/not_found/.."})
+            folder = {".tag": "folder", "id": "id:test", "path_display": asked}
+            return httpx.Response(200, json=folder)
         if path in ("/2/files/list_folder", "/2/files/list_folder/continue"):
+            if path == "/2/files/list_folder":
+                self.listed.append(json.loads(request.content)["path"])
             entry = {".tag": "file", "path_lower": "/t/a.csv", "rev": "1", "content_hash": "h"}
             return httpx.Response(200, json={"entries": [entry], "cursor": "c", "has_more": False})
         self.writes.append(path)
-        if self.allow:
+        if self.answer == "allow":
             return httpx.Response(200, json={})
+        if self.answer == "live":
+            return httpx.Response(400, text=LIVE_REFUSAL)
+        if self.answer == "notfound":
+            return httpx.Response(409, json={"error_summary": "from_lookup/not_found/.."})
         return httpx.Response(
             401,
             json={"error_summary": "missing_scope/..", "error": {".tag": "missing_scope"}},
         )
 
 
-@pytest.mark.parametrize("allow", [False, True])
-def test_the_read_only_check(auth, connection, allow):
+@pytest.mark.parametrize("answer", ["live", "scope", "allow", "notfound"])
+def test_the_read_only_check(auth, connection, answer):
     from datalab.dropbox.check import check_read_only
 
     auth.start()
     auth.finish("GOODCODE")
     index = ProcessedIndex(connection)
     index.choose("id:t", "/T", "100")
-    dropbox = WriteAttempts(allow)
+    dropbox = WriteAttempts(answer)
     lines: list[str] = []
     code = check_read_only(
         auth, index, http=httpx.Client(transport=httpx.MockTransport(dropbox)), say=lines.append
@@ -488,13 +697,65 @@ def test_the_read_only_check(auth, connection, allow):
              "/2/files/move_v2", "/2/files/copy_v2"}  # fmt: skip
     assert tried <= set(dropbox.writes)
     assert not any("sl.first" in line or "rt-1" in line for line in lines)  # no tokens printed
-    if allow:
-        assert code == 1 and lines[-1].startswith("FAIL")
+    marks = [line.split()[0] for line in lines if line.startswith("  ") and ":" in line]
+    if answer in ("live", "scope"):
+        assert code == 0 and lines[-1] == "PASS: Dropbox refused every change."
+        assert marks == ["refused"] * 5
+        # Nothing was made, so nothing is cleaned up.
+        assert len(dropbox.writes) == 5
+    elif answer == "allow":
+        assert code == 1 and lines[-1].startswith("FAIL") and marks == ["ALLOWED"] * 5
         # It removes only what it made, by its own made-up names.
         assert dropbox.writes[-2:] == ["/2/files/delete_v2", "/2/files/delete_v2"]
     else:
-        assert code == 0 and lines[-1] == "PASS: Dropbox refused every change."
-        assert sum(line.startswith("  refused") for line in lines) == 5
+        # "Not found" doesn't show the app lacks permission: no pass, no clean-up.
+        assert code == 1 and lines[-1].startswith("FAIL") and marks == ["UNCLEAR"] * 5
+        assert len(dropbox.writes) == 5 and any("not_found" in line for line in lines)
+
+
+def test_the_read_only_check_can_try_another_folder(auth, connection):
+    from datalab.dropbox.check import check_read_only
+
+    auth.start()
+    auth.finish("GOODCODE")
+    index = ProcessedIndex(connection)
+    index.choose("id:study", "/Study", "100")
+    dropbox = WriteAttempts("live")
+    lines: list[str] = []
+    http = httpx.Client(transport=httpx.MockTransport(dropbox))
+    code = check_read_only(auth, index, http=http, say=lines.append, folder="/Me/Test (synthetic)")
+    assert code == 0 and "/Me/Test (synthetic)" in lines[0]
+    # Only the named folder is listed; the chosen one isn't touched.
+    assert dropbox.listed == ["id:test", "id:test"]
+
+    lines.clear()
+    assert check_read_only(auth, index, http=http, say=lines.append, folder="/Nope") == 2
+    assert "isn't a folder" in lines[-1]
+
+
+def test_the_shape_report_gives_counts_not_names():
+    from datalab.dropbox.shape import report, shape_of
+
+    assert shape_of("Steps_P0123.csv") == "a_a9.csv"
+    entries = [FileEntry(f"Waves/{name}.csv", f"id:{i}", 2_000_000) for i, name in
+               enumerate(["Smith_Jane", "Doe_John", "Roe_Rick"])]  # fmt: skip
+    entries += [FileEntry(f"fitbit/steps_{year}.csv", f"id:s{year}", 500) for year in (2024, 2025)]
+    entries.append(FileEntry("README", "id:r", 10))
+    lines: list[str] = []
+    report(entries, say=lines.append)
+    text = "\n".join(lines)
+    assert lines[0].startswith("6 files, 5.7 MB, in 5 datasets")
+    assert "  Waves: 3, 5.7 MB, 3, 3" in lines  # as named, not as its pattern
+    assert (
+        "  fitbit: 2, 1000 bytes, 1, 0" in lines
+        and "  (files at the top): 1, 10 bytes, 1, 1" in lines
+    )
+    assert "  .csv: 5, 5.7 MB" in lines and "  (none): 1, 10 bytes" in lines
+    assert "  1-10 MB: 3, 5.7 MB" in lines and "  2024: 1" in lines and "  2025: 1" in lines
+    assert "  1 file: 4, 4" in lines and "  2-10: 1, 2" in lines
+    assert "  a_a.csv: 3" in lines
+    for name in ("smith", "jane", "doe", "roe", "steps"):
+        assert name not in text.lower()
 
 
 def test_errors_about_a_path_are_refusals(client):
@@ -508,6 +769,43 @@ def test_a_download_that_doesnt_match_dropbox_is_dropped(client, tmp_path):
     with pytest.raises(DropboxUnavailable, match="didn't match"):
         client.download("id:x", tmp_path / "x.csv", max_bytes=1000, deadline=1e18)
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    ("where", "fetched"),
+    [("/study/fitbit/a.csv", True), ("/personal/taxes.csv", False), ("/study-old/a.csv", False),
+     (None, False)],
+)  # fmt: skip
+def test_a_download_from_outside_the_chosen_folder_is_refused(auth, tmp_path, where, fetched):
+    from datalab.dropbox.client import OutsideFolder
+
+    auth.start()
+    auth.finish("GOODCODE")
+    body = b"a,b\n1,2\n"
+
+    def dropbox(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/2/files/get_metadata":
+            folder = {".tag": "folder", "name": "Study", "id": "id:s", "path_display": "/Study",
+                      "path_lower": "/study"}  # fmt: skip
+            return httpx.Response(200, json=folder)
+        hasher = ContentHasher()
+        hasher.update(body)
+        result = {"size": len(body), "content_hash": hasher.hexdigest()}
+        if where is not None:
+            result["path_lower"] = where
+        return httpx.Response(200, content=body, headers={"Dropbox-API-Result": json.dumps(result)})
+
+    client = DropboxClient(auth, http=httpx.Client(transport=httpx.MockTransport(dropbox)))
+    source = DropboxSource(client, "id:s", "/Study")
+    dest = tmp_path / "a.csv"
+    entry = FileEntry("fitbit/a.csv", "id:a", len(body))
+    if fetched:
+        source.fetch(entry, dest, max_bytes=1000, deadline=1e18)
+        assert dest.read_bytes() == body
+    else:
+        with pytest.raises(OutsideFolder):
+            source.fetch(entry, dest, max_bytes=1000, deadline=1e18)
+        assert not list(tmp_path.iterdir())  # nothing written, not even a partial
 
 
 def test_the_content_hash_is_dropboxs(tmp_path):
@@ -572,8 +870,11 @@ def test_settings_show_practices_folder(app):
         status = client.get("/api/processed").json()
         assert status["source"] == "practice" and status["ready"]
         assert client.post("/api/processed/connect").status_code == 409
-        refreshed = client.post("/api/processed/refresh").json()
-        assert refreshed["files"] > 5
+        started = client.post("/api/processed/refresh").json()
+        assert started["listing_error"] is None
+        app.state.services.sessions.processed.wait_for_listing(10)
+        refreshed = client.get("/api/processed").json()
+        assert refreshed["files"] > 5 and refreshed["listing"] is None
 
 
 def _token(services, tmp_path, sources):

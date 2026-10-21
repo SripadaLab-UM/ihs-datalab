@@ -316,13 +316,28 @@ access. It never gains it.
   request, and refuses one with duplicate keys, since parsers disagree about
   which copy wins.
 - **The Dropbox sign-in never leaves DataLab's host process.** DataLab uses
-  the lab's Dropbox app with PKCE, so it holds no app secret. The person's
-  tokens are kept in the OS keychain; only the host process uses them, to
-  list the chosen folder and download files. The app may only read (file
+  the lab's Dropbox app with PKCE, so it holds no app secret. Each person
+  signs in as themselves, and their tokens are kept in their own OS
+  keychain; only the host process uses them. The app may only read (file
   names and contents, and basic account details to find the team folders),
   never write. The Safety check looks for the token in both session types'
   containers (environment, command, files). **Disconnect** revokes it on
   Dropbox.
+- **What the sign-in could read, and what DataLab reads.** Dropbox can't
+  limit an app to one team folder (an "App folder" app can't reach team
+  folders at all), so a person's sign-in could read *everything they can
+  see in Dropbox*, their own files included. Only the chosen folder is
+  reached, three ways:
+  - DataLab lists only the chosen folder.
+  - The agent can fetch only a file in that list (a path outside it, `..`
+    included, is refused, as is a file that looks like credentials).
+  - Every download is checked against Dropbox's own answer: a file Dropbox
+    doesn't place inside the chosen folder is refused before a byte is
+    written.
+
+  The agent never holds the token and can't reach Dropbox. Which people
+  the Dropbox app lets sign in limits who can use it, not what a sign-in
+  can read.
 - **Agent containers sit on an internal Docker network with no route out.**
   Their only exit is a small **gateway** that holds no secrets:
   - **data sessions:** the gateway forwards only to the relay and to DataLab's

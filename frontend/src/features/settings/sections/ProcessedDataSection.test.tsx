@@ -13,7 +13,7 @@ vi.mock("@/api/processed", () => ({
 
 const signedIn: Processed = {
   source: "dropbox", configured: true, ready: false, problem: "Choose the lab's processed-data folder.",
-  folder: null, files: 0, bytes: 0, indexed_at: null,
+  folder: null, files: 0, bytes: 0, indexed_at: null, listing: null, listing_error: null,
   sign_in: { state: "signed in", account: "Test Person", authorize_url: null, message: null },
 }; // prettier-ignore
 
@@ -56,4 +56,23 @@ it("goes back to the top from the folder path", async () => {
   await screen.findByText("DataLab test (synthetic)");
   fireEvent.click(screen.getByRole("button", { name: "Dropbox" }));
   expect(await screen.findByText("Lab Study Data")).toBeTruthy();
+});
+
+it("shows how far a listing has got, and stops asking once it's done", async () => {
+  const listing = { files: 12400, folders_done: 23, folders_total: 65, seconds: 70 };
+  vi.mocked(processedApi.status)
+    .mockResolvedValueOnce({ ...signedIn, ready: true, problem: null, folder: "/Lab Study Data", listing })
+    .mockResolvedValue({
+      ...signedIn, ready: true, problem: null, folder: "/Lab Study Data",
+      files: 50614, bytes: 1_400_000_000_000, indexed_at: new Date().toISOString(),
+    }); // prettier-ignore
+  show();
+  expect(await screen.findByText("Listing… 12,400 files so far · 23 of 65 folders · 1 min 10 s")).toBeTruthy();
+  expect(screen.getByRole("progressbar", { name: "Folders listed" })).toHaveAttribute("value", "23");
+  expect(screen.getByRole("button", { name: "Listing…" })).toBeDisabled();
+  // It asks again while listing, then shows the list.
+  expect(await screen.findByText(/^50,614 files/, {}, { timeout: 3000 })).toBeTruthy();
+  const asked = vi.mocked(processedApi.status).mock.calls.length;
+  await new Promise((done) => setTimeout(done, 1500));
+  expect(vi.mocked(processedApi.status).mock.calls.length).toBe(asked);
 });

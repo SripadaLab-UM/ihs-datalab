@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable
 from typing import Literal, TypeVar
 
@@ -24,6 +25,7 @@ from pydantic import BaseModel, Field
 from datalab.dropbox.auth import DropboxUnavailable, SignIn, SignInNeeded
 from datalab.dropbox.client import DropboxRefused
 from datalab.dropbox.service import Folder, NotAvailable, ProcessedData
+from datalab.dropbox.sources import Progress
 
 T = TypeVar("T")
 
@@ -33,6 +35,16 @@ class SignInOut(BaseModel):
     authorize_url: str | None = None
     account: str | None = None
     message: str | None = None
+
+
+class ListingOut(BaseModel):
+    """A listing under way: Dropbox doesn't say how many files to expect, so
+    this counts what's come and the chosen folder's top-level folders done."""
+
+    files: int
+    folders_done: int
+    folders_total: int | None = None
+    seconds: int
 
 
 class ProcessedOut(BaseModel):
@@ -45,6 +57,8 @@ class ProcessedOut(BaseModel):
     files: int = 0
     bytes: int = 0
     indexed_at: str | None = None
+    listing: ListingOut | None = None
+    listing_error: str | None = None
 
 
 class FolderOut(BaseModel):
@@ -95,6 +109,8 @@ def build_processed_router(processed: ProcessedData) -> APIRouter:
             files=status.files,
             bytes=status.bytes,
             indexed_at=status.indexed_at,
+            listing=_listing(status.listing) if status.listing else None,
+            listing_error=status.listing_error,
         )
 
     @router.get("")
@@ -127,12 +143,14 @@ def build_processed_router(processed: ProcessedData) -> APIRouter:
     @router.post("/folder")
     async def choose(body: ChooseIn) -> ProcessedOut:
         await run(lambda: processed.choose(body.id))
-        await run(processed.refresh)
+        await run(processed.start_refresh)
         return await run(status_out)
 
     @router.post("/refresh")
     async def refresh() -> ProcessedOut:
-        await run(processed.refresh)
+        """Starts a refresh (or joins one under way) and returns at once;
+        `listing` says how far it's got."""
+        await run(processed.start_refresh)
         return await run(status_out)
 
     return router
@@ -149,3 +167,12 @@ def _sign_in(state: SignIn) -> SignInOut:
 
 def _folder(folder: Folder) -> FolderOut:
     return FolderOut(id=folder.id, path=folder.path, name=folder.name)
+
+
+def _listing(progress: Progress) -> ListingOut:
+    return ListingOut(
+        files=progress.files,
+        folders_done=progress.folders_done,
+        folders_total=progress.folders_total,
+        seconds=int(time.monotonic() - progress.started),
+    )
