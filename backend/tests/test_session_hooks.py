@@ -119,7 +119,9 @@ def test_a_hook_that_swallows_cancellation_doesnt_hold_up_the_turn(app, monkeypa
         try:
             await asyncio.sleep(10)
         except asyncio.CancelledError:
-            await asyncio.sleep(0.5)
+            # Long past the limit, so a turn that waited for it can't pass
+            # for one that didn't, even on a slow CI runner.
+            await asyncio.sleep(2)
         finished.set()
 
     manager.register_after_turn(stubborn)
@@ -129,7 +131,7 @@ def test_a_hook_that_swallows_cancellation_doesnt_hold_up_the_turn(app, monkeypa
         started = time.monotonic()
         wait_for(client, cid, "turn_done")
         # The turn ended at the limit, not when the hook gave up.
-        assert time.monotonic() - started < 0.45
+        assert time.monotonic() - started < 1.5
         assert not finished.is_set()
         assert len(manager._detached) == 1
         deadline = time.monotonic() + 5
