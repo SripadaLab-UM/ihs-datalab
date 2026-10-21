@@ -10,12 +10,11 @@ as `9` (`Ab_12.csv` is `a_9.csv`).
 
 from __future__ import annotations
 
-import re
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 
 from datalab.config import Settings
-from datalab.dropbox.families import Family, families, years_in
+from datalab.dropbox.families import Family, families, is_clutter, shape_of, years_in
 from datalab.dropbox.sources import FileEntry
 
 _MB = 1024 * 1024
@@ -37,22 +36,16 @@ _DATASET_BANDS = [
 ]
 
 
-def shape_of(name: str) -> str:
-    """A file name with its letters as `a` and digits as `9`, each run once;
-    its extension as it is."""
-    stem, dot, extension = name.rpartition(".")
-    if not dot or not stem:
-        stem, extension = name, ""
-    shaped = re.sub(r"\d+", "9", re.sub(r"[^\W\d_]+", "a", stem))
-    return f"{shaped}.{extension.lower()}" if extension else shaped
-
-
 def report(entries: Iterable[FileEntry], say: Callable[[str], None] = print) -> None:
     files = list(entries)
     sets = families(files)
     total = sum(f.size for f in files)
+    grouped = sum(f.files for f in sets)
     say(f"{len(files):,} files, {_size(total)}, in {len(sets):,} datasets "
-        f"({len(files) / max(len(sets), 1):.1f} files per dataset)")  # fmt: skip
+        f"({grouped / max(len(sets), 1):.1f} files per dataset)")  # fmt: skip
+    clutter = [e for e in files if is_clutter(e.path)]
+    say(f"{len(clutter):,} code and cache files ({_size(sum(e.size for e in clutter))}) "
+        "are in no dataset")  # fmt: skip
 
     say("\nBy top-level folder: files, size, datasets, datasets of one file")
     by_top: dict[str, list[FileEntry]] = defaultdict(list)
@@ -60,7 +53,9 @@ def report(entries: Iterable[FileEntry], say: Callable[[str], None] = print) -> 
         by_top[_top(entry.path)].append(entry)
     sets_by_top: dict[str, list[Family]] = defaultdict(list)
     for family in sets:
-        sets_by_top[_top(family.example or family.key)].append(family)
+        # A dataset across year folders counts in each.
+        for top in {_top(path) for path in family.members}:
+            sets_by_top[top].append(family)
     for top in sorted(by_top):
         group, its_sets = by_top[top], sets_by_top[top]
         single = sum(1 for f in its_sets if f.files == 1)

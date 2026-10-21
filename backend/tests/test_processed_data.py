@@ -22,7 +22,7 @@ from datalab.config import DropboxSettings, Settings
 from datalab.data.access_log import AccessLog
 from datalab.dropbox.auth import DropboxAuth, SignInNeeded, TokenStore, pkce_pair
 from datalab.dropbox.client import ContentHasher, DropboxClient, DropboxRefused, content_hash
-from datalab.dropbox.families import families, pattern
+from datalab.dropbox.families import families, is_clutter, pattern, years_in
 from datalab.dropbox.index import ProcessedIndex
 from datalab.dropbox.service import LoadRefused, ProcessedData
 from datalab.dropbox.sources import (
@@ -37,6 +37,7 @@ from datalab.knowledge.check import name_findings
 from datalab.sessions import modes
 from datalab.sessions.tokens import DATABASE_TOOLS, FILE_TOOLS, SessionAccess, tools_for_sources
 from tests.conftest import FakeDatabase
+from tests.lab_shaped_folder import lab_shaped_folder
 from tests.test_agent_tools import mcp_session, payload
 from tests.test_agent_tools import server as server
 from tests.test_inputs_api import FakeContainers
@@ -60,6 +61,55 @@ def test_no_participant_id_survives_grouping():
     assert found[1].files == 40
     for family in found:
         assert not name_findings(family.pattern), family.pattern
+
+
+def test_far_off_years_are_plain_numbers():
+    assert pattern("x/batch_20981231.csv") == "x/batch_{n}.csv"
+    assert pattern("x/run_2037_1995.csv") == "x/run_{n}_{n}.csv"
+    assert pattern("x/steps_2024.csv") == "x/steps_{year}.csv"
+    assert years_in("2085 data/f_1995_20240131.csv") == [2024]
+
+
+def test_code_and_caches_are_in_no_dataset():
+    for path in ("p/code/clean.py", "p/code/model.R", "p/code/__pycache__/m.cpython-311.pyc",
+                 "p/.Rhistory", "p/out/~$results.xlsx", "p/.DS_Store", "p/run.sas"):  # fmt: skip
+        assert is_clutter(path), path
+    for path in ("p/out/results.xlsx", "p/out/fit.RData", "p/report.html", "p/a.sas7bdat"):
+        assert not is_clutter(path), path
+    found = families([FileEntry("p/code/clean.py", "1", 1), FileEntry("p/out/r.csv", "2", 1)])
+    assert [f.pattern for f in found] == ["p/out/r.csv"]
+
+
+def test_names_that_dont_group_merge_only_when_many():
+    def names(count: int) -> list[str]:
+        paths = [f"2018 data/surveys/responses/{'xyz'[i % 3] * (i + 2)}.xlsx" for i in range(count)]
+        return [f.pattern for f in families(FileEntry(p, p, 1) for p in paths)]
+
+    # Nine could be a folder's distinct measures; ten unmatched names are names.
+    assert len(names(9)) == 9
+    assert names(10) == ["{year} data/surveys/responses/{name}.xlsx"]
+    # Near the top, names are the lab's own and stay.
+    shallow = [FileEntry(f"Dictionary/{'abcdefghijkl'[i] * 3}.xlsx", str(i), 1) for i in range(12)]
+    assert len(families(shallow)) == 12
+
+
+def test_grouping_on_a_folder_shaped_like_the_labs():
+    lab = lab_shaped_folder()
+    found = families(lab.entries)
+    patterns = {f.pattern for f in found}
+    assert lab.kept <= patterns
+    # Thousands of files, a few dozen datasets.
+    assert len(lab.entries) > 2000 and len(found) < 40
+    for family in found:
+        segments = family.pattern.split("/")
+        stems = [segment.rsplit(".", 1)[0] for segment in segments]
+        assert not set(segments + stems) & lab.person_names, family.pattern
+        assert not name_findings(family.pattern), family.pattern
+        assert all(2000 <= year <= 2030 for year in family.years), family.pattern
+    members = [path for f in found for path in f.members]
+    assert len(members) == len(set(members))  # each file in one dataset
+    assert set(members) | lab.clutter == {e.path for e in lab.entries}
+    assert not set(members) & lab.clutter
 
 
 def test_a_number_that_never_varies_stays_in_the_name():

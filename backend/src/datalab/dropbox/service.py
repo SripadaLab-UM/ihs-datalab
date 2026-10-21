@@ -29,7 +29,7 @@ from datalab.config import Settings
 from datalab.data.access_log import AccessLog
 from datalab.dropbox.auth import DropboxAuth, DropboxUnavailable, SignIn, SignInNeeded
 from datalab.dropbox.client import DropboxClient, DropboxRefused, TookTooLong, TooLarge
-from datalab.dropbox.families import Family, dataset_of, families, pattern
+from datalab.dropbox.families import Family, dataset_of, families
 from datalab.dropbox.index import ProcessedIndex
 from datalab.dropbox.sources import (
     DropboxSource,
@@ -230,8 +230,8 @@ class ProcessedData:
         self._require_ready()
         wanted = dataset.lower().strip()
         entries = list(self.index.files())
-        keys = {f.key for f in families(entries) if wanted in (f.pattern, f.key)}
-        found = [e for e in entries if pattern(e.path) in keys]
+        members = {p for f in families(entries) if wanted in (f.pattern, f.key) for p in f.members}
+        found = [e for e in entries if e.path in members]
         found.sort(key=lambda e: e.modified or "", reverse=True)
         return found[:limit]
 
