@@ -105,8 +105,8 @@ def report(entries: Iterable[FileEntry], say: Callable[[str], None] = print) -> 
         return
     per_folder = Counter(f.folder for f in singles)
     crowded = sum(1 for f in singles if per_folder[f.folder] > 10)
-    say(f"\nOf the {len(singles):,} one-file datasets, {crowded:,} sit in a folder with over 10 "
-        "others (their file names don't group); the rest differ by folder name.")  # fmt: skip
+    say(f"\nOf the {len(singles):,} one-file datasets, {crowded:,} are in folders holding over 10 "
+        "of them (there, file names don't group); the rest are in folders holding 10 or fewer.")  # fmt: skip
     say("Their file names' commonest shapes (letters as a, digits as 9):")
     for name_shape, count in Counter(
         shape_of(f.example.rsplit("/", 1)[-1]) for f in singles if f.example
