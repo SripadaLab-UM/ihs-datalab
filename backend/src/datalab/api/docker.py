@@ -1,8 +1,8 @@
-"""Docker on Windows, for the page (windows_vm.py, docs/DISTRIBUTION.md).
+"""Docker Desktop on Windows and Mac, for the page (windows_vm.py, docs/DISTRIBUTION.md).
 
 - `GET /api/docker` says how Docker stands ("ready", "not-installed",
-  "stopped", "starting", "vm-refused", "unknown"; "unsupported" off
-  Windows), whether an administrator prompt is showing, and where to turn on
+  "stopped", "starting", "vm-refused" (Windows), "unknown"; "unsupported"
+  on Linux), whether an administrator prompt is showing, and where to turn on
   temporary administrator access (`[windows] admin_access_url`). It answers
   from the last check: a new one runs at most every 15 seconds, whoever asks
   (a GET can come from another page on this computer), and WSL's virtual

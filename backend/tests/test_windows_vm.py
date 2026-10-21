@@ -341,11 +341,95 @@ def test_docker_desktop_not_where_its_installer_puts_it(monkeypatch, tmp_path):
     assert windows_vm.docker_state(FakeWindows(docker=True).run, "win32") == "ready"
 
 
-def test_nothing_is_checked_off_windows():
+def test_nothing_is_checked_on_linux():
     fake = FakeWindows()
-    doctor = doctor_for(fake, platform="darwin")
+    doctor = doctor_for(fake, platform="linux")
     assert doctor.state() == "unsupported" and doctor.fix().outcome == "unsupported"
     assert fake.calls == []
+
+
+class FakeMac:
+    """subprocess.run and Popen as DataLab uses them on a Mac: `docker info`,
+    `pgrep` for Docker Desktop, and `open -g -a Docker.app`. Once opened, the
+    engine answers after `boot` more checks."""
+
+    def __init__(self, *, open_=False, ready=False, boot=2, never=False):
+        self.open = open_ or ready
+        self.ready = ready
+        self.boot = boot
+        self.never = never
+        self.opened: list[list[str]] = []
+
+    def run(self, args, **_):
+        if args[0] == "docker":
+            if self.open and not self.ready and not self.never:
+                self.boot -= 1
+                self.ready = self.boot <= 0
+            return subprocess.CompletedProcess(args, 0 if self.ready else 1, b"", b"")
+        if args[0] == "/usr/bin/pgrep":
+            return subprocess.CompletedProcess(args, 0 if self.open else 1, b"", b"")
+        raise AssertionError(f"unexpected on a Mac: {args}")
+
+    def popen(self, args, **_):
+        self.opened.append(args)
+        self.open = True
+
+
+@pytest.fixture
+def mac_app(tmp_path, monkeypatch):
+    app = tmp_path / "Applications" / "Docker.app"
+    app.mkdir(parents=True)
+    monkeypatch.setattr(windows_vm, "mac_docker_app", lambda homes=None: app)
+    return app
+
+
+def mac_doctor(fake: FakeMac) -> windows_vm.DockerDoctor:
+    clock = Clock()
+    return windows_vm.DockerDoctor(
+        run=fake.run, popen=fake.popen, platform="darwin", clock=clock, sleep=clock.sleep
+    )
+
+
+def test_a_mac_opens_docker_desktop_in_the_background_at_start(mac_app):
+    fake = FakeMac()
+    doctor = mac_doctor(fake)
+    said: list[str] = []
+    assert windows_vm.check_before_serve(doctor, say=said.append) == "starting"
+    assert fake.opened == [["/usr/bin/open", "-g", "-a", str(mac_app)]]
+    assert said and "Opening Docker Desktop" in said[0]
+    # Ready once its engine answers; never opened twice.
+    assert doctor.wait_ready(60) and doctor.state(fresh=True) == "ready"
+    assert len(fake.opened) == 1
+
+
+def test_a_mac_with_docker_running_is_left_alone(mac_app):
+    fake = FakeMac(ready=True)
+    assert windows_vm.check_before_serve(mac_doctor(fake), say=lambda _: None) == "ready"
+    assert fake.opened == []
+
+
+def test_a_mac_without_docker_desktop_says_so(monkeypatch):
+    monkeypatch.setattr(windows_vm, "mac_docker_app", lambda homes=None: None)
+    fake = FakeMac()
+    doctor = mac_doctor(fake)
+    assert doctor.state() == "not-installed"
+    assert not doctor.wait_ready(60) and fake.opened == []
+    assert doctor.fix().outcome == "unsupported"
+
+
+def test_waiting_for_a_docker_that_never_answers_gives_up(mac_app):
+    fake = FakeMac(never=True)
+    doctor = mac_doctor(fake)
+    assert not doctor.wait_ready(30)
+    assert doctor.state(fresh=True) == "starting"
+
+
+def test_the_mac_app_is_found_where_installers_put_it(tmp_path):
+    home_apps = tmp_path / "home" / "Applications"
+    (home_apps / "Docker.app").mkdir(parents=True)
+    found = windows_vm.mac_docker_app((tmp_path / "Applications", home_apps))
+    assert found == home_apps / "Docker.app"
+    assert windows_vm.mac_docker_app((tmp_path / "nowhere",)) is None
 
 
 def clocked(fake: FakeWindows) -> tuple[windows_vm.DockerDoctor, list[float]]:

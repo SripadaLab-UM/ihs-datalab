@@ -570,6 +570,17 @@ containers, images and volumes).
 
 ## Mac: Docker Desktop
 
+**Each time DataLab starts** (`windows_vm.check_before_serve`, as on
+Windows): if Docker Desktop is installed but closed, DataLab opens it in the
+background (`open -g -a Docker.app`), and the Docker banner says it's
+starting until `docker info` answers. A message sent meanwhile waits for it,
+up to 2 minutes, with a notice in the conversation (`SessionManager.docker`).
+If the person quits Docker Desktop later, the banner's **Open Docker
+Desktop** opens it again; DataLab doesn't reopen it by itself, except for a
+message sent while it's closed. The state comes from `docker info`, `pgrep`
+for Docker Desktop's programs, and Docker.app in `/Applications` or
+`~/Applications`.
+
 Step 1 of `installer/macos/install.sh` (shipped as `install-macos.sh`):
 
 - **Finding it.** Docker Desktop is looked for in `/Applications` and
