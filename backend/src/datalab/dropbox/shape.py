@@ -60,7 +60,7 @@ def report(entries: Iterable[FileEntry], say: Callable[[str], None] = print) -> 
         by_top[_top(entry.path)].append(entry)
     sets_by_top: dict[str, list[Family]] = defaultdict(list)
     for family in sets:
-        sets_by_top[_top(family.key)].append(family)
+        sets_by_top[_top(family.example or family.key)].append(family)
     for top in sorted(by_top):
         group, its_sets = by_top[top], sets_by_top[top]
         single = sum(1 for f in its_sets if f.files == 1)

@@ -553,7 +553,7 @@ def test_the_shape_report_gives_counts_not_names():
     from datalab.dropbox.shape import report, shape_of
 
     assert shape_of("Steps_P0123.csv") == "a_a9.csv"
-    entries = [FileEntry(f"waves/{name}.csv", f"id:{i}", 2_000_000) for i, name in
+    entries = [FileEntry(f"Waves/{name}.csv", f"id:{i}", 2_000_000) for i, name in
                enumerate(["Smith_Jane", "Doe_John", "Roe_Rick"])]  # fmt: skip
     entries += [FileEntry(f"fitbit/steps_{year}.csv", f"id:s{year}", 500) for year in (2024, 2025)]
     entries.append(FileEntry("README", "id:r", 10))
@@ -561,7 +561,7 @@ def test_the_shape_report_gives_counts_not_names():
     report(entries, say=lines.append)
     text = "\n".join(lines)
     assert lines[0].startswith("6 files, 5.7 MB, in 5 datasets")
-    assert "  waves: 3, 5.7 MB, 3, 3" in lines
+    assert "  Waves: 3, 5.7 MB, 3, 3" in lines  # as named, not as its pattern
     assert (
         "  fitbit: 2, 1000 bytes, 1, 0" in lines
         and "  (files at the top): 1, 10 bytes, 1, 1" in lines
