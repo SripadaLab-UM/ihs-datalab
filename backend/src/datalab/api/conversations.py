@@ -218,6 +218,7 @@ def build_conversations_router(
         if processed_offered is not None:
             return processed_offered()
         return processed_ready is not None
+
     router = APIRouter(prefix="/api", tags=["conversations"])
 
     def name_after_first_question(conversation: Conversation, question: str) -> None:
