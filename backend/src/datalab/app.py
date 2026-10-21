@@ -317,6 +317,7 @@ def create_app(
             allowed_models=settings.allowed_models,
             titles=titles,
             processed_ready=lambda: processed.status().problem,
+            processed_offered=lambda: processed.status().source != "off",
         )
     )
     app.include_router(build_processed_router(processed))

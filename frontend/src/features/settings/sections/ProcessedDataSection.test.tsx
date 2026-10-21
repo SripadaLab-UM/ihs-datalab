@@ -76,3 +76,15 @@ it("shows how far a listing has got, and stops asking once it's done", async () 
   await new Promise((done) => setTimeout(done, 1500));
   expect(vi.mocked(processedApi.status).mock.calls.length).toBe(asked);
 });
+
+it("shows nothing when this DataLab has no Dropbox app", async () => {
+  vi.mocked(processedApi.status).mockResolvedValue({
+    ...signedIn, source: "off", configured: false, sign_in: null,
+    problem: "The lab's Dropbox app isn't set in settings.toml ([dropbox] app_key).",
+  }); // prettier-ignore
+  show();
+  await waitFor(() => expect(processedApi.status).toHaveBeenCalled());
+  await waitFor(() => expect(screen.queryByText("Checking…")).toBeNull());
+  expect(screen.queryByText(/Processed data/)).toBeNull();
+  expect(screen.queryByText(/Dropbox/)).toBeNull();
+});

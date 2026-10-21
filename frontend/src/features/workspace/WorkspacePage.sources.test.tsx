@@ -76,3 +76,15 @@ it("offers only the database until Dropbox is set up, and says how", async () =>
   fireEvent.click(within(dialog).getByRole("button", { name: /Start/ }));
   await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith("analysis", undefined, ["database"]));
 });
+
+it("shows no data choice at all when this DataLab offers no processed data", async () => {
+  // What the backend lists when there's no Dropbox app: no mode offers it.
+  vi.mocked(api.modes).mockResolvedValue([mode("analysis", "Analysis", ["database"])]);
+  vi.mocked(processedApi.status).mockResolvedValue({ ...processed(false), source: "off", configured: false });
+  const dialog = await openDialog();
+  await within(dialog).findByText("Analysis");
+  expect(within(dialog).queryByRole("radio", { name: /Processed data|Both|Study database/ })).toBeNull();
+  expect(within(dialog).queryByText(/Dropbox/)).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: /Start/ }));
+  await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith("analysis", undefined, undefined));
+});

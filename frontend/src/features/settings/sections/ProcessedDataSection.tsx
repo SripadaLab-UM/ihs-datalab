@@ -54,17 +54,9 @@ export function ProcessedDataSection() {
       </Part>
     );
   }
-  if (shown.source === "off") {
-    return (
-      <Part id={PROCESSED_ANCHOR} title="Processed data (Dropbox)" state={<Chip>Not set up</Chip>}>
-        <p className="mt-1 text-sm text-muted">
-          {shown.problem} Ask the DataLab maintainer to set the{" "}
-          <code className="font-mono text-[12.5px]">[dropbox]</code> section of settings.toml. Until then, conversations
-          use the study database only.
-        </p>
-      </Part>
-    );
-  }
+  // Without the lab's Dropbox app (installed DataLab, until the lab's central
+  // DataLab offers it) there's nothing to show: no conversation can use it.
+  if (shown.source === "off") return null;
   return <Dropbox processed={shown} />;
 }
 

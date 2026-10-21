@@ -206,9 +206,19 @@ def build_conversations_router(
     allowed_models: tuple[str, ...] | None = None,
     titles: TitleWriter | None = None,
     processed_ready: Callable[[], str | None] | None = None,
+    processed_offered: Callable[[], bool] | None = None,
 ) -> APIRouter:
     """`processed_ready()` is why the processed data can't be used now, or
-    None when it can (dropbox/service.py); without it, it never can."""
+    None when it can (dropbox/service.py); without it, it never can.
+    `processed_offered()` is whether this DataLab offers it at all: not
+    when it has no Dropbox app (installed DataLab, until the lab's central
+    DataLab), and then no mode lists it, so nothing offers it."""
+
+    def offered() -> bool:
+        if processed_offered is not None:
+            return processed_offered()
+        return processed_ready is not None
+
     router = APIRouter(prefix="/api", tags=["conversations"])
 
     def name_after_first_question(conversation: Conversation, question: str) -> None:
@@ -250,6 +260,7 @@ def build_conversations_router(
 
     @router.get("/modes")
     def list_modes() -> list[ModeOut]:
+        sources = ("database", "dropbox") if offered() else ("database",)
         return [
             ModeOut(
                 id=m.id,
@@ -262,7 +273,7 @@ def build_conversations_router(
                 attachments=m.attachments,
                 question=m.question,
                 remember="suggest_kb_update" in m.allowed_tools,
-                sources=[s for s in ("database", "dropbox") if s in m.sources],
+                sources=[s for s in sources if s in m.sources],
             )
             for m in MODES.values()
         ]
