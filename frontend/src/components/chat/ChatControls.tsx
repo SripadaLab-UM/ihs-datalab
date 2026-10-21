@@ -14,6 +14,7 @@ export function ChatHeader({
   start,
   title,
   kind,
+  sources,
   model,
   effort,
   onEffort,
@@ -22,6 +23,8 @@ export function ChatHeader({
   start?: ReactNode;
   title: ReactNode;
   kind: "data" | "research";
+  /** A data conversation's sources, for the badge. */
+  sources?: readonly DataSource[];
   model: string;
   effort: Effort;
   onEffort: (effort: Effort) => void;
@@ -31,7 +34,7 @@ export function ChatHeader({
     <header className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line px-4 py-3 sm:px-8">
       {start}
       {title}
-      <SessionBadge kind={kind} />
+      <SessionBadge kind={kind} sources={sources} />
       <span className="flex items-center gap-1.5 font-mono text-[11.5px] text-faint">
         {model}
         <span aria-hidden>·</span>

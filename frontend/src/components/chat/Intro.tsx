@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import clsx from "clsx";
 import { useId, useState } from "react";
 
-import { api } from "@/api/client";
+import { api, type DataSource } from "@/api/client";
 import { Icon } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 
@@ -15,12 +15,15 @@ import { HOVER_TITLE } from "./Story";
 export function EmptyState({
   mode: modeId,
   kind,
+  sources,
   onPick,
   starting,
   error,
 }: {
   mode: string;
   kind: "data" | "research";
+  /** A data conversation's sources; the study database when not given. */
+  sources?: readonly DataSource[];
   onPick: (text: string) => void;
   starting: boolean;
   error?: string;
@@ -37,7 +40,7 @@ export function EmptyState({
         <p className="mt-4 max-w-[52ch] font-serif text-[18px] leading-relaxed text-muted">{mode?.description}</p>
       </div>
       <ul className="grid gap-x-6 gap-y-3 border-t border-line pt-4 font-sans text-[13px] text-muted sm:grid-cols-3">
-        {safetyLines(kind, mode?.queries).map(([icon, text]) => (
+        {safetyLines(kind, mode?.queries, sources).map(([icon, text]) => (
           <li key={text} className="flex items-start gap-2">
             <Icon name={icon as "db"} size={14} className={clsx("mt-0.5 shrink-0", data ? "text-data" : "text-research")} />
             {text}
@@ -69,13 +72,23 @@ export function EmptyState({
 }
 
 /** What a session may and may not do, said wherever a conversation starts. */
-export function safetyLines(kind: "data" | "research", queries: boolean | undefined): [AnyIcon, string][] {
+export function safetyLines(
+  kind: "data" | "research",
+  queries: boolean | undefined,
+  sources?: readonly DataSource[],
+): [AnyIcon, string][] {
+  const files = sources?.includes("dropbox") ?? false;
+  const database = !files || (sources?.includes("database") ?? false);
   return kind === "data"
     ? [
         // Knowledge writing has the catalog tools only.
         queries === false
           ? ["db", "Reads the database catalog (tables and columns), never rows"]
-          : ["db", "Queries the IHS database, read-only"],
+          : files
+            ? database
+              ? ["db", "Queries the IHS database and reads the lab's processed data, read-only"]
+              : ["folder", "Reads the lab's processed data, fetching only the files it needs, read-only"]
+            : ["db", "Queries the IHS database, read-only"],
         ["eye", "Shows you everything it reads and runs"],
         ["lock", "Websites blocked; the model is U-M's approved GPT service"],
       ]

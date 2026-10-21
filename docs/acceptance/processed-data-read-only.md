@@ -81,8 +81,14 @@ noted in setup 3: no new versions, files or folders.
 | Step | Result | Notes |
 |---|---|---|
 | 1. App can't write | PASS, 2026-10-20 | From source on this fix. Dropbox refused all five with HTTP 400 "not permitted…required scope"; folder unchanged. (beta.12's check misread the same refusals as ALLOWED.) |
-| 2. Agent can read | | |
-| 3. Agent can't change | | |
-| 4. No route to Dropbox | | |
-| 5. Safety check | | |
-| 6. Dropbox unchanged | | |
+| 2. Agent can read | PASS, 2026-10-20 | Practice DataLab (see below). Loaded from `/data/dropbox/fitbit/…`; the Queries tab listed the file (15.8 KB). |
+| 3. Agent can't change | PASS, 2026-10-20 | Practice. Append, delete, create, mkdir and rename: all "Read-only file system". |
+| 4. No route to Dropbox | PASS, 2026-10-20 | Practice. curl: "Could not resolve host"; Python: "Temporary failure in name resolution", for both hosts. |
+| 5. Safety check | PASS, 2026-10-20 | Practice: every check passed, `processed_data_read_only` and both Dropbox-token checks included. |
+| 6. Dropbox unchanged | PASS, 2026-10-20 | Step 1's before/after listing of the test folder matched; steps 2–4 never touched Dropbox. |
+
+Steps 2–5 ran in practice DataLab, from source on `read-only-check-fix` with
+beta.12's agent image: the same staging, read-only mount and sealed container
+as the real profile, on the same synthetic files, with the local stand-in
+instead of the Dropbox API (step 1 covers the API). Claude drove them; outside
+AI tools use practice only.

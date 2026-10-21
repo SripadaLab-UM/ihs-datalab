@@ -8,7 +8,7 @@ import { processedApi } from "@/api/processed";
 import { DockedChat } from "@/components/chat/DockedChat";
 import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
 import { SHOW_STEP } from "@/components/chat/showStep";
-import { Button, Icon, InfoTip, Modal, Panel } from "@/components/ui";
+import { Button, dataReach, Icon, InfoTip, Modal, Panel } from "@/components/ui";
 import type { AnyIcon } from "@/components/ui/Icon";
 import { settingsLink } from "@/features/settings/highlight";
 import { PROCESSED_ANCHOR } from "@/features/settings/sectionIds";
@@ -143,7 +143,7 @@ export function WorkspacePage() {
                       className={clsx("shrink-0", c.kind === "data" ? "text-data" : "text-research")}
                       title={
                         c.kind === "data"
-                          ? "Data session: database access, web blocked"
+                          ? `Data session: ${dataReach(c.data_sources)}, web blocked`
                           : "Research session: web access, no database connection"
                       }
                     >

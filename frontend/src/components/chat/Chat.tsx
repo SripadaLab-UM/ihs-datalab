@@ -179,6 +179,7 @@ export function Chat({
             start={headerStart}
             title={<Title conversation={conversation} />}
             kind={conversation.kind}
+            sources={conversation.data_sources}
             model={conversation.model}
             effort={effort}
             onEffort={setEffort}
@@ -215,6 +216,7 @@ export function Chat({
                 <EmptyState
                   mode={conversation.mode}
                   kind={conversation.kind}
+                  sources={conversation.data_sources}
                   onPick={(text) => void sendMessage(text, true).catch(() => undefined)}
                   starting={send.isPending || running}
                 />
