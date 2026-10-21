@@ -873,3 +873,46 @@ def test_stream_stops_once_the_session_ends(app):
         store.append(cid, "answer_delta", {"text": "after the end"})
         rest = list(lines)  # ends: the stream closed
     assert not any("after the end" in line for line in rest)
+
+
+class FakeDocker:
+    """Docker Desktop as the session manager sees it (windows_vm.DockerDoctor)."""
+
+    def __init__(self, state: str) -> None:
+        self._state = state
+        self.waited: list[float] = []
+
+    def state(self, *, fresh: bool = False) -> str:
+        return self._state
+
+    def wait_ready(self, seconds: float, *, every: float = 3) -> bool:
+        self.waited.append(seconds)
+        self._state = "ready"
+        return True
+
+
+@pytest.mark.parametrize("state", ["stopped", "starting"])
+def test_a_message_sent_while_docker_starts_waits_for_it(app, state):
+    from datalab.sessions.manager import DOCKER_STARTING
+
+    made = use_fake_runtime(app)
+    docker = FakeDocker(state)
+    app.state.services.sessions.docker = docker
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"})
+        events = wait_for(client, cid, "turn_done")
+    notices = [e["data"]["text"] for e in events if e["type"] == "notice"]
+    assert notices == [DOCKER_STARTING] and docker.waited == [120]
+    assert made[0].sent == ["hi"]
+
+
+def test_a_message_sent_with_docker_ready_doesnt_wait(app):
+    use_fake_runtime(app)
+    docker = FakeDocker("ready")
+    app.state.services.sessions.docker = docker
+    with TestClient(app) as client:
+        cid = client.post("/api/conversations", json={}).json()["id"]
+        client.post(f"/api/conversations/{cid}/messages", json={"text": "hi"})
+        events = wait_for(client, cid, "turn_done")
+    assert not [e for e in events if e["type"] == "notice"] and docker.waited == []

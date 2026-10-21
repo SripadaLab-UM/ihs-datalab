@@ -1,5 +1,6 @@
-// Docker on Windows (backend api/docker.py, windows_vm.py). While Docker can't
-// run, every page says so in a banner at the top, with what to do. When a
+// Docker Desktop on Windows and Mac (backend api/docker.py, windows_vm.py).
+// While Docker can't run, every page says so in a banner at the top, with what
+// to do (DataLab opens Docker Desktop itself when it starts). When a
 // Windows policy has stopped Docker's virtual machine, a dialog opens by itself
 // (once a session, unless put off with Later) and walks through the fix: turn
 // on the temporary administrator access (on a Michigan Medicine computer, from

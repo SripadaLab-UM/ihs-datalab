@@ -49,6 +49,23 @@ class ProcessedSource(Protocol):
     def ensure_fresh(self) -> None: ...
 
 
+class DockerWaiter(Protocol):
+    """What the session manager needs of Docker Desktop (windows_vm.DockerDoctor)."""
+
+    def state(self, *, fresh: bool = False) -> str: ...
+
+    def wait_ready(self, seconds: float, *, every: float = 3) -> bool: ...
+
+
+# How long a turn waits for Docker Desktop to start before trying anyway (it
+# then fails, saying Docker Desktop isn't running).
+DOCKER_WAIT_SECONDS = 120
+DOCKER_STARTING = (
+    "Docker Desktop is starting. Your message goes to the agent as soon as it's ready "
+    "(usually within a minute or two)."
+)
+
+
 # What Continue sends: the same thread picks up where a turn stopped part-way.
 CONTINUE_TEXT = (
     "Please continue where you left off: the last turn was interrupted before it finished."
@@ -92,6 +109,9 @@ class SessionManager:
         # The lab's processed data, to refresh its file list before a turn
         # that uses it (set by the app; dropbox/service.py).
         self.processed: ProcessedSource | None = None
+        # Docker Desktop, to wait for while it starts rather than fail a turn
+        # sent too soon (set by the app when it manages containers).
+        self.docker: DockerWaiter | None = None
         self._settings = settings
         self._store = store
         self._tokens = tokens
@@ -559,6 +579,18 @@ class SessionManager:
             self._runtimes[conversation.id] = runtime
         return runtime
 
+    async def _wait_for_docker(self, conversation_id: str) -> None:
+        """If Docker Desktop is closed or still starting, open it and wait for
+        it (saying so in the conversation), for up to DOCKER_WAIT_SECONDS."""
+        docker = self.docker
+        if docker is None:
+            return
+        state = await asyncio.to_thread(docker.state, fresh=True)
+        if state not in ("stopped", "starting"):
+            return
+        self._store.append(conversation_id, "notice", {"text": DOCKER_STARTING})
+        await asyncio.to_thread(docker.wait_ready, DOCKER_WAIT_SECONDS)
+
     async def _run_turn(
         self,
         conversation_id: str,
@@ -572,6 +604,7 @@ class SessionManager:
         completed = False
         status = "failed"
         try:
+            await self._wait_for_docker(conversation_id)
             result = await runtime.send(text, effort=effort)
             status = result.status
             completed = result.status == "completed"

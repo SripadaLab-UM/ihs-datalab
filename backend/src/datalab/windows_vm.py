@@ -24,6 +24,10 @@ DataLab's page shows how Docker stands and offers the fix as a button
 (api/docker.py, DockerDoctor): on a Michigan Medicine computer the person has
 to turn on their temporary administrator access first, which a question
 asked once in DataLab's window couldn't wait for.
+
+On a Mac there's no virtual machine right to put back, but the rest holds:
+DockerDoctor says whether Docker Desktop is installed, closed, starting or
+ready, and opens it (in the background) when DataLab starts and it's closed.
 """
 
 from __future__ import annotations
@@ -103,7 +107,7 @@ try {
 Run = Callable[..., subprocess.CompletedProcess]
 Probe = Literal["ok", "refused", "unknown"]
 # How Docker stands, as the page shows it (api/docker.py): "unsupported" off
-# Windows (none of this applies there); "ready" when its engine answers;
+# Windows and Mac (Linux runs Docker as a service); "ready" when its engine answers;
 # "not-installed" when Docker Desktop isn't where its installer puts it;
 # "stopped" when Docker Desktop isn't open; "starting" while it's open but its
 # engine isn't answering yet; "vm-refused" when the policy has taken the right
@@ -367,7 +371,7 @@ def restart_docker(
         return "stop"
     if not terminate_docker_vm(run):
         return "terminate"
-    if not start_docker(popen):
+    if not start_docker(popen, "win32"):  # the fix is Windows' alone
         return "start"
     deadline = clock() + ready_seconds
     while clock() < deadline:
@@ -390,9 +394,38 @@ def docker_desktop_running(run: Run = subprocess.run) -> bool:
     return b"docker desktop.exe" in (listed.stdout or b"").lower()
 
 
-def start_docker(popen: Callable = subprocess.Popen) -> bool:
-    """Open Docker Desktop. It needs no administrator: the installer set its
-    service to start by itself."""
+def mac_docker_app(homes: tuple[Path, ...] | None = None) -> Path | None:
+    """Docker Desktop on a Mac, where its installer and the Mac installer put
+    it (installer/macos/install.sh: find_docker_app)."""
+    for folder in homes or (Path("/Applications"), Path.home() / "Applications"):
+        if (folder / "Docker.app").is_dir():
+            return folder / "Docker.app"
+    return None
+
+
+def mac_docker_desktop_running(run: Run = subprocess.run) -> bool:
+    """Whether Docker Desktop is open on a Mac (its engine may still be starting)."""
+    try:
+        found = run(
+            ["/usr/bin/pgrep", "-f", "Docker.app/Contents/MacOS/"],
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return found.returncode == 0
+
+
+def start_docker(popen: Callable = subprocess.Popen, platform: str = sys.platform) -> bool:
+    """Open Docker Desktop. It needs no administrator: on Windows the
+    installer set its service to start by itself. On a Mac it opens in the
+    background (`open -g`), without taking the screen from DataLab."""
+    if platform == "darwin":
+        mac_app = mac_docker_app()
+        if mac_app is None:
+            return False
+        popen(["/usr/bin/open", "-g", "-a", str(mac_app)], close_fds=True)
+        return True
     app = docker_desktop()
     if not app.exists():
         return False
@@ -406,6 +439,12 @@ def docker_state(
     """How Docker stands now. WSL's virtual machine is only tried while Docker
     Desktop is open and its engine isn't answering (with `probe_vm`): a
     closed Docker Desktop is "stopped" without starting anything."""
+    if platform == "darwin":
+        if docker_answers(run):
+            return "ready"
+        if mac_docker_app() is None:
+            return "not-installed"
+        return "starting" if mac_docker_desktop_running(run) else "stopped"
     if platform != "win32":
         return "unsupported"
     if docker_answers(run):
@@ -423,9 +462,9 @@ def docker_state(
 
 
 class DockerDoctor:
-    """How Docker stands on this Windows computer, for DataLab's page, and the
-    two things the page can do about it: open Docker Desktop, and put the
-    virtual machines' right back (one administrator prompt).
+    """How Docker stands on this Windows computer or Mac, for DataLab's page,
+    and the two things the page can do about it: open Docker Desktop, and (on
+    Windows) put the virtual machines' right back (one administrator prompt).
 
     Both the page and DataLab's own start (check_before_serve) ask it, so
     their answers agree. A check can start WSL's virtual machine, so:
@@ -518,8 +557,21 @@ class DockerDoctor:
             # between would look to the restart as if it wouldn't close.
             return self.state()
         if self.state(fresh=True) == "stopped":
-            start_docker(self._popen)
+            start_docker(self._popen, self._platform)
         return self.state(fresh=True)
+
+    def wait_ready(self, seconds: float, *, every: float = 3) -> bool:
+        """Wait until Docker's engine answers, opening Docker Desktop first if
+        it's closed; whether it did within `seconds`. Gives up at once when
+        it can't start (not installed, a refused VM, or nothing to manage)."""
+        state = self.state(fresh=True)
+        if state == "stopped":
+            state = self.start()
+        deadline = self._clock() + seconds
+        while state in ("starting", "stopped") and self._clock() < deadline:
+            self._sleep(every)
+            state = self.state(fresh=True)
+        return state == "ready"
 
     def fix(self) -> FixResult:
         """Show the administrator prompt and put the right back, then restart
@@ -554,7 +606,7 @@ class DockerDoctor:
 
 
 def check_before_serve(doctor: DockerDoctor, *, say: Callable[[str], None] = print) -> DockerState:
-    """At DataLab's start on Windows: open Docker Desktop if it's closed, and
+    """At DataLab's start on Windows or a Mac: open Docker Desktop if it's closed, and
     if Windows won't let its virtual machine start, say so in DataLab's window
     too. The page shows the same, with the fix (api/docker.py): the fix needs
     an administrator, which on a Michigan Medicine computer means turning on

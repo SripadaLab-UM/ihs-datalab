@@ -1,24 +1,33 @@
 ---
 title: When Docker can't run
-summary: What the Docker banner means, and how to fix a Windows computer that won't let Docker start.
+summary: What the Docker banner means, how DataLab starts Docker Desktop for you, and how to fix a Windows computer that won't let Docker start.
 order: 33
-keywords: docker, docker desktop, windows, administrator, admin, permission, virtual machine, wsl, banner, fix, not running, starting, not installed
+keywords: docker, docker desktop, mac, windows, administrator, admin, permission, virtual machine, wsl, banner, fix, not running, starting, not installed
 ---
 
 # When Docker can't run
 
 Every conversation, workflow run and pipeline test runs in Docker Desktop, in
-a sealed-off space on your computer. When Docker can't run on Windows, a
-banner at the top of every page says so until it can. The SQL Playground,
+a sealed-off space on your computer. When Docker can't run, on a Mac or on
+Windows, a banner at the top of every page says so until it can. The SQL Playground,
 exports and Settings keep working meanwhile, and nothing you've done in
 DataLab is lost.
 
 ## "Docker Desktop isn't running"
 
-Click **Open Docker Desktop**, or open it from the Start menu yourself.
-DataLab also opens it when DataLab starts. The banner then says **Docker
-Desktop is starting**: that takes a minute or two, and the banner goes away
-once it's ready.
+DataLab opens Docker Desktop itself when DataLab starts (on a Mac, in the
+background). If you close Docker Desktop later, click **Open Docker
+Desktop** in the banner, or open it yourself (Applications on a Mac, the
+Start menu on Windows). The banner then says **Docker Desktop is starting**:
+that takes a minute or two, and the banner goes away once it's ready.
+
+A message you send meanwhile waits for it: the conversation says **Docker
+Desktop is starting**, and your message goes to the agent as soon as it's
+ready. If Docker Desktop doesn't start within two minutes, the message stops
+with "Docker Desktop isn't running".
+
+To have it running before you even open DataLab, turn on **Start Docker
+Desktop when you sign in** in Docker Desktop's **Settings → General**.
 
 ## "Docker Desktop isn't installed"
 

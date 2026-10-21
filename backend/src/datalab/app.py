@@ -420,6 +420,9 @@ def create_app(
     # Docker on Windows: how it stands, and the fixes the page offers (api/docker.py).
     docker_doctor = docker_doctor or DockerDoctor()
     app.state.docker_doctor = docker_doctor
+    if manage_containers:
+        # A turn sent while Docker Desktop is closed or starting waits for it.
+        sessions.docker = docker_doctor
     app.include_router(
         build_docker_router(
             settings,

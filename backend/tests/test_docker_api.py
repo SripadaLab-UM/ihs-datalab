@@ -46,9 +46,9 @@ def test_the_page_learns_the_vm_is_refused_and_where_to_get_admin_access(setting
     }
 
 
-def test_off_windows_nothing_is_offered(settings):
+def test_on_linux_nothing_is_offered(settings):
     fake = FakeWindows()
-    client = client_for(settings, fake, platform="darwin")
+    client = client_for(settings, fake, platform="linux")
     assert client.get("/api/docker").json()["state"] == "unsupported"
     assert client.post("/api/docker/fix").json()["outcome"] == "unsupported"
     assert fake.calls == []
