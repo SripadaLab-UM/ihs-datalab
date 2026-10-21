@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -289,7 +290,7 @@ class SessionContainers:
         if code != 0:
             if "no such" in err.lower():
                 return None
-            raise DockerError(f"docker inspect failed: {err.strip()[:300]}")
+            raise docker_failure("inspect", err[:300])
         running, paused = [*out.split(), "", ""][:2]
         if paused == "true":
             return "paused"
@@ -439,9 +440,30 @@ async def docker(*args: str, check: bool = True) -> str:
     )
     out, err = await process.communicate()
     if check and process.returncode != 0:
-        # Never log arguments: they may include the session token.
-        raise DockerError(f"docker {args[0]} failed: {err.decode(errors='replace').strip()[:500]}")
+        raise docker_failure(args[0], err.decode(errors="replace"))
     return out.decode(errors="replace")
+
+
+# Docker Desktop not running, as the docker command says it on Mac, Linux and
+# Windows (its socket, or its named pipe, isn't there).
+_ENGINE_DOWN = re.compile(
+    r"cannot connect to the docker daemon|is the docker daemon running"
+    r"|error during connect|docker_engine.*(cannot find|could not find)",
+    re.IGNORECASE,
+)
+DOCKER_NOT_RUNNING = (
+    "Docker Desktop isn't running. Open Docker Desktop, wait until it says "
+    "'Engine running', then try again."
+)
+
+
+def docker_failure(command: str, stderr: str) -> DockerError:
+    """The error for a failed docker command: in plain words when Docker
+    Desktop isn't running, else Docker's own (never its arguments: they may
+    include the session token)."""
+    if _ENGINE_DOWN.search(stderr):
+        return DockerError(DOCKER_NOT_RUNNING)
+    return DockerError(f"docker {command} failed: {stderr.strip()[:500]}")
 
 
 async def remove_all_session_containers(profile: str, data_dir: Path) -> None:

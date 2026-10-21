@@ -38,6 +38,31 @@ async def test_stop_isnt_confirmed_if_docker_cant_answer(tmp_path, monkeypatch):
         await make(tmp_path).stop_and_confirm()
 
 
+@pytest.mark.parametrize(
+    "said",
+    [
+        # Mac, word for word as a colleague saw it when attaching a file.
+        "Cannot connect to the Docker daemon at unix:///Users/someone/.docker/run/docker.sock. "
+        "Is the docker daemon running?",
+        # Windows: Docker Desktop's pipe isn't there.
+        'error during connect: Get "http://%2F%2F.%2Fpipe%2Fdocker_engine/v1.47/containers/x": '
+        "open //./pipe/docker_engine: The system cannot find the file specified.",
+    ],
+)
+async def test_docker_not_running_is_said_in_plain_words(tmp_path, monkeypatch, said):
+    """Still refused (nothing is assumed stopped), but said so a person knows what to do."""
+    fake_docker(monkeypatch, [(1, "", said)])
+    with pytest.raises(DockerError) as refused:
+        await make(tmp_path).stop_and_confirm()
+    assert str(refused.value) == module.DOCKER_NOT_RUNNING
+    assert "docker.sock" not in str(refused.value)
+
+
+def test_other_docker_failures_keep_dockers_words():
+    error = module.docker_failure("run", "Error response from daemon: Conflict. The name is in use")
+    assert str(error).startswith("docker run failed: Error response from daemon: Conflict")
+
+
 async def test_stop_is_confirmed_when_the_container_is_gone(tmp_path, monkeypatch):
     fake_docker(monkeypatch, [(1, "", "Error: No such object: datalab-abc-c-1-agent")])
     await make(tmp_path).stop_and_confirm()
