@@ -449,37 +449,62 @@ def test_only_a_folder_id_can_be_opened(app):
             assert answer.status_code == 422, bad
 
 
+# Dropbox's own words for an app without a write scope, as a live run on
+# 2026-10-20 got them (HTTP 400), with the app's id made up.
+LIVE_REFUSAL = (
+    'Error in call to API function "files/delete_v2": Your app (ID: 1234567) is not '
+    "permitted to access this endpoint because it does not have the required scope "
+    "'files.content.write'. The owner of the app can enable the scope for the app using "
+    "the Permissions tab on the App Console."
+)
+
+
 class WriteAttempts:
     """Dropbox's write endpoints, answering as a read-only app gets them
-    answered (401 missing_scope), or as a misconfigured one would (200)."""
+    answered (`live`: 400 with Dropbox's words; `scope`: 401 missing_scope),
+    as a misconfigured app would (`allow`: 200), or with an error that proves
+    nothing (`notfound`: 409)."""
 
-    def __init__(self, allow: bool) -> None:
-        self.allow = allow
+    def __init__(self, answer: str) -> None:
+        self.answer = answer
         self.writes: list[str] = []
+        self.listed: list[str] = []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
+        if path == "/2/files/get_metadata":
+            asked = json.loads(request.content)["path"]
+            if asked != "/Me/Test (synthetic)":
+                return httpx.Response(409, json={"error_summary": "path/not_found/.."})
+            folder = {".tag": "folder", "id": "id:test", "path_display": asked}
+            return httpx.Response(200, json=folder)
         if path in ("/2/files/list_folder", "/2/files/list_folder/continue"):
+            if path == "/2/files/list_folder":
+                self.listed.append(json.loads(request.content)["path"])
             entry = {".tag": "file", "path_lower": "/t/a.csv", "rev": "1", "content_hash": "h"}
             return httpx.Response(200, json={"entries": [entry], "cursor": "c", "has_more": False})
         self.writes.append(path)
-        if self.allow:
+        if self.answer == "allow":
             return httpx.Response(200, json={})
+        if self.answer == "live":
+            return httpx.Response(400, text=LIVE_REFUSAL)
+        if self.answer == "notfound":
+            return httpx.Response(409, json={"error_summary": "from_lookup/not_found/.."})
         return httpx.Response(
             401,
             json={"error_summary": "missing_scope/..", "error": {".tag": "missing_scope"}},
         )
 
 
-@pytest.mark.parametrize("allow", [False, True])
-def test_the_read_only_check(auth, connection, allow):
+@pytest.mark.parametrize("answer", ["live", "scope", "allow", "notfound"])
+def test_the_read_only_check(auth, connection, answer):
     from datalab.dropbox.check import check_read_only
 
     auth.start()
     auth.finish("GOODCODE")
     index = ProcessedIndex(connection)
     index.choose("id:t", "/T", "100")
-    dropbox = WriteAttempts(allow)
+    dropbox = WriteAttempts(answer)
     lines: list[str] = []
     code = check_read_only(
         auth, index, http=httpx.Client(transport=httpx.MockTransport(dropbox)), say=lines.append
@@ -488,13 +513,65 @@ def test_the_read_only_check(auth, connection, allow):
              "/2/files/move_v2", "/2/files/copy_v2"}  # fmt: skip
     assert tried <= set(dropbox.writes)
     assert not any("sl.first" in line or "rt-1" in line for line in lines)  # no tokens printed
-    if allow:
-        assert code == 1 and lines[-1].startswith("FAIL")
+    marks = [line.split()[0] for line in lines if line.startswith("  ") and ":" in line]
+    if answer in ("live", "scope"):
+        assert code == 0 and lines[-1] == "PASS: Dropbox refused every change."
+        assert marks == ["refused"] * 5
+        # Nothing was made, so nothing is cleaned up.
+        assert len(dropbox.writes) == 5
+    elif answer == "allow":
+        assert code == 1 and lines[-1].startswith("FAIL") and marks == ["ALLOWED"] * 5
         # It removes only what it made, by its own made-up names.
         assert dropbox.writes[-2:] == ["/2/files/delete_v2", "/2/files/delete_v2"]
     else:
-        assert code == 0 and lines[-1] == "PASS: Dropbox refused every change."
-        assert sum(line.startswith("  refused") for line in lines) == 5
+        # "Not found" doesn't show the app lacks permission: no pass, no clean-up.
+        assert code == 1 and lines[-1].startswith("FAIL") and marks == ["UNCLEAR"] * 5
+        assert len(dropbox.writes) == 5 and any("not_found" in line for line in lines)
+
+
+def test_the_read_only_check_can_try_another_folder(auth, connection):
+    from datalab.dropbox.check import check_read_only
+
+    auth.start()
+    auth.finish("GOODCODE")
+    index = ProcessedIndex(connection)
+    index.choose("id:study", "/Study", "100")
+    dropbox = WriteAttempts("live")
+    lines: list[str] = []
+    http = httpx.Client(transport=httpx.MockTransport(dropbox))
+    code = check_read_only(auth, index, http=http, say=lines.append, folder="/Me/Test (synthetic)")
+    assert code == 0 and "/Me/Test (synthetic)" in lines[0]
+    # Only the named folder is listed; the chosen one isn't touched.
+    assert dropbox.listed == ["id:test", "id:test"]
+
+    lines.clear()
+    assert check_read_only(auth, index, http=http, say=lines.append, folder="/Nope") == 2
+    assert "isn't a folder" in lines[-1]
+
+
+def test_the_shape_report_gives_counts_not_names():
+    from datalab.dropbox.shape import report, shape_of
+
+    assert shape_of("Steps_P0123.csv") == "a_a9.csv"
+    entries = [FileEntry(f"waves/{name}.csv", f"id:{i}", 2_000_000) for i, name in
+               enumerate(["Smith_Jane", "Doe_John", "Roe_Rick"])]  # fmt: skip
+    entries += [FileEntry(f"fitbit/steps_{year}.csv", f"id:s{year}", 500) for year in (2024, 2025)]
+    entries.append(FileEntry("README", "id:r", 10))
+    lines: list[str] = []
+    report(entries, say=lines.append)
+    text = "\n".join(lines)
+    assert lines[0].startswith("6 files, 5.7 MB, in 5 datasets")
+    assert "  waves: 3, 5.7 MB, 3, 3" in lines
+    assert (
+        "  fitbit: 2, 1000 bytes, 1, 0" in lines
+        and "  (files at the top): 1, 10 bytes, 1, 1" in lines
+    )
+    assert "  .csv: 5, 5.7 MB" in lines and "  (none): 1, 10 bytes" in lines
+    assert "  1-10 MB: 3, 5.7 MB" in lines and "  2024: 1" in lines and "  2025: 1" in lines
+    assert "  1 file: 4, 4" in lines and "  2-10: 1, 2" in lines
+    assert "  a_a.csv: 3" in lines
+    for name in ("smith", "jane", "doe", "roe", "steps"):
+        assert name not in text.lower()
 
 
 def test_errors_about_a_path_are_refusals(client):

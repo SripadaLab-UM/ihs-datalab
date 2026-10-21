@@ -93,9 +93,17 @@ def main(argv: list[str] | None = None) -> int:
 
     processed = commands.add_parser("processed", help="the lab's processed data in Dropbox")
     processed_commands = processed.add_subparsers(dest="processed_command", required=True)
-    processed_commands.add_parser(
+    read_only = processed_commands.add_parser(
         "check-read-only",
         help="show that DataLab's Dropbox sign-in can't change anything in the chosen folder",
+    )
+    read_only.add_argument(
+        "--folder",
+        help="the folder to try instead (a Dropbox path), such as a synthetic test folder",
+    )
+    processed_commands.add_parser(
+        "shape",
+        help="counts of the chosen folder's files by folder, type, size and year (no names)",
     )
 
     kb_check = commands.add_parser(
@@ -173,10 +181,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "catalog":
         return _build_catalog(settings, args)
 
+    if args.command == "processed" and args.processed_command == "shape":
+        from datalab.dropbox.shape import run as shape
+
+        return shape(settings)
     if args.command == "processed":
         from datalab.dropbox.check import run as check_read_only
 
-        return check_read_only(settings)
+        return check_read_only(settings, args.folder)
     return 2
 
 

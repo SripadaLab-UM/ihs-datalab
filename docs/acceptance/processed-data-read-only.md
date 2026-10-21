@@ -33,12 +33,18 @@ Automated cover, which runs without Dropbox:
 ## 1. The app can't write (Dropbox refuses)
 
 ```sh
-datalab processed check-read-only
+datalab processed check-read-only --folder "/<your folder>/DataLab test (synthetic)"
 ```
+
+(`--folder` tries that folder whichever folder DataLab uses; without it, the
+chosen one.)
 
 Expect `PASS: Dropbox refused every change.`, with all five attempts (upload
 a new file, make a folder, delete, move, copy) `refused … no permission to
-write`, and "The folder's files are unchanged". It names only new, made-up
+write`, and "The folder's files are unchanged". Dropbox refuses with HTTP 400
+"Your app … is not permitted to access this endpoint because it does not have
+the required scope" (or 401 missing_scope); any other error is `UNCLEAR`, not a
+pass. It names only new, made-up
 paths, so nothing existing is at risk even if it failed.
 
 ## 2–4. The agent can't change files
@@ -74,7 +80,7 @@ noted in setup 3: no new versions, files or folders.
 
 | Step | Result | Notes |
 |---|---|---|
-| 1. App can't write | | |
+| 1. App can't write | PASS, 2026-10-20 | From source on this fix. Dropbox refused all five with HTTP 400 "not permitted…required scope"; folder unchanged. (beta.12's check misread the same refusals as ALLOWED.) |
 | 2. Agent can read | | |
 | 3. Agent can't change | | |
 | 4. No route to Dropbox | | |
