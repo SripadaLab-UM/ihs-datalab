@@ -8,6 +8,8 @@ MockTransport, with response shapes from Dropbox's API documentation."""
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -24,12 +26,14 @@ from datalab.dropbox.auth import DropboxAuth, SignInNeeded, TokenStore, pkce_pai
 from datalab.dropbox.client import ContentHasher, DropboxClient, DropboxRefused, content_hash
 from datalab.dropbox.families import families, is_clutter, pattern, years_in
 from datalab.dropbox.index import ProcessedIndex
-from datalab.dropbox.service import LoadRefused, ProcessedData
+from datalab.dropbox.service import LoadRefused, NotAvailable, ProcessedData
 from datalab.dropbox.sources import (
     Changes,
     CursorTooOld,
+    DropboxSource,
     FileEntry,
     LocalSource,
+    Progress,
     practice_folder,
     safe_relative,
 )
@@ -158,7 +162,7 @@ class ScriptedSource:
         self._changes = changes
         self.listed = 0
 
-    def listing(self) -> Changes:
+    def listing(self, progress=None) -> Changes:
         self.listed += 1
         return self._listing
 
@@ -492,6 +496,136 @@ def test_folders_can_be_opened_to_choose_a_subfolder(settings, connection, auth,
     assert asked == ["", "id:f"]
 
 
+class FolderTree:
+    """Dropbox's listing endpoints for a chosen folder `/Study` holding a
+    file and three folders, one of them paged; shapes from the API docs."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, str, bool]] = []
+        self.at_once = 0
+        self.most_at_once = 0
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _file(path: str, size: int = 10) -> dict[str, object]:
+        return {".tag": "file", "name": path.rsplit("/", 1)[-1], "id": f"id:{path}",
+                "path_display": path, "path_lower": path.lower(), "size": size,
+                "server_modified": "2025-01-01T00:00:00Z", "content_hash": "h"}  # fmt: skip
+
+    @staticmethod
+    def _folder(path: str) -> dict[str, object]:
+        return {".tag": "folder", "name": path.rsplit("/", 1)[-1], "id": f"id:{path}",
+                "path_display": path, "path_lower": path.lower()}  # fmt: skip
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        body = json.loads(request.content) if request.content else {}
+        if path == "/2/files/get_metadata":
+            return httpx.Response(200, json=self._folder("/Study"))
+        if path == "/2/files/list_folder/get_latest_cursor":
+            self.asked.append(("cursor", body["path"], body["recursive"]))
+            return httpx.Response(200, json={"cursor": "from-before"})
+        if path == "/2/files/list_folder/continue":
+            self.asked.append(("continue", body["cursor"], True))
+            entries = [self._file("/Study/Big/b2.csv")]
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "big-2", "has_more": False}
+            )
+        if path != "/2/files/list_folder":
+            return httpx.Response(404)
+        self.asked.append(("list", body["path"], body["recursive"]))
+        with self._lock:
+            self.at_once += 1
+            self.most_at_once = max(self.most_at_once, self.at_once)
+        time.sleep(0.05)
+        with self._lock:
+            self.at_once -= 1
+        if body["path"] == "id:/Study":
+            entries = [self._file("/Study/README.md"), self._folder("/Study/A"),
+                       self._folder("/Study/Big"), self._folder("/Study/C")]  # fmt: skip
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "top", "has_more": False}
+            )
+        if body["path"] == "id:/Study/Big":
+            entries = [self._folder("/Study/Big"), self._file("/Study/Big/b1.csv")]
+            return httpx.Response(
+                200, json={"entries": entries, "cursor": "big-1", "has_more": True}
+            )
+        name = body["path"].rsplit("/", 1)[-1]
+        entries = [self._file(f"/Study/{name}/x.csv"), self._file(f"/Study/{name}/sub/y.csv")]
+        return httpx.Response(200, json={"entries": entries, "cursor": name, "has_more": False})
+
+
+def test_a_folder_is_listed_in_parts_at_once(auth):
+    auth.start()
+    auth.finish("GOODCODE")
+    tree = FolderTree()
+    client = DropboxClient(auth, http=httpx.Client(transport=httpx.MockTransport(tree)))
+    progress = Progress()
+    found = DropboxSource(client, "id:/Study", "/Study").listing(progress)
+    assert sorted(e.path for e in found.changed) == [
+        "A/sub/y.csv", "A/x.csv", "Big/b1.csv", "Big/b2.csv", "C/sub/y.csv", "C/x.csv", "README.md",
+    ]  # fmt: skip
+    # The cursor is taken before anything is listed, for the whole folder:
+    # what changes meanwhile comes back at the next refresh.
+    assert tree.asked[0] == ("cursor", "id:/Study", True) and found.cursor == "from-before"
+    assert ("list", "id:/Study", False) in tree.asked
+    assert {("list", f"id:/Study/{n}", True) for n in ("A", "Big", "C")} <= set(tree.asked)
+    assert tree.most_at_once > 1
+    assert (progress.files, progress.folders_done, progress.folders_total) == (7, 3, 3)
+
+
+class SlowSource:
+    """A listing that waits until it's let go, counting as it goes."""
+
+    label = "slow"
+
+    def __init__(self) -> None:
+        self.go = threading.Event()
+        self.listed = 0
+
+    def listing(self, progress=None) -> Changes:
+        self.listed += 1
+        assert progress is not None
+        progress.folders_total = 2
+        progress.count(files=3, folders=1)
+        self.go.wait(5)
+        return Changes([FileEntry(f"f{n}.csv", f"id:{n}", 1) for n in range(5)], [], None)
+
+    def changes(self, cursor: str) -> Changes:
+        raise CursorTooOld("none")
+
+
+def test_a_refresh_runs_in_the_background_and_shows_how_far_it_has_got(processed):
+    slow = SlowSource()
+    processed._source = lambda: slow
+    processed.start_refresh()
+    for _ in range(100):
+        listing = processed.status().listing
+        if listing is not None and listing.files:
+            break
+        time.sleep(0.01)
+    assert listing is not None
+    assert (listing.files, listing.folders_done, listing.folders_total) == (3, 1, 2)
+    processed.start_refresh()  # joins the one under way
+    slow.go.set()
+    processed.wait_for_listing(5)
+    status = processed.status()
+    assert slow.listed == 1 and status.listing is None and status.files == 5
+    assert status.listing_error is None
+
+
+def test_a_background_refresh_that_fails_says_why(processed):
+    def unreachable():
+        raise NotAvailable("Dropbox couldn't be reached.")
+
+    processed._source = unreachable
+    processed.start_refresh()
+    processed.wait_for_listing(5)
+    status = processed.status()
+    assert status.listing is None and status.listing_error == "Dropbox couldn't be reached."
+
+
 def test_only_a_folder_id_can_be_opened(app):
     with TestClient(app) as client:
         for bad in ("../etc", "/Study Data", "id:a/b"):
@@ -699,8 +833,11 @@ def test_settings_show_practices_folder(app):
         status = client.get("/api/processed").json()
         assert status["source"] == "practice" and status["ready"]
         assert client.post("/api/processed/connect").status_code == 409
-        refreshed = client.post("/api/processed/refresh").json()
-        assert refreshed["files"] > 5
+        started = client.post("/api/processed/refresh").json()
+        assert started["listing_error"] is None
+        app.state.services.sessions.processed.wait_for_listing(10)
+        refreshed = client.get("/api/processed").json()
+        assert refreshed["files"] > 5 and refreshed["listing"] is None
 
 
 def _token(services, tmp_path, sources):

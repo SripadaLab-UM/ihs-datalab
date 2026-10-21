@@ -35,6 +35,7 @@ from datalab.dropbox.sources import (
     DropboxSource,
     FileEntry,
     LocalSource,
+    Progress,
     Source,
     practice_folder,
     safe_relative,
@@ -86,6 +87,9 @@ class Status:
     bytes: int
     indexed_at: str | None
     problem: str | None = None
+    # A listing under way, and why the last one in the background failed.
+    listing: Progress | None = None
+    listing_error: str | None = None
 
     @property
     def ready(self) -> bool:
@@ -118,6 +122,10 @@ class ProcessedData:
         self._practice_root = practice_root or practice_folder()
         self._cache = settings.data_dir / "processed-cache"
         self._refreshing = threading.Lock()
+        self._listing: Progress | None = None
+        self._listing_error: str | None = None
+        self._background: threading.Thread | None = None
+        self._starting = threading.Lock()
         self._downloads = threading.Semaphore(DOWNLOADS_AT_ONCE)
         self._fetching: dict[str, threading.Lock] = {}
         self._fetching_lock = threading.Lock()
@@ -136,6 +144,8 @@ class ProcessedData:
             "files": files,
             "bytes": size,
             "indexed_at": chosen.indexed_at if chosen else None,
+            "listing": self._listing,
+            "listing_error": self._listing_error,
         }
         if self._practice:
             return Status("practice", True, None, **common)
@@ -189,7 +199,48 @@ class ProcessedData:
 
     # The file list ----------------------------------------------------------
 
-    def refresh(self, *, if_older_than: float | None = None) -> int:
+    def start_refresh(self) -> None:
+        """Bring the file list up to date in the background, and return at
+        once: a big folder's first listing takes minutes, and Settings shows
+        how far it's got (`Status.listing`). Joins a listing already under
+        way rather than starting another."""
+        status = self.status()
+        if not status.ready:
+            raise NotAvailable(status.problem or "The processed data isn't set up.")
+        with self._starting:
+            if self._background is not None and self._background.is_alive():
+                return
+            progress = Progress()
+            self._listing, self._listing_error = progress, None
+            self._background = threading.Thread(
+                target=self._refresh_quietly,
+                args=(progress,),
+                name="processed-listing",
+                daemon=True,
+            )
+            self._background.start()
+
+    def wait_for_listing(self, timeout: float | None = None) -> None:
+        """Until a background listing has finished (tests, shutdown)."""
+        if self._background is not None:
+            self._background.join(timeout)
+
+    def _refresh_quietly(self, progress: Progress) -> None:
+        try:
+            self.refresh(progress=progress)
+        except NotAvailable as error:
+            self._listing_error = str(error)
+            log.warning("processed data not listed: %s", error)
+        except Exception:
+            self._listing_error = "The file list couldn't be made. DataLab's log has the details."
+            log.exception("processed data not listed")
+        finally:
+            if self._listing is progress:
+                self._listing = None
+
+    def refresh(
+        self, *, if_older_than: float | None = None, progress: Progress | None = None
+    ) -> int:
         """Bring the file list up to date; how many files it has. With
         `if_older_than` (seconds), only if it's at least that old."""
         status = self.status()
@@ -200,12 +251,17 @@ class ProcessedData:
             if age < if_older_than:
                 return status.files
         with self._refreshing:
+            progress = progress or Progress()
+            self._listing = progress
             try:
-                return self.index.refresh(self._source())
+                return self.index.refresh(self._source(), progress)
             except SignInNeeded as error:
                 raise NotAvailable(str(error)) from None
             except (DropboxUnavailable, DropboxRefused) as error:
                 raise NotAvailable(f"The file list couldn't be refreshed: {error}") from None
+            finally:
+                if self._listing is progress:
+                    self._listing = None
 
     def ensure_fresh(self) -> None:
         """Before a conversation that uses it: refresh a stale list, and carry

@@ -10,6 +10,7 @@ import { PROCESSED_ANCHOR } from "../sectionIds";
 import { FixedOnPractice, Part } from "./Section";
 
 const STATUS = ["processed-status"];
+const LISTING_POLL_MS = 1000;
 
 /**
  * The lab's processed data: the cleaned files the lab keeps in Dropbox. A
@@ -20,7 +21,12 @@ const STATUS = ["processed-status"];
  */
 export function ProcessedDataSection() {
   const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: STATUS, queryFn: processedApi.status });
+  // While DataLab lists the folder (minutes, for a big one), ask how far it's got.
+  const status = useQuery({
+    queryKey: STATUS,
+    queryFn: processedApi.status,
+    refetchInterval: (query) => (query.state.data?.listing ? LISTING_POLL_MS : false),
+  });
   const settle = (next: Processed) => queryClient.setQueryData(STATUS, next);
   const refresh = useMutation({ mutationFn: processedApi.refresh, onSuccess: settle });
   const shown = status.data;
@@ -298,7 +304,7 @@ function ChooseFolder({
           ))}
         </ul>
       )}
-      {choose.isPending && <p className="text-sm text-muted">Listing its files…</p>}
+      {choose.isPending && <p className="text-sm text-muted">Choosing it…</p>}
       {choose.error && <p className="text-sm text-danger">{choose.error.message}</p>}
       {onCancel && (
         <div>
@@ -310,17 +316,62 @@ function ChooseFolder({
 }
 
 function FileList({ processed, onRefresh, refreshing }: { processed: Processed; onRefresh: () => void; refreshing: boolean }) {
+  const listing = processed.listing;
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line pt-3 text-sm">
-      <span className="font-mono text-[12.5px]">{processed.folder}</span>
-      <span className="text-muted">
-        {processed.indexed_at
-          ? `${processed.files.toLocaleString()} files, ${formatBytes(processed.bytes)}, listed ${ago(processed.indexed_at)}`
-          : "Not listed yet"}
-      </span>
-      <Button variant="ghost" className="ml-auto px-2 text-[12.5px]" onClick={onRefresh} disabled={refreshing}>
-        {refreshing ? "Refreshing…" : "Refresh list"}
-      </Button>
+    <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-mono text-[12.5px]">{processed.folder}</span>
+        {!listing && (
+          <span className="text-muted">
+            {processed.indexed_at
+              ? `${processed.files.toLocaleString()} files, ${formatBytes(processed.bytes)}, listed ${ago(processed.indexed_at)}`
+              : "Not listed yet"}
+          </span>
+        )}
+        <Button
+          variant="ghost"
+          className="ml-auto px-2 text-[12.5px]"
+          onClick={onRefresh}
+          disabled={refreshing || Boolean(listing)}
+        >
+          {listing ? "Listing…" : refreshing ? "Refreshing…" : "Refresh list"}
+        </Button>
+      </div>
+      {listing && <ListingProgress listing={listing} />}
+      {processed.listing_error && <p className="text-danger">{processed.listing_error}</p>}
     </div>
   );
+}
+
+/**
+ * How far a listing has got. Dropbox doesn't say how many files to expect,
+ * so this counts what's come, and the chosen folder's top-level folders
+ * done: a rough measure, since one folder can hold thousands of files and
+ * the next a few.
+ */
+function ListingProgress({ listing }: { listing: NonNullable<Processed["listing"]> }) {
+  const total = listing.folders_total;
+  return (
+    <div className="flex max-w-xl flex-col gap-1.5" role="status">
+      <p className="text-muted">
+        Listing… {listing.files.toLocaleString()} files so far
+        {total ? ` · ${listing.folders_done} of ${total} folders` : ""} · {elapsed(listing.seconds)}
+      </p>
+      {total ? (
+        <progress
+          className="h-1.5 w-full overflow-hidden rounded-full accent-[var(--color-data)]"
+          max={total}
+          value={listing.folders_done}
+          aria-label="Folders listed"
+        />
+      ) : null}
+      <p className="text-xs text-muted">You can leave this page: the listing carries on.</p>
+    </div>
+  );
+}
+
+function elapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} min ${seconds % 60} s`;
 }

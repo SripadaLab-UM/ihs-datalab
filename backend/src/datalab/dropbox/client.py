@@ -104,22 +104,16 @@ class DropboxClient:
 
     def list_folder(self, path: str, *, recursive: bool = False) -> Iterator[Page]:
         """Every page of a folder's listing ("" is the team space's top level)."""
-        page = self._page(
-            self._rpc(
-                "files/list_folder",
-                {
-                    "path": path,
-                    "recursive": recursive,
-                    "include_deleted": False,
-                    "include_non_downloadable_files": False,
-                    "limit": 2000,
-                },
-            )
-        )
+        page = self._page(self._rpc("files/list_folder", _listing_args(path, recursive)))
         yield page
         while page.has_more:
             page = self.changes(page.cursor)
             yield page
+
+    def latest_cursor(self, path: str, *, recursive: bool = False) -> str:
+        """A cursor for `changes` from now, without listing anything."""
+        answer = self._rpc("files/list_folder/get_latest_cursor", _listing_args(path, recursive))
+        return str(answer["cursor"])
 
     def changes(self, cursor: str) -> Page:
         """What changed since `cursor` (deleted items included). DropboxRefused
@@ -308,3 +302,13 @@ def _retry_after(answer: httpx.Response, text: str, attempt: int) -> float:
         except (ValueError, KeyError, TypeError):
             wait = 2.0**attempt
     return max(1.0, min(wait, _LONGEST_WAIT))
+
+
+def _listing_args(path: str, recursive: bool) -> dict[str, Any]:
+    return {
+        "path": path,
+        "recursive": recursive,
+        "include_deleted": False,
+        "include_non_downloadable_files": False,
+        "limit": 2000,
+    }

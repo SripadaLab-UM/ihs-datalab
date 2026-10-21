@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import time
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
@@ -54,13 +56,35 @@ class Changes:
     cursor: str | None
 
 
+# How many of the chosen folder's top-level folders are listed at once.
+LISTING_AT_ONCE = 4
+
+
+@dataclass
+class Progress:
+    """How far a listing has got, for Settings to show. Counted from the
+    listing's threads."""
+
+    started: float = field(default_factory=time.monotonic)
+    files: int = 0
+    folders_done: int = 0
+    # Top-level folders to list, once known.
+    folders_total: int | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
+
+    def count(self, *, files: int = 0, folders: int = 0) -> None:
+        with self._lock:
+            self.files += files
+            self.folders_done += folders
+
+
 class Source(Protocol):
     """A folder of processed data."""
 
     @property
     def label(self) -> str: ...
 
-    def listing(self) -> Changes:
+    def listing(self, progress: Progress | None = None) -> Changes:
         """Every file now (`deleted` empty), and a cursor for `changes`."""
         ...
 
@@ -89,13 +113,41 @@ class DropboxSource:
     def label(self) -> str:
         return self.folder_path.rsplit("/", 1)[-1] or self.folder_path
 
-    def listing(self) -> Changes:
+    def listing(self, progress: Progress | None = None) -> Changes:
+        """The folder's top level, then each of its folders, `LISTING_AT_ONCE`
+        at a time: Dropbox pages a big recursive listing slowly, one page
+        after another. The cursor comes first, so whatever changes while the
+        parts are listed comes back at the next refresh."""
+        progress = progress or Progress()
         prefix = self._current_prefix()
+        cursor = self._client.latest_cursor(self.folder_id, recursive=True)
         changed: list[FileEntry] = []
-        cursor = ""
-        for page in self._client.list_folder(self.folder_id, recursive=True):
-            changed += [e for item in page.items if (e := _entry(item, prefix)) is not None]
-            cursor = page.cursor
+        folders: list[str] = []
+        for page in self._client.list_folder(self.folder_id):
+            for item in page.items:
+                if item.tag == "folder":
+                    folders.append(item.id or item.path_lower)
+                elif (entry := _entry(item, prefix)) is not None:
+                    changed.append(entry)
+        progress.folders_total = len(folders)
+        progress.count(files=len(changed))
+
+        def below(folder: str) -> list[FileEntry]:
+            found: list[FileEntry] = []
+            for page in self._client.list_folder(folder, recursive=True):
+                new = [e for item in page.items if (e := _entry(item, prefix)) is not None]
+                found += new
+                progress.count(files=len(new))
+            progress.count(folders=1)
+            return found
+
+        pool = ThreadPoolExecutor(LISTING_AT_ONCE, thread_name_prefix="dropbox-listing")
+        try:
+            for found in pool.map(below, folders):
+                changed += found
+        finally:
+            # On an error, don't wait for the folders not yet started.
+            pool.shutdown(cancel_futures=True)
         return Changes(changed, [], cursor)
 
     def changes(self, cursor: str) -> Changes:
@@ -174,7 +226,7 @@ class LocalSource:
     def label(self) -> str:
         return self._label
 
-    def listing(self) -> Changes:
+    def listing(self, progress: Progress | None = None) -> Changes:
         found: list[FileEntry] = []
         for folder, dirs, files in os.walk(self.root, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith((".", "__")))
@@ -190,6 +242,8 @@ class LocalSource:
                 found.append(
                     FileEntry(rel, f"local:{rel}", stat.st_size, modified, content_hash(full))
                 )
+        if progress is not None:
+            progress.count(files=len(found))
         return Changes(found, [], None)
 
     def changes(self, cursor: str) -> Changes:

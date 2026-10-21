@@ -398,7 +398,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Refresh */
+        /**
+         * Refresh
+         * @description Starts a refresh (or joins one under way) and returns at once;
+         *     `listing` says how far it's got.
+         */
         post: operations["refresh_api_processed_refresh_post"];
         delete?: never;
         options?: never;
@@ -4088,6 +4092,21 @@ export interface components {
             /** Note */
             note?: string | null;
         };
+        /**
+         * ListingOut
+         * @description A listing under way: Dropbox doesn't say how many files to expect, so
+         *     this counts what's come and the chosen folder's top-level folders done.
+         */
+        ListingOut: {
+            /** Files */
+            files: number;
+            /** Folders Done */
+            folders_done: number;
+            /** Folders Total */
+            folders_total?: number | null;
+            /** Seconds */
+            seconds: number;
+        };
         /** ModeOut */
         ModeOut: {
             /** Id */
@@ -5049,6 +5068,9 @@ export interface components {
             bytes: number;
             /** Indexed At */
             indexed_at?: string | null;
+            listing?: components["schemas"]["ListingOut"] | null;
+            /** Listing Error */
+            listing_error?: string | null;
         };
         /** ProposalDetail */
         ProposalDetail: {
