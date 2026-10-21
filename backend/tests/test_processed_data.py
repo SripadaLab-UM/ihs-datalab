@@ -771,6 +771,43 @@ def test_a_download_that_doesnt_match_dropbox_is_dropped(client, tmp_path):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.parametrize(
+    ("where", "fetched"),
+    [("/study/fitbit/a.csv", True), ("/personal/taxes.csv", False), ("/study-old/a.csv", False),
+     (None, False)],
+)  # fmt: skip
+def test_a_download_from_outside_the_chosen_folder_is_refused(auth, tmp_path, where, fetched):
+    from datalab.dropbox.client import OutsideFolder
+
+    auth.start()
+    auth.finish("GOODCODE")
+    body = b"a,b\n1,2\n"
+
+    def dropbox(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/2/files/get_metadata":
+            folder = {".tag": "folder", "name": "Study", "id": "id:s", "path_display": "/Study",
+                      "path_lower": "/study"}  # fmt: skip
+            return httpx.Response(200, json=folder)
+        hasher = ContentHasher()
+        hasher.update(body)
+        result = {"size": len(body), "content_hash": hasher.hexdigest()}
+        if where is not None:
+            result["path_lower"] = where
+        return httpx.Response(200, content=body, headers={"Dropbox-API-Result": json.dumps(result)})
+
+    client = DropboxClient(auth, http=httpx.Client(transport=httpx.MockTransport(dropbox)))
+    source = DropboxSource(client, "id:s", "/Study")
+    dest = tmp_path / "a.csv"
+    entry = FileEntry("fitbit/a.csv", "id:a", len(body))
+    if fetched:
+        source.fetch(entry, dest, max_bytes=1000, deadline=1e18)
+        assert dest.read_bytes() == body
+    else:
+        with pytest.raises(OutsideFolder):
+            source.fetch(entry, dest, max_bytes=1000, deadline=1e18)
+        assert not list(tmp_path.iterdir())  # nothing written, not even a partial
+
+
 def test_the_content_hash_is_dropboxs(tmp_path):
     # Dropbox's documented example: SHA-256 of each 4 MB block's SHA-256.
     import hashlib

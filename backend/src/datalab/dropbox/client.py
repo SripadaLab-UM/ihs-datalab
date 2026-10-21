@@ -75,6 +75,11 @@ class Item:
         )
 
 
+class OutsideFolder(Exception):
+    """Dropbox says the file asked for isn't in the chosen folder (its real
+    path, lower-cased, or "(no path)" when Dropbox gave none)."""
+
+
 @dataclass(frozen=True)
 class Page:
     items: list[Item]
@@ -133,13 +138,17 @@ class DropboxClient:
         max_bytes: int,
         deadline: float,
         byte_range: tuple[int, int] | None = None,
+        inside: str | None = None,
     ) -> Item:
         """Stream one file to `dest` (written as dest.partial, then renamed).
 
         Refused (TooLarge) as soon as it passes `max_bytes`; TookTooLong past
         `deadline` (a time.monotonic() value). The whole file's content hash
         is checked against what Dropbox says it is. `byte_range` (first, last)
-        fetches only part of it, unchecked."""
+        fetches only part of it, unchecked. With `inside` (a folder's
+        lower-case path), OutsideFolder before a byte is written unless
+        Dropbox says the file is in that folder: a person's sign-in can read
+        all their Dropbox, and DataLab fetches only from the chosen folder."""
         partial = dest.with_name(dest.name + ".partial")
         headers = {"Dropbox-API-Arg": json.dumps({"path": path}, ensure_ascii=True)}
         if byte_range is not None:
@@ -147,6 +156,10 @@ class DropboxClient:
         try:
             with self._send("POST", f"{CONTENT}/2/files/download", headers) as answer:
                 result = Item.from_raw(json.loads(answer.headers.get("Dropbox-API-Result", "{}")))
+                if inside is not None and not result.path_lower.startswith(
+                    inside.rstrip("/") + "/"
+                ):
+                    raise OutsideFolder(result.path_lower or "(no path)")
                 if byte_range is None and result.size > max_bytes:
                     raise TooLarge(f"{result.size} bytes")
                 written = 0

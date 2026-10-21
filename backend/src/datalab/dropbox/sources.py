@@ -173,11 +173,13 @@ class DropboxSource:
 
     def fetch(self, entry: FileEntry, dest: Path, *, max_bytes: int, deadline: float) -> None:
         # By id: a file renamed since the list was made is still the same file.
+        # Dropbox's answer must put it in the folder as it's named now.
         self._client.download(
             entry.id or f"{self.folder_path}/{entry.path}",
             dest,
             max_bytes=max_bytes,
             deadline=deadline,
+            inside=self._current_prefix(),
         )
 
     def _current_prefix(self) -> str:

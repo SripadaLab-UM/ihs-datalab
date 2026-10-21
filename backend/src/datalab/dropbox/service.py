@@ -28,7 +28,13 @@ from pathlib import Path
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog
 from datalab.dropbox.auth import DropboxAuth, DropboxUnavailable, SignIn, SignInNeeded
-from datalab.dropbox.client import DropboxClient, DropboxRefused, TookTooLong, TooLarge
+from datalab.dropbox.client import (
+    DropboxClient,
+    DropboxRefused,
+    OutsideFolder,
+    TookTooLong,
+    TooLarge,
+)
 from datalab.dropbox.families import Family, dataset_of, families
 from datalab.dropbox.index import ProcessedIndex
 from datalab.dropbox.sources import (
@@ -388,6 +394,12 @@ class ProcessedData:
                     ) from None
                 except SignInNeeded as error:
                     raise LoadRefused(str(error)) from None
+                except OutsideFolder as where:
+                    log.warning("refused a download outside the chosen folder: %s", where)
+                    raise LoadRefused(
+                        f"Dropbox says {entry.path} isn't in the chosen folder now, so DataLab "
+                        "won't fetch it. Refresh the file list in Settings."
+                    ) from None
                 except DropboxRefused as error:
                     raise LoadRefused(
                         f"Dropbox couldn't find {entry.path} ({error.summary}). The file list may "
