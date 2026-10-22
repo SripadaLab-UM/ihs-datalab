@@ -167,3 +167,40 @@ def test_the_release_carries_the_labs_dropbox_app_key(
         # Practice gets it too: it never uses Dropbox, but the key is its switch
         # for the synthetic folder, so practice offers what the real one does.
         assert load_settings("practice").dropbox.app_key == expected
+
+
+SERVER = """deployment = "server"
+[server]
+public_url = "https://datalab.example.edu"
+admins = [1234]
+"""
+
+
+def test_a_server_needs_its_own_section(settings_file):
+    assert load_settings("practice").deployment == "desktop"
+    assert load_settings("practice").server is None
+    settings_file.write_text(SERVER, encoding="utf-8")
+    settings = load_settings("practice")
+    assert settings.on_server and settings.server is not None
+    assert settings.server.site == "https://datalab.example.edu/datalab"
+    assert settings.server.admins == (1234,)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[server]\npublic_url = "https://a.edu"\n',  # a desktop with [server]
+        'deployment = "cloud"\n',
+        'deployment = "server"\n',  # no public_url
+        SERVER.replace("https://datalab.example.edu", "http://datalab.example.edu"),
+        SERVER.replace("https://datalab.example.edu", "https://datalab.example.edu/x"),
+        SERVER.replace("[1234]", '["octocat"]'),  # a login, not an id
+        SERVER + 'base_path = "/datalab/"\n',
+        SERVER + "max_running_per_user = 4\n",  # more than max_running
+        SERVER + "unknown = 1\n",
+    ],
+)
+def test_server_settings_are_checked(settings_file, text):
+    settings_file.write_text(text, encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_settings("practice")

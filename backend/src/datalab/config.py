@@ -12,7 +12,7 @@ import os
 import re
 import sys
 import tomllib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
@@ -236,11 +236,76 @@ class WindowsSettings:
             object.__setattr__(self, "admin_access_url", None)
 
 
+Deployment = Literal["desktop", "server"]
+
+
+@dataclass(frozen=True)
+class ServerSettings:
+    """`[server]`: DataLab run once for the whole lab on a server, behind
+    Apache (`deployment = "server"`), rather than on each person's computer.
+
+    People sign in with GitHub; the server's own secrets come from systemd
+    credentials, never the keychain (credentials.py). See docs/SERVER.md.
+    """
+
+    # The site's address, without a path: "https://datalab.example.edu".
+    public_url: str = ""
+    # Where DataLab lives on that site: "/datalab". Apache strips it before
+    # passing a request on, so DataLab's own routes stay /api/..., /sign-in.
+    base_path: str = "/datalab"
+    # GitHub numeric user ids of the administrators. Ids, not logins: a
+    # login can be renamed, and an old one taken by someone else.
+    admins: tuple[int, ...] = ()
+    # Where Apache reaches DataLab: a Unix socket, so nobody else on the
+    # server can. DataLab's TCP port then answers only session gateways.
+    socket: str = "/run/datalab/web.sock"
+    # Each conversation's agent container, and how many run at once: the
+    # server's memory is shared by everyone.
+    agent_memory: str = "1536m"
+    agent_cpus: str = "1"
+    max_running: int = 3
+    max_running_per_user: int = 1
+    idle_minutes: int = 10
+    # How long a sign-in lasts: at most `session_hours`, and ends after
+    # `session_idle_minutes` without a request.
+    session_hours: float = 8
+    session_idle_minutes: int = 60
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]+)?", self.public_url):
+            raise ValueError(
+                "server.public_url must be the site's https:// address with no path, such as "
+                "https://datalab.example.edu"
+            )
+        if not re.fullmatch(r"(/[a-z0-9-]+)+", self.base_path):
+            raise ValueError(
+                'server.base_path must be a path such as "/datalab", with no "/" at the end'
+            )
+        if not self.socket.startswith("/"):
+            raise ValueError("server.socket must be an absolute path")
+        if not re.fullmatch(r"[1-9][0-9]*[kmg]", self.agent_memory):
+            raise ValueError("server.agent_memory must be a size such as 1536m or 2g")
+        if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", self.agent_cpus) or float(self.agent_cpus) <= 0:
+            raise ValueError("server.agent_cpus must be a number of CPUs, such as 1")
+        if not 1 <= self.max_running_per_user <= self.max_running:
+            raise ValueError("server.max_running_per_user must be between 1 and server.max_running")
+        if self.idle_minutes < 1 or self.session_idle_minutes < 1 or self.session_hours <= 0:
+            raise ValueError("server idle and session times must be more than 0")
+
+    @property
+    def site(self) -> str:
+        """DataLab's own address: public_url + base_path."""
+        return self.public_url + self.base_path
+
+
 @dataclass(frozen=True)
 class Settings:
     profile: Profile
     data_dir: Path
     oracle: OracleSettings | None
+    # "desktop" (one person's computer, the default) or "server" (`[server]`).
+    deployment: Deployment = "desktop"
+    server: ServerSettings | None = None
     limits: QueryLimits = field(default_factory=QueryLimits)
     # Folder of catalog YAML files (the knowledge base's generated/schema).
     catalog_dir: Path | None = None
@@ -259,6 +324,10 @@ class Settings:
     updates: UpdateSettings = field(default_factory=UpdateSettings)
     windows: WindowsSettings = field(default_factory=WindowsSettings)
     dropbox: DropboxSettings = field(default_factory=DropboxSettings)
+
+    @property
+    def on_server(self) -> bool:
+        return self.deployment == "server"
 
     @property
     def settings_file(self) -> Path:
@@ -399,10 +468,13 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle = _oracle_from(raw["oracle"]) if "oracle" in raw else None
 
     catalog_dir = raw.get("catalog_dir") or os.environ.get("DATALAB_CATALOG_DIR")
+    deployment, server = _deployment(raw)
     settings = Settings(
         profile=profile,
         data_dir=data_dir,
         oracle=oracle,
+        deployment=deployment,
+        server=server,
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
         agent_image=_agent_image(profile, raw),
@@ -460,6 +532,30 @@ def _fits(hint: Any, value: Any) -> bool:
     if hint is str:
         return isinstance(value, str)
     raise TypeError(f"settings of type {hint!r} aren't supported in sections yet")
+
+
+def _deployment(raw: dict) -> tuple[Deployment, ServerSettings | None]:
+    """`deployment` and its `[server]` table. Desktop is the default, and
+    `[server]` belongs only to a server: a desktop with one is a mistake."""
+    deployment = raw.get("deployment", "desktop")
+    if deployment not in ("desktop", "server"):
+        raise ValueError(
+            f"deployment in settings.toml must be 'desktop' or 'server', not {deployment!r}"
+        )
+    if deployment == "desktop":
+        if "server" in raw:
+            raise ValueError('[server] in settings.toml needs deployment = "server"')
+        return "desktop", None
+    table = dict(raw.get("server", {})) if isinstance(raw.get("server", {}), dict) else None
+    if table is None:
+        raise ValueError("[server] in settings.toml must be a table")
+    admins = table.pop("admins", [])
+    if not isinstance(admins, list) or not all(
+        isinstance(a, int) and not isinstance(a, bool) and a > 0 for a in admins
+    ):
+        raise ValueError("server.admins must be a list of GitHub user ids (numbers)")
+    server = _section(ServerSettings, {"server": table}, "server")
+    return "server", replace(server, admins=tuple(admins))
 
 
 def _allowed_models(raw: dict) -> tuple[str, ...] | None:

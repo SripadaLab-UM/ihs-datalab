@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import os
 import re
 import sys
 from pathlib import Path
@@ -207,7 +208,12 @@ def _serve(settings, *, open_browser: bool) -> int:
     # The data folder's lock, held until DataLab exits: nothing else may
     # change the database while an interrupted update is sorted out, or after.
     refuse_if_running(settings)
-    if settings.profile == "practice":
+    if settings.on_server:
+        problem = _use_server_secrets()
+        if problem:
+            print(problem, flush=True)
+            return 1
+    elif settings.profile == "practice":
         _save_practice_password(settings)
     import threading
     import webbrowser
@@ -258,20 +264,25 @@ def _serve(settings, *, open_browser: bool) -> int:
         return 1
     # The new version is up, with its migrations applied: the update is done.
     updates.finish(settings.data_dir, __version__)
-    _refresh_launcher_icons()
-    url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
-    print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
-    if open_browser:
-        threading.Timer(1.5, webbrowser.open, args=(url,)).start()
-    # Asks GitHub for a newer release in the background, if allowed; being
-    # offline or rate-limited only shows in Settings → Updates.
-    threading.Thread(
-        target=app.state.update_checker.check_on_start, name="update-check", daemon=True
-    ).start()
-    # And about once an hour while DataLab is open (Settings → Updates can turn
-    # that off); stopped as DataLab quits.
     hourly = app.state.hourly_update_check
-    hourly.start()
+    if settings.on_server:
+        # A server is updated by its administrator (`datalab server install`),
+        # and has no launcher, browser or person at its console.
+        print(f"DataLab ({settings.profile}) is starting at {settings.server.site}/", flush=True)
+    else:
+        _refresh_launcher_icons()
+        url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
+        print(f"DataLab ({settings.profile}) is starting. Open: {url}", flush=True)
+        if open_browser:
+            threading.Timer(1.5, webbrowser.open, args=(url,)).start()
+        # Asks GitHub for a newer release in the background, if allowed; being
+        # offline or rate-limited only shows in Settings → Updates.
+        threading.Thread(
+            target=app.state.update_checker.check_on_start, name="update-check", daemon=True
+        ).start()
+        # And about once an hour while DataLab is open (Settings → Updates can
+        # turn that off); stopped as DataLab quits.
+        hourly.start()
     # On Windows: opens Docker Desktop if it's closed, and says in DataLab's window
     # when a policy stops its virtual machine (the page offers the fix).
     doctor = getattr(app.state, "docker_doctor", None)
@@ -373,6 +384,21 @@ def _refresh_launcher_icons() -> None:
             launcher_icons.refresh(launcher_icons.package_branding(), root=layout.root)
     except Exception:  # never a reason not to start
         logging.getLogger(__name__).exception("couldn't refresh the launcher's icon")
+
+
+def _use_server_secrets() -> str | None:
+    """On a server, secrets come only from systemd's credentials folder
+    (credentials.py). Why DataLab can't start, or None."""
+    from datalab.credentials import use_server_secrets
+
+    folder = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not folder or not Path(folder).is_dir():
+        return (
+            "A server DataLab reads its secrets from systemd's credentials folder "
+            "(LoadCredential= in its unit), and none was given. See docs/SERVER.md."
+        )
+    use_server_secrets(Path(folder))
+    return None
 
 
 def _save_practice_password(settings) -> None:
