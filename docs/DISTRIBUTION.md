@@ -1126,6 +1126,7 @@ agent_memory = "64g"
 agent_cpus = "16"
 max_running = 2                                                 # at once, counted apart from standard
 open_to = "admins"                                              # or "lab"
+cpuset = "0-31"            # its cores DataLab may use: a slot of agent_cpus each ("" = unpinned)
 ```
 
 How it fits together (`sessions/compute.py`, `Engine` in `sessions/containers.py`):
@@ -1149,6 +1150,11 @@ How it fits together (`sessions/compute.py`, `Engine` in `sessions/containers.py
 - **GPU:** Podman 4.9's Docker-compatible API drops GPU requests, so the
   agent is started through `gpu_docker_host`, a second API service whose
   containers get the GPU by default (CDI). The gateway and proxy never are.
+- **Cores:** with `cpuset`, each running agent gets a slot of `agent_cpus`
+  cores to itself (`--cpuset-cpus`), so `nproc` there says what it may use.
+  Name the cores so a slot is one processor's (NUMA node's). Memory can't be
+  hidden that way: the agent's instructions and environment say its limits
+  (`DATALAB_CPUS`, `DATALAB_MEMORY`, `OMP_NUM_THREADS`, `MC_CORES`).
 - **Networks:** Docker's client can't read Podman's networks; DataLab creates
   them (an existing one is fine) and finds leftovers from their containers.
 

@@ -242,9 +242,13 @@ class SessionContainers:
         # More of the agent's environment ("NAME=value"): its limits, on the
         # lab's server (compute.limit_env).
         agent_env: tuple[str, ...] = (),
+        # The cores the agent may run on (`--cpuset-cpus`), so `nproc` says
+        # what it may use: a high-compute agent's slot. None: any.
+        cpuset: str | None = None,
     ) -> None:
         self.engine = engine
         self.agent_env = agent_env
+        self.cpuset = cpuset
         self._extra_mounts = extra_mounts
         self.processed = processed
         self.session_id = session_id
@@ -484,6 +488,7 @@ class SessionContainers:
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--memory", self.limits.memory, "--cpus", self.limits.cpus,
+            *(["--cpuset-cpus", self.cpuset] if self.cpuset else []),
             "--pids-limit", str(self.limits.pids),
             "--env-file", str(env_file),
             *mounts,

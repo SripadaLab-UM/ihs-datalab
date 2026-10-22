@@ -60,7 +60,8 @@ def resources_note(settings: Settings, compute: Compute) -> str:
         f"\nThis conversation runs on {where}. Your container may use at most "
         f"{_cpus(limits.cpus)} and {_memory(limits.memory)} of memory"
         + (", and has a GPU (see `nvidia-smi`)" if gpu else "")
-        + ". `nproc`, `free` and /proc/meminfo show the whole machine, not your share: "
+        + ". `free`, /proc/meminfo (and `nproc`, unless you're pinned to cores of your own) "
+        "can show the whole machine, not your share: "
         "size parallel work and memory to these limits (they're in DATALAB_CPUS and "
         "DATALAB_MEMORY, and OMP_NUM_THREADS and MC_CORES are set to match). A process "
         "that goes over the memory limit is stopped.\n"

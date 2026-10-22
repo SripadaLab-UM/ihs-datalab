@@ -90,7 +90,7 @@ async def test_a_remote_session_runs_on_the_other_machines_engine(tmp_path, monk
     containers = SessionContainers(
         "c_1", "research", SessionPaths(tmp_path), agent_image="img", host_port=8766,
         profile="practice", instance="abc", engine=engine,
-        limits=compute.limits_for_compute(on_server, "high"),
+        limits=compute.limits_for_compute(on_server, "high"), cpuset="16-31",
     )  # fmt: skip
     monkeypatch.setattr(containers, "_wait_for_proxy", _no_wait)
     await containers.start("token")
@@ -115,6 +115,8 @@ async def test_a_remote_session_runs_on_the_other_machines_engine(tmp_path, monk
     assert agent_args[agent_args.index("--memory") + 1] == "64g"
     assert agent_args[agent_args.index("--cpus") + 1] == "16"
     assert "--gpus" not in agent_args  # Podman's Docker API drops it: the GPU API adds it
+    assert agent_args[agent_args.index("--cpuset-cpus") + 1] == "16-31"
+    assert "--cpuset-cpus" not in gateway[0] and "--cpuset-cpus" not in proxy[0]
     assert proxy[1] == remote
 
 
@@ -260,3 +262,43 @@ def test_the_agent_is_told_its_real_limits(settings):
         env
     )
     assert compute.limit_env(settings, "high") == []
+
+
+def test_cores_are_split_into_slots_of_an_agents_size():
+    assert replace(HIGH, cpuset="0-31").cpu_slots == ("0-15", "16-31")
+    eight = replace(HIGH, cpuset="0-7,16-23", agent_cpus="4", max_running=2)
+    assert eight.cpu_slots == ("0-3", "4-7", "16-19", "20-23")
+    assert replace(HIGH, cpuset="").cpu_slots == ()
+    with pytest.raises(ValueError, match="room for 1 agents"):
+        replace(HIGH, cpuset="0-23", max_running=2)  # one slot of 16, and 8 left over
+    with pytest.raises(ValueError, match="whole number"):
+        replace(HIGH, cpuset="0-31", agent_cpus="1.5")
+    with pytest.raises(ValueError, match="list of cores"):
+        replace(HIGH, cpuset="all")
+
+
+async def test_each_running_agent_gets_cores_of_its_own(settings):
+    """`nproc` then says what the agent may use. A slot is given back when its
+    conversation stops; with none free, an agent runs unpinned (still limited)."""
+    from datalab.db import connect
+    from datalab.sessions.manager import SessionManager
+    from datalab.sessions.store import ConversationStore
+    from datalab.sessions.tokens import SessionTokens
+
+    on_server = server_settings(settings, high=replace(HIGH, cpuset="0-31"))
+    store = ConversationStore(connect(settings.data_dir / "test.sqlite"))
+    manager = SessionManager(on_server, store, SessionTokens())
+
+    def high_conversation():
+        return store.create(kind="data", mode="analysis", title="t", model="m", compute="high")
+
+    one, two, three = high_conversation(), high_conversation(), high_conversation()
+    assert manager._containers(one, pin=True).cpuset == "0-15"
+    assert manager._containers(one, pin=True).cpuset == "0-15"  # the same while it runs
+    assert manager._containers(two, pin=True).cpuset == "16-31"
+    assert manager._containers(three, pin=True).cpuset is None  # none free
+    assert manager._containers(one).cpuset is None  # only an agent starting takes one
+    await manager._shutdown(one.id)
+    assert manager._containers(three, pin=True).cpuset == "0-15"
+    standard = store.create(kind="data", mode="analysis", title="t", model="m")
+    assert manager._containers(standard, pin=True).cpuset is None

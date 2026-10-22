@@ -124,6 +124,9 @@ class SessionManager:
         self._idle_seconds = idle_seconds
         self._max_running = max_running
         self._computes: dict[str, Compute] = {}
+        # High compute: which slot of the other machine's cores each running
+        # conversation's agent has (compute.HighComputeSettings.cpu_slots).
+        self._cpu_slots: dict[str, int] = {}
         self._runtimes: dict[str, SessionRuntime] = {}
         self._last_used: dict[str, float] = {}
         self._turns: dict[str, asyncio.Task[None]] = {}
@@ -489,13 +492,33 @@ class SessionManager:
 
     # ------------------------------------------------------------------------
 
-    def _containers(self, conversation: Conversation) -> SessionContainers:
+    def _containers(self, conversation: Conversation, *, pin: bool = False) -> SessionContainers:
+        """The conversation's containers. `pin`: for a runtime about to start
+        its agent, which then gets a slot of the cores, if there are any."""
         return self._containers_for(
             conversation.id,
             conversation.kind,
             processed="dropbox" in self.sources_of(conversation),
             compute=conversation.compute,
+            cpuset=self._cpu_slot(conversation) if pin else None,
         )
+
+    def _cpu_slot(self, conversation: Conversation) -> str | None:
+        """A free slot of the high-compute machine's cores for this
+        conversation's agent; None for a standard one, or when none is set
+        (or free: it then runs unpinned, within its CPU limit)."""
+        high = compute_module.high_compute(self._settings)
+        if conversation.compute != "high" or high is None or not high.cpu_slots:
+            return None
+        slot = self._cpu_slots.get(conversation.id)
+        if slot is None:
+            taken = set(self._cpu_slots.values())
+            free = [i for i in range(len(high.cpu_slots)) if i not in taken]
+            if not free:
+                log.warning("no free cores to pin %s to", conversation.id)
+                return None
+            slot = self._cpu_slots[conversation.id] = free[0]
+        return high.cpu_slots[slot]
 
     def _containers_for(
         self,
@@ -504,6 +527,7 @@ class SessionManager:
         *,
         processed: bool = False,
         compute: Compute = "standard",
+        cpuset: str | None = None,
     ) -> SessionContainers:
         return SessionContainers(
             conversation_id,
@@ -518,6 +542,7 @@ class SessionManager:
             processed=processed,
             engine=compute_module.engine_for(self._settings, compute),
             agent_env=tuple(compute_module.limit_env(self._settings, compute)),
+            cpuset=cpuset,
         )
 
     def sources_of(self, conversation: Conversation) -> tuple[str, ...]:
@@ -594,7 +619,7 @@ class SessionManager:
                 conversation.id,
                 conversation.kind,
                 paths,
-                self._containers(conversation),
+                self._containers(conversation, pin=True),
                 self._tokens,
                 model=conversation.model,
                 developer_instructions=modes.instructions(
@@ -803,5 +828,7 @@ class SessionManager:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         runtime = self._runtimes.pop(conversation_id, None)
+        # Its cores are free again once its agent has stopped (below).
+        self._cpu_slots.pop(conversation_id, None)
         if runtime:
             await runtime.close()

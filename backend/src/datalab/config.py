@@ -239,6 +239,31 @@ class WindowsSettings:
 Deployment = Literal["desktop", "server"]
 
 
+def _cores(text: str) -> list[int]:
+    """A cpuset ("0-15,24,26-27") as its cores, in order."""
+    cores: list[int] = []
+    for part in text.split(","):
+        match = re.fullmatch(r"\s*([0-9]+)\s*(?:-\s*([0-9]+)\s*)?", part)
+        if match is None:
+            raise ValueError(f"server.high_compute.cpuset isn't a list of cores: {text!r}")
+        first, last = int(match[1]), int(match[2] or match[1])
+        if last < first:
+            raise ValueError(f"server.high_compute.cpuset has a backwards range: {part!r}")
+        cores += [c for c in range(first, last + 1) if c not in cores]
+    return cores
+
+
+def _ranges(cores: list[int]) -> str:
+    """Cores as a cpuset: [0, 1, 2, 5] -> "0-2,5"."""
+    runs: list[list[int]] = []
+    for core in cores:
+        if runs and core == runs[-1][-1] + 1:
+            runs[-1].append(core)
+        else:
+            runs.append([core])
+    return ",".join(f"{r[0]}-{r[-1]}" if len(r) > 1 else str(r[0]) for r in runs)
+
+
 @dataclass(frozen=True)
 class HighComputeSettings:
     """`[server.high_compute]`: conversations whose containers run on a larger
@@ -267,6 +292,12 @@ class HighComputeSettings:
     max_running: int = 2
     # Who may choose it: "admins", or "lab" (anyone who may sign in).
     open_to: str = "admins"
+    # The other machine's cores DataLab may use, such as "0-31" ("" leaves
+    # agents unpinned). They're split into slots of `agent_cpus` cores, in
+    # order, and each running agent gets a slot to itself (`--cpuset-cpus`),
+    # so `nproc` there says what it may use. Name them so a slot is one
+    # processor's (NUMA node's) cores.
+    cpuset: str = ""
 
     def __post_init__(self) -> None:
         for name in ("docker_host", "sessions_dir", "relay_socket"):
@@ -287,6 +318,26 @@ class HighComputeSettings:
             raise ValueError("server.high_compute.max_running must be at least 1")
         if self.open_to not in ("admins", "lab"):
             raise ValueError('server.high_compute.open_to must be "admins" or "lab"')
+        if self.cpuset:
+            if not self.agent_cpus.isdigit():
+                raise ValueError(
+                    "server.high_compute.agent_cpus must be a whole number with a cpuset"
+                )
+            if len(self.cpu_slots) < self.max_running:
+                raise ValueError(
+                    f"server.high_compute.cpuset has room for {len(self.cpu_slots)} agents of "
+                    f"{self.agent_cpus} CPUs, fewer than max_running ({self.max_running})"
+                )
+
+    @property
+    def cpu_slots(self) -> tuple[str, ...]:
+        """`cpuset` in slots of `agent_cpus` cores, each as `--cpuset-cpus` takes it."""
+        if not self.cpuset:
+            return ()
+        cores = _cores(self.cpuset)
+        size = int(self.agent_cpus)
+        chunks = [cores[i : i + size] for i in range(0, len(cores) - size + 1, size)]
+        return tuple(_ranges(chunk) for chunk in chunks)
 
 
 @dataclass(frozen=True)
