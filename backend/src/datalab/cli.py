@@ -269,6 +269,10 @@ def _serve(settings, *, open_browser: bool) -> int:
         # A server is updated by its administrator (`datalab server install`),
         # and has no launcher, browser or person at its console.
         print(f"DataLab ({settings.profile}) is starting at {settings.server.site}/", flush=True)
+        if settings.profile == "practice":
+            # Practice only (synthetic data), until GitHub sign-in: its one-time
+            # link goes to the service's log, which only its administrators read.
+            print(f"Sign in once: {settings.server.site}{browser.sign_in_path()}", flush=True)
     else:
         _refresh_launcher_icons()
         url = f"http://{settings.host}:{settings.port}{browser.sign_in_path()}"
