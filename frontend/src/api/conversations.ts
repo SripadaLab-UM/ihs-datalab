@@ -14,6 +14,9 @@ export type Effort = NonNullable<Schemas["NewMessage"]["effort"]>;
 export type PlanSchema = Schemas["PlanSchemaOut"];
 export type FileLoad = Schemas["FileLoadOut"];
 export type DataSource = Conversation["data_sources"][number];
+export type Compute = Conversation["compute"];
+export type ComputeChoice = Schemas["ComputeChoiceOut"];
+export type HighCompute = Schemas["HighComputeOut"];
 
 export const conversationsApi = {
   modes: () => request<Mode[]>("/api/modes"),
@@ -22,11 +25,19 @@ export const conversationsApi = {
   conversations: () => request<Conversation[]>("/api/conversations"),
   conversation: (id: string) => request<Conversation>(`/api/conversations/${id}`),
   // No title: DataLab writes one from the first question. No sources: the database.
-  createConversation: (mode: string, model?: string, dataSources?: DataSource[]) =>
+  // No compute: standard (high runs on the lab's larger machine, where offered).
+  createConversation: (mode: string, model?: string, dataSources?: DataSource[], compute?: Compute) =>
     request<Conversation>("/api/conversations", {
       method: "POST",
-      body: JSON.stringify(dataSources ? { mode, model, data_sources: dataSources } : { mode, model }),
+      body: JSON.stringify({
+        mode,
+        model,
+        ...(dataSources ? { data_sources: dataSources } : {}),
+        ...(compute ? { compute } : {}),
+      }),
     }),
+  /** Whether this person may choose high compute, and what it gives (null: they can't). */
+  computeChoice: () => request<ComputeChoice>("/api/conversations/compute"),
   // Restarts the agent's container: its tools and folders follow the sources.
   setSources: (id: string, dataSources: DataSource[]) =>
     request<Conversation>(`/api/conversations/${id}`, {

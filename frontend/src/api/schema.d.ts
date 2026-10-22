@@ -82,6 +82,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/compute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compute Choice
+         * @description Whether this person may choose high compute, and what it gives.
+         */
+        get: operations["compute_choice_api_conversations_compute_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -3256,6 +3276,10 @@ export interface components {
             /** Type */
             type: string | null;
         };
+        /** ComputeChoiceOut */
+        ComputeChoiceOut: {
+            high: components["schemas"]["HighComputeOut"] | null;
+        };
         /** ConnectionCheckOut */
         ConnectionCheckOut: {
             /** Ok */
@@ -3320,6 +3344,11 @@ export interface components {
             express: boolean;
             /** Data Sources */
             data_sources: ("database" | "dropbox")[];
+            /**
+             * Compute
+             * @enum {string}
+             */
+            compute: "standard" | "high";
             /** Busy */
             busy: boolean;
         };
@@ -4088,6 +4117,18 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /**
+         * HighComputeOut
+         * @description What a high-compute conversation gets, for the New conversation choice.
+         */
+        HighComputeOut: {
+            /** Memory */
+            memory: string;
+            /** Cpus */
+            cpus: string;
+            /** Gpu */
+            gpu: boolean;
+        };
         /** HistoryItem */
         HistoryItem: {
             /** Query Id */
@@ -4373,6 +4414,12 @@ export interface components {
             model?: string | null;
             /** Data Sources */
             data_sources?: ("database" | "dropbox")[] | null;
+            /**
+             * Compute
+             * @default standard
+             * @enum {string}
+             */
+            compute: "standard" | "high";
         };
         /**
          * NewDropColumns
@@ -6748,6 +6795,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_choice_api_conversations_compute_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeChoiceOut"];
                 };
             };
         };

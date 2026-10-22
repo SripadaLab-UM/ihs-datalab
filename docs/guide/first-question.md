@@ -3,7 +3,7 @@ title: Ask your first question
 summary: Start a conversation, choose a mode, ask, and watch the agent work.
 order: 10
 screens: /workspace
-keywords: start, new conversation, ask, question, mode, starter, stop, attach, inputs, effort, model
+keywords: start, new conversation, ask, question, mode, starter, stop, attach, inputs, effort, model, compute, high compute, gpu
 ---
 
 # Ask your first question
@@ -26,7 +26,13 @@ keywords: start, new conversation, ask, question, mode, starter, stop, attach, i
    kind.
 3. The model is the recommended one. **Change** offers only models approved
    for study data.
-4. Press **Start**.
+4. On the lab's shared DataLab, if you may use it, **Compute** offers
+   **Standard** or **High compute**. High compute runs the conversation on
+   the lab's high-compute server, with many more CPUs and much more memory,
+   and a GPU. Choose it for heavy work: models, simulation, very large data.
+   It stays there for the whole conversation, which shows **High compute** in
+   its header. Only a few run at once, so use it when you need it.
+5. Press **Start**.
 
 ## Ask
 

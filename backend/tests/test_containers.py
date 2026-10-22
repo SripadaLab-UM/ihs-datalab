@@ -21,10 +21,10 @@ def fake_docker(monkeypatch, answers):
     """Answer `docker inspect` from a list; record other docker commands."""
     calls = []
 
-    async def status(*args):
+    async def status(*args, env=None):
         return answers.pop(0)
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         calls.append(args[0])
         return ""
 
@@ -73,7 +73,7 @@ async def test_stopping_removes_the_network_after_the_containers(tmp_path, monke
     """Networks left behind used up Docker's address pools after ~30 conversations."""
     calls = []
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         calls.append(args)
         return ""
 
@@ -104,7 +104,7 @@ async def test_cleanup_removes_only_this_instances_containers(monkeypatch, tmp_p
     (tmp_path / "sessions" / "c_old").mkdir(parents=True)
     removed: list[tuple[str, ...]] = []
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         if args[0] == "ps":
             return f"aaa|{mine}|c_1\nbbb|other|c_2\nccc||c_old\nddd||c_elsewhere\n"
         if args[:2] == ("network", "ls"):
@@ -191,13 +191,13 @@ async def test_on_native_linux_the_agent_runs_as_datalabs_own_user(
     calls = []
     env_files = []
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         calls.append(args)
         if args[0] == "run":
             env_files.append(Path(args[args.index("--env-file") + 1]).read_text(encoding="utf-8"))
         return ""
 
-    async def status(*args):
+    async def status(*args, env=None):
         return "missing"
 
     monkeypatch.setattr(module, "docker", docker)
@@ -231,10 +231,10 @@ async def test_the_gateways_config_is_readable_whatever_the_umask(tmp_path, monk
     """On the lab's server DataLab runs with umask 0077, and the gateway's
     nginx can't override file permissions (--cap-drop ALL)."""
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         return ""
 
-    async def status(*args):
+    async def status(*args, env=None):
         return (0, "")
 
     monkeypatch.setattr(module, "docker", docker)

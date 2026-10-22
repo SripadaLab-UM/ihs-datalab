@@ -240,6 +240,56 @@ Deployment = Literal["desktop", "server"]
 
 
 @dataclass(frozen=True)
+class HighComputeSettings:
+    """`[server.high_compute]`: conversations whose containers run on a larger
+    machine (docs/DISTRIBUTION.md, "High compute"). DataLab drives that
+    machine's container engine (Podman or Docker) through a socket here, which
+    an SSH tunnel forwards; the conversation's folders live there, and are
+    mounted here at the same path (sshfs), so every path means the same file
+    on both machines. The gateway there reaches DataLab through a socket the
+    same tunnel forwards back.
+    """
+
+    # The engine's API, forwarded here: "unix:///run/datalab-compute/podman.sock".
+    docker_host: str = ""
+    # The same engine's API whose containers get the GPU by default ("" for
+    # none): Podman's Docker-compatible API drops GPU requests, so a second
+    # API service adds it (CDI) to everything it starts.
+    gpu_docker_host: str = ""
+    # Where high-compute conversations' folders live, on both machines.
+    sessions_dir: str = ""
+    # On the other machine: the socket that reaches DataLab's gateway listener.
+    relay_socket: str = ""
+    # Each high-compute agent's container.
+    agent_memory: str = "64g"
+    agent_cpus: str = "16"
+    # High-compute conversations running at once, for everyone together.
+    max_running: int = 2
+    # Who may choose it: "admins", or "lab" (anyone who may sign in).
+    open_to: str = "admins"
+
+    def __post_init__(self) -> None:
+        for name in ("docker_host", "sessions_dir", "relay_socket"):
+            if not getattr(self, name):
+                raise ValueError(f"server.high_compute.{name} is needed")
+        for name in ("docker_host", "gpu_docker_host"):
+            value = getattr(self, name)
+            if value and not value.startswith("unix:///"):
+                raise ValueError(f"server.high_compute.{name} must be a unix:/// socket")
+        for name in ("sessions_dir", "relay_socket"):
+            if not getattr(self, name).startswith("/"):
+                raise ValueError(f"server.high_compute.{name} must be an absolute path")
+        if not re.fullmatch(r"[1-9][0-9]*[kmg]", self.agent_memory):
+            raise ValueError("server.high_compute.agent_memory must be a size such as 64g")
+        if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", self.agent_cpus) or float(self.agent_cpus) <= 0:
+            raise ValueError("server.high_compute.agent_cpus must be a number of CPUs")
+        if self.max_running < 1:
+            raise ValueError("server.high_compute.max_running must be at least 1")
+        if self.open_to not in ("admins", "lab"):
+            raise ValueError('server.high_compute.open_to must be "admins" or "lab"')
+
+
+@dataclass(frozen=True)
 class ServerSettings:
     """`[server]`: DataLab run once for the whole lab on a server, behind
     Apache (`deployment = "server"`), rather than on each person's computer.
@@ -286,6 +336,8 @@ class ServerSettings:
     # The systemd unit that runs this DataLab: `datalab server install` and
     # `rollback` stop and start it.
     service: str = "datalab.service"
+    # `[server.high_compute]`: a larger machine for conversations that need it.
+    high_compute: HighComputeSettings | None = None
 
     def __post_init__(self) -> None:
         if self.open_to not in ("admins", "lab"):
@@ -568,12 +620,20 @@ def _deployment(raw: dict) -> tuple[Deployment, ServerSettings | None]:
     table = dict(raw.get("server", {})) if isinstance(raw.get("server", {}), dict) else None
     if table is None:
         raise ValueError("[server] in settings.toml must be a table")
+    high = table.pop("high_compute", None)
+    if high is not None and not isinstance(high, dict):
+        raise ValueError("[server.high_compute] in settings.toml must be a table")
     admins = table.pop("admins", [])
     if not isinstance(admins, list) or not all(
         isinstance(a, int) and not isinstance(a, bool) and a > 0 for a in admins
     ):
         raise ValueError("server.admins must be a list of GitHub user ids (numbers)")
     server = _section(ServerSettings, {"server": table}, "server")
+    if high is not None:
+        computing = _section(
+            HighComputeSettings, {"server.high_compute": high}, "server.high_compute"
+        )
+        server = replace(server, high_compute=computing)
     return "server", replace(server, admins=tuple(admins))
 
 

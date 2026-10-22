@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import sqlite3
 import threading
@@ -70,6 +71,7 @@ from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions import helper
 from datalab.sessions.approvals import Approvals
+from datalab.sessions.compute import engine_for, high_compute
 from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import AttachmentStore
@@ -274,6 +276,12 @@ def create_app(
         if manage_containers:
             # Containers from a previous run that didn't shut down cleanly.
             await remove_all_session_containers(settings.profile, settings.data_dir)
+            if high_compute(settings) is not None:
+                # And on the high-compute machine (its tunnel may be down: then later).
+                with contextlib.suppress(Exception):
+                    await remove_all_session_containers(
+                        settings.profile, settings.data_dir, engine_for(settings, "high")
+                    )
             await helper.remove_leftovers(settings)
         # Turns the last run stopped in the middle of, if it didn't close cleanly.
         sessions.end_cut_off_turns()
@@ -368,6 +376,7 @@ def create_app(
             titles=titles,
             processed_ready=lambda: processed.status().problem,
             processed_offered=lambda: processed.status().source != "off",
+            settings=settings,
         )
     )
     app.include_router(build_processed_router(processed))

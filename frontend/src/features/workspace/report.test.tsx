@@ -13,7 +13,7 @@ const conversation: Conversation = {
   created_at: "",
   updated_at: "",
   rigor_review: true, express: false,
-  data_sources: ["database"], busy: false,
+  data_sources: ["database"], compute: "standard", busy: false,
 };
 
 it("renders questions, answers, charts as SVG, and the SQL, with links as plain text", async () => {

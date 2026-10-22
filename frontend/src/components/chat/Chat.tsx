@@ -8,7 +8,15 @@ import { KnownFilesContext, OpenFileContext } from "@/lib/files";
 
 import { ASSISTANTS, type AssistantId, CompactContext } from "./assistants";
 import { useFollowLatest, useRefreshOnEvents } from "./chatHooks";
-import { ChatHeader, CompactHeader, ExpressSwitch, RigorSwitch, SourcesSelect, Title } from "./ChatControls";
+import {
+  ChatHeader,
+  CompactHeader,
+  ExpressSwitch,
+  HighComputeChip,
+  RigorSwitch,
+  SourcesSelect,
+  Title,
+} from "./ChatControls";
 import { Composer, type ComposerNote } from "./Composer";
 import { useEffortChoice, useExpressEffort } from "./effort";
 import { CompactIntro, EmptyState } from "./Intro";
@@ -169,6 +177,7 @@ export function Chat({
             onEffort={setEffort}
             actions={
               <>
+                {conversation.compute === "high" && <HighComputeChip />}
                 <ExpressSwitch conversation={conversation} compact />
                 {headerActions}
               </>
@@ -185,6 +194,7 @@ export function Chat({
             onEffort={setEffort}
             actions={
               <>
+                {conversation.compute === "high" && <HighComputeChip />}
                 <RememberButton
                   mode={conversation.mode}
                   onSend={(text) => sendMessage(text, false, true)}

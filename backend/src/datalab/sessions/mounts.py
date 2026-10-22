@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from datalab.config import Settings, default_data_dir
-from datalab.sessions import modes
+from datalab.sessions import compute, modes
 from datalab.sessions.hooks import MountProvider, MountRefused, checked_mount, data_dir_problem
 from datalab.sessions.inputs import (
     AttachmentStore,
@@ -101,10 +101,12 @@ def input_mounts(
         return []  # Knowledge writing: metadata only (the API refuses to attach, too)
     protected = [settings.data_dir, *(default_data_dir(p) for p in ("real", "practice"))]
     mountable = []
-    uploads = Uploads(settings.data_dir / "sessions")
+    assert conversation is not None
+    remote = conversation.compute == "high"
+    uploads = Uploads(lambda c: compute.session_root(settings, c, conversation.compute))
     for attachment in attachments.list(conversation_id):
         samples = practice_samples()
-        if settings.profile == "practice" and is_sample(attachment, samples):
+        if not remote and settings.profile == "practice" and is_sample(attachment, samples):
             mountable.append(attachment)
             continue
         if uploads.owns(conversation_id, attachment):
@@ -113,7 +115,12 @@ def input_mounts(
             if attachment.available:
                 mountable.append(attachment)
             continue
-        problem = recheck(attachment, protected=protected)
+        # High compute: only the conversation's own files are on that machine.
+        problem = (
+            f"{attachment.container_path} isn't on the high-compute machine"
+            if remote
+            else recheck(attachment, protected=protected)
+        )
         if problem is None:
             mountable.append(attachment)
         else:

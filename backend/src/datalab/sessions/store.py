@@ -15,9 +15,11 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from datalab.sessions.tokens import SessionKind
+
+Compute = Literal["standard", "high"]
 
 
 @dataclass(frozen=True)
@@ -38,6 +40,9 @@ class Conversation:
     data_sources: tuple[str, ...] = ("database",)
     # Who it belongs to (auth/users.py): the local user on a person's computer.
     owner_id: int = 1
+    # Where its containers run: "standard", or "high" on the lab's larger
+    # machine ([server.high_compute]). Kept for the conversation's life.
+    compute: Compute = "standard"
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,7 @@ class ConversationStore:
         rigor_review: bool = False,
         data_sources: tuple[str, ...] = ("database",),
         owner_id: int = 1,
+        compute: Compute = "standard",
     ) -> Conversation:
         now = _now()
         conversation = Conversation(
@@ -79,12 +85,13 @@ class ConversationStore:
             rigor_review=rigor_review,
             data_sources=data_sources,
             owner_id=owner_id,
+            compute=compute,
         )
         with self._lock:
             self._db.execute(
                 "INSERT INTO conversations (id, kind, mode, title, model, created_at, "
-                "updated_at, rigor_review, data_sources, owner_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "updated_at, rigor_review, data_sources, owner_id, compute) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation.id,
                     kind,
@@ -96,6 +103,7 @@ class ConversationStore:
                     int(rigor_review),
                     json.dumps(list(data_sources)),
                     owner_id,
+                    compute,
                 ),
             )
         return conversation
@@ -288,6 +296,7 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         express=bool(row["express"]),
         data_sources=_sources(row["data_sources"]),
         owner_id=row["owner_id"],
+        compute="high" if row["compute"] == "high" else "standard",
     )
 
 

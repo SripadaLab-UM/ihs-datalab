@@ -102,7 +102,7 @@ def build_inputs_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api", tags=["inputs"])
     practice = settings.profile == "practice"
-    uploads = Uploads(settings.data_dir / "sessions")
+    uploads = Uploads(lambda conversation_id: sessions.paths(conversation_id).root)
     protected = [settings.data_dir, default_data_dir("real"), default_data_dir("practice")]
 
     def conversation_or_404(conversation_id: str):
@@ -151,6 +151,10 @@ def build_inputs_router(
             real = Path(os.path.realpath(found[0]))
             if not str(real).startswith(os.path.realpath(samples) + os.sep):
                 raise HTTPException(404, "No such sample.")
+            if conversation.compute == "high":
+                # Its containers run on another machine: the sample goes
+                # there with the conversation's own files.
+                real = await asyncio.to_thread(uploads.copy_in, conversation_id, real)
             chosen.append((real, "folder" if real.is_dir() else "file"))
         else:
             if practice:

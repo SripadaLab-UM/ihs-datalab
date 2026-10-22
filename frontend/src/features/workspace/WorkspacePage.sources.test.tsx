@@ -15,6 +15,7 @@ vi.mock("@/api/client", () => ({
     models: vi.fn(),
     health: vi.fn(),
     createConversation: vi.fn(),
+    computeChoice: vi.fn(),
   },
 }));
 vi.mock("@/api/processed", () => ({ processedApi: { status: vi.fn() } }));
@@ -38,6 +39,7 @@ beforeEach(() => {
     { ...mode("research", "Research", []), kind: "research" },
   ]);
   vi.mocked(api.createConversation).mockResolvedValue({ id: "c1" } as never);
+  vi.mocked(api.computeChoice).mockResolvedValue({ high: null });
 });
 
 async function openDialog() {
@@ -87,4 +89,25 @@ it("shows no data choice at all when this DataLab offers no processed data", asy
   expect(within(dialog).queryByText(/Dropbox/)).toBeNull();
   fireEvent.click(within(dialog).getByRole("button", { name: /Start/ }));
   await waitFor(() => expect(api.createConversation).toHaveBeenCalledWith("analysis", undefined, undefined));
+});
+
+it("on the lab's DataLab, starts a high-compute conversation when it's chosen and offered", async () => {
+  vi.mocked(processedApi.status).mockResolvedValue(processed(true));
+  vi.mocked(api.computeChoice).mockResolvedValue({ high: { memory: "64g", cpus: "16", gpu: true } });
+  const dialog = await openDialog();
+  const high = await within(dialog).findByRole("radio", { name: /High compute/ });
+  expect(within(dialog).getByText(/16 CPUs, 64 GB memory, and a GPU/)).toBeTruthy();
+  expect(within(dialog).getByRole("radio", { name: /Standard/ })).toBeChecked();
+  fireEvent.click(high);
+  fireEvent.click(within(dialog).getByRole("button", { name: /Start/ }));
+  await waitFor(() =>
+    expect(api.createConversation).toHaveBeenCalledWith("analysis", undefined, ["database"], "high"),
+  );
+});
+
+it("offers no compute choice to someone who can't use high compute", async () => {
+  vi.mocked(processedApi.status).mockResolvedValue(processed(true));
+  const dialog = await openDialog();
+  await within(dialog).findByRole("radio", { name: /Study database/ });
+  expect(within(dialog).queryByRole("radio", { name: /High compute/ })).toBeNull();
 });

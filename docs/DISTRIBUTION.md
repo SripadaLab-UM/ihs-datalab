@@ -1108,6 +1108,53 @@ its person.
 - Export folders, workflow destination keys, Updates and Docker Desktop's
   help aren't shown.
 
+### High compute
+
+A conversation can run on a larger machine: **High compute** in New
+conversation, for those `[server.high_compute]` allows. It stays there for
+its life (`conversations.compute`). DataLab itself stays where it is (sign-in,
+the database, the model key, the audit log); only the conversation's
+containers and folders are on the other machine.
+
+```toml
+[server.high_compute]
+docker_host = "unix:///run/datalab-compute/podman.sock"         # its engine, through the tunnel
+gpu_docker_host = "unix:///run/datalab-compute/podman-gpu.sock" # the same, GPU by default ("" for none)
+sessions_dir = "/app/datalab-compute/practice/sessions"         # on both machines (below)
+relay_socket = "/app/datalab-compute/run/practice-relay.sock"   # on the other machine
+agent_memory = "64g"
+agent_cpus = "16"
+max_running = 2                                                 # at once, counted apart from standard
+open_to = "admins"                                              # or "lab"
+```
+
+How it fits together (`sessions/compute.py`, `Engine` in `sessions/containers.py`):
+
+- **Control:** an SSH connection DataLab's machine opens forwards the other
+  machine's container API (Docker-compatible; Podman's there) to
+  `docker_host`, and DataLab runs its usual `docker` commands with that
+  `DOCKER_HOST`.
+- **Folders:** the conversation's folder is in `sessions_dir`, which lives on
+  the other machine and is mounted here at the same path (sshfs). DataLab
+  reads and writes it as usual, and the containers there mount the same
+  paths. Only the conversation's own files are mounted: its uploads, and
+  copies of practice samples.
+- **The way back:** the same SSH connection forwards `relay_socket` (on the
+  other machine) to DataLab's gateway listener. The gateway mounts it and
+  proxies to it, instead of to `host.docker.internal`; DataLab still checks
+  each session's token.
+- **Names:** Podman resolves no container names once `--dns` is set (Docker's
+  resolver still does), so the agent is given the gateway's and proxy's
+  addresses (`--add-host`). It still has no DNS of its own.
+- **GPU:** Podman 4.9's Docker-compatible API drops GPU requests, so the
+  agent is started through `gpu_docker_host`, a second API service whose
+  containers get the GPU by default (CDI). The gateway and proxy never are.
+- **Networks:** Docker's client can't read Podman's networks; DataLab creates
+  them (an existing one is fine) and finds leftovers from their containers.
+
+The tunnel, the shared folder and the other machine's setup are server
+administration, outside this repository: see the lab's server wiki.
+
 ### Installing a release, and going back
 
 Run as the service's user, from the release that's running:

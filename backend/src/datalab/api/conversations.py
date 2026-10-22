@@ -10,8 +10,9 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+from datalab.config import Settings
 from datalab.relay.policy import model_allowed
-from datalab.sessions import plan_schema
+from datalab.sessions import compute, plan_schema
 from datalab.sessions.approvals import Unshowable
 from datalab.sessions.manager import (
     CONTINUE_TEXT,
@@ -22,7 +23,7 @@ from datalab.sessions.manager import (
 )
 from datalab.sessions.modes import MODES
 from datalab.sessions.plan_schema import PlanInvalid
-from datalab.sessions.store import Conversation, ConversationStore
+from datalab.sessions.store import Compute, Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
 from datalab.web import current_user, ended_since
 
@@ -50,6 +51,9 @@ class NewConversation(BaseModel):
     model: str | None = None
     # Where its data comes from; left out: the database.
     data_sources: list[DataSource] | None = Field(default=None, min_length=1, max_length=2)
+    # Where it runs (the lab's server): "high" on the larger machine, if the
+    # person may choose it (GET /api/conversations/compute). Kept for its life.
+    compute: Compute = "standard"
 
     _one_line = field_validator("title")(_one_line_title)
 
@@ -67,7 +71,22 @@ class ConversationOut(BaseModel):
     express: bool
     # The database, the lab's processed data (Dropbox), or both; empty for research.
     data_sources: list[DataSource]
+    # "standard", or "high": its containers run on the lab's larger machine.
+    compute: Compute
     busy: bool
+
+
+class HighComputeOut(BaseModel):
+    """What a high-compute conversation gets, for the New conversation choice."""
+
+    memory: str  # "64g"
+    cpus: str  # "16"
+    gpu: bool
+
+
+class ComputeChoiceOut(BaseModel):
+    # None: this person can't choose high compute (or there's none).
+    high: HighComputeOut | None
 
 
 class ConversationChange(BaseModel):
@@ -207,6 +226,7 @@ def build_conversations_router(
     titles: TitleWriter | None = None,
     processed_ready: Callable[[], str | None] | None = None,
     processed_offered: Callable[[], bool] | None = None,
+    settings: Settings | None = None,
 ) -> APIRouter:
     """`processed_ready()` is why the processed data can't be used now, or
     None when it can (dropbox/service.py); without it, it never can.
@@ -298,6 +318,10 @@ def build_conversations_router(
         mode = MODES.get(body.mode)
         if mode is None:
             raise HTTPException(422, f"Unknown mode {body.mode!r}.")
+        if body.compute == "high" and (
+            settings is None or not compute.may_choose_high(settings, current_user(request))
+        ):
+            raise HTTPException(403, "High compute isn't available to you here.")
         model = body.model or default_model
         if not model_allowed(model, allowed_models):
             raise HTTPException(422, f"{model!r} isn't approved for DataLab.")
@@ -313,8 +337,22 @@ def build_conversations_router(
             rigor_review=mode.id == "analysis",
             data_sources=sources,
             owner_id=current_user(request).id,
+            compute=body.compute,
         )
         return out(conversation)
+
+    @router.get("/conversations/compute")
+    def compute_choice(request: Request) -> ComputeChoiceOut:
+        """Whether this person may choose high compute, and what it gives."""
+        if settings is None or not compute.may_choose_high(settings, current_user(request)):
+            return ComputeChoiceOut(high=None)
+        high = compute.high_compute(settings)
+        assert high is not None
+        return ComputeChoiceOut(
+            high=HighComputeOut(
+                memory=high.agent_memory, cpus=high.agent_cpus, gpu=bool(high.gpu_docker_host)
+            )
+        )
 
     @router.get("/conversations/{conversation_id}")
     def get_conversation(conversation_id: str) -> ConversationOut:

@@ -583,7 +583,7 @@ def test_the_github_token_never_reaches_a_container(lab, monkeypatch):
     cid = conversation(lab)
     seen: list[str] = []
 
-    async def docker(*args: str, check: bool = True) -> str:
+    async def docker(*args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
         seen.append(" ".join(args))
         if args[0] == "run" and "--env-file" in args:
             seen.append(Path(args[args.index("--env-file") + 1]).read_text(encoding="utf-8"))

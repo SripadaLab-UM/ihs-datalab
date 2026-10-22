@@ -23,7 +23,7 @@ import re
 import secrets
 import shutil
 import threading
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -58,12 +58,14 @@ class Upload:
 
 
 class Uploads:
-    def __init__(self, sessions_dir: Path) -> None:
-        self._sessions = sessions_dir
+    def __init__(self, root_of: Callable[[str], Path]) -> None:
+        # A conversation's own folder (on the high-compute machine, for one
+        # that runs there: sessions/compute.py).
+        self._root_of = root_of
         self._lock = threading.Lock()
 
     def folder(self, conversation_id: str) -> Path:
-        return self._sessions / conversation_id / "uploads"
+        return self._root_of(conversation_id) / "uploads"
 
     def start(self, conversation_id: str, kind: UploadKind) -> Upload:
         upload = Upload(f"up_{secrets.token_hex(6)}", kind, 0, 0, False)
@@ -140,6 +142,24 @@ class Uploads:
         with self._lock:
             self._save(place, Upload(upload.id, upload.kind, upload.files, upload.bytes, True))
         return items
+
+    def copy_in(self, conversation_id: str, source: Path) -> Path:
+        """A copy of one of DataLab's own files or folders (a practice sample)
+        in the conversation's folder, as a finished upload: for a conversation
+        whose containers run on another machine, where the original isn't."""
+        kind: UploadKind = "folder" if source.is_dir() else "files"
+        upload = self.start(conversation_id, kind)
+        place = self.folder(conversation_id) / upload.id
+        target = place / "content" / source.name
+        if source.is_dir():
+            shutil.copytree(source, target, symlinks=False)
+        else:
+            shutil.copyfile(source, target)
+        size = _size(target)
+        files = sum(1 for _ in _files(target)) if target.is_dir() else 1
+        with self._lock:
+            self._save(place, Upload(upload.id, kind, files, size, True))
+        return target
 
     def used(self, conversation_id: str) -> int:
         """Bytes this conversation's uploads hold."""

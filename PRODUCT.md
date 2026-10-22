@@ -116,7 +116,9 @@ results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
   apart on every route, with Sign out; uploads in place of attaching from
   the computer; exports as downloads, and workflow deliveries kept with the
   run; personal and administrator settings; `datalab server install`,
-  `rollback` and `status`. Running on the server's practice copy.
+  `rollback` and `status`; **High compute**, a per-conversation choice to
+  run on the lab's larger machine (more CPUs and memory, a GPU), driven over
+  SSH. Running on the server's practice copy.
 - planned: the real copy (the lab's database), then opening it to the lab
   (`open_to = "lab"`); conversation sharing; queueing instead of refusing
   when it's busy.

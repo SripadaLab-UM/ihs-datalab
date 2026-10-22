@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
@@ -69,6 +69,36 @@ _KILL_TURN_PROCESSES = (
 
 class DockerError(RuntimeError):
     pass
+
+
+# Where a remote engine's gateway finds DataLab: the relay socket, mounted.
+_RELAY_IN_GATEWAY = "/datalab/relay.sock"
+
+
+@dataclass(frozen=True)
+class Engine:
+    """Where a conversation's containers run.
+
+    This machine's Docker by default. Or a larger machine's container engine
+    (high compute, `[server.high_compute]`), reached through a socket an SSH
+    tunnel forwards here (`env`: its DOCKER_HOST), whose gateway reaches
+    DataLab through a socket the tunnel forwards back (`relay_socket`, a path
+    on that machine). Its Docker API is Podman's: GPU requests are dropped
+    there, so a GPU agent is started through a second API (`gpu_env`) that
+    gives every container it starts the GPU; and its container names don't
+    resolve with `--dns` set, so the agent is told the gateway's address.
+    """
+
+    env: dict[str, str] = field(default_factory=dict)
+    gpu_env: dict[str, str] | None = None
+    relay_socket: str | None = None
+
+    @property
+    def remote(self) -> bool:
+        return self.relay_socket is not None
+
+
+LOCAL = Engine()
 
 
 @dataclass(frozen=True)
@@ -208,7 +238,9 @@ class SessionContainers:
         # Whether the conversation uses the processed data: its fetched files
         # are mounted read-only at /data/dropbox (data sessions only).
         processed: bool = False,
+        engine: Engine = LOCAL,
     ) -> None:
+        self.engine = engine
         self._extra_mounts = extra_mounts
         self.processed = processed
         self.session_id = session_id
@@ -231,9 +263,11 @@ class SessionContainers:
         """Create or restart the session's network and containers."""
         self.paths.create()
         # Files the Linux containers read get Unix line ends, on Windows too.
-        _write_readable(self.paths.gateway_conf, render_gateway_conf(self.kind, self.host_port))
-        if not await self._exists("network", self.network):
-            await docker("network", "create", "--internal", *self._labels, self.network)
+        _write_readable(
+            self.paths.gateway_conf,
+            render_gateway_conf(self.kind, self.host_port, relay=self.engine.remote),
+        )
+        await self._ensure_network()
         await self._start_gateway()
         if self.kind == "research":
             await self._start_proxy()
@@ -247,15 +281,15 @@ class SessionContainers:
         one behind per conversation stopped new ones starting after a while.
         """
         for name in (self.agent, self.gateway, self.proxy):
-            await docker("rm", "-f", name, check=False)
-        await docker("network", "rm", self.network, check=False)
+            await self._docker("rm", "-f", name, check=False)
+        await self._docker("network", "rm", self.network, check=False)
 
     async def remove(self) -> None:
         await self.stop()
 
     async def is_running(self) -> bool:
         """Running and not paused: a paused agent can't run Codex."""
-        output = await docker(
+        output = await self._docker(
             "inspect", "-f", "{{.State.Running}} {{.State.Paused}}", self.agent, check=False
         )
         return output.split() == ["true", "false"]
@@ -279,13 +313,13 @@ class SessionContainers:
         if state is None or state == "not running":
             return
         if state == "running":
-            await docker("pause", self.agent)
+            await self._docker("pause", self.agent)
         if await self._agent_state() != "paused":
             raise DockerError("DataLab couldn't pause the agent's container.")
 
     async def unpause(self) -> None:
         if await self._agent_state() == "paused":
-            await docker("unpause", self.agent)
+            await self._docker("unpause", self.agent)
 
     async def _agent_state(self) -> str | None:
         """'running', 'paused', 'not running', or None if there's no container.
@@ -293,7 +327,7 @@ class SessionContainers:
         Raises DockerError if Docker can't say.
         """
         code, out, err = await docker_status(
-            "inspect", "-f", "{{.State.Running}} {{.State.Paused}}", self.agent
+            "inspect", "-f", "{{.State.Running}} {{.State.Paused}}", self.agent, env=self.engine.env
         )
         if code != 0:
             if "no such" in err.lower():
@@ -312,19 +346,41 @@ class SessionContainers:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             limit=32 * 1024 * 1024,
+            env=_with(self.engine.env),
         )  # fmt: skip
 
     async def kill_turn_processes(self) -> None:
-        await docker("exec", self.agent, "sh", "-c", _KILL_TURN_PROCESSES, check=False)
+        await self._docker("exec", self.agent, "sh", "-c", _KILL_TURN_PROCESSES, check=False)
+
+    async def _docker(self, *args: str, check: bool = True) -> str:
+        return await docker(*args, check=check, env=self.engine.env)
+
+    async def _ensure_network(self) -> None:
+        if not self.engine.remote:
+            if not await self._exists("network", self.network):
+                await docker("network", "create", "--internal", *self._labels, self.network)
+            return
+        # Docker's client can't read Podman's networks (`network inspect`
+        # fails on them), so: create it, and an existing one is fine.
+        code, _, err = await docker_status(
+            "network", "create", "--internal", *self._labels, self.network, env=self.engine.env
+        )
+        if code != 0 and "exists" not in err.lower():
+            raise docker_failure("network create", err)
 
     async def _start_gateway(self) -> None:
         if await self._running(self.gateway):
             return
-        await docker("rm", "-f", self.gateway, check=False)
-        await docker(
+        await self._docker("rm", "-f", self.gateway, check=False)
+        if self.engine.remote:
+            # The way to DataLab: the socket the tunnel forwards back.
+            upstream = ["-v", f"{self.engine.relay_socket}:{_RELAY_IN_GATEWAY}"]
+        else:
+            upstream = ["--add-host", "host.docker.internal:host-gateway"]
+        await self._docker(
             "run", "-d", "--name", self.gateway,
             *self._labels,
-            "--add-host", "host.docker.internal:host-gateway",
+            *upstream,
             "--read-only", "--tmpfs", "/var/cache/nginx", "--tmpfs", "/var/run",
             "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "SETUID",
             "--cap-add", "SETGID", "--cap-add", "NET_BIND_SERVICE",
@@ -333,17 +389,17 @@ class SessionContainers:
             "-v", f"{self.paths.gateway_conf}:/etc/nginx/conf.d/default.conf:ro",
             GATEWAY_IMAGE,
         )  # fmt: skip
-        await docker("network", "connect", "--alias", "gateway", self.network, self.gateway)
+        await self._docker("network", "connect", "--alias", "gateway", self.network, self.gateway)
 
     async def _start_proxy(self) -> None:
         if await self._running(self.proxy):
             return
-        await docker("rm", "-f", self.proxy, check=False)
+        await self._docker("rm", "-f", self.proxy, check=False)
         _write_readable(
             self.paths.squid_conf,
             resources.files(__package__).joinpath("squid.conf").read_text(encoding="utf-8"),
         )
-        await docker(
+        await self._docker(
             "run", "-d", "--name", self.proxy,
             *self._labels,
             "--cap-drop", "ALL", "--cap-add", "CHOWN", "--cap-add", "SETUID",
@@ -353,14 +409,14 @@ class SessionContainers:
             "-v", f"{self.paths.squid_conf}:/etc/squid/squid.conf:ro",
             PROXY_IMAGE,
         )  # fmt: skip
-        await docker("network", "connect", "--alias", "proxy", self.network, self.proxy)
+        await self._docker("network", "connect", "--alias", "proxy", self.network, self.proxy)
         await self._wait_for_proxy()
 
     async def _wait_for_proxy(self, timeout: float = 20) -> None:
         """Squid takes a moment to start; don't hand the agent a dead proxy."""
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
-            logs = await docker("logs", self.proxy, check=False)
+            logs = await self._docker("logs", self.proxy, check=False)
             if "Accepting HTTP Socket connections" in logs:
                 return
             await asyncio.sleep(0.25)
@@ -369,7 +425,7 @@ class SessionContainers:
     async def _start_agent(self, token: str) -> None:
         if await self._running(self.agent):
             return
-        await docker("rm", "-f", self.agent, check=False)
+        await self._docker("rm", "-f", self.agent, check=False)
         # The token goes in a private env file, not on a command line where
         # other programs on this computer could see it.
         self.paths.prepare_config_mountpoint()
@@ -400,11 +456,25 @@ class SessionContainers:
         if self._extra_mounts:
             # Checks the disk (and maybe slow cloud folders): not on the event loop.
             mounts += await asyncio.to_thread(self._extra_mounts)
+        hosts: list[str] = []
+        if self.engine.remote:
+            # Podman resolves no container names once --dns is set (Docker's
+            # resolver still does): the agent is told their addresses.
+            for alias, name in (("gateway", self.gateway), ("proxy", self.proxy)):
+                if name == self.proxy and self.kind != "research":
+                    continue
+                address = await self._address(name)
+                if not address:
+                    raise DockerError(f"DataLab couldn't find the session's {alias}.")
+                hosts += ["--add-host", f"{alias}:{address}"]
+        # A GPU agent starts through the engine's GPU API (see Engine).
+        start_env = self.engine.gpu_env if self.engine.gpu_env is not None else self.engine.env
         await docker(
             "run", "-d", "--name", self.agent,
             *self._labels,
             "--network", self.network,
             "--dns", _NO_DNS,
+            *hosts,
             "--init",
             *(["--user", user] if user else []),
             "--cap-drop", "ALL",
@@ -414,15 +484,20 @@ class SessionContainers:
             "--env-file", str(env_file),
             *mounts,
             self.agent_image,
+            env=start_env,
         )  # fmt: skip
         env_file.unlink(missing_ok=True)
 
+    async def _address(self, name: str) -> str:
+        template = f'{{{{(index .NetworkSettings.Networks "{self.network}").IPAddress}}}}'
+        return (await self._docker("inspect", "-f", template, name, check=False)).strip()
+
     async def _running(self, name: str) -> bool:
-        output = await docker("inspect", "-f", "{{.State.Running}}", name, check=False)
+        output = await self._docker("inspect", "-f", "{{.State.Running}}", name, check=False)
         return output.strip() == "true"
 
     async def _exists(self, kind: str, name: str) -> bool:
-        output = await docker(kind, "inspect", "-f", "{{.Name}}", name, check=False)
+        output = await self._docker(kind, "inspect", "-f", "{{.Name}}", name, check=False)
         return bool(output.strip())
 
 
@@ -435,32 +510,47 @@ def _write_readable(path: Path, text: str) -> None:
     path.chmod(0o644)
 
 
-def render_gateway_conf(kind: SessionKind, host_port: int) -> str:
+def render_gateway_conf(kind: SessionKind, host_port: int, *, relay: bool = False) -> str:
+    """The gateway's nginx config. DataLab is at `host.docker.internal` on
+    this machine, or (`relay`: a remote engine) through the relay socket."""
     template = resources.files(__package__).joinpath("gateway.conf").read_text(encoding="utf-8")
+    upstream = f"unix:{_RELAY_IN_GATEWAY}:" if relay else f"host.docker.internal:{host_port}"
     mcp = ""
     if kind == "data":
         mcp = (
             "\n    # Agent tools (data sessions only).\n"
             "    location /mcp {\n"
-            f"        proxy_pass http://host.docker.internal:{host_port}/mcp;\n"
+            f"        proxy_pass http://{upstream}/mcp;\n"
             "    }\n"
         )
-    return template.replace("{mcp_location}", mcp).replace("{port}", str(host_port))
+    return (
+        template.replace("{mcp_location}", mcp)
+        .replace("{upstream}", upstream)
+        .replace("{port}", str(host_port))
+    )
 
 
-async def docker_status(*args: str) -> tuple[int, str, str]:
+def _with(env: dict[str, str] | None) -> dict[str, str] | None:
+    """This process's environment plus an engine's (its DOCKER_HOST); None,
+    the environment as it is, for this machine's Docker."""
+    return {**os.environ, **env} if env else None
+
+
+async def docker_status(*args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
     """Run docker; return its exit code, output, and error output."""
     process = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
+        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_with(env),
+    )  # fmt: skip
     out, err = await process.communicate()
     return process.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 
 
-async def docker(*args: str, check: bool = True) -> str:
+async def docker(*args: str, check: bool = True, env: dict[str, str] | None = None) -> str:
     process = await asyncio.create_subprocess_exec(
-        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
+        "docker", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        env=_with(env),
+    )  # fmt: skip
     out, err = await process.communicate()
     if check and process.returncode != 0:
         raise docker_failure(args[0], err.decode(errors="replace"))
@@ -489,7 +579,9 @@ def docker_failure(command: str, stderr: str) -> DockerError:
     return DockerError(f"docker {command} failed: {stderr.strip()[:500]}")
 
 
-async def remove_all_session_containers(profile: str, data_dir: Path) -> None:
+async def remove_all_session_containers(
+    profile: str, data_dir: Path, engine: Engine = LOCAL
+) -> None:
     """Clean up this instance's containers and networks left by a previous run.
 
     Only this instance's: another DataLab with the same profile (an
@@ -503,9 +595,23 @@ async def remove_all_session_containers(profile: str, data_dir: Path) -> None:
     instance = instance_of(data_dir)
     owned = f"label={_PROFILE_LABEL}={profile}"
     fields = f'{{{{.ID}}}}|{{{{.Label "{_INSTANCE_LABEL}"}}}}|{{{{.Label "{_LABEL}"}}}}'
-    listed = await docker("ps", "-a", "--filter", owned, "--format", fields, check=False)
+    env = engine.env
+    listed = await docker("ps", "-a", "--filter", owned, "--format", fields, check=False, env=env)
     if ids := _owned(listed, instance, data_dir):
-        await docker("rm", "-f", *ids, check=False)
+        await docker("rm", "-f", *ids, check=False, env=env)
+    if engine.remote:
+        # Docker's client can't list Podman's networks: each session's is
+        # named after it, so this instance's containers name the networks.
+        mine = set(ids)
+        sessions = {
+            parts[2].strip()
+            for line in listed.splitlines()
+            if len(parts := line.split("|")) == 3 and parts[0].strip() in mine
+        }
+        names = sorted(session_name(s, instance) for s in sessions if s)
+        if names:
+            await docker("network", "rm", *names, check=False, env=env)
+        return
     listed = await docker("network", "ls", "--filter", owned, "--format", fields, check=False)
     if networks := _owned(listed, instance, data_dir):
         await docker("network", "rm", *networks, check=False)

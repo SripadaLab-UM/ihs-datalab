@@ -101,6 +101,10 @@ server", and these besides:
 - **Each person sees only their own work.** Someone else's conversation,
   run, draft, Playground or download answers "not found". Only DataLab's
   administrators change the lab's connections or run the Safety check.
+- **High compute keeps the same walls.** A conversation that runs on the
+  lab's high-compute server has the same sealed containers there: no route
+  out but DataLab's gateway, no DNS, read-only data, and only its own files.
+  That server is approved for the study's data too.
 - **Files come in and go out only through you.** You upload files into one
   conversation; exports go to your own browser as downloads, kept a day for
   you only. Every upload and download is in the audit log, by size, never
@@ -606,6 +610,13 @@ access. It never gains it.
   credentials files refused, 500 MB a file and 2 GB a conversation; mounted
   read-only only while still where they were put. Refused on practice.
   Tests: `test_uploads.py`.
+- **High compute** (`sessions/compute.py`, the remote `Engine`): the same
+  containers and arguments, on the other machine's engine. The gateway's
+  only way out is DataLab's relay socket, forwarded back over SSH (the relay
+  checks each session's token); the agent gets `--add-host` for the gateway
+  and proxy and keeps `--dns` at an unroutable address; only the
+  conversation's own folder (and copies of samples) is mounted. Only the
+  agent is started through the GPU API. Tests: `test_high_compute.py`.
 - **Downloads** (`downloads.py`): written through the same export checks,
   zipped, and served only from the signed-in person's own folder, for a
   day. Tests: `test_downloads.py`.

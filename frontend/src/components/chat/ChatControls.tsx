@@ -50,6 +50,15 @@ export function ChatHeader({
  * the tab's own actions; under it the conversation (once there is one), the
  * model and how hard it thinks. Two short lines that fit a narrow panel.
  */
+/** The lab's shared DataLab: this conversation runs on the lab's high-compute server. */
+export function HighComputeChip() {
+  return (
+    <span title="This conversation runs on the lab's high-compute server, for its whole life">
+      <Chip tone="you">High compute</Chip>
+    </span>
+  );
+}
+
 export function CompactHeader({
   assistant,
   kind,
