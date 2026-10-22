@@ -179,9 +179,10 @@ def refuse_cross_site(scope: Scope, *, public_origin: str | None = None) -> str 
     - be JSON (`content-type: application/json`), which only a same-origin
       page's fetch can send without the browser asking first (CORS preflight,
       which DataLab never allows). The frontend's request() sends it on every
-      call, with or without a body. No /api route takes anything else (no
-      uploads or forms: attaching files goes through the computer's own
-      picker), so nothing is exempt.
+      call, with or without a body. The one exception is a file uploaded on
+      the lab's server (api/inputs.py): its body is the file as it is
+      (`application/octet-stream`), and it carries the `X-DataLab-Path`
+      header, which no other page can send without that same preflight.
     """
     headers = Headers(scope=scope)
     site = headers.get("sec-fetch-site")
@@ -195,6 +196,8 @@ def refuse_cross_site(scope: Scope, *, public_origin: str | None = None) -> str 
         if origin != own:
             return "Refused a request from another origin."
     content_type = headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type == "application/octet-stream" and headers.get("x-datalab-path"):
+        return None
     if content_type != "application/json":
         return "DataLab's API takes JSON requests only."
     return None

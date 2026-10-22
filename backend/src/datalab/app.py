@@ -383,7 +383,9 @@ def create_app(
         build_preview_router(previews, (server.public_url, server.base_path) if server else None)
     )
     app.include_router(build_code_router(conversations, sessions))
-    app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
+    app.include_router(
+        build_inputs_router(settings, conversations, attachments, sessions, access_log)
+    )
     destinations = DestinationStore(connection)
     app.include_router(
         build_exports_router(

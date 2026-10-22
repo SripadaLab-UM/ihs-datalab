@@ -245,7 +245,8 @@ class ServerSettings:
     Apache (`deployment = "server"`), rather than on each person's computer.
 
     People sign in with GitHub; the server's own secrets come from systemd
-    credentials, never the keychain (credentials.py). See docs/SERVER.md.
+    credentials, never the keychain (credentials.py). See docs/DISTRIBUTION.md,
+    "The lab's shared DataLab".
     """
 
     # The site's address, without a path: "https://datalab.example.edu".
@@ -282,6 +283,9 @@ class ServerSettings:
     # `session_idle_minutes` without a request.
     session_hours: float = 8
     session_idle_minutes: int = 60
+    # The systemd unit that runs this DataLab: `datalab server install` and
+    # `rollback` stop and start it.
+    service: str = "datalab.service"
 
     def __post_init__(self) -> None:
         if self.open_to not in ("admins", "lab"):

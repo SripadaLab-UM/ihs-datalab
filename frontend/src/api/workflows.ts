@@ -89,6 +89,9 @@ export const workflowsApi = {
     request<WorkflowRun>("/api/workflows/test-runs", post({ text, params })),
   /** The destination keys workflow files name, and the folder each maps to on this computer. */
   destinations: () => request<DestinationKey[]>("/api/workflows/destinations"),
+  /** The lab's server: a run's delivery, zipped for the browser to download. */
+  downloadDelivery: (runId: string) =>
+    request<{ url: string; name: string }>(`/api/workflows/runs/${runId}/download`, { method: "POST" }),
 };
 
 /** Where a run's live updates come from (server-sent events: `run` each time it changes, then `end`). */

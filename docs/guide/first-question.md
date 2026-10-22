@@ -79,6 +79,12 @@ files it finds inside. Anything you attach to a research session may reach
 the internet. The practice DataLab can't attach your own files; it offers
 made-up sample files instead.
 
+On the lab's shared DataLab, the one you open in your browser and sign in
+to with GitHub, press **Upload files…** or **Upload folder…** instead. Your
+browser sends them (up to 500 MB a file, and 2 GB for a conversation), and
+they stay with that conversation, for you only, until you **Remove** them.
+Credentials files aren't uploaded.
+
 ## Keep track
 
 DataLab names the conversation from your first question; click the title to

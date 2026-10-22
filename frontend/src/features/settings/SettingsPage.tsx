@@ -4,6 +4,7 @@ import { type KeyboardEvent, useEffect, useRef } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router";
 
 import { api } from "@/api/client";
+import { sessionApi } from "@/api/session";
 
 import {
   DEFAULT_SECTION,
@@ -14,8 +15,10 @@ import {
   type SettingsSectionId,
   sectionForAnchor,
   settingsPath,
+  visibleSections,
 } from "./sectionIds";
 import { AboutSection } from "./sections/AboutSection";
+import { AccountSection } from "./sections/AccountSection";
 import { AppearanceSection } from "./sections/AppearanceSection";
 import { ConnectionsSection } from "./sections/ConnectionsSection";
 import { DestinationKeysSection } from "./sections/DestinationKeysSection";
@@ -46,7 +49,12 @@ export function SettingsPage() {
   const { hash } = useLocation();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
-  const current = isSection(section) ? section : null;
+  const server = health.data?.deployment === "server";
+  const me = useQuery({ queryKey: ["session-me"], queryFn: sessionApi.me, staleTime: 5 * 60_000, enabled: server });
+  const visible = visibleSections(server, me.data?.admin ?? false);
+  // Until DataLab has said what it is (and who's signed in), nothing is ruled out.
+  const known = health.isSuccess && (!server || me.isSuccess);
+  const current = isSection(section) && (!known || visible.includes(section)) ? section : null;
   const anchor = anchorOf(hash);
 
   useEffect(() => {
@@ -64,13 +72,17 @@ export function SettingsPage() {
 
   if (!current) {
     // An old link (/settings#updates) goes to its section; else the last one used.
-    const target = (anchor && sectionForAnchor(anchor)) || rememberedSection() || DEFAULT_SECTION;
+    const wanted = (anchor && sectionForAnchor(anchor)) || rememberedSection() || DEFAULT_SECTION;
+    const target = visible.includes(wanted) ? wanted : visible[0];
     const place = anchor && anchor !== target ? `#${encodeURIComponent(anchor)}` : "";
     return <Navigate to={`${settingsPath(target)}${place}`} replace />;
   }
 
   let panel;
   switch (current) {
+    case "account":
+      panel = <AccountSection />;
+      break;
     case "connections":
       panel = <ConnectionsSection />;
       break;
@@ -111,7 +123,7 @@ export function SettingsPage() {
         <p aria-live="polite" className="sr-only" data-testid="settings-announcement">
           {announcement}
         </p>
-        <SectionNav current={current} />
+        <SectionNav current={current} visible={visible} />
         <div className="flex min-w-0 max-w-3xl flex-1 flex-col gap-14">{panel}</div>
       </div>
     </div>
@@ -119,7 +131,7 @@ export function SettingsPage() {
 }
 
 /** The sections: a column of links on a wide window, a row of tabs on a narrow one. Arrow keys move between them. */
-function SectionNav({ current }: { current: SettingsSectionId }) {
+function SectionNav({ current, visible }: { current: SettingsSectionId; visible: SettingsSectionId[] }) {
   const list = useRef<HTMLUListElement>(null);
   const safety = useQuery({ queryKey: ["safety"], queryFn: api.lastSafetyReport });
   const update = useUpdateCheck().data;
@@ -152,7 +164,7 @@ function SectionNav({ current }: { current: SettingsSectionId }) {
         onKeyDown={onKeyDown}
         className="-mx-1 flex gap-1 overflow-x-auto border-b border-line md:mx-0 md:flex-col md:gap-0.5 md:overflow-visible md:border-b-0"
       >
-        {SETTINGS_SECTIONS.map((s) => {
+        {SETTINGS_SECTIONS.filter((s) => visible.includes(s.id)).map((s) => {
           const active = s.id === current;
           const mark = marks[s.id];
           return (

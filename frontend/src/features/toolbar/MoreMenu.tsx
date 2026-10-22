@@ -11,6 +11,7 @@ import { githubApi } from "@/api/github";
 import { Icon, Modal } from "@/components/ui";
 import { GitHubMark } from "@/features/settings/GitHubEntry";
 import { settingsLink } from "@/features/settings/highlight";
+import { useDeployment } from "@/lib/deployment";
 import { type Theme, useTheme } from "@/lib/theme";
 
 import { EMPTY_DRAFT, FeedbackDialog, type FeedbackDraft } from "./FeedbackDialog";
@@ -40,6 +41,7 @@ export function MoreMenu() {
   const { theme, setTheme } = useTheme();
   const github = useGitHub();
   const [dialog, setDialog] = useState<"feedback" | "folders" | null>(null);
+  const { server } = useDeployment();
   // Kept while the page is open: closing Feedback and coming back finds it as it was.
   const [draft, setDraft] = useState<FeedbackDraft>(EMPTY_DRAFT);
   return (
@@ -47,7 +49,7 @@ export function MoreMenu() {
       <Shortcut kind="menu" icon="more" label="More" title="More: appearance, and report a bug or suggest an improvement" width="w-60">
         {(close) => (
           <>
-            <div role="none" className={NARROW_ONLY}>
+            <div role="none" className={server ? "hidden" : NARROW_ONLY}>
               <button
                 type="button"
                 role="menuitem"

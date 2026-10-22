@@ -3,7 +3,7 @@ title: "Settings & Safety"
 summary: Save or replace the U-M GPT key, test the connections, sign in to GitHub, pick light or dark, check for updates, tidy disk use, and run the Safety check.
 order: 31
 screens: /settings, /settings/*
-keywords: settings, connections, password, key, toolkit key, api key, keychain, database, oracle, vpn, u-m gpt, test connection, github, account, appearance, theme, dark, light, dark mode, updates, update available, check now, every hour, hourly, last checked, storage, disk, space, backups, remove, cleanup, safety check, diagnostics
+keywords: settings, account, sign out, administrator, connections, password, key, toolkit key, api key, keychain, database, oracle, vpn, u-m gpt, test connection, github, account, appearance, theme, dark, light, dark mode, updates, update available, check now, every hour, hourly, last checked, storage, disk, space, backups, remove, cleanup, safety check, diagnostics
 ---
 
 # Settings & Safety
@@ -48,6 +48,21 @@ starts.
 The practice DataLab can't change some settings. They are still shown, marked
 **Fixed on the practice DataLab**, so you can see what the real DataLab would
 let you do.
+
+On the lab's shared DataLab, the one you open in your browser and sign in
+to with GitHub, Settings has **Account**, **Appearance** and **About**.
+DataLab's administrators also see **Connections**, **Storage** and **Safety**:
+the database, U-M GPT and the Safety check are set up once, for everyone.
+There are no **Export folders** (exports are downloads) or **Updates** (the
+administrators update it).
+
+## Account
+
+On the lab's shared DataLab: who you're signed in as, and **Sign out**. Your
+conversations, Playground, workflow runs and drafts are yours alone; nobody
+else signed in there sees them. What you save to the lab's knowledge base or
+pipelines goes to GitHub as you. The **Session** menu at the top right says
+who's signed in, and has **Sign out** too.
 
 ## Connections
 

@@ -2,6 +2,7 @@
 // toolbar, other screens and Help can link straight to one.
 
 export const SETTINGS_SECTIONS = [
+  { id: "account", label: "Account" },
   { id: "connections", label: "Connections" },
   { id: "appearance", label: "Appearance" },
   { id: "export-folders", label: "Export folders" },
@@ -14,6 +15,20 @@ export const SETTINGS_SECTIONS = [
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 
 export const DEFAULT_SECTION: SettingsSectionId = "connections";
+
+/**
+ * The sections someone sees. On a person's computer, all but Account (it's
+ * theirs alone). On the lab's shared DataLab (a server): their Account and
+ * Appearance, and About; administrators also look after the lab's
+ * Connections, Storage and Safety. Export folders and Updates are a
+ * computer's: the server downloads exports, and its administrator updates it.
+ */
+export function visibleSections(server: boolean, admin: boolean): SettingsSectionId[] {
+  if (!server) return SETTINGS_SECTIONS.map((s) => s.id).filter((id) => id !== "account");
+  return admin
+    ? ["account", "connections", "appearance", "storage", "safety", "about"]
+    : ["account", "appearance", "about"];
+}
 
 /** GitHub's place in Connections, where the toolbar's GitHub entry links. */
 export const GITHUB_ANCHOR = "connection-github";

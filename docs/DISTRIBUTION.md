@@ -1015,6 +1015,135 @@ content's hash (`/favicon.svg?v=<sha8>`, `frontend/brandIcons.ts`), in
   failing never hides the other's result.
 - **U-M GPT** is reached through the gateway container.
 
+## The lab's shared DataLab (a server)
+
+Status: **implemented, in a pilot**: one DataLab for the whole lab, on a
+Linux server behind Apache, that people open in their browser and sign in
+to with GitHub. Running on the server's practice copy (synthetic data); the
+real copy isn't live yet. Readiness is in [PRODUCT.md](../PRODUCT.md).
+
+Everything below applies only with `deployment = "server"` in
+settings.toml. A person's own computer (`deployment = "desktop"`, the
+default) behaves as the rest of this document says.
+
+### Settings
+
+```toml
+deployment = "server"
+
+[server]
+public_url = "https://<the site>"     # no path
+base_path = "/datalab"                # where Apache serves it
+admins = [12345678]                   # GitHub numeric user ids
+open_to = "admins"                    # "lab" once colleagues may sign in
+access_repo = "<org>/<repo>"          # its writers are the lab ("" = [repos] knowledge)
+socket = "/run/datalab/web.sock"      # Apache's way in
+socket_group = "apache"
+gateway_listen = "docker-bridge"      # where session gateways reach DataLab
+agent_memory = "1536m"                # per conversation's agent container
+agent_cpus = "1"
+max_running = 3                       # agents at once, everyone together
+max_running_per_user = 1
+idle_minutes = 10
+session_hours = 8                     # a sign-in lasts at most this
+session_idle_minutes = 60             # and ends after this without a request
+service = "datalab.service"           # the systemd unit install/rollback restart
+```
+
+`[repos] client_id` is the lab's GitHub App, as on a computer; its client
+secret is a server secret (below).
+
+### Secrets
+
+Never the keychain or the environment: the systemd unit hands them over with
+`LoadCredential=`, from root-only files (`credentials.py`):
+
+| Credential | What |
+|---|---|
+| `model-api-key` | The lab's U-M GPT key |
+| `oracle-password` | The database account's password |
+| `github-client-secret` | The GitHub App's client secret (web sign-in) |
+| `token-key` | Encrypts people's GitHub sign-ins in the database (a Fernet key) |
+
+### How it runs
+
+- **Apache** serves `base_path` over HTTPS and passes requests, with the
+  prefix stripped, to DataLab's **Unix socket** (group `apache`, 0660), so
+  nothing else on the server can reach the app. Live events need
+  `flushpackets=on`; uploads need `LimitRequestBody` of at least 500 MB.
+- DataLab's **TCP port** listens on the Docker bridge only and answers only
+  the session gateways (`/relay/`, `/mcp`) (`server_listen.py`).
+- Agent containers run as the service's own user (`--user`), with the
+  `[server]` memory and CPU limits.
+- **Sign-in** is GitHub's web flow (PKCE). Someone may sign in while they
+  can write to `access_repo` (re-checked as their sign-in is refreshed),
+  and, while `open_to = "admins"`, only if they're in `admins`. The cookie
+  is `Secure`, `HttpOnly`, `SameSite=Lax`, scoped to `base_path`.
+
+### People, kept apart
+
+Each conversation, workflow run, knowledge and pipelines draft, Playground
+and query record has an owner. One check on every route (`api/access.py`)
+answers 404 for anyone else's id, as if it didn't exist; a test fails if a
+route's id isn't covered. Only administrators change the lab's settings or
+see its storage and diagnostics. Saving to the lab's repos commits and
+pushes as the person, with their own GitHub sign-in. Every audit line names
+its person.
+
+### Files in and out
+
+- **Uploads** take the place of attaching from the computer: the browser
+  sends each file (`PUT /api/conversations/<id>/uploads/<upload>/files`,
+  with an `X-DataLab-Path` header, which no other site can send), into the
+  conversation's own folder; then they're attached read-only like any
+  input. At most 500 MB a file and 2 GB a conversation; names are checked,
+  and credentials files refused (`sessions/uploads.py`). The practice copy
+  takes no uploads: it offers its synthetic samples, as on a computer.
+- **Downloads** take the place of export folders: every export (a
+  conversation's, the Playground's) is written as usual into the person's
+  own staging folder, zipped, and saved by their browser from
+  `/api/downloads/<id>`, which only they can open, for a day
+  (`downloads.py`). A workflow run's delivery stays on the server; its run
+  offers **Download**.
+- Export folders, workflow destination keys, Updates and Docker Desktop's
+  help aren't shown.
+
+### Installing a release, and going back
+
+Run as the service's user, from the release that's running:
+
+```bash
+<root>/current/venv/bin/datalab --profile <profile> server install --version 0.4.0   # a signed release
+<root>/current/venv/bin/datalab --profile <profile> server install --from <folder>   # scripts/build-release.sh's dist
+<root>/current/venv/bin/datalab --profile <profile> server rollback                  # the release before
+<root>/current/venv/bin/datalab --profile <profile> server status
+```
+
+with `DATALAB_DATA_DIR` set as the unit sets it. Each release has its own
+folder, `<root>/releases/<id>/` (its package, `requirements.txt`, its
+Python environment), and the unit runs `<root>/current/venv/bin/datalab`;
+`current` and `previous` are symlinks (`server_install.py`). An install:
+
+1. checks the release's files: for `--version`, `SHA256SUMS` signed with the
+   lab's release key, as the in-app updater checks; for `--from`, the
+   maintainer's own build. Either way `requirements.txt` must pin
+   everything by hash and the package by its checksum;
+2. installs it beside the running release and pulls its images, while the
+   service keeps running;
+3. waits for running work (a query, a workflow run, pipeline tests) to
+   finish, stops the service, backs up the database (the update marker, so
+   the new release's start-up finishes the update), and switches `current`;
+4. starts the service and waits for it to answer on its socket as the new
+   version. If it doesn't, `current` goes back and the old release starts;
+   its start-up recovery puts the database back if the new one changed it.
+
+`rollback` stops the service, has the previous release restore the database
+backup if the newer one changed the database (`datalab rollback`, which
+refuses to drop what was recorded since unless given `--yes`), swaps
+`current` and `previous`, and starts it again. A conversation whose agent
+was mid-turn when the service stopped picks up where its last checkpoint
+left it.
+
 ## For the maintainer: releasing
 
 - Tagging a release makes GitHub Actions:

@@ -29,6 +29,7 @@ const TABS = [
 export function Shell() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const practice = health.data?.profile === "practice";
+  const server = health.data?.deployment === "server";
   usePracticeTab(practice);
   const [signedOut, setSignedOut] = useState(false);
   // On a narrow window the tabs scroll: keep the one you're on in view.
@@ -59,8 +60,9 @@ export function Shell() {
           Windows, or press Ctrl-C in it) and start it again from its launcher: an old sign-in link won't work again.
         </div>
       )}
-      <UpdatingBanner />
-      <DockerBanner />
+      {/* A server's Docker and updates are its administrator's (`datalab server install`). */}
+      {!server && <UpdatingBanner />}
+      {!server && <DockerBanner />}
       <header className="flex items-center gap-4 border-b border-line px-5 lg:gap-8">
         <Brand practice={practice} />
         <nav ref={nav} className="flex min-w-0 gap-1 self-stretch overflow-x-auto">
@@ -91,9 +93,7 @@ export function Shell() {
             in its own menu at the far end, set apart. */}
         <div className="ml-auto flex shrink-0 items-center gap-2 self-stretch 2xl:gap-3">
           {/* Below 2xl "Update available" is one of the attention items instead. */}
-          <span className="hidden 2xl:contents">
-            <UpdatePill />
-          </span>
+          <span className="hidden 2xl:contents">{!server && <UpdatePill />}</span>
           <AttentionMenu />
           <Shortcuts />
           {/* From lg to 2xl the brand beside the tabs says "practice" itself, so the

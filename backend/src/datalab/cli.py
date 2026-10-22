@@ -107,6 +107,31 @@ def main(argv: list[str] | None = None) -> int:
         help="counts of the chosen folder's files by folder, type, size and year (no names)",
     )
 
+    server = commands.add_parser(
+        "server", help="install a release on the lab's server, or go back (docs/DISTRIBUTION.md)"
+    )
+    server_commands = server.add_subparsers(dest="server_command", required=True)
+    install = server_commands.add_parser(
+        "install", help="install a release beside the running one, then switch to it"
+    )
+    source = install.add_mutually_exclusive_group(required=True)
+    source.add_argument("--version", dest="release", help="a signed release from GitHub")
+    source.add_argument(
+        "--from",
+        dest="folder",
+        type=Path,
+        help="a folder scripts/build-release.sh built (the package and requirements.txt)",
+    )
+    back_server = server_commands.add_parser(
+        "rollback", help="go back to the release that ran before"
+    )
+    back_server.add_argument(
+        "--yes",
+        action="store_true",
+        help="restore the database backup even though it drops what was recorded since",
+    )
+    server_commands.add_parser("status", help="which releases are current and previous")
+
     kb_check = commands.add_parser(
         "kb-check", help="check a knowledge base folder (the check GitHub Actions runs)"
     )
@@ -161,6 +186,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "rollback":
         return _rollback(settings, args)
+
+    if args.command == "server":
+        return _server(settings, args)
 
     if args.command == "github":
         return _github_sign_in(settings, args)
@@ -412,7 +440,7 @@ def _use_server_secrets() -> str | None:
     if not folder or not Path(folder).is_dir():
         return (
             "A server DataLab reads its secrets from systemd's credentials folder "
-            "(LoadCredential= in its unit), and none was given. See docs/SERVER.md."
+            "(LoadCredential= in its unit), and none was given. See docs/DISTRIBUTION.md."
         )
     use_server_secrets(Path(folder))
     return None
@@ -702,6 +730,25 @@ def _backup(settings) -> int:
     finally:
         source.close()
     print(f"Backed up the database to {backup.folder}")
+    return 0
+
+
+def _server(settings, args) -> int:
+    from datalab.server_install import InstallFailed, ServerInstaller, ServerLayout
+
+    try:
+        installer = ServerInstaller(settings, ServerLayout.of_this_process())
+        if args.server_command == "status":
+            print("\n".join(installer.status()))
+        elif args.server_command == "rollback":
+            installer.rollback(drop_since=args.yes)
+        elif args.folder is not None:
+            installer.install(installer.stage_folder(args.folder))
+        else:
+            installer.install(installer.stage_release(args.release))
+    except InstallFailed as failed:
+        print(failed, file=sys.stderr)
+        return 1
     return 0
 
 

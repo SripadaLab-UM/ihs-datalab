@@ -1,16 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { api, type Conversation } from "@/api/client";
 import { Button, EmptyNote, FileGlyph, Icon } from "@/components/ui";
 import { kindOf } from "@/lib/files";
 import { pickerOpenHint } from "@/lib/picker";
+import { uploadAndAttach, type UploadProgress } from "@/lib/upload";
 
 /** Files and folders attached to a conversation. The agent reads them; it can't change them. */
 export function Inputs({ conversation, practice }: { conversation: Conversation; practice: boolean }) {
   const queryClient = useQueryClient();
-  const inputs = useQuery({ queryKey: ["inputs", conversation.id], queryFn: () => api.inputs(conversation.id) });
+  const inputs = useQuery({
+    queryKey: ["inputs", conversation.id],
+    queryFn: () => api.inputs(conversation.id),
+  });
   const modes = useQuery({ queryKey: ["modes"], queryFn: api.modes });
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  // The lab's server: files come from the browser, not DataLab's own disk.
+  const server = health.data?.deployment === "server";
   const mode = modes.data?.find((m) => m.id === conversation.mode);
   const [refused, setRefused] = useState<{ path: string; reason: string }[]>([]);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -33,8 +40,31 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
       refresh();
     },
   });
-  const detach = useMutation({ mutationFn: (id: string) => api.detach(conversation.id, id), onSuccess: refresh });
-  const blocked = conversation.busy || attach.isPending;
+  const [progress, setProgress] = useState<UploadProgress | null>(null);
+  const upload = useMutation({
+    mutationFn: async ({ files, kind }: { files: File[]; kind: "files" | "folder" }) => {
+      if (
+        conversation.kind === "research" &&
+        !window.confirm(
+          "This is a research session, which has the internet. Anything you upload may be sent to websites. Upload anyway?",
+        )
+      ) {
+        return { added: [], refused: [], warnings: [] };
+      }
+      return uploadAndAttach(conversation.id, files, kind, setProgress);
+    },
+    onSuccess: (result) => {
+      setRefused(result.refused);
+      setWarnings(result.warnings ?? []);
+      refresh();
+    },
+    onSettled: () => setProgress(null),
+  });
+  const detach = useMutation({
+    mutationFn: (id: string) => api.detach(conversation.id, id),
+    onSuccess: refresh,
+  });
+  const blocked = conversation.busy || attach.isPending || upload.isPending;
 
   if (mode && !mode.attachments) {
     // The tabs' own chats (Knowledge writing, Workflow authoring, ...): DataLab refuses to attach, too.
@@ -60,9 +90,19 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
           )}
         </p>
       </div>
+      {server && !practice && (
+        <Uploader disabled={blocked} onFiles={(files, kind) => upload.mutate({ files, kind })} />
+      )}
+      {progress && (
+        <p className="text-xs text-muted" role="status">
+          Uploading{progress.file ? ` ${progress.file}` : ""}…{" "}
+          {progress.totalBytes > 0 && `${Math.floor((100 * progress.sentBytes) / progress.totalBytes)}%`}
+        </p>
+      )}
+      {upload.error && <p className="text-xs text-danger">{upload.error.message}</p>}
       {practice ? (
         <Samples onAttach={(sample) => attach.mutate({ source: "sample", sample })} disabled={blocked} />
-      ) : (
+      ) : server ? null : (
         <div className="flex gap-2">
           <Button onClick={() => attach.mutate({ source: "files" })} disabled={blocked}>
             <Icon name="attach" size={14} /> Attach files…
@@ -103,10 +143,14 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
               <div className="truncate font-mono text-xs" title={item.container_path}>
                 {item.container_path}
               </div>
-              <div className="truncate text-xs text-muted" title={item.host_path}>
-                {practice ? "Practice sample" : item.host_path}
+              <div className="truncate text-xs text-muted" title={server ? undefined : item.host_path}>
+                {practice ? "Practice sample" : server ? "Uploaded" : item.host_path}
               </div>
-              {!item.available && <div className="text-xs text-danger">Not found on this computer any more.</div>}
+              {!item.available && (
+                <div className="text-xs text-danger">
+                  {server ? "Its files are gone." : "Not found on this computer any more."}
+                </div>
+              )}
             </div>
             <Button
               variant="ghost"
@@ -123,8 +167,53 @@ export function Inputs({ conversation, practice }: { conversation: Conversation;
   );
 }
 
+/** The lab's server: choose files or a folder in the browser; they're uploaded, then attached. */
+function Uploader({
+  disabled,
+  onFiles,
+}: {
+  disabled: boolean;
+  onFiles: (files: File[], kind: "files" | "folder") => void;
+}) {
+  const filesInput = useRef<HTMLInputElement>(null);
+  const folderInput = useRef<HTMLInputElement>(null);
+  const chosen = (kind: "files" | "folder") => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = ""; // the same files can be chosen again
+    if (files.length) onFiles(files, kind);
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex gap-2">
+        <Button onClick={() => filesInput.current?.click()} disabled={disabled}>
+          <Icon name="attach" size={14} /> Upload files…
+        </Button>
+        <Button onClick={() => folderInput.current?.click()} disabled={disabled}>
+          <Icon name="folder" size={14} /> Upload folder…
+        </Button>
+      </div>
+      <input ref={filesInput} type="file" multiple hidden onChange={chosen("files")} data-testid="upload-files" />
+      <input
+        ref={folderInput}
+        type="file"
+        hidden
+        onChange={chosen("folder")}
+        data-testid="upload-folder"
+        {...{ webkitdirectory: "" }}
+      />
+      <p className="text-xs text-muted">
+        Up to 500 MB a file and 2 GB a conversation. They're kept with this conversation on the lab's DataLab until you
+        remove them.
+      </p>
+    </div>
+  );
+}
+
 function Samples({ onAttach, disabled }: { onAttach: (sample: string) => void; disabled: boolean }) {
-  const samples = useQuery({ queryKey: ["input-samples"], queryFn: api.inputSamples });
+  const samples = useQuery({
+    queryKey: ["input-samples"],
+    queryFn: api.inputSamples,
+  });
   return (
     <div>
       <p className="dl-label mb-2">Synthetic samples (practice can't attach your files)</p>

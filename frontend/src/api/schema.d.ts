@@ -603,6 +603,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Upload
+         * @description An upload to send files into, one request each (`PUT .../files`).
+         */
+        post: operations["start_upload_api_conversations__conversation_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/uploads/{upload_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upload File
+         * @description One file of an upload: the request's body, as it is.
+         */
+        put: operations["upload_file_api_conversations__conversation_id__uploads__upload_id__files_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/uploads/{upload_id}/attach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Upload
+         * @description Attach what an upload holds: each file, or its folder.
+         */
+        post: operations["attach_upload_api_conversations__conversation_id__uploads__upload_id__attach_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/inputs/{attachment_id}": {
         parameters: {
             query?: never;
@@ -615,6 +675,26 @@ export interface paths {
         post?: never;
         /** Detach */
         delete: operations["detach_api_conversations__conversation_id__inputs__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/downloads/{download_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download
+         * @description An export, as a .zip: only the person who made it, for a day.
+         */
+        get: operations["download_api_downloads__download_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1581,6 +1661,26 @@ export interface paths {
          * @description The original definition, extracts, image and seed, run again.
          */
         post: operations["replay_api_workflows_runs__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download Delivery
+         * @description The lab's server: a run's delivery, kept there, as a .zip for the browser.
+         */
+        post: operations["download_delivery_api_workflows_runs__run_id__download_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3465,6 +3565,13 @@ export interface components {
             /** Admin Access Url */
             admin_access_url: string | null;
         };
+        /** DownloadOut */
+        DownloadOut: {
+            /** Url */
+            url: string;
+            /** Name */
+            name: string;
+        };
         /** DraftCheckIn */
         DraftCheckIn: {
             /** Text */
@@ -3694,6 +3801,8 @@ export interface components {
             sync_provider: ("dropbox" | "onedrive" | "box" | "google_drive" | "icloud") | null;
             /** Sync Note */
             sync_note: string | null;
+            /** Download Url */
+            download_url?: string | null;
         };
         /** ExtractStep */
         ExtractStep: {
@@ -4332,6 +4441,14 @@ export interface components {
             path: string;
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** NewUpload */
+        NewUpload: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "files" | "folder";
         };
         /** NotebookOut */
         NotebookOut: {
@@ -6322,6 +6439,27 @@ export interface components {
             /** Latest Migration */
             latest_migration: string | null;
         };
+        /** UploadOut */
+        UploadOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "files" | "folder";
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Room Bytes */
+            room_bytes: number;
+        };
+        /** UploadedFile */
+        UploadedFile: {
+            /** Path */
+            path: string;
+            /** Bytes */
+            bytes: number;
+        };
         /** ValidateIn */
         ValidateIn: {
             /** Path */
@@ -7553,6 +7691,112 @@ export interface operations {
             };
         };
     };
+    start_upload_api_conversations__conversation_id__uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_file_api_conversations__conversation_id__uploads__upload_id__files_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-datalab-path": string;
+            };
+            path: {
+                conversation_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedFile"];
+                };
+            };
+            /** @description Too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Refused */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_upload_api_conversations__conversation_id__uploads__upload_id__attach_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     detach_api_conversations__conversation_id__inputs__attachment_id__delete: {
         parameters: {
             query?: never;
@@ -7571,6 +7815,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_api_downloads__download_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                download_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
@@ -9261,6 +9536,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_delivery_api_workflows_runs__run_id__download_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadOut"];
                 };
             };
             /** @description Validation Error */

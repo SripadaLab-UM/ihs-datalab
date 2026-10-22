@@ -449,6 +449,8 @@ def build_support_router(services: SupportServices) -> APIRouter:
     async def save_to_folder_route(report_id: str, body: SupportSaveToFolderIn) -> SupportReportOut:
         """Copy the ZIP to an export folder (practice: its own) as <report-id>.zip.
         Trying again never makes a second copy."""
+        if settings.on_server:
+            raise HTTPException(409, "On the lab's DataLab, download the report instead.")
         find(report_id)
         try:
             target = export_target(settings, services.destinations, body.destination_id)

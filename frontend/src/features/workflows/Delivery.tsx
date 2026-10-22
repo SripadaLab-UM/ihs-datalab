@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 
+import { api } from "@/api/client";
 import { type Delivery, type Workflow, type WorkflowRun, workflowsApi } from "@/api/workflows";
-import { Chip, Icon, InfoTip } from "@/components/ui";
+import { Button, Chip, Icon, InfoTip } from "@/components/ui";
 import { settingsLink } from "@/features/settings/highlight";
+import { startDownload } from "@/lib/download";
 
 import { deliveryProblems, isLive, plural, problemWhere, short, when } from "./words";
 
@@ -12,7 +14,7 @@ export function DeliveryStatus({
   run,
   deliveries = [],
 }: {
-  run: Pick<WorkflowRun, "delivery_status" | "delivery_message" | "status" | "finished_at" | "mode">;
+  run: Pick<WorkflowRun, "delivery_status" | "delivery_message" | "status" | "finished_at" | "mode"> & { id?: string };
   deliveries?: Delivery[];
 }) {
   const live = isLive(run);
@@ -47,21 +49,44 @@ export function DeliveryStatus({
             <Icon name="check" size={13} className="translate-y-[2px]" /> {run.delivery_message ?? "Delivered."}
           </p>
           {deliveries.map((d) => (
-            <DeliveryFiles key={d.id} delivery={d} />
+            <DeliveryFiles key={d.id} delivery={d} runId={run.id} />
           ))}
         </div>
       );
   }
 }
 
-function DeliveryFiles({ delivery }: { delivery: Delivery }) {
+// A delivery the lab's server keeps (export_folders.SERVER_DELIVERIES_NAME): downloaded from its run.
+const KEPT_ON_SERVER = "the lab's DataLab";
+
+function DeliveryFiles({ delivery, runId }: { delivery: Delivery; runId?: string }) {
+  const kept = delivery.destination_name === KEPT_ON_SERVER;
+  const download = useMutation({
+    mutationFn: () => workflowsApi.downloadDelivery(runId ?? ""),
+    onSuccess: (made) => startDownload(made.url),
+  });
   return (
     <div className="border-l border-line pl-3 font-sans text-[12.5px] text-muted">
-      <p>
-        <span className="text-ink">{delivery.saved_to}</span>{" "}
-        (<span className="font-mono">{delivery.destination_key}</span>), in{" "}
-        <span className="font-mono text-ink break-all">{delivery.folder}</span>, {when(delivery.delivered_at)}
-      </p>
+      {kept ? (
+        <p>
+          <span className="text-ink">{delivery.saved_to}</span>{" "}
+          (<span className="font-mono">{delivery.destination_key}</span>), {when(delivery.delivered_at)}
+        </p>
+      ) : (
+        <p>
+          <span className="text-ink">{delivery.saved_to}</span>{" "}
+          (<span className="font-mono">{delivery.destination_key}</span>), in{" "}
+          <span className="font-mono text-ink break-all">{delivery.folder}</span>, {when(delivery.delivered_at)}
+        </p>
+      )}
+      {kept && runId && (
+        <div className="mt-1.5 flex items-center gap-2">
+          <Button onClick={() => download.mutate()} disabled={download.isPending}>
+            <Icon name="export" size={14} /> {download.isPending ? "Preparing…" : "Download"}
+          </Button>
+          {download.error && <span className="text-danger">{download.error.message}</span>}
+        </div>
+      )}
       {/* Saved on this computer; a sync app uploads it later, if it's running. Never "synced". */}
       {delivery.sync_note && <p className="mt-0.5">{delivery.sync_note}</p>}
       <ul className="mt-1 flex flex-col gap-0.5 font-mono text-[12px]">
@@ -106,6 +131,20 @@ export function DeliveryBlocked({ workflow }: { workflow: Pick<Workflow, "proble
 /** The destination keys workflow files name, and where each goes on this computer. Read-only: folders are chosen in Settings. */
 export function Destinations({ practice }: { practice: boolean }) {
   const keys = useQuery({ queryKey: ["workflow-destinations"], queryFn: workflowsApi.destinations });
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  if (health.data?.deployment === "server") {
+    return (
+      <section aria-labelledby="destinations-title" className="flex flex-col gap-2">
+        <h2 id="destinations-title" className="dl-label">
+          Destinations
+        </h2>
+        <p className="max-w-[46rem] font-sans text-[13px] text-muted">
+          On the lab's DataLab, a workflow's delivery is kept with its run, whatever destination it names. Download it
+          from the run.
+        </p>
+      </section>
+    );
+  }
   return (
     <section aria-labelledby="destinations-title" className="flex flex-col gap-2">
       <h2 id="destinations-title" className="dl-label">

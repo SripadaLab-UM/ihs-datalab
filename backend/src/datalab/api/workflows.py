@@ -46,6 +46,7 @@ from datalab.data.access_log import AccessLog, check_owner
 from datalab.data.catalog import Catalog
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import MAX_SQL_BYTES
+from datalab.downloads import Downloads
 from datalab.exports import DestinationStore
 from datalab.pipelines.check import check as data_check
 from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
@@ -456,6 +457,11 @@ class _Mapping:
 # ------------------------------------------------------------------ router
 
 
+class DownloadOut(BaseModel):
+    url: str  # where the browser downloads it
+    name: str  # the .zip's name
+
+
 def build_workflows_router(services: WorkflowServices) -> APIRouter:
     settings = services.settings
     folder = workflows_folder(settings)
@@ -676,6 +682,32 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             raise HTTPException(409, str(error)) from error
         return WorkflowRunOut.model_validate(_run_fields(run_or_404(new_id)))
 
+    @router.post("/runs/{run_id}/download")
+    def download_delivery(run_id: str, request: Request) -> DownloadOut:
+        """The lab's server: a run's delivery, kept there, as a .zip for the browser."""
+        run_or_404(run_id)
+        kept = settings.data_dir / "deliveries"
+        delivered = [
+            d
+            for d in RunStore(services.database).deliveries(run_id)
+            if d.get("destination_name") == export_folders.SERVER_DELIVERIES_NAME
+        ]
+        folder = Path(delivered[-1]["folder"]) if delivered else None
+        if (
+            folder is None
+            or not folder.is_dir()
+            or not folder.resolve().is_relative_to(kept.resolve())
+        ):
+            raise HTTPException(404, "This run has no delivery on the lab's DataLab to download.")
+        made = Downloads(settings.data_dir).make(
+            current_user(request).id,
+            folder,
+            files=len(delivered[-1].get("files") or []),
+            session_id=run_id,
+            keep=True,
+        )
+        return DownloadOut(url=made.url, name=made.name)
+
     @router.get("/runs/{run_id}/delivery")
     def delivery(run_id: str) -> DeliveryStatusOut:
         run = RunDetailOut.model_validate(_run_fields(run_or_404(run_id)))
@@ -717,6 +749,11 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
     @router.put("/destinations/{key}", status_code=204)
     def set_destination_key(key: str, body: SetDestinationKey) -> None:
         """Map a destination key to one of this computer's export folders."""
+        if settings.on_server:
+            raise HTTPException(
+                409,
+                "On the lab's DataLab, every delivery is kept there, and downloaded from its run.",
+            )
         if practice:
             raise HTTPException(403, "Practice DataLab delivers only to its own practice folder.")
         if not _KEY.fullmatch(key):

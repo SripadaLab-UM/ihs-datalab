@@ -107,6 +107,20 @@ results files, export rules). Effort is Quick, Balanced or Thorough (`low`,
   guardrails (above); query failures explained in DataLab's own words.
 - planned: connectors for outside AI tools (practice only).
 
+**The lab's shared DataLab** (one copy for everyone, on a server; see
+[DISTRIBUTION.md](docs/DISTRIBUTION.md), "The lab's shared DataLab")
+- implemented: `deployment = "server"` behind Apache (a Unix socket, secrets
+  from systemd credentials, agent containers as the service's user);
+  GitHub web sign-in for the lab (administrators only for now); each
+  person's conversations, runs, drafts, Playground and query records kept
+  apart on every route, with Sign out; uploads in place of attaching from
+  the computer; exports as downloads, and workflow deliveries kept with the
+  run; personal and administrator settings; `datalab server install`,
+  `rollback` and `status`. Running on the server's practice copy.
+- planned: the real copy (the lab's database), then opening it to the lab
+  (`open_to = "lab"`); conversation sharing; queueing instead of refusing
+  when it's busy.
+
 **Workspace**
 - implemented: the shared chat and its modes; Express; inputs, outputs with
   preview, the Code tab, History and rollback, Queries; model and effort

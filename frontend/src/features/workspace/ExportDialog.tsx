@@ -9,6 +9,7 @@ import { isCodeFile } from "@/components/code/languages";
 import { kindOf } from "@/lib/files";
 import { formatBytes } from "@/lib/csv";
 import { settingsLink } from "@/features/settings/highlight";
+import { DownloadReady, startDownload } from "@/lib/download";
 
 import { buildReport, REPORT_CSS } from "./report";
 
@@ -69,6 +70,7 @@ export function ExportDialog({
       // The versions listed: never "whatever is latest" at the moment of export.
       return api.export(conversation.id, destinationId, files, reportBody, shown?.checkpoint ?? undefined, rawHtml);
     },
+    onSuccess: (done) => done.download_url && startDownload(done.download_url),
   });
 
   const toggle = (path: string) => {
@@ -85,7 +87,11 @@ export function ExportDialog({
           <p role="status">
             {run.data.saved_to}: {run.data.files.length} file{run.data.files.length === 1 ? "" : "s"}, in
           </p>
-          <p className="break-all rounded-lg bg-sunken px-3 py-2 font-mono text-xs">{run.data.folder}</p>
+          {run.data.download_url ? (
+            <DownloadReady url={run.data.download_url} name={run.data.folder} />
+          ) : (
+            <p className="break-all rounded-lg bg-sunken px-3 py-2 font-mono text-xs">{run.data.folder}</p>
+          )}
           {run.data.sync_note && <p className="text-muted">{run.data.sync_note}</p>}
           {conversation.kind === "data" && !practice && (
             <p className="text-research">These files may contain study data. Keep them on approved storage.</p>
@@ -236,7 +242,7 @@ export function ExportDialog({
               >
                 {destinations.data?.map((d) => (
                   <option key={d.id} value={d.id} disabled={!d.available}>
-                    {d.name} — {d.path}
+                    {d.path ? `${d.name} — ${d.path}` : d.name}
                   </option>
                 ))}
               </select>

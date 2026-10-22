@@ -6,20 +6,28 @@ import { api } from "@/api/client";
 import { sqlApi } from "@/api/sql";
 import { Button, Modal } from "@/components/ui";
 import { settingsLink } from "@/features/settings/highlight";
+import { DownloadReady, startDownload } from "@/lib/download";
 
 /** Export one result's file to an export folder, with a manifest saying what query made it. */
 export function ExportResult({ queryId, practice, onClose }: { queryId: string; practice: boolean; onClose: () => void }) {
   const destinations = useQuery({ queryKey: ["destinations"], queryFn: api.destinations });
   const [chosen, setChosen] = useState("");
   const destinationId = chosen || destinations.data?.find((d) => d.available)?.id || "";
-  const run = useMutation({ mutationFn: () => sqlApi.export(queryId, destinationId) });
+  const run = useMutation({
+    mutationFn: () => sqlApi.export(queryId, destinationId),
+    onSuccess: (done) => done.download_url && startDownload(done.download_url),
+  });
 
   return (
     <Modal title="Export the result" onClose={onClose}>
       {run.data ? (
         <div className="flex flex-col gap-3 font-sans text-[13.5px]">
           <p role="status">{run.data.saved_to}: the result, with a manifest of the query that made it, in</p>
-          <p className="rounded-[3px] bg-sunken px-3 py-2 font-mono text-[12px] break-all">{run.data.folder}</p>
+          {run.data.download_url ? (
+            <DownloadReady url={run.data.download_url} name={run.data.folder} />
+          ) : (
+            <p className="rounded-[3px] bg-sunken px-3 py-2 font-mono text-[12px] break-all">{run.data.folder}</p>
+          )}
           {run.data.sync_note && <p className="text-muted">{run.data.sync_note}</p>}
           {!practice && <p className="text-research">This file contains study data. Keep it on approved storage.</p>}
           <div className="flex justify-end">
@@ -52,7 +60,7 @@ export function ExportResult({ queryId, practice, onClose }: { queryId: string; 
               >
                 {destinations.data?.map((d) => (
                   <option key={d.id} value={d.id} disabled={!d.available}>
-                    {d.name} — {d.path}
+                    {d.path ? `${d.name} — ${d.path}` : d.name}
                   </option>
                 ))}
               </select>

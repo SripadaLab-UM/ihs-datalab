@@ -90,6 +90,22 @@ Other AI tools, such as Claude, are used to try and test DataLab. They are
   technical stops a tool that controls your terminal or browser, so this is a
   rule for people. Connectors, once built, will refuse the real profile.
 
+## The lab's shared DataLab
+
+On the lab's server, one DataLab serves everyone who signs in with GitHub.
+The promises above hold there too, with "your computer" read as "the
+server", and these besides:
+
+- **Only the lab gets in.** Signing in needs a GitHub account that can write
+  to the lab's repository, checked again as the sign-in is refreshed.
+- **Each person sees only their own work.** Someone else's conversation,
+  run, draft, Playground or download answers "not found". Only DataLab's
+  administrators change the lab's connections or run the Safety check.
+- **Files come in and go out only through you.** You upload files into one
+  conversation; exports go to your own browser as downloads, kept a day for
+  you only. Every upload and download is in the audit log, by size, never
+  by name or content.
+
 ## What DataLab does *not* promise
 
 - **The AI sees the data you give it.** That is the point, and U-M GPT is the
@@ -570,6 +586,31 @@ access. It never gains it.
   use and offers one-click cleanup of old conversations and runs.
 - PHI is permitted on these machines, which are PHI-approved. Cleanup exists
   for tidiness, not as a safety control.
+
+### The lab's shared DataLab
+
+- **Sign-in** (`auth/`): GitHub's web flow with PKCE and a state cookie;
+  access needs push on `[server] access_repo`, re-checked at each token
+  refresh, and only `admins` while `open_to = "admins"`. The session cookie
+  holds a random value whose SHA-256 alone is stored; GitHub tokens are
+  stored encrypted with the server's `token-key`. Tests:
+  `test_github_web_auth.py`.
+- **Ownership** (`api/access.py`): one dependency on every route checks each
+  id in the path against its owner (404 for anyone else's) and keeps the
+  lab's settings, storage and diagnostics to administrators.
+  `test_every_routes_ids_are_covered` fails when a route's id has no rule;
+  `test_route_access.py` checks two people kept apart.
+- **Uploads** (`sessions/uploads.py`): only through the browser, with the
+  `X-DataLab-Path` header (`refuse_cross_site` accepts no other non-JSON
+  body), into the conversation's own folder; names checked part by part,
+  credentials files refused, 500 MB a file and 2 GB a conversation; mounted
+  read-only only while still where they were put. Refused on practice.
+  Tests: `test_uploads.py`.
+- **Downloads** (`downloads.py`): written through the same export checks,
+  zipped, and served only from the signed-in person's own folder, for a
+  day. Tests: `test_downloads.py`.
+- **Audit**: every line names its person; uploads and downloads are recorded
+  by count and size only.
 
 ### Safety check
 

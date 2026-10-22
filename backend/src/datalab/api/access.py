@@ -52,10 +52,20 @@ ADMIN_WRITES = (
     "/api/export-destinations",
     "/api/workflows/destinations",
 )
+# What only administrators may even read: where the server keeps its data,
+# and its diagnostics (paths, versions, logs' shape).
+ADMIN_READS = ("/api/settings/storage", "/api/settings/diagnostics")
 _READS = frozenset({"GET", "HEAD", "OPTIONS"})
 
-WITHIN = frozenset({"approval_id", "attachment_id", "number", "root", "path", "suggestion_id"})
-OWN_STORE = {("/api/sql/", "run_id"), ("/api/sql/", "query_id")}
+WITHIN = frozenset(
+    {"upload_id", "approval_id", "attachment_id", "number", "root", "path", "suggestion_id"}
+)
+OWN_STORE = {
+    ("/api/sql/", "run_id"),
+    ("/api/sql/", "query_id"),
+    # Looked up in the signed-in person's own folder only (downloads.py).
+    ("/api/downloads/", "download_id"),
+}
 
 
 def owner_rules(db: sqlite3.Connection) -> list[Rule]:
@@ -141,6 +151,8 @@ class RequireOwner:
         user = current_user(request)
         if request.method not in _READS and template.startswith(ADMIN_WRITES) and not user.admin:
             raise HTTPException(403, "Only DataLab's administrators can change this.")
+        if template.startswith(ADMIN_READS) and not user.admin:
+            raise HTTPException(403, "Only DataLab's administrators can see this.")
         if not request.path_params:
             return
         for name, value in request.path_params.items():

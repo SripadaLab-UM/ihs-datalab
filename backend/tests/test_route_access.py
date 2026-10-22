@@ -116,3 +116,13 @@ def test_the_audit_names_whose_session_it_was(app):
         assert mine is not None and mine[1] == "person1001"
         assert who(playground) == mine
         assert who("c_nobody") is None
+
+
+def test_only_administrators_see_where_the_server_keeps_its_data(app):
+    with TestClient(app) as a:
+        b = TestClient(app)  # the same app: only its cookies differ
+        signed_in(app, a, 1001, admin=True)
+        signed_in(app, b, 1002, admin=False)
+        for path in ("/api/settings/storage", "/api/settings/diagnostics"):
+            assert b.get(path).status_code == 403, path
+            assert a.get(path).status_code == 200, path

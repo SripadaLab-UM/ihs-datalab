@@ -226,6 +226,20 @@ class AccessLog:
         with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
 
+    def record_transfer(self, event: str, *, session_id: str, files: int, size: int) -> None:
+        """An upload into a conversation, or a download from it (the lab's
+        server): how many files and bytes, never their names or contents."""
+        entry = {
+            "ts": _now(),
+            "event": event,
+            "session_id": session_id,
+            "files": files,
+            "bytes": size,
+            **self._person(session_id),
+        }
+        with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+
     def record_catalog_build(self, catalog: Catalog) -> None:
         """DataLab built its own catalog from the database: how many tables,
         of which cohorts. Metadata only, like the catalog itself."""

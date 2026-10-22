@@ -28,13 +28,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from datalab import export_folders, exports
-from datalab.api.exports import ExportOut, export_out, export_target
+from datalab.api.exports import ExportOut, export_out, export_target, made_download
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, QueryRecord
 from datalab.data.catalog import Catalog, TableInfo
 from datalab.data.service import DataService
 from datalab.data.sql_drafts import SqlDrafts, TurnProposal
 from datalab.data.sqlcheck import MAX_SQL_BYTES
+from datalab.downloads import Download
 from datalab.exports import DestinationStore, ExportError, ExportSource
 from datalab.playground import Diagnostic, Playground, PlaygroundBusy, Run
 from datalab.sessions.checkpoints import UnsafePath, open_workspace_file
@@ -444,14 +445,15 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             container_path=f"playground/results/{path.name}",
         )
 
-        def run() -> exports.ExportResult:
+        def run() -> tuple[exports.ExportResult, Download | None]:
             with export_folders.open_target(target) as opened:
-                return exports.export(
+                done = exports.export(
                     opened, title="SQL Playground", tag=record.id, sources=[source], about=about
                 )
+            return done, made_download(settings, target, done, playground.id)
 
         try:
-            done = await asyncio.to_thread(run)
+            done, download = await asyncio.to_thread(run)
         except (ExportError, UnsafePath, OSError) as error:
             raise HTTPException(422, f"The export didn't finish: {error}") from error
         services.access_log.record_export(
@@ -461,7 +463,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             contains_study_data=not practice,
             query_id=record.id,
         )
-        return export_out(target, done)
+        return export_out(target, done, download)
 
     @router.get("/proposals/{conversation_id}")
     def proposals(conversation_id: str) -> list[SqlProposalOut]:

@@ -14,6 +14,8 @@ import type { SettingsSectionId } from "@/features/settings/sectionIds";
 import { useUpdateCheck } from "@/features/settings/updateCheck";
 
 import { databaseStanding, keyStanding, useConnections, useConnectionTest } from "./ConnectionShortcuts";
+import { useDeployment } from "@/lib/deployment";
+
 import { useFolders } from "./FoldersShortcut";
 import { ITEM, Shortcut } from "./Popover";
 
@@ -40,7 +42,11 @@ export function useAttention(): AttentionItem[] {
   // Where it comes from says what to do: the knowledge base syncs; a folder in settings is the maintainer's.
   const catalog = useQuery({ queryKey: ["catalog-status", "attention"], queryFn: api.catalogStatus, enabled: noCatalog });
   const update = useUpdateCheck().data;
+  const { server, admin } = useDeployment();
   const items: AttentionItem[] = [];
+  // The lab's server: connections are its administrators' to put right, and
+  // nobody signs in to GitHub separately there.
+  if (server && !admin) return items;
   const db = databaseStanding(connections, test?.database, health.data?.practice_database);
   if (db.attention) {
     items.push({ id: "database", text: db.attention, hint: "The study database: open connection settings", section: "connections", anchor: "connection-database" });
@@ -58,13 +64,13 @@ export function useAttention(): AttentionItem[] {
         : { id: "catalog", text: "No table catalog", hint: "No query can run: see why, and ask the DataLab maintainer", section: "about" },
     );
   }
-  if (real && github?.available && !github.signed_in) {
+  if (real && !server && github?.available && !github.signed_in) {
     items.push({ id: "github", text: "GitHub: sign in", hint: "The lab's knowledge base and pipelines can't sync", section: "connections", anchor: "connection-github" });
   }
-  if (unavailable) {
+  if (unavailable && !server) {
     items.push({ id: "folders", text: "Folder unavailable", hint: `${unavailable === 1 ? "An export folder isn't" : `${unavailable} export folders aren't`} available now`, section: "export-folders", anchor: "export-folders" });
   }
-  if (update?.state === "available" && update.available) {
+  if (update?.state === "available" && update.available && !server) {
     items.push({ id: "update", text: "Update available", hint: `DataLab ${update.available.version}: see what's new`, section: "updates" });
   }
   return items;

@@ -26,6 +26,7 @@ from datalab.sessions.inputs import (
     recheck,
 )
 from datalab.sessions.store import ConversationStore
+from datalab.sessions.uploads import Uploads
 
 log = logging.getLogger(__name__)
 
@@ -100,10 +101,17 @@ def input_mounts(
         return []  # Knowledge writing: metadata only (the API refuses to attach, too)
     protected = [settings.data_dir, *(default_data_dir(p) for p in ("real", "practice"))]
     mountable = []
+    uploads = Uploads(settings.data_dir / "sessions")
     for attachment in attachments.list(conversation_id):
         samples = practice_samples()
         if settings.profile == "practice" and is_sample(attachment, samples):
             mountable.append(attachment)
+            continue
+        if uploads.owns(conversation_id, attachment):
+            # In the conversation's own folder, which `recheck` refuses as
+            # DataLab's data: uploaded to this conversation, and still there.
+            if attachment.available:
+                mountable.append(attachment)
             continue
         problem = recheck(attachment, protected=protected)
         if problem is None:
