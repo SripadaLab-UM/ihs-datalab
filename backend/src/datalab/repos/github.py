@@ -25,7 +25,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal, NoReturn, Protocol
 
 import httpx
 import keyring
@@ -105,6 +105,17 @@ class Tokens:
             return None
 
 
+class TokenKeeper(Protocol):
+    """Where a sign-in's tokens are kept: the keychain (TokenStore) on a
+    person's computer, DataLab's database on the lab's server (auth/tokens.py)."""
+
+    def load(self) -> Tokens | None: ...
+
+    def save(self, tokens: Tokens) -> None: ...
+
+    def clear(self) -> None: ...
+
+
 class TokenStore:
     """The user's GitHub tokens in the OS keychain, as one entry."""
 
@@ -179,12 +190,16 @@ class GitHubAuth:
         self,
         client_id: str,
         *,
-        store: TokenStore | None = None,
+        store: TokenKeeper | None = None,
         http: httpx.Client | None = None,
         clock: Callable[[], float] = time.time,
+        client_secret: str | None = None,
     ) -> None:
         self._client_id = client_id
-        self._store = store or TokenStore()
+        # Only the lab's server has it: tokens from its web sign-in need it to
+        # refresh (the device flow's don't).
+        self._client_secret = client_secret
+        self._store: TokenKeeper = store or TokenStore()
         self._http = http or httpx.Client(timeout=_TIMEOUT)
         self._clock = clock
         self._lock = threading.RLock()
@@ -322,14 +337,14 @@ class GitHubAuth:
                 if expires > now:
                     return tokens.access_token  # good for a few minutes more
                 self._ran_out()
-            raw = self._post(
-                f"{GITHUB}/login/oauth/access_token",
-                {
-                    "client_id": self._client_id,
-                    "grant_type": "refresh_token",
-                    "refresh_token": tokens.refresh_token,
-                },
-            )
+            form = {
+                "client_id": self._client_id,
+                "grant_type": "refresh_token",
+                "refresh_token": tokens.refresh_token,
+            }
+            if self._client_secret:
+                form["client_secret"] = self._client_secret
+            raw = self._post(f"{GITHUB}/login/oauth/access_token", form)
             if "access_token" not in raw:
                 if raw.get("error") in _REFUSED_REFRESH:
                     # Expired, revoked, or already used: it can't be tried again.

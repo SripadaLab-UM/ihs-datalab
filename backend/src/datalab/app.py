@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
 import threading
 import time
@@ -35,8 +36,19 @@ from datalab.api.sql import SqlServices, build_sql_router
 from datalab.api.support import SupportServices, build_support_router
 from datalab.api.textguard import RefuseNonText
 from datalab.api.workflows import WorkflowServices, build_workflows_router
+from datalab.auth.github_web import GitHubWebSignIn
+from datalab.auth.routes import mount_github_sign_in
+from datalab.auth.sessions import WebSessions
+from datalab.auth.tokens import token_key
+from datalab.auth.users import Users
 from datalab.config import Settings
-from datalab.credentials import model_api_key, oracle_password
+from datalab.credentials import (
+    SERVER_GITHUB_CLIENT_SECRET,
+    SERVER_TOKEN_KEY,
+    model_api_key,
+    oracle_password,
+    server_secret,
+)
 from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
@@ -70,11 +82,15 @@ from datalab.updater import Updater, busy_reason
 from datalab.web import (
     ApiProtection,
     BrowserSession,
+    CookieRules,
     SessionActivityOut,
+    SignInGate,
     add_session_routes,
     mount_web_ui,
 )
 from datalab.windows_vm import DockerDoctor
+
+log = logging.getLogger(__name__)
 
 VERSION = __version__
 
@@ -459,7 +475,22 @@ def create_app(
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
-    app.state.browser = browser
+    # On the lab's server, people sign in with GitHub and each browser's
+    # sign-in is kept (auth/); on a person's computer, the launcher's link.
+    sign_in_gate: SignInGate = browser
+    web_sessions: WebSessions | None = None
+    github_web: GitHubWebSignIn | None = None
+    if settings.server is not None:
+        users = Users(connection)
+        web_sessions = WebSessions(
+            connection,
+            users,
+            hours=settings.server.session_hours,
+            idle_minutes=settings.server.session_idle_minutes,
+        )
+        sign_in_gate = web_sessions
+        github_web = _github_sign_in(settings, connection, users)
+    app.state.browser = sign_in_gate
     if settings.on_server:
         from datalab.server_listen import ListenerSplit
 
@@ -468,9 +499,10 @@ def create_app(
         app.add_middleware(ListenerSplit, bridge_port=settings.port)
     app.add_middleware(
         ApiProtection,
-        session=browser,
+        session=sign_in_gate,
         enforce=protect_api,
         public_origin=settings.server.public_url if settings.server else None,
+        **({"signed_out": "Sign in with GitHub."} if settings.server else {}),
     )
 
     @app.get("/api/health")
@@ -479,6 +511,8 @@ def create_app(
             "status": "ok",
             "version": VERSION,
             "profile": settings.profile,
+            # "desktop" or "server": the signed-out page offers GitHub on a server.
+            "deployment": settings.deployment,
             "database_configured": settings.oracle is not None,
             "catalog_tables": len(catalog),
             "catalog_schemas": catalog.schemas,
@@ -509,10 +543,53 @@ def create_app(
         return SessionActivityOut(agent_turn=sessions.any_busy(), workflow_run=run is not None)
 
     site_base = settings.server.base_path if settings.server else ""
-    add_session_routes(app, browser, activity, base=site_base)
+    cookie = (
+        CookieRules(path=f"{site_base}/", secure=True, samesite="lax")
+        if settings.server
+        else CookieRules()
+    )
+    add_session_routes(
+        app,
+        sign_in_gate,
+        activity,
+        cookie=cookie,
+        deployment=settings.deployment,
+        on_sign_out=github_web.sign_out if github_web else None,
+    )
+    if web_sessions is not None:
+        mount_github_sign_in(app, github_web, web_sessions, base=site_base, cookie=cookie)
     # Last, so the web UI's catch-all route never shadows the API.
-    mount_web_ui(app, browser, web_dist, base=site_base)
+    mount_web_ui(
+        app,
+        browser,
+        web_dist,
+        base=site_base,
+        # The real server's only way in is GitHub; practice keeps the
+        # one-time link (in its service log) for testing.
+        link=settings.server is None or settings.profile == "practice",
+        web_sessions=web_sessions,
+        cookie=cookie,
+    )
     return app
+
+
+def _github_sign_in(
+    settings: Settings, connection: sqlite3.Connection, users: Users
+) -> GitHubWebSignIn | None:
+    """The server's GitHub sign-in, once its client secret and token key are
+    in place (credentials.py); until then, the sign-in page says so."""
+    secret = server_secret(SERVER_GITHUB_CLIENT_SECRET)
+    key = server_secret(SERVER_TOKEN_KEY)
+    if not (secret and key and settings.repos.client_id):
+        log.warning("GitHub sign-in isn't set up: client id, client secret or token key missing")
+        return None
+    try:
+        return GitHubWebSignIn(
+            settings, connection, users, client_secret=secret, token_key=token_key(key)
+        )
+    except ValueError as error:
+        log.warning("GitHub sign-in isn't set up: %s", error)
+        return None
 
 
 def catalog_folder(settings: Settings) -> Path:

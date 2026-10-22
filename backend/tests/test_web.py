@@ -210,15 +210,18 @@ def test_streams_learn_the_session_ended(settings):
     from datalab.web import ended_since
 
     browser = BrowserSession(settings.port)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(browser=browser)))
+    cookie = browser.redeem(browser.sign_in_path().split("token=")[1])
+    app = SimpleNamespace(state=SimpleNamespace(browser=browser))
+    request = SimpleNamespace(app=app, cookies={browser.cookie_name: cookie})
     ended = ended_since(request)  # type: ignore[arg-type]
     assert not ended()
     browser.end()
     assert ended()
-    # A stream opened after the end follows the new session.
-    assert not ended_since(request)()  # type: ignore[arg-type]
-    # No browser session (a router tested on its own): never ended.
-    assert not ended_since(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))()  # type: ignore[arg-type]
+    # A stream that didn't open signed in (a router tested on its own) never ends.
+    assert not ended_since(SimpleNamespace(app=app, cookies={}))()  # type: ignore[arg-type]
+    # No browser session at all: never ended.
+    alone = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), cookies={})
+    assert not ended_since(alone)()  # type: ignore[arg-type]
 
 
 def test_session_activity_says_what_is_still_going(settings, catalog, tmp_path):
@@ -244,13 +247,21 @@ def test_on_the_labs_server_datalab_lives_under_its_base_path(settings, catalog,
         assert '<base href="/datalab/" />' in client.get("/workspace/c_1").text
         signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
         assert signed_in.headers["location"] == "/datalab/"
-        assert "path=/datalab/" in signed_in.headers["set-cookie"].lower()
-        client.cookies.set(browser.cookie_name, signed_in.cookies[browser.cookie_name])
+        cookie = signed_in.headers["set-cookie"].lower()
+        assert "path=/datalab/" in cookie and "secure" in cookie and "samesite=lax" in cookie
+        # On a server the practice link signs in the local user, as a server sign-in.
+        client.cookies.set("datalab_session", signed_in.cookies["datalab_session"])
+        assert client.get("/api/session/me").json() == {
+            "login": "local", "name": "local", "admin": True, "deployment": "server",
+        }  # fmt: skip
         # Behind Apache the browser's origin is the site's, not what reaches DataLab.
         local = {**JSON, "origin": "http://testserver"}
         assert client.post("/api/session/end", headers=local).status_code == 403
         site = {**JSON, "origin": "https://lab.example.edu"}
         assert client.post("/api/session/end", headers=site).status_code == 204
+        # Signed out: that sign-in no longer works.
+        assert client.get("/api/conversations").status_code == 401
+        assert client.get("/api/conversations").json()["detail"] == "Sign in with GitHub."
 
 
 def test_a_desktop_page_has_its_base_at_the_root(settings, catalog, tmp_path):

@@ -5,6 +5,7 @@ import { NavLink, Outlet, useLocation } from "react-router";
 
 import { api, SIGNED_OUT } from "@/api/client";
 import { Brand, usePracticeTab } from "@/app/brand";
+import { GitHubSignIn } from "@/app/SignIn";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { DockerBanner } from "@/features/docker/DockerBanner";
 import { HelpLink } from "@/features/help/HelpLink";
@@ -47,6 +48,8 @@ export function Shell() {
     window.addEventListener(SIGNED_OUT, onSignedOut);
     return () => window.removeEventListener(SIGNED_OUT, onSignedOut);
   }, []);
+  // The lab's server: signed out means the sign-in page, not a restart.
+  if (signedOut && health.data?.deployment === "server") return <GitHubSignIn />;
   return (
     <div className="flex h-full flex-col">
       {signedOut && (

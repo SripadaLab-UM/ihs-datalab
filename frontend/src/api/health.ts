@@ -9,6 +9,8 @@ export interface Health {
   status: string;
   version: string;
   profile: "real" | "practice";
+  /** "server": the lab's shared DataLab, where people sign in with GitHub. */
+  deployment?: "desktop" | "server";
   database_configured: boolean;
   catalog_tables: number;
   /** Coarse on purpose: health needs no sign-in. The details are in catalogStatus. */

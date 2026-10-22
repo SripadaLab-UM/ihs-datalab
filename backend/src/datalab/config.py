@@ -256,6 +256,12 @@ class ServerSettings:
     # GitHub numeric user ids of the administrators. Ids, not logins: a
     # login can be renamed, and an old one taken by someone else.
     admins: tuple[int, ...] = ()
+    # Who may sign in with GitHub: "admins" while the shared DataLab is set
+    # up, then "lab": anyone who may write to `access_repo`.
+    open_to: str = "admins"
+    # The repository whose writers are the lab (the datalab-users team's):
+    # "owner/name". Empty: `[repos] knowledge`.
+    access_repo: str = ""
     # Where Apache reaches DataLab: a Unix socket, so nobody else on the
     # server can. DataLab's TCP port then answers only session gateways.
     socket: str = "/run/datalab/web.sock"
@@ -278,6 +284,9 @@ class ServerSettings:
     session_idle_minutes: int = 60
 
     def __post_init__(self) -> None:
+        if self.open_to not in ("admins", "lab"):
+            raise ValueError('server.open_to must be "admins" or "lab"')
+        _check_repo("server.access_repo", self.access_repo or None)
         if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]+)?", self.public_url):
             raise ValueError(
                 "server.public_url must be the site's https:// address with no path, such as "

@@ -13,13 +13,20 @@ from __future__ import annotations
 import hmac
 import secrets
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from datalab.auth.users import LOCAL, User
+
+if TYPE_CHECKING:
+    from datalab.auth.sessions import WebSessions
 
 CONTENT_SECURITY_POLICY = "; ".join(
     [
@@ -76,7 +83,11 @@ class BrowserSession:
     def valid(self, cookie: str | None) -> bool:
         return bool(cookie) and hmac.compare_digest(cookie or "", self._cookie)
 
-    def end(self) -> None:
+    def user_for(self, cookie: str | None) -> User | None:
+        """A person's computer has one user, the local one."""
+        return LOCAL if self.valid(cookie) else None
+
+    def end(self, cookie: str | None = None) -> None:
         """End the browser session: the cookie stops working, in every window
         that has it. The sign-in link was used up, so signing in again takes a
         new one: DataLab prints one when it starts."""
@@ -84,19 +95,69 @@ class BrowserSession:
         self.generation += 1
 
 
+class SignInGate(Protocol):
+    """What ApiProtection asks of the browser's sign-in: BrowserSession on a
+    person's computer, WebSessions (auth/sessions.py) on the lab's server."""
+
+    cookie_name: str
+
+    def user_for(self, cookie: str | None) -> User | None: ...
+
+    def valid(self, cookie: str | None) -> bool: ...
+
+    def end(self, cookie: str | None = None) -> None: ...
+
+
+@dataclass(frozen=True)
+class CookieRules:
+    """How the sign-in cookie is set: on a person's computer, SameSite=Strict
+    on 127.0.0.1; on the lab's server, Secure and SameSite=Lax (GitHub sends
+    the browser back from another site, and a Strict cookie set then isn't
+    sent on its first page), under DataLab's base path only."""
+
+    path: str = "/"
+    secure: bool = False
+    samesite: str = "strict"
+
+    def kwargs(self) -> dict[str, object]:
+        return {
+            "httponly": True,
+            "samesite": self.samesite,
+            "secure": self.secure,
+            "path": self.path,
+        }
+
+
 def ended_since(request: Request) -> Callable[[], bool]:
-    """For a live-update stream: whether End session has happened since it
-    opened, so it stops instead of sending events until the browser reconnects
-    (and is refused). Always False where the app has no browser session."""
-    session: BrowserSession | None = getattr(request.app.state, "browser", None)
-    opened = session.generation if session else 0
-    return lambda: session is not None and session.generation != opened
+    """For a live-update stream: whether the browser has been signed out
+    since it opened (End session, sign-out, the sign-in ran out), so it stops
+    instead of sending events until the browser reconnects (and is refused).
+    On the server, always False where the stream didn't open signed in (tests)."""
+    gate: SignInGate | None = getattr(request.app.state, "browser", None)
+    if gate is None:
+        return lambda: False
+    if isinstance(gate, BrowserSession):
+        # A person's computer: End session ends every window's streams.
+        session, generation = gate, gate.generation
+        return lambda: session.generation != generation
+    # The lab's server: this browser's own sign-in.
+    cookie = request.cookies.get(gate.cookie_name)
+    opened = gate.valid(cookie)
+    return lambda: opened and not gate.valid(cookie)
 
 
 # Set in the request's scope state once ApiProtection has let it through its
 # sign-in check (the api's routes, not /api/health): middleware inside that
 # reads bodies (api/textguard.py) reads only these.
 SIGNED_IN = "datalab.signed_in"
+# And who signed in: an auth.users.User.
+USER = "datalab.user"
+
+
+def current_user(request: Request) -> User:
+    """Who is making this request (ApiProtection set it). The local user
+    where nothing checks (tests of single routes)."""
+    return request.scope.get("state", {}).get(USER) or LOCAL
 
 
 # Methods that change nothing: the only ones a request from another page may make.
@@ -147,13 +208,15 @@ class ApiProtection:
     def __init__(
         self,
         app: ASGIApp,
-        session: BrowserSession,
+        session: SignInGate,
         *,
         enforce: bool = True,
         public_origin: str | None = None,
+        signed_out: str = "Open DataLab from its launcher to sign in.",
     ) -> None:
         self._app = app
         self._session = session
+        self._signed_out = signed_out
         self._enforce = enforce
         # The lab's server's https:// address ([server] public_url).
         self._public_origin = public_origin
@@ -173,16 +236,15 @@ class ApiProtection:
             await response(scope, receive, _with_headers(send))
             return
         if path.startswith("/api/") and path != "/api/health":
-            if self._enforce and not self._session.valid(
-                Request(scope).cookies.get(self._session.cookie_name)
-            ):
-                response = JSONResponse(
-                    {"detail": "Open DataLab from its launcher to sign in."}, status_code=401
-                )
+            user = self._session.user_for(Request(scope).cookies.get(self._session.cookie_name))
+            if self._enforce and user is None:
+                response = JSONResponse({"detail": self._signed_out}, status_code=401)
                 await response(scope, receive, _with_headers(send))
                 return
             # Past the sign-in check: what runs inside may read the body.
-            scope.setdefault("state", {})[SIGNED_IN] = True
+            state = scope.setdefault("state", {})
+            state[SIGNED_IN] = True
+            state[USER] = user or LOCAL
         await self._app(scope, receive, _with_headers(send))
 
 
@@ -200,6 +262,14 @@ def _with_headers(send: Send) -> Send:
     return wrapped
 
 
+class SessionUserOut(BaseModel):
+    login: str
+    name: str
+    admin: bool
+    # "desktop" or "server": what the page offers (sign-out, GitHub).
+    deployment: str
+
+
 class SessionActivityOut(BaseModel):
     # A conversation's agent is working (or starting, or restoring).
     agent_turn: bool
@@ -209,28 +279,41 @@ class SessionActivityOut(BaseModel):
 
 def add_session_routes(
     app: FastAPI,
-    session: BrowserSession,
+    session: SignInGate,
     activity: Callable[[], SessionActivityOut] = lambda: SessionActivityOut(
         agent_turn=False, workflow_run=False
     ),
-    base: str = "",
+    cookie: CookieRules | None = None,
+    deployment: str = "desktop",
+    on_sign_out: Callable[[User], None] | None = None,
 ) -> None:
     """`POST /api/session/end`: End session, from the toolbar's session menu.
     Only a signed-in window can call it (ApiProtection checks the cookie).
     `GET /api/session/activity`: what's still going, which carries on after
     End session but stops when DataLab is restarted to sign in again."""
 
+    rules = cookie or CookieRules()
+
     @app.get("/api/session/activity", tags=["session"])
     def session_activity() -> SessionActivityOut:
         return activity()
 
-    @app.post("/api/session/end", status_code=204, tags=["session"])
-    def end_session() -> Response:
-        session.end()
-        response = Response(status_code=204)
-        response.delete_cookie(
-            session.cookie_name, httponly=True, samesite="strict", path=f"{base}/"
+    @app.get("/api/session/me", tags=["session"])
+    def who_am_i(request: Request) -> SessionUserOut:
+        user = current_user(request)
+        return SessionUserOut(
+            login=user.login, name=user.display_name, admin=user.admin, deployment=deployment
         )
+
+    @app.post("/api/session/end", status_code=204, tags=["session"])
+    def end_session(request: Request) -> Response:
+        """End session on a person's computer (every window); sign out on
+        the lab's server (this browser, and the person's GitHub tokens)."""
+        if on_sign_out is not None:
+            on_sign_out(current_user(request))
+        session.end(request.cookies.get(session.cookie_name))
+        response = Response(status_code=204)
+        response.delete_cookie(session.cookie_name, **rules.kwargs())  # type: ignore[arg-type]
         return response
 
 
@@ -247,21 +330,38 @@ def with_base(html: str, base: str) -> str:
     return html.replace("<head>", f"<head>\n    {tag}", 1)
 
 
-def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None, base: str = "") -> None:
+def mount_web_ui(
+    app: FastAPI,
+    session: BrowserSession,
+    dist: Path | None,
+    base: str = "",
+    *,
+    link: bool = True,
+    web_sessions: WebSessions | None = None,
+    cookie: CookieRules | None = None,
+) -> None:
     """The web UI. `base` is where DataLab lives on its site ("" at the root,
     "/datalab" on the lab's server, where Apache strips it before passing
-    requests on): what the page and redirects name."""
+    requests on): what the page and redirects name.
 
-    @app.get("/sign-in", include_in_schema=False)
-    def sign_in(token: str) -> RedirectResponse:
-        cookie = session.redeem(token)
-        if cookie is None:
-            return RedirectResponse(f"{base}/signed-out", status_code=303)
-        response = RedirectResponse(f"{base}/", status_code=303)
-        response.set_cookie(
-            session.cookie_name, cookie, httponly=True, samesite="strict", path=f"{base}/"
-        )
-        return response
+    `link`: whether the launcher's one-time link signs in (never on the real
+    server, where only GitHub does). With `web_sessions` (the lab's server),
+    it signs in the local user as a server sign-in."""
+    rules = cookie or CookieRules(path=f"{base}/")
+
+    if link:
+
+        @app.get("/sign-in", include_in_schema=False)
+        def sign_in(token: str) -> RedirectResponse:
+            redeemed = session.redeem(token)
+            if redeemed is None:
+                return RedirectResponse(f"{base}/signed-out", status_code=303)
+            name, value = session.cookie_name, redeemed
+            if web_sessions is not None:
+                name, value = web_sessions.cookie_name, web_sessions.start(LOCAL)
+            response = RedirectResponse(f"{base}/", status_code=303)
+            response.set_cookie(name, value, **rules.kwargs())  # type: ignore[arg-type]
+            return response
 
     if dist is None or not (dist / "index.html").exists():
         return
