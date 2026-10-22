@@ -152,8 +152,23 @@ def create_app(
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
     approvals = Approvals()
+    # On the lab's server everyone shares its memory: fewer conversations
+    # working at once, stopped sooner when idle ([server]).
+    server_limits = (
+        {
+            "max_running": settings.server.max_running,
+            "idle_seconds": settings.server.idle_minutes * 60,
+        }
+        if settings.server
+        else {}
+    )
     sessions = SessionManager(
-        settings, conversations, tokens, attachments=attachments, approvals=approvals
+        settings,
+        conversations,
+        tokens,
+        attachments=attachments,
+        approvals=approvals,
+        **server_limits,
     )
     services = Services(settings, data, catalog, tokens, access_log, conversations, sessions)
 

@@ -27,7 +27,12 @@ from datalab.config import Settings
 from datalab.sessions import modes, mounts, seeds, turns, workfiles
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
-from datalab.sessions.containers import SessionContainers, SessionPaths, instance_of
+from datalab.sessions.containers import (
+    SessionContainers,
+    SessionPaths,
+    instance_of,
+    limits_for,
+)
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.hooks import AfterTurnHook, MountProvider, TurnInfo, WorkspaceSeed
 from datalab.sessions.inputs import AttachmentStore
@@ -481,6 +486,7 @@ class SessionManager:
             host_port=self._settings.port,
             profile=self._settings.profile,
             instance=instance_of(self._settings.data_dir),
+            limits=limits_for(self._settings),
             extra_mounts=lambda: self._extra_mounts(conversation_id),
             processed=processed,
         )

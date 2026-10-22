@@ -25,10 +25,11 @@ import contextlib
 import hashlib
 import json
 import os
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+
+from datalab.container_user import host_user
 
 RUN_LABEL = "datalab.run"
 PROFILE_LABEL = "datalab.profile"
@@ -315,12 +316,11 @@ def folder_bytes(root: Path) -> int:
 
 
 def _user() -> str:
-    """Who steps run as. On native Linux Docker (CI), files a step writes are
-    owned by that user on the host, so it's the host's own user there."""
-    if sys.platform.startswith("linux") and hasattr(os, "getuid") and os.getuid() != 0:
-        return f"{os.getuid()}:{os.getgid()}"
-    # Never root, even when DataLab itself runs as root.
-    return STEP_USER
+    """Who steps run as. On native Linux Docker (CI, the lab's server), files
+    a step writes are owned by that user on the host, so it's the host's own
+    user there (container_user.py). Never root, even when DataLab itself
+    runs as root."""
+    return host_user() or STEP_USER
 
 
 def _csv_field(value: str) -> str:

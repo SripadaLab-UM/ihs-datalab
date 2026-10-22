@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
+from datalab.config import Settings
+from datalab.container_user import host_user
 from datalab.sessions.tokens import SessionKind
 
 log = logging.getLogger(__name__)
@@ -178,6 +180,14 @@ class ContainerLimits:
     memory: str = "4g"
     cpus: str = "2"
     pids: int = 1024
+
+
+def limits_for(settings: Settings) -> ContainerLimits:
+    """An agent's limits: on the lab's server, what `[server]` allows each
+    (its memory is shared by everyone); on a person's computer, the default."""
+    if settings.server is None:
+        return ContainerLimits()
+    return ContainerLimits(memory=settings.server.agent_memory, cpus=settings.server.agent_cpus)
 
 
 class SessionContainers:
@@ -369,6 +379,12 @@ class SessionContainers:
         env_file = self.paths.root / ".agent.env"
         env_file.touch(mode=0o600)
         env = [f"DATALAB_SESSION_TOKEN={token}"]
+        user = host_user()
+        if user:
+            # Native Linux: the agent runs as DataLab's own user, the owner of
+            # its folders (container_user.py). The image's home belongs to
+            # its own user, so this one's is /tmp.
+            env.append("HOME=/tmp")
         if self.kind == "research":
             # The internet goes through the proxy; the model goes to the gateway.
             for name in ("HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"):
@@ -393,6 +409,7 @@ class SessionContainers:
             "--network", self.network,
             "--dns", _NO_DNS,
             "--init",
+            *(["--user", user] if user else []),
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--memory", self.limits.memory, "--cpus", self.limits.cpus,
