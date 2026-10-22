@@ -242,3 +242,21 @@ async def test_leftovers_on_the_other_machine_are_cleaned_up(monkeypatch, tmp_pa
     ]
     assert all(env == {"DOCKER_HOST": HIGH.docker_host} for _, env in calls)
     assert not any(args[:2] == ("network", "ls") for args, _ in calls)
+
+
+def test_the_agent_is_told_its_real_limits(settings):
+    """`nproc` and `free` show the whole machine (cgroup v1): the agent is told
+    its share, and numeric libraries' threads are set to match."""
+    on_server = server_settings(settings)
+    high = compute.resources_note(on_server, "high")
+    assert "high-compute server" in high
+    assert "16 CPUs and 64 GB of memory, and has a GPU" in high
+    assert "show the whole machine" in high
+    standard = compute.resources_note(on_server, "standard")
+    assert "1 CPU and 1536 MB of memory." in standard and "GPU" not in standard
+    assert compute.resources_note(settings, "standard") == ""  # a person's own computer
+    env = compute.limit_env(on_server, "high")
+    assert {"DATALAB_CPUS=16", "DATALAB_MEMORY=64g", "OMP_NUM_THREADS=16", "MC_CORES=16"} <= set(
+        env
+    )
+    assert compute.limit_env(settings, "high") == []

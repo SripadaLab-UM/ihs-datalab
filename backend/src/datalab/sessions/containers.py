@@ -239,8 +239,12 @@ class SessionContainers:
         # are mounted read-only at /data/dropbox (data sessions only).
         processed: bool = False,
         engine: Engine = LOCAL,
+        # More of the agent's environment ("NAME=value"): its limits, on the
+        # lab's server (compute.limit_env).
+        agent_env: tuple[str, ...] = (),
     ) -> None:
         self.engine = engine
+        self.agent_env = agent_env
         self._extra_mounts = extra_mounts
         self.processed = processed
         self.session_id = session_id
@@ -431,7 +435,7 @@ class SessionContainers:
         self.paths.prepare_config_mountpoint()
         env_file = self.paths.root / ".agent.env"
         env_file.touch(mode=0o600)
-        env = [f"DATALAB_SESSION_TOKEN={token}"]
+        env = [f"DATALAB_SESSION_TOKEN={token}", *self.agent_env]
         user = host_user()
         if user:
             # Native Linux: the agent runs as DataLab's own user, the owner of

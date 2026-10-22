@@ -517,6 +517,7 @@ class SessionManager:
             extra_mounts=lambda: self._extra_mounts(conversation_id),
             processed=processed,
             engine=compute_module.engine_for(self._settings, compute),
+            agent_env=tuple(compute_module.limit_env(self._settings, compute)),
         )
 
     def sources_of(self, conversation: Conversation) -> tuple[str, ...]:
@@ -600,7 +601,8 @@ class SessionManager:
                     conversation.mode,
                     knowledge_base=self.seeds_into("kb", conversation.mode),
                     data_sources=sources,
-                ),
+                )
+                + compute_module.resources_note(self._settings, conversation.compute),
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
