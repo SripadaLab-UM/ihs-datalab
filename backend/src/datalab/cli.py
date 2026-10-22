@@ -314,9 +314,22 @@ def _serve(settings, *, open_browser: bool) -> int:
         server.should_exit = True
 
     app.state.shutdown = shutdown
-    return _run_until_stopped(
-        server.run, on_exit=hourly.stop, forced=lambda: bool(server.force_exit)
-    )
+    run = server.run
+    if settings.on_server:
+        # Apache's Unix socket, and the Docker bridge for the session
+        # gateways (server_listen.py).
+        from datalab.server_listen import bridge_address, tcp_listener, unix_listener
+
+        listen = settings.server.gateway_listen
+        sockets = [
+            unix_listener(settings.server.socket, settings.server.socket_group or None),
+            tcp_listener(bridge_address() if listen == "docker-bridge" else listen, settings.port),
+        ]
+
+        def run() -> None:
+            server.run(sockets=sockets)
+
+    return _run_until_stopped(run, on_exit=hourly.stop, forced=lambda: bool(server.force_exit))
 
 
 class _QuietCancelledRequests:

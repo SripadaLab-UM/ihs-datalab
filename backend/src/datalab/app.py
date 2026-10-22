@@ -460,6 +460,12 @@ def create_app(
     app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
+    if settings.on_server:
+        from datalab.server_listen import ListenerSplit
+
+        # Added before ApiProtection, so it runs after it: a refused route
+        # still gets the security headers.
+        app.add_middleware(ListenerSplit, bridge_port=settings.port)
     app.add_middleware(
         ApiProtection,
         session=browser,

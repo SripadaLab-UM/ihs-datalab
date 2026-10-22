@@ -259,6 +259,12 @@ class ServerSettings:
     # Where Apache reaches DataLab: a Unix socket, so nobody else on the
     # server can. DataLab's TCP port then answers only session gateways.
     socket: str = "/run/datalab/web.sock"
+    # The group that may open it: the web server's ("" leaves it as made).
+    socket_group: str = "apache"
+    # Where the session gateways reach DataLab (its TCP port answers only
+    # them, server_listen.py): "docker-bridge" for this host's Docker bridge,
+    # or an address (a compute server's containers, one day).
+    gateway_listen: str = "docker-bridge"
     # Each conversation's agent container, and how many run at once: the
     # server's memory is shared by everyone.
     agent_memory: str = "1536m"
