@@ -1122,7 +1122,11 @@ Run as the service's user, from the release that's running:
 with `DATALAB_DATA_DIR` set as the unit sets it. Each release has its own
 folder, `<root>/releases/<id>/` (its package, `requirements.txt`, its
 Python environment), and the unit runs `<root>/current/venv/bin/datalab`;
-`current` and `previous` are symlinks (`server_install.py`). An install:
+`current` and `previous` are symlinks (`server_install.py`). Give each copy
+on a server (a practice copy and the real one) its own root, with its own
+`tools/`, `releases/` and `current`: an install switches the `current` its
+running release lives under, so copies sharing a root would switch each
+other's code. An install:
 
 1. checks the release's files: for `--version`, `SHA256SUMS` signed with the
    lab's release key, as the in-app updater checks; for `--from`, the
