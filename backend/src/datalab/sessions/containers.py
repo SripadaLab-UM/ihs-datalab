@@ -231,9 +231,7 @@ class SessionContainers:
         """Create or restart the session's network and containers."""
         self.paths.create()
         # Files the Linux containers read get Unix line ends, on Windows too.
-        self.paths.gateway_conf.write_text(
-            render_gateway_conf(self.kind, self.host_port), encoding="utf-8", newline="\n"
-        )
+        _write_readable(self.paths.gateway_conf, render_gateway_conf(self.kind, self.host_port))
         if not await self._exists("network", self.network):
             await docker("network", "create", "--internal", *self._labels, self.network)
         await self._start_gateway()
@@ -341,10 +339,9 @@ class SessionContainers:
         if await self._running(self.proxy):
             return
         await docker("rm", "-f", self.proxy, check=False)
-        self.paths.squid_conf.write_text(
+        _write_readable(
+            self.paths.squid_conf,
             resources.files(__package__).joinpath("squid.conf").read_text(encoding="utf-8"),
-            encoding="utf-8",
-            newline="\n",
         )
         await docker(
             "run", "-d", "--name", self.proxy,
@@ -427,6 +424,15 @@ class SessionContainers:
     async def _exists(self, kind: str, name: str) -> bool:
         output = await docker(kind, "inspect", "-f", "{{.Name}}", name, check=False)
         return bool(output.strip())
+
+
+def _write_readable(path: Path, text: str) -> None:
+    """A config file the gateway or proxy reads, with Unix line ends, and
+    readable by everyone whatever DataLab's umask (0077 on the lab's server):
+    on native Linux their processes can't override file permissions
+    (--cap-drop ALL). Neither holds anything secret."""
+    path.write_text(text, encoding="utf-8", newline="\n")
+    path.chmod(0o644)
 
 
 def render_gateway_conf(kind: SessionKind, host_port: int) -> str:

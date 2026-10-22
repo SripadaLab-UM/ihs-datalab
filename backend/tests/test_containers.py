@@ -225,3 +225,24 @@ def test_the_servers_limits_apply_to_each_agent(settings):
     )
     limits = limits_for(replace(settings, deployment="server", server=server))
     assert (limits.memory, limits.cpus) == ("1g", "0.5")
+
+
+async def test_the_gateways_config_is_readable_whatever_the_umask(tmp_path, monkeypatch):
+    """On the lab's server DataLab runs with umask 0077, and the gateway's
+    nginx can't override file permissions (--cap-drop ALL)."""
+
+    async def docker(*args, check=True):
+        return ""
+
+    async def status(*args):
+        return (0, "")
+
+    monkeypatch.setattr(module, "docker", docker)
+    monkeypatch.setattr(module, "docker_status", status)
+    containers = make(tmp_path)
+    old = os.umask(0o077)
+    try:
+        await containers.start("token")
+    finally:
+        os.umask(old)
+    assert containers.paths.gateway_conf.stat().st_mode & 0o777 == 0o644
