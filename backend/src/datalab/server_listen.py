@@ -58,6 +58,8 @@ def bridge_address() -> str:
             ["docker", "network", "inspect", "bridge", "--format", _GATEWAY],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
             check=True,
         ).stdout.strip()

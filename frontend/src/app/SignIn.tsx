@@ -5,6 +5,7 @@ import { IhsMark } from "@/app/brand";
 import { at } from "@/lib/base";
 
 const REASONS: Record<string, string> = {
+  "signed-out": "You've signed out.",
   "not-in-lab":
     "Your GitHub account can't open the lab's repository. Ask the lab's DataLab maintainer to add you to the datalab-users team, then sign in again.",
   "admins-only": "The lab's DataLab is open to its administrators while it's being set up. You'll hear when it's ready for you.",

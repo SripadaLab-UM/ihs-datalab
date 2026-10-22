@@ -77,6 +77,7 @@ def test_0011_keeps_existing_folders_and_deliveries(tmp_path):
         "0014_express.sql",
         "0015_processed_data.sql",
         "0016_users.sql",
+        "0017_owners.sql",
     ]
     [folder] = connection.execute("SELECT * FROM export_destinations").fetchall()
     assert (folder["name"], folder["key"], folder["offered"]) == (

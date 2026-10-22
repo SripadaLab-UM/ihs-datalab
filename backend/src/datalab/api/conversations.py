@@ -24,7 +24,7 @@ from datalab.sessions.modes import MODES
 from datalab.sessions.plan_schema import PlanInvalid
 from datalab.sessions.store import Conversation, ConversationStore
 from datalab.sessions.titles import DEFAULT_TITLE, TitleWriter, normalize_title
-from datalab.web import ended_since
+from datalab.web import current_user, ended_since
 
 _HEARTBEAT_SECONDS = 15
 MAX_PLAN_BODY = 100_000
@@ -289,11 +289,12 @@ def build_conversations_router(
         return ModelsOut(default=default_model, available=await models())
 
     @router.get("/conversations")
-    def list_conversations() -> list[ConversationOut]:
-        return [out(c) for c in store.list()]
+    def list_conversations(request: Request) -> list[ConversationOut]:
+        """The signed-in person's own conversations (api/access.py)."""
+        return [out(c) for c in store.list(owner_id=current_user(request).id)]
 
     @router.post("/conversations", status_code=201)
-    def create_conversation(body: NewConversation) -> ConversationOut:
+    def create_conversation(body: NewConversation, request: Request) -> ConversationOut:
         mode = MODES.get(body.mode)
         if mode is None:
             raise HTTPException(422, f"Unknown mode {body.mode!r}.")
@@ -311,6 +312,7 @@ def build_conversations_router(
             model=model,
             rigor_review=mode.id == "analysis",
             data_sources=sources,
+            owner_id=current_user(request).id,
         )
         return out(conversation)
 

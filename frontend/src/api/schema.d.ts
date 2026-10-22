@@ -68,7 +68,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Conversations */
+        /**
+         * List Conversations
+         * @description The signed-in person's own conversations (api/access.py).
+         */
         get: operations["list_conversations_api_conversations_get"];
         put?: never;
         /** Create Conversation */
@@ -1155,7 +1158,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Proposals */
+        /**
+         * Proposals
+         * @description The signed-in person's conversations' proposals (api/access.py).
+         */
         get: operations["proposals_api_knowledge_proposals_get"];
         put?: never;
         post?: never;
@@ -1240,7 +1246,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Open Edits */
+        /**
+         * Open Edits
+         * @description The signed-in person's own open edits.
+         */
         get: operations["open_edits_api_knowledge_edits_get"];
         put?: never;
         /** Start Edit */
@@ -1449,7 +1458,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Runs */
+        /**
+         * List Runs
+         * @description The signed-in person's own runs (api/access.py).
+         */
         get: operations["list_runs_api_workflows_runs_get"];
         put?: never;
         /** Start */
@@ -1834,7 +1846,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Proposals */
+        /**
+         * Proposals
+         * @description The signed-in person's conversations' proposals (api/access.py).
+         */
         get: operations["proposals_api_pipelines_proposals_get"];
         put?: never;
         post?: never;
@@ -1919,7 +1934,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Open Edits */
+        /**
+         * Open Edits
+         * @description The signed-in person's own edits.
+         */
         get: operations["open_edits_api_pipelines_edits_get"];
         put?: never;
         /** Start Edit */
@@ -2457,7 +2475,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Route */
+        /**
+         * List Route
+         * @description Saved reports. On the lab's server they're the administrators' to
+         *     read (api/access.py), until each records who saved it.
+         */
         get: operations["list_route_api_support_reports_get"];
         put?: never;
         /**

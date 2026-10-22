@@ -357,9 +357,10 @@ class GitHubAuth:
             self._save(fresh)
             return fresh.access_token
 
-    def token_for_git(self) -> None:
+    def token_for_git(self) -> str | None:
         """Make sure git's credential helper, which reads the keychain, will
-        find a fresh token there."""
+        find a fresh token there. (The lab's server's stand-in returns the
+        token itself, for that one command: auth/github_web.py.)"""
         self.access_token()
         if self._unsaved is not None:
             raise GitHubUnavailable(_UNSAVED)

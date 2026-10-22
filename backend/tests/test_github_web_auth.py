@@ -164,6 +164,7 @@ def test_a_code_github_wont_trade_is_refused(settings, connection):
 def test_browser_sign_ins_end_when_they_should(connection):
     now = [1_000_000.0]
     users = Users(connection)
+    users.ensure_local()  # as the server does at start
     sessions = WebSessions(connection, users, hours=8, idle_minutes=60, clock=lambda: now[0])
     cookie = sessions.start(LOCAL)
     assert sessions.user_for(cookie) == LOCAL

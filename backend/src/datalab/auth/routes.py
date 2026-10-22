@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 
 from datalab.auth.github_web import STATE_COOKIE, STATE_SECONDS, GitHubWebSignIn, Refused
 from datalab.auth.sessions import WebSessions
+from datalab.data.access_log import AccessLog
 from datalab.web import CookieRules
 
 log = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ def mount_github_sign_in(
     *,
     base: str,
     cookie: CookieRules,
+    audit: AccessLog | None = None,
 ) -> None:
     """`sign_in` is None when the server's GitHub client secret or token key
     isn't in place yet: the sign-in page says it isn't set up."""
@@ -64,8 +66,12 @@ def mount_github_sign_in(
             user = sign_in.finish(code, state, request.cookies.get(STATE_COOKIE))
         except Refused as refused:
             log.info("GitHub sign-in refused: %s", refused.reason)
+            if audit is not None:
+                audit.record_sign_in("sign_in_refused", "", reason=refused.reason)
             return signed_out(refused.reason)
         log.info("signed in with GitHub: %s", user.login)
+        if audit is not None:
+            audit.record_sign_in("sign_in", user.login, user.id, admin=user.admin)
         response = RedirectResponse(f"{base}/", status_code=303)
         response.delete_cookie(STATE_COOKIE, **state_rules.kwargs())  # type: ignore[arg-type]
         response.set_cookie(sessions.cookie_name, sessions.start(user), **cookie.kwargs())  # type: ignore[arg-type]

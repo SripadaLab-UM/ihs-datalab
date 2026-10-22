@@ -3,12 +3,16 @@
 // browser's sign-in (the cookie the one-time link set) in every window.
 // DataLab keeps running; signing in again takes the new link it makes when it
 // next starts, from the launcher.
+//
+// On the lab's shared DataLab (a server) it's Sign out: the menu says who's
+// signed in, and signing in again is the GitHub button on the page it leaves for.
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { api } from "@/api/client";
 import { type SessionActivity, sessionApi } from "@/api/session";
 import { usePracticeTab } from "@/app/brand";
+import { GitHubSignIn } from "@/app/SignIn";
 import { clearAllDrafts } from "@/components/chat/plan";
 import { at } from "@/lib/base";
 import { Button, Icon, Modal } from "@/components/ui";
@@ -24,6 +28,8 @@ export function leaveApp(path: string) {
 
 export function SessionMenu({ onEnded = () => leaveApp(SESSION_ENDED_PATH) }: { onEnded?: () => void } = {}) {
   const [confirming, setConfirming] = useState(false);
+  const me = useQuery({ queryKey: ["session-me"], queryFn: sessionApi.me, staleTime: 5 * 60_000 });
+  if (me.data?.deployment === "server") return <SignOutMenu name={me.data.name} login={me.data.login} />;
   return (
     <>
       <Shortcut kind="menu" icon="user" label="Session" title="This window's DataLab session: End session" width="w-64">
@@ -50,6 +56,43 @@ export function SessionMenu({ onEnded = () => leaveApp(SESSION_ENDED_PATH) }: { 
       </Shortcut>
       {confirming && <EndSessionDialog onClose={() => setConfirming(false)} onEnded={onEnded} />}
     </>
+  );
+}
+
+/** The lab's shared DataLab: who's signed in, and Sign out (no restart needed to sign in again). */
+function SignOutMenu({ name, login }: { name: string; login: string }) {
+  const out = useMutation({
+    mutationFn: sessionApi.end,
+    onSuccess: () => {
+      clearAllDrafts(); // plan edits in this tab go with the sign-in
+      leaveApp(SESSION_ENDED_PATH);
+    },
+  });
+  return (
+    <Shortcut kind="menu" icon="user" label="Session" title={`Signed in as ${name}`} width="w-64">
+      {(close) => (
+        <>
+          <p role="none" className="px-3 pt-1.5 pb-2 text-[12.5px] text-muted">
+            Signed in as <span className="font-medium text-ink">{name}</span>
+            {login !== name && <span> (@{login})</span>}
+          </p>
+          <div role="separator" className="mb-1 border-t border-line" />
+          <button
+            type="button"
+            role="menuitem"
+            tabIndex={-1}
+            className={ITEM}
+            disabled={out.isPending}
+            onClick={() => {
+              close();
+              out.mutate();
+            }}
+          >
+            <Icon name="close" size={14} /> Sign out
+          </button>
+        </>
+      )}
+    </Shortcut>
   );
 }
 
@@ -114,6 +157,7 @@ export function activityWarning(activity: SessionActivity | undefined): string |
 export function SessionEnded() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health, retry: false });
   usePracticeTab(health.data?.profile === "practice");
+  if (health.data?.deployment === "server") return <GitHubSignIn reason="signed-out" />;
   return (
     <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
       <p className="font-serif text-[28px] text-ink">Session ended</p>

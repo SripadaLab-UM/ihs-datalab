@@ -36,6 +36,8 @@ class Conversation:
     # Where its data comes from: "database", "dropbox" (the lab's processed
     # data), or both (sessions/tokens.py: DATA_SOURCES).
     data_sources: tuple[str, ...] = ("database",)
+    # Who it belongs to (auth/users.py): the local user on a person's computer.
+    owner_id: int = 1
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class ConversationStore:
         model: str,
         rigor_review: bool = False,
         data_sources: tuple[str, ...] = ("database",),
+        owner_id: int = 1,
     ) -> Conversation:
         now = _now()
         conversation = Conversation(
@@ -75,11 +78,13 @@ class ConversationStore:
             updated_at=now,
             rigor_review=rigor_review,
             data_sources=data_sources,
+            owner_id=owner_id,
         )
         with self._lock:
             self._db.execute(
                 "INSERT INTO conversations (id, kind, mode, title, model, created_at, "
-                "updated_at, rigor_review, data_sources) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "updated_at, rigor_review, data_sources, owner_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     conversation.id,
                     kind,
@@ -90,6 +95,7 @@ class ConversationStore:
                     now,
                     int(rigor_review),
                     json.dumps(list(data_sources)),
+                    owner_id,
                 ),
             )
         return conversation
@@ -142,12 +148,26 @@ class ConversationStore:
             ).fetchone()
         return _conversation(row) if row else None
 
-    def list(self) -> list[Conversation]:
+    def list(self, owner_id: int | None = None) -> list[Conversation]:
+        """Newest first: all of them, or only `owner_id`'s."""
         with self._lock:
-            rows = self._db.execute(
-                "SELECT * FROM conversations ORDER BY updated_at DESC"
-            ).fetchall()
+            if owner_id is None:
+                rows = self._db.execute(
+                    "SELECT * FROM conversations ORDER BY updated_at DESC"
+                ).fetchall()
+            else:
+                rows = self._db.execute(
+                    "SELECT * FROM conversations WHERE owner_id = ? ORDER BY updated_at DESC",
+                    (owner_id,),
+                ).fetchall()
         return [_conversation(row) for row in rows]
+
+    def owner_of(self, conversation_id: str) -> int | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT owner_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone()
+        return row["owner_id"] if row else None
 
     def rename(self, conversation_id: str, title: str) -> None:
         with self._lock:
@@ -267,6 +287,7 @@ def _conversation(row: sqlite3.Row) -> Conversation:
         rigor_review=bool(row["rigor_review"]),
         express=bool(row["express"]),
         data_sources=_sources(row["data_sources"]),
+        owner_id=row["owner_id"],
     )
 
 

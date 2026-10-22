@@ -128,15 +128,16 @@ class EditStore:
         self._db = db
         self._lock = threading.Lock()
 
-    def add(self, edit: Edit) -> Edit:
+    def add(self, edit: Edit, owner_id: int = 1) -> Edit:
         with self._lock:
             self._db.execute(
                 "INSERT INTO pipeline_edits (id, base, files_json, status, origin_json, "
-                "edit_commit, tree, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "edit_commit, tree, created_at, updated_at, owner_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     edit.id, edit.base, _files_json(edit.files), edit.status,
                     json.dumps(edit.origin), edit.commit, edit.tree, edit.created_at,
-                    edit.updated_at,
+                    edit.updated_at, owner_id,
                 ),
             )  # fmt: skip
         return edit
@@ -148,30 +149,34 @@ class EditStore:
             ).fetchone()
         return _edit(row) if row else None
 
-    def list_open(self) -> list[Edit]:
+    def list_open(self, owner_id: int | None = None) -> list[Edit]:
+        """Open edits, newest first: everyone's, or `owner_id`'s."""
         marks = ", ".join("?" for _ in (*OPEN, "saving"))
+        mine = "" if owner_id is None else " AND owner_id = ?"
         with self._lock:
             rows = self._db.execute(
-                f"SELECT * FROM pipeline_edits WHERE status IN ({marks}) ORDER BY updated_at DESC",
-                (*OPEN, "saving"),
+                f"SELECT * FROM pipeline_edits WHERE status IN ({marks}){mine} "
+                "ORDER BY updated_at DESC",
+                (*OPEN, "saving", *(() if owner_id is None else (owner_id,))),
             ).fetchall()
         return [_edit(r) for r in rows]
 
-    def list_recent(self, limit: int = MAX_RECENT) -> list[Edit]:
-        """The open edits, then the latest finished ones."""
+    def list_recent(self, limit: int = MAX_RECENT, owner_id: int | None = None) -> list[Edit]:
+        """The open edits, then the latest finished ones: everyone's, or `owner_id`'s."""
+        mine = "" if owner_id is None else "AND owner_id = ? "
         with self._lock:
             rows = self._db.execute(
                 "SELECT * FROM pipeline_edits WHERE status IN ('saved', 'discarded') "
-                "ORDER BY updated_at DESC LIMIT ?",
-                (limit,),
+                f"{mine}ORDER BY updated_at DESC LIMIT ?",
+                (*(() if owner_id is None else (owner_id,)), limit),
             ).fetchall()
-        return self.list_open() + [_edit(r) for r in rows]
+        return self.list_open(owner_id) + [_edit(r) for r in rows]
 
-    def open_for(self, path: str) -> Edit | None:
+    def open_for(self, path: str, owner_id: int | None = None) -> Edit | None:
         """The open edit of `path`, or of a path differing from it only in case
         (they're the same file on Windows and Mac)."""
         lowered = path.lower()
-        found = [e for e in self.list_open() if any(p.lower() == lowered for p in e.files)]
+        found = [e for e in self.list_open(owner_id) if any(p.lower() == lowered for p in e.files)]
         exact = next((e for e in found if path in e.files), None)
         return exact or (found[0] if found else None)
 
@@ -226,14 +231,14 @@ class PipelineEdits:
 
     # Starting, reading ---------------------------------------------------------
 
-    def start(self, path: str, *, new: bool = False) -> Edit:
-        """The open edit of `path`, or a new one from the file as last synced.
+    def start(self, path: str, *, new: bool = False, owner_id: int = 1) -> Edit:
+        """The person's open edit of `path`, or a new one from the file as last synced.
         `new`: a file that isn't in the repo yet."""
         self._repo  # noqa: B018  # not available: say so first
         if problem := editable_problem(path):
             raise EditRefused(problem)
         with self._lock:
-            found = self.store.open_for(path)
+            found = self.store.open_for(path, owner_id)
             if found is not None and path in found.files:
                 return found
             if found is not None:
@@ -272,9 +277,9 @@ class PipelineEdits:
                 if note := generated_note(path, current):
                     raise EditRefused(f"{path} can't be edited by hand. {note}")
                 text = current
-            return self._add(head, {path: EditFile(text, new=content is None)}, {})
+            return self._add(head, {path: EditFile(text, new=content is None)}, {}, owner_id)
 
-    def from_proposal(self, proposal_id: str) -> Edit:
+    def from_proposal(self, proposal_id: str, owner_id: int = 1) -> Edit:
         """Edit before accepting: the proposal's files as the person's edit,
         on the proposal's base. The proposal is superseded by it."""
         pipelines = self._pipelines
@@ -285,7 +290,7 @@ class PipelineEdits:
                 raise EditRefused("There's nothing in this proposal to edit.")
             files: dict[str, EditFile] = {}
             for change in proposal.files:
-                taken = self.store.open_for(change.path)
+                taken = self.store.open_for(change.path, owner_id)
                 if taken is not None:
                     raise EditRefused(
                         f"You're already editing {change.path} on this computer. Share or "
@@ -299,7 +304,7 @@ class PipelineEdits:
                     )
                 files[change.path] = EditFile(text, new=change.change == "added")
             origin = {"proposal_id": proposal.id, "conversation_id": proposal.conversation_id}
-            edit = self._add(proposal.base, files, origin)
+            edit = self._add(proposal.base, files, origin, owner_id)
             pipelines.store.set_base(proposal.conversation_id, proposal.commit)
             pipelines.store.update(
                 proposal,
@@ -602,12 +607,14 @@ class PipelineEdits:
 
     # Inside ----------------------------------------------------------------------
 
-    def _add(self, base: str, files: dict[str, EditFile], origin: dict[str, Any]) -> Edit:
+    def _add(
+        self, base: str, files: dict[str, EditFile], origin: dict[str, Any], owner_id: int = 1
+    ) -> Edit:
         edit_id = f"pe_{secrets.token_hex(8)}"
         commit, tree = self._commit(edit_id, base, files)
         now = _now()
         return self.store.add(
-            Edit(edit_id, base, files, "draft", commit, tree, now, now, origin=origin)
+            Edit(edit_id, base, files, "draft", commit, tree, now, now, origin=origin), owner_id
         )
 
     def _commit(self, edit_id: str, base: str, files: Mapping[str, EditFile]) -> tuple[str, str]:

@@ -29,6 +29,7 @@ from urllib.parse import urlencode
 import httpx
 from cryptography.fernet import Fernet
 
+from datalab.auth.acting import acting_user
 from datalab.auth.tokens import DbTokenStore
 from datalab.auth.users import User, Users
 from datalab.config import Settings
@@ -38,6 +39,9 @@ from datalab.repos.github import (
     Account,
     GitHubAuth,
     GitHubUnavailable,
+    RepoAccess,
+    SignIn,
+    SignInNeeded,
     Tokens,
 )
 
@@ -210,6 +214,85 @@ class GitHubWebSignIn:
         except (httpx.HTTPError, ValueError):
             raise Refused("unavailable") from None
         return raw if isinstance(raw, dict) else {}
+
+
+class PerPersonGitHub(GitHubAuth):
+    """The lab's server's stand-in for the one GitHub sign-in a computer has
+    (repos/github.py): the knowledge and pipelines services hold this, and
+    each call is the acting person's own sign-in (auth/acting.py), from when
+    they signed in to DataLab. Outside a request it's no one's: sign in.
+
+    There's no device flow here: people sign in with GitHub as they sign in
+    to DataLab."""
+
+    def __init__(self, sign_in: GitHubWebSignIn | None, client_id: str) -> None:
+        super().__init__(client_id, store=_Nowhere())
+        self._sign_in = sign_in
+
+    def _own(self) -> GitHubAuth:
+        user = acting_user()
+        if user is None or self._sign_in is None:
+            raise SignInNeeded("Sign in with GitHub.")
+        return self._sign_in.auth_for(user)
+
+    def status(self) -> SignIn:
+        try:
+            return self._own().status()
+        except SignInNeeded:
+            return SignIn("signed out")
+
+    def start(self) -> SignIn:
+        return SignIn("signed out", message=_SIGN_IN_HERE)
+
+    def poll(self) -> SignIn:
+        return self.status()
+
+    def cancel(self) -> SignIn:
+        return self.status()
+
+    def sign_out(self) -> SignIn:
+        return SignIn("signed out", message=_SIGN_IN_HERE)
+
+    def signed_in(self) -> bool:
+        try:
+            return self._own().signed_in()
+        except SignInNeeded:
+            return False
+
+    def access_token(self) -> str:
+        return self._own().access_token()
+
+    def token_for_git(self) -> str:
+        # Handed to that one git command (repos/git.py), never saved anywhere.
+        return self._own().access_token()
+
+    def account(self) -> Account | None:
+        try:
+            return self._own().account()
+        except SignInNeeded:
+            return None
+
+    def repo_access(self, repo: str) -> RepoAccess:
+        return self._own().repo_access(repo)
+
+    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        return self._own().request(method, path, **kwargs)
+
+
+_SIGN_IN_HERE = "On the lab's DataLab you sign in with GitHub when you sign in to DataLab."
+
+
+class _Nowhere:
+    """No tokens of its own: the stand-in keeps none."""
+
+    def load(self) -> Tokens | None:
+        return None
+
+    def save(self, tokens: Tokens) -> None:
+        raise RuntimeError("The stand-in never keeps tokens.")
+
+    def clear(self) -> None:
+        return None
 
 
 def _tokens(raw: dict[str, Any], now: float) -> Tokens:

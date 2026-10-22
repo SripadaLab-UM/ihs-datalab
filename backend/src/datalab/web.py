@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from datalab.auth.acting import act_as, stop_acting
 from datalab.auth.users import LOCAL, User
 
 if TYPE_CHECKING:
@@ -245,6 +246,13 @@ class ApiProtection:
             state = scope.setdefault("state", {})
             state[SIGNED_IN] = True
             state[USER] = user or LOCAL
+            # And code deep inside acts for them (auth/acting.py).
+            acting = act_as(user or LOCAL)
+            try:
+                await self._app(scope, receive, _with_headers(send))
+            finally:
+                stop_acting(acting)
+            return
         await self._app(scope, receive, _with_headers(send))
 
 

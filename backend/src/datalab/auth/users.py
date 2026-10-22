@@ -38,6 +38,8 @@ class Users:
         """The person behind a GitHub sign-in, added the first time. Their
         login, name and whether they're an administrator are kept up to
         date; a disabled person stays disabled (see `get`)."""
+        # First, so nobody from GitHub can ever be given the local user's id.
+        self.ensure_local()
         now = _now()
         with self._lock:
             self._db.execute(
@@ -52,6 +54,16 @@ class Users:
                 "SELECT * FROM users WHERE github_id = ?", (account.id,)
             ).fetchone()
         return _user(row)
+
+    def ensure_local(self) -> None:
+        """The local user's row, on the lab's server: practice's one-time
+        link signs it in (a computer needs none)."""
+        with self._lock:
+            self._db.execute(
+                "INSERT OR IGNORE INTO users (id, login, is_admin, created_at) "
+                "VALUES (?, 'local', 1, ?)",
+                (LOCAL_ID, _now()),
+            )
 
     def get(self, user_id: int) -> User | None:
         """Someone who may use DataLab now: None if unknown or disabled."""

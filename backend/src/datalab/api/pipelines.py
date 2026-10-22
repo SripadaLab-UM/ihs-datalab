@@ -32,9 +32,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from datalab.api.access import mine
 from datalab.config import Settings
 from datalab.knowledge.proposals import unified_diff
 from datalab.pipelines.edits import (
@@ -51,6 +52,7 @@ from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignInN
 from datalab.sessions.containers import instance_of
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
+from datalab.web import current_user
 from datalab.workflows.sandbox import DockerSandbox, Sandbox, StepLimits
 
 
@@ -438,14 +440,15 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
         )
 
     @router.get("/files/{path:path}")
-    async def file(path: str) -> PipelineFileOut:
+    async def file(path: str, request: Request) -> PipelineFileOut:
         if not safe_path(path):
             raise HTTPException(404, "No such file.")
+        owner = current_user(request).id
 
         def read() -> PipelineFileOut:
             head, text, size, too_large = pipelines.read(path)
             note = source_note(path, text)
-            open_edit = pipelines.edits.store.open_for(path)
+            open_edit = pipelines.edits.store.open_for(path, owner)
             return PipelineFileOut(
                 path=path,
                 head=head,
@@ -460,9 +463,17 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
         return await run(read)
 
     @router.get("/proposals")
-    async def proposals(conversation_id: str | None = None) -> list[PipelineProposalOut]:
+    async def proposals(
+        request: Request, conversation_id: str | None = None
+    ) -> list[PipelineProposalOut]:
+        """The signed-in person's conversations' proposals (api/access.py)."""
+
         def listed() -> list[PipelineProposalOut]:
-            return [summary(p) for p in pipelines.store.list(conversation_id)]
+            return [
+                summary(p)
+                for p in pipelines.store.list(conversation_id)
+                if mine(request, p.conversation_id)
+            ]
 
         return await run(listed)
 
@@ -535,7 +546,10 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
         )
 
     @router.get("/edits")
-    async def open_edits() -> list[PipelineEditSummaryOut]:
+    async def open_edits(request: Request) -> list[PipelineEditSummaryOut]:
+        """The signed-in person's own edits."""
+        owner = current_user(request).id
+
         def listed() -> list[PipelineEditSummaryOut]:
             pipelines._repo()
             return [
@@ -547,18 +561,21 @@ def build_pipelines_router(services: PipelineServices) -> APIRouter:
                     updated_at=e.updated_at,
                     from_proposal=e.origin.get("proposal_id"),
                 )
-                for e in edits.store.list_recent()
+                for e in edits.store.list_recent(owner_id=owner)
             ]
 
         return await run(listed)
 
     @router.post("/edits")
-    async def start_edit(body: PipelineStartEditIn) -> PipelineEditOut:
-        return await run(lambda: edit_detail(edits.start(body.path, new=body.new)))
+    async def start_edit(body: PipelineStartEditIn, request: Request) -> PipelineEditOut:
+        owner = current_user(request).id
+        return await run(lambda: edit_detail(edits.start(body.path, new=body.new, owner_id=owner)))
 
     @router.post("/proposals/{proposal_id}/edit")
-    async def edit_proposal(proposal_id: str) -> PipelineEditOut:
-        return await run(lambda: edit_detail(edits.from_proposal(proposal_id)))
+    async def edit_proposal(proposal_id: str, request: Request) -> PipelineEditOut:
+        # The proposal is the person's (api/access.py checked its conversation).
+        owner = current_user(request).id
+        return await run(lambda: edit_detail(edits.from_proposal(proposal_id, owner_id=owner)))
 
     @router.get("/edits/{edit_id}")
     async def get_edit(edit_id: str) -> PipelineEditOut:

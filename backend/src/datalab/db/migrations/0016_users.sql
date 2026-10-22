@@ -1,5 +1,7 @@
 -- People and their sign-ins, for the lab's shared DataLab (deployment =
--- "server"; auth/). A person's computer has one: the local user, id 1.
+-- "server"; auth/). A person's computer has one, the local user (id 1),
+-- which it never stores: the server adds it at start (Users.ensure_local),
+-- so a computer's rollback has no rows here to lose.
 
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
@@ -13,9 +15,6 @@ CREATE TABLE users (
     created_at TEXT NOT NULL,
     last_seen_at TEXT
 );
-
-INSERT INTO users (id, login, is_admin, created_at)
-VALUES (1, 'local', 1, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
 
 -- A browser's sign-in. The cookie holds a random value; only its SHA-256 is
 -- kept here, so a copy of the database can't sign anyone in.

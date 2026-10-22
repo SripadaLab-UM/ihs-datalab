@@ -1,6 +1,7 @@
 """The SQL Playground: the person's own SQL, run through the data service.
 
-Each DataLab has one Playground, with a `pg_…` id kept in its folder. Its
+Each person has one Playground (on a computer, the one person: the local
+user), with a `pg_…` id kept in its folder. Its
 queries go through `DataService.run_query` with `origin="playground"`, so they
 get the same SQL check, extraction cap and logging as the agent's, and list
 as its history with `AccessLog.for_origin("playground", id)`.
@@ -111,9 +112,16 @@ class PlaygroundBusy(RuntimeError):
 
 class Playground:
     def __init__(
-        self, settings: Settings, data: DataService, catalog: Catalog, access_log: AccessLog
+        self,
+        settings: Settings,
+        data: DataService,
+        catalog: Catalog,
+        access_log: AccessLog,
+        user_id: int = 1,
     ) -> None:
         self._settings = settings
+        # Whose it is (auth/users.py): the local user's keeps playground.json.
+        self.user_id = user_id
         self._data = data
         self._catalog = catalog
         self._log = access_log
@@ -145,7 +153,9 @@ class Playground:
         return removed
 
     def _load_or_make_id(self) -> str:
-        file = self._root / "playground.json"
+        file = self._root / (
+            "playground.json" if self.user_id == 1 else f"playground-user-{self.user_id}.json"
+        )
         with contextlib.suppress(OSError, ValueError, AttributeError):
             stored = json.loads(file.read_text(encoding="utf-8")).get("id")
             if isinstance(stored, str) and _ID.fullmatch(stored):

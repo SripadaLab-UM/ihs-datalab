@@ -9,7 +9,9 @@ Two stores, on purpose:
 
 Each query has an origin, what it was run for, and an owner (`session_id`):
 a conversation (its id), the SQL Playground (a `pg_…` id), or a workflow run
-(a `run_…` id). A panel lists one owner's queries with `for_origin`.
+(a `run_…` id). A panel lists one owner's queries with `for_origin`. And a
+person (`who`, set by the app): whose conversation, Playground or run it
+was, in the `queries` row and every audit line, for the lab's shared DataLab.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -84,6 +87,8 @@ class AccessLog:
     def __init__(self, db: sqlite3.Connection, audit_file: Path) -> None:
         self._db = db
         self._audit_file = audit_file
+        # Whose a session is, as (user id, login); None if unknown (set by the app).
+        self.who: Callable[[str], tuple[int, str] | None] = lambda session_id: None
         self._lock = threading.Lock()
         audit_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -103,10 +108,12 @@ class AccessLog:
         (see `end_cut_off_queries`); it's only a result once `finished` says
         the query succeeded."""
         check_owner(origin, session_id)
+        person = self.who(session_id)
         with self._lock:
             self._db.execute(
                 "INSERT INTO queries (id, session_id, origin, started_at, status, sql_text, "
-                "binds_json, tables_json, result_path) VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?)",
+                "binds_json, tables_json, result_path, user_id) "
+                "VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)",
                 (
                     query_id,
                     session_id,
@@ -116,6 +123,7 @@ class AccessLog:
                     _json(binds),
                     _json(tables),
                     str(result_path) if result_path else None,
+                    person[0] if person else 1,
                 ),
             )
 
@@ -213,6 +221,7 @@ class AccessLog:
             "files": files,
             "contains_study_data": contains_study_data,
             **({"query_id": query_id} if query_id else {}),
+            **self._person(session_id),
         }
         with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
@@ -274,6 +283,7 @@ class AccessLog:
                 "bytes": size,
                 "elapsed_ms": elapsed_ms,
                 **({"cached": True} if cached else {}),
+                **self._person(row["session_id"]),
             }
             with self._audit_file.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(entry) + "\n")
@@ -351,9 +361,28 @@ class AccessLog:
             "elapsed_ms": record.elapsed_ms,
             **({"reason": reason} if reason else {}),
             **({"wait_ms": wait_ms} if wait_ms is not None else {}),
+            **self._person(record.session_id),
         }
         with self._audit_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
+
+    def record_sign_in(
+        self, event: str, login: str, user_id: int | None = None, **details: Any
+    ) -> None:
+        """A sign-in to the lab's shared DataLab, refused one, or sign-out:
+        who, and why not. Never a token."""
+        entry = {
+            "ts": _now(),
+            "event": event,
+            "user": {"id": user_id, "login": login},
+            **details,
+        }
+        with self._lock, self._audit_file.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+
+    def _person(self, session_id: str) -> dict[str, Any]:
+        person = self.who(session_id)
+        return {"user": {"id": person[0], "login": person[1]}} if person else {}
 
 
 def _remove_cut_off_result(query_id: str, result_path: str | None) -> str:

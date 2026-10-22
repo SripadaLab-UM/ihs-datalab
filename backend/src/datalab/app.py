@@ -14,11 +14,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from datalab import __version__, datalock, db, updates
+from datalab.api.access import RequireOwner, owner_rules
 from datalab.api.code import build_code_router
 from datalab.api.conversations import build_conversations_router
 from datalab.api.docker import build_docker_router
@@ -36,11 +37,11 @@ from datalab.api.sql import SqlServices, build_sql_router
 from datalab.api.support import SupportServices, build_support_router
 from datalab.api.textguard import RefuseNonText
 from datalab.api.workflows import WorkflowServices, build_workflows_router
-from datalab.auth.github_web import GitHubWebSignIn
+from datalab.auth.github_web import GitHubWebSignIn, PerPersonGitHub
 from datalab.auth.routes import mount_github_sign_in
 from datalab.auth.sessions import WebSessions
 from datalab.auth.tokens import token_key
-from datalab.auth.users import Users
+from datalab.auth.users import User, Users
 from datalab.config import Settings
 from datalab.credentials import (
     SERVER_GITHUB_CLIENT_SECRET,
@@ -213,8 +214,20 @@ def create_app(
     processed = ProcessedData(settings, connection, access_log)
     sessions.processed = processed
     # One GitHub sign-in for both lab repos: only one object may refresh its
-    # tokens, since each refresh replaces the refresh token.
-    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    # tokens, since each refresh replaces the refresh token. On the lab's
+    # server, each person's own, from their sign-in to DataLab: the services
+    # hold a stand-in that acts as whoever the request is for (auth/).
+    users = Users(connection) if settings.server is not None else None
+    if users is not None:
+        users.ensure_local()
+    github_web = _github_sign_in(settings, connection, users) if users is not None else None
+    github: GitHubAuth | None = None
+    if settings.repos.client_id:
+        github = (
+            PerPersonGitHub(github_web, settings.repos.client_id)
+            if settings.server is not None
+            else GitHubAuth(settings.repos.client_id)
+        )
     # Built here, before the agent tools, whose check_workflow uses the
     # workflows' check (they're included below, in their place).
     pipelines = build_pipelines_router(
@@ -293,7 +306,13 @@ def create_app(
         await model_http.aclose()
         connection.close()
 
-    app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
+    # Every route's ids are checked against who owns them (api/access.py).
+    app = FastAPI(
+        title="DataLab",
+        version=VERSION,
+        lifespan=lifespan,
+        dependencies=[Depends(RequireOwner(owner_rules(connection)))],
+    )
     app.state.services = services
     app.state.sql_drafts = sql_drafts
     app.state.kb_suggestions = kb_suggestions
@@ -380,11 +399,13 @@ def create_app(
     # The areas still being built. Each gets what it needs here, once, and
     # otherwise changes only its own module (and registers any session hooks
     # or mounts from there).
-    app.include_router(
-        build_sql_router(
-            SqlServices(settings, data, catalog, access_log, destinations, drafts=sql_drafts)
-        )
+    sql_router = build_sql_router(
+        SqlServices(settings, data, catalog, access_log, destinations, drafts=sql_drafts)
     )
+    # Each person's own SQL Playground (api/sql.py OwnPlayground).
+    app.state.playgrounds = sql_router.playgrounds  # type: ignore[attr-defined]
+    access_log.who = _who(connection, conversations, app.state.playgrounds)
+    app.include_router(sql_router)
     app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
         build_knowledge_router(
@@ -479,9 +500,7 @@ def create_app(
     # sign-in is kept (auth/); on a person's computer, the launcher's link.
     sign_in_gate: SignInGate = browser
     web_sessions: WebSessions | None = None
-    github_web: GitHubWebSignIn | None = None
-    if settings.server is not None:
-        users = Users(connection)
+    if settings.server is not None and users is not None:
         web_sessions = WebSessions(
             connection,
             users,
@@ -489,7 +508,6 @@ def create_app(
             idle_minutes=settings.server.session_idle_minutes,
         )
         sign_in_gate = web_sessions
-        github_web = _github_sign_in(settings, connection, users)
     app.state.browser = sign_in_gate
     if settings.on_server:
         from datalab.server_listen import ListenerSplit
@@ -554,10 +572,12 @@ def create_app(
         activity,
         cookie=cookie,
         deployment=settings.deployment,
-        on_sign_out=github_web.sign_out if github_web else None,
+        on_sign_out=_on_sign_out(github_web, access_log) if settings.server else None,
     )
     if web_sessions is not None:
-        mount_github_sign_in(app, github_web, web_sessions, base=site_base, cookie=cookie)
+        mount_github_sign_in(
+            app, github_web, web_sessions, base=site_base, cookie=cookie, audit=access_log
+        )
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(
         app,
@@ -571,6 +591,41 @@ def create_app(
         cookie=cookie,
     )
     return app
+
+
+def _on_sign_out(github_web: GitHubWebSignIn | None, audit: AccessLog) -> Callable[[User], None]:
+    """Signing out of the lab's shared DataLab: logged, and the person's
+    GitHub tokens forgotten (they sign in again next time)."""
+
+    def signed_out(user: User) -> None:
+        audit.record_sign_in("sign_out", user.login, user.id)
+        if github_web is not None:
+            github_web.sign_out(user)
+
+    return signed_out
+
+
+def _who(
+    connection: sqlite3.Connection, conversations: ConversationStore, playgrounds
+) -> Callable[[str], tuple[int, str] | None]:
+    """Whose a query's session is (the access log's `who`): a conversation's
+    owner, a Playground's person, or a workflow run's starter."""
+
+    def who(session_id: str) -> tuple[int, str] | None:
+        owner = conversations.owner_of(session_id)
+        if owner is None and session_id.startswith("pg_"):
+            owner = playgrounds.user_of(session_id)
+        if owner is None:
+            row = connection.execute(
+                "SELECT owner_id FROM workflow_runs WHERE id = ?", (session_id,)
+            ).fetchone()
+            owner = row[0] if row else None
+        if owner is None:
+            return None
+        row = connection.execute("SELECT login FROM users WHERE id = ?", (owner,)).fetchone()
+        return (owner, row[0]) if row else None
+
+    return who
 
 
 def _github_sign_in(
