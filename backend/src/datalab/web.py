@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -31,7 +31,8 @@ CONTENT_SECURITY_POLICY = "; ".join(
         "font-src 'self' data:",
         "connect-src 'self'",
         "object-src 'none'",
-        "base-uri 'none'",
+        # Only DataLab's own <base href>, which mount_web_ui writes.
+        "base-uri 'self'",
         "form-action 'self'",
         "frame-ancestors 'none'",
     ]
@@ -102,7 +103,7 @@ SIGNED_IN = "datalab.signed_in"
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def refuse_cross_site(scope: Scope) -> str | None:
+def refuse_cross_site(scope: Scope, *, public_origin: str | None = None) -> str | None:
     """Why a state-changing /api request isn't DataLab's own page's, or None.
 
     Browsers count every port of 127.0.0.1 as one site, so another local web
@@ -126,7 +127,9 @@ def refuse_cross_site(scope: Scope) -> str | None:
         return f"Refused a request from another site ({site})."
     origin = headers.get("origin")
     if origin is not None:
-        own = f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
+        # On the lab's server, Apache answers the browser: its address is
+        # the setting, not what reaches DataLab through the socket.
+        own = public_origin or f"{scope.get('scheme', 'http')}://{headers.get('host', '')}"
         if origin != own:
             return "Refused a request from another origin."
     content_type = headers.get("content-type", "").split(";")[0].strip().lower()
@@ -141,10 +144,19 @@ class ApiProtection:
     security headers. With enforce=False (tests of single routes) neither
     check runs."""
 
-    def __init__(self, app: ASGIApp, session: BrowserSession, *, enforce: bool = True) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        session: BrowserSession,
+        *,
+        enforce: bool = True,
+        public_origin: str | None = None,
+    ) -> None:
         self._app = app
         self._session = session
         self._enforce = enforce
+        # The lab's server's https:// address ([server] public_url).
+        self._public_origin = public_origin
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -155,7 +167,7 @@ class ApiProtection:
             self._enforce
             and path.startswith("/api/")
             and scope.get("method", "GET") not in _SAFE_METHODS
-            and (why := refuse_cross_site(scope))
+            and (why := refuse_cross_site(scope, public_origin=self._public_origin))
         ):
             response = JSONResponse({"detail": why}, status_code=403)
             await response(scope, receive, _with_headers(send))
@@ -201,6 +213,7 @@ def add_session_routes(
     activity: Callable[[], SessionActivityOut] = lambda: SessionActivityOut(
         agent_turn=False, workflow_run=False
     ),
+    base: str = "",
 ) -> None:
     """`POST /api/session/end`: End session, from the toolbar's session menu.
     Only a signed-in window can call it (ApiProtection checks the cookie).
@@ -215,7 +228,9 @@ def add_session_routes(
     def end_session() -> Response:
         session.end()
         response = Response(status_code=204)
-        response.delete_cookie(session.cookie_name, httponly=True, samesite="strict", path="/")
+        response.delete_cookie(
+            session.cookie_name, httponly=True, samesite="strict", path=f"{base}/"
+        )
         return response
 
 
@@ -223,33 +238,52 @@ def add_session_routes(
 _ICON_NAMES = ("favicon", "apple-touch-icon")
 
 
-def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None) -> None:
+def with_base(html: str, base: str) -> str:
+    """index.html with `<base href>` naming where DataLab lives: "/" on a
+    person's computer, "/datalab/" on the lab's server. The build's paths
+    are relative (vite.config.ts), and the frontend reads this tag
+    (src/lib/base.ts), so one build serves at either."""
+    tag = f'<base href="{base}/" />'
+    return html.replace("<head>", f"<head>\n    {tag}", 1)
+
+
+def mount_web_ui(app: FastAPI, session: BrowserSession, dist: Path | None, base: str = "") -> None:
+    """The web UI. `base` is where DataLab lives on its site ("" at the root,
+    "/datalab" on the lab's server, where Apache strips it before passing
+    requests on): what the page and redirects name."""
+
     @app.get("/sign-in", include_in_schema=False)
     def sign_in(token: str) -> RedirectResponse:
         cookie = session.redeem(token)
         if cookie is None:
-            return RedirectResponse("/signed-out", status_code=303)
-        response = RedirectResponse("/", status_code=303)
-        response.set_cookie(session.cookie_name, cookie, httponly=True, samesite="strict", path="/")
+            return RedirectResponse(f"{base}/signed-out", status_code=303)
+        response = RedirectResponse(f"{base}/", status_code=303)
+        response.set_cookie(
+            session.cookie_name, cookie, httponly=True, samesite="strict", path=f"{base}/"
+        )
         return response
 
     if dist is None or not (dist / "index.html").exists():
         return
 
     index = dist / "index.html"
+    page = with_base(index.read_text(encoding="utf-8"), base)
+
+    def index_page() -> HTMLResponse:
+        # The page always revalidates, so an update is picked up on the next
+        # load; the files it names are content-hashed and can be cached.
+        return HTMLResponse(page, headers={"Cache-Control": "no-cache"})
 
     @app.get("/{path:path}", include_in_schema=False)
-    def web_ui(path: str) -> FileResponse:
+    def web_ui(path: str) -> Response:
         # Built files if they exist; otherwise the app's index (client-side routes).
         candidate = (dist / path).resolve()
         if path and candidate.is_file() and dist.resolve() in candidate.parents:
             if candidate == index.resolve():
-                return FileResponse(index, headers={"Cache-Control": "no-cache"})
+                return index_page()
             if candidate.parent == dist.resolve() and candidate.name.startswith(_ICON_NAMES):
                 # The page names the icons with their content's hash (?v=), and
                 # they revalidate too, so a new icon shows after an update.
                 return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
             return FileResponse(candidate)
-        # The page always revalidates, so an update is picked up on the next
-        # load; the files it names are content-hashed and can be cached.
-        return FileResponse(index, headers={"Cache-Control": "no-cache"})
+        return index_page()

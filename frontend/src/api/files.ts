@@ -1,5 +1,7 @@
 // A conversation's workspace files: outputs, inputs attached to it, and the
 // checkpoints its files can be restored to.
+import { at } from "@/lib/base";
+
 import { ApiError, request } from "./http";
 import type { components } from "./schema";
 
@@ -13,8 +15,10 @@ export type AttachResult = Schemas["AttachResult"];
 
 /** Where the viewer loads a file from (images are shown straight from this), as of one checkpoint. */
 const fileUrl = (id: string, root: FileRoot, path: string, checkpoint?: number | null) =>
-  `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}` +
-  (checkpoint != null ? `?checkpoint=${checkpoint}` : "");
+  at(
+    `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}` +
+      (checkpoint != null ? `?checkpoint=${checkpoint}` : ""),
+  );
 
 export const filesApi = {
   files: (id: string, root: FileRoot = "outputs") =>

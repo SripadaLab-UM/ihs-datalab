@@ -1,6 +1,8 @@
 // Send feedback's support reports (backend api/support.py, docs/SUPPORT.md):
 // preview a report, save it, reopen it, save it to a folder to email, or send
 // it to the lab's private support repository.
+import { at } from "@/lib/base";
+
 import { request } from "./http";
 import type { components } from "./schema";
 
@@ -31,7 +33,7 @@ export const supportApi = {
   reports: () => request<SupportReport[]>("/api/support/reports"),
   report: (id: string) => request<SupportReportDetail>(report(id)),
   /** The ZIP, as a download (a link to this, in the person's own browser). */
-  bundleUrl: (id: string) => `${report(id)}/bundle`,
+  bundleUrl: (id: string) => at(`${report(id)}/bundle`),
   remove: (id: string) => request<void>(report(id), { method: "DELETE" }),
   saveToFolder: (id: string, destinationId: string) =>
     request<SupportReport>(`${report(id)}/save-to-folder`, {

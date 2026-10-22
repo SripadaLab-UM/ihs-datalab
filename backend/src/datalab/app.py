@@ -323,8 +323,15 @@ def create_app(
     app.include_router(build_processed_router(processed))
     previews = Previews()
     app.state.previews = previews
-    app.include_router(build_files_router(conversations, sessions, previews))
-    app.include_router(build_preview_router(previews))
+    server = settings.server
+    app.include_router(
+        build_files_router(
+            conversations, sessions, previews, base=server.base_path if server else ""
+        )
+    )
+    app.include_router(
+        build_preview_router(previews, (server.public_url, server.base_path) if server else None)
+    )
     app.include_router(build_code_router(conversations, sessions))
     app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
     destinations = DestinationStore(connection)
@@ -438,7 +445,12 @@ def create_app(
     app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
     app.state.browser = browser
-    app.add_middleware(ApiProtection, session=browser, enforce=protect_api)
+    app.add_middleware(
+        ApiProtection,
+        session=browser,
+        enforce=protect_api,
+        public_origin=settings.server.public_url if settings.server else None,
+    )
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -475,9 +487,10 @@ def create_app(
             run = None
         return SessionActivityOut(agent_turn=sessions.any_busy(), workflow_run=run is not None)
 
-    add_session_routes(app, browser, activity)
+    site_base = settings.server.base_path if settings.server else ""
+    add_session_routes(app, browser, activity, base=site_base)
     # Last, so the web UI's catch-all route never shadows the API.
-    mount_web_ui(app, browser, web_dist)
+    mount_web_ui(app, browser, web_dist, base=site_base)
     return app
 
 

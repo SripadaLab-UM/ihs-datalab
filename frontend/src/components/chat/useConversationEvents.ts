@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { at } from "@/lib/base";
+
 import type { ConversationEvent } from "./transcript";
 
 // Every event type the backend emits (backend sessions/: runtime.py, manager.py and its parts).
@@ -72,7 +74,7 @@ export function useConversationEvents(conversationId: string | undefined, active
     if (last.current.id !== conversationId) last.current = { id: conversationId, seq: 0 };
     if (!conversationId || !active) return;
     const seen = last.current;
-    const source = new EventSource(`/api/conversations/${conversationId}/stream?after=${seen.seq}`);
+    const source = new EventSource(at(`/api/conversations/${conversationId}/stream?after=${seen.seq}`));
     const onEvent = (message: MessageEvent<string>) => {
       const payload = JSON.parse(message.data) as { seq: number; data: Record<string, unknown> };
       if (payload.seq <= seen.seq) return;

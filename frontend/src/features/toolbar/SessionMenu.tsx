@@ -10,6 +10,7 @@ import { api } from "@/api/client";
 import { type SessionActivity, sessionApi } from "@/api/session";
 import { usePracticeTab } from "@/app/brand";
 import { clearAllDrafts } from "@/components/chat/plan";
+import { at } from "@/lib/base";
 import { Button, Icon, Modal } from "@/components/ui";
 
 import { ITEM, Shortcut } from "./Popover";
@@ -18,7 +19,7 @@ export const SESSION_ENDED_PATH = "/session-ended";
 
 /** Leaves the app for the "session ended" page: a full load, so nothing of this window's state stays. */
 export function leaveApp(path: string) {
-  window.location.assign(path);
+  window.location.assign(at(path));
 }
 
 export function SessionMenu({ onEnded = () => leaveApp(SESSION_ENDED_PATH) }: { onEnded?: () => void } = {}) {

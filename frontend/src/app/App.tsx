@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 
 import { HelpPage } from "@/features/help/HelpPage";
+import { BASE } from "@/lib/base";
 import { KnowledgePage } from "@/features/knowledge/KnowledgePage";
 import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -19,7 +20,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={BASE || undefined}>
         <Routes>
           {/* Outside the shell: after End session, nothing here may call the API. */}
           <Route path="session-ended" element={<SessionEnded />} />

@@ -2,6 +2,7 @@
 // own file beside this one (conversations.ts, files.ts, sql.ts...), so a tab's
 // work never has to touch another's.
 
+import { at } from "@/lib/base";
 import { recordFailedRequest } from "@/lib/supportTrail";
 
 export class ApiError extends Error {
@@ -21,7 +22,7 @@ export const SIGNED_OUT = "datalab:signed-out";
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(at(path), {
       ...init,
       headers: { "content-type": "application/json", ...init?.headers },
     });

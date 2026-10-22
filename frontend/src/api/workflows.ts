@@ -1,5 +1,7 @@
 // Calls for the Workflows tab. Add this tab's calls here: it's the only API file
 // its work needs to touch.
+import { at } from "@/lib/base";
+
 import { request } from "./http";
 import type { components } from "./schema";
 
@@ -90,4 +92,4 @@ export const workflowsApi = {
 };
 
 /** Where a run's live updates come from (server-sent events: `run` each time it changes, then `end`). */
-export const runStreamUrl = (runId: string) => `/api/workflows/runs/${id(runId)}/stream`;
+export const runStreamUrl = (runId: string) => at(`/api/workflows/runs/${id(runId)}/stream`);
