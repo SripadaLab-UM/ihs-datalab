@@ -48,6 +48,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import httpx
 
@@ -81,7 +82,10 @@ class InstallFailed(RuntimeError):
     """A step failed; the message says what is running now."""
 
 
-Run = Callable[[Sequence[str], float], subprocess.CompletedProcess[str]]
+class Run(Protocol):
+    def __call__(
+        self, command: Sequence[str], timeout: float, cwd: Path | None = None
+    ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _runner(root: Path) -> Run:
@@ -90,24 +94,21 @@ def _runner(root: Path) -> Run:
     env = clean_environment()
     env["UV_PYTHON_INSTALL_DIR"] = str(root / "tools" / "python")
 
-    def run(command: Sequence[str], timeout: float) -> subprocess.CompletedProcess[str]:
-        return _run(command, timeout, env)
+    def run(
+        command: Sequence[str], timeout: float, cwd: Path | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            list(command),
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            env=env,
+            cwd=cwd,
+        )
 
     return run
-
-
-def _run(
-    command: Sequence[str], timeout: float, env: dict[str, str]
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        list(command),
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
-        check=False,
-        env=env,
-    )
 
 
 @dataclass(frozen=True)
@@ -350,10 +351,12 @@ class ServerInstaller:
                     PYPI,
                     "--python",
                     str(venv / "bin" / "python"),
+                    # From its own folder: it names the package as ./<wheel>.
                     "-r",
-                    str(staged.folder / "requirements.txt"),
+                    "requirements.txt",
                 ],
                 15 * 60,
+                cwd=staged.folder,
             )
             installed = self._must(
                 [str(self.layout.executable(staged.release_id)), "--version"], 60
@@ -486,9 +489,11 @@ class ServerInstaller:
                 f"`{' '.join(command)}` failed: {(result.stderr or '').strip()[-300:]}"
             )
 
-    def _must(self, command: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
+    def _must(
+        self, command: list[str], timeout: float, cwd: Path | None = None
+    ) -> subprocess.CompletedProcess[str]:
         try:
-            result = self._run(command, timeout)
+            result = self._run(command, timeout, cwd)
         except (OSError, subprocess.SubprocessError) as error:
             name = Path(command[0]).name
             raise InstallFailed(f"{name} failed ({type(error).__name__}).") from None

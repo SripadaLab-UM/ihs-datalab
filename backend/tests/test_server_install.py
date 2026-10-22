@@ -23,13 +23,15 @@ class Machine:
     def __init__(self, layout: ServerLayout) -> None:
         self.layout = layout
         self.commands: list[list[str]] = []
+        self.cwds: list[Path | None] = []
         self.running = True
         self.starts_as: dict[str, str | None] = {}  # release id -> version it answers as
         self.fail: set[str] = set()
 
-    def run(self, command, timeout):
+    def run(self, command, timeout, cwd=None):
         command = list(command)
         self.commands.append(command)
+        self.cwds.append(cwd)
         words = " ".join(command)
         code = 1 if any(f in words for f in self.fail) else 0
         out = ""
@@ -99,7 +101,10 @@ def test_a_built_release_is_installed_beside_and_switched_to(server, monkeypatch
     assert layout.pointer("current") == staged.release_id
     assert layout.pointer("previous") == "0.3.0-old"
     ran = [" ".join(c) for c in machine.commands]
-    assert any("pip install" in c and "--require-hashes" in c for c in ran)
+    pip = next(i for i, c in enumerate(ran) if "pip install" in c)
+    assert "--require-hashes" in ran[pip] and ran[pip].endswith("-r requirements.txt")
+    # requirements.txt names the package as ./<wheel>: run from its folder.
+    assert machine.cwds[pip] == staged.folder
     assert any(c.endswith("--profile practice pull-images") for c in ran)
     # Installed and its images pulled before the service stopped.
     stop = next(i for i, c in enumerate(ran) if "systemctl stop dl.service" in c)
