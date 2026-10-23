@@ -30,7 +30,7 @@ import shutil
 import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -45,7 +45,15 @@ from datalab.repos.github import saved_token_values
 from datalab.safety import policy
 from datalab.safety.canary import Canaries
 from datalab.sessions.checkpoints import Checkpoints
-from datalab.sessions.containers import SessionContainers, SessionPaths, docker, instance_of
+from datalab.sessions.compute import engine_for, high_compute
+from datalab.sessions.containers import (
+    LOCAL,
+    SessionContainers,
+    SessionPaths,
+    docker,
+    instance_of,
+)
+from datalab.sessions.store import Compute
 from datalab.sessions.tokens import SessionAccess, SessionKind, SessionTokens
 
 if TYPE_CHECKING:
@@ -141,6 +149,12 @@ class SafetyCheck:
         )
         async with self._probe("research") as probe:
             report.results += await self._research_session_checks(probe, model_reachable)
+        if high_compute(self._settings) is not None:
+            # A data session on the lab's larger machine: the same walls,
+            # through its engine, its tunnel and the relay socket.
+            async with self._probe("data", compute="high") as probe:
+                high_results = await self._data_session_checks(probe)
+            report.results += [_on_high_compute(r) for r in high_results]
         report.results.append(await self._image_check())
         report.results.append(await self._browser_policy_check())
         report.results.append(await self._preview_check())
@@ -150,9 +164,16 @@ class SafetyCheck:
     # Probe sessions -------------------------------------------------------
 
     @asynccontextmanager
-    async def _probe(self, kind: SessionKind) -> AsyncIterator[_Probe]:
+    async def _probe(
+        self, kind: SessionKind, *, compute: Compute = "standard"
+    ) -> AsyncIterator[_Probe]:
         session_id = f"safety_{secrets.token_hex(4)}"
-        paths = SessionPaths(self._settings.data_dir / "safety" / session_id)
+        high = high_compute(self._settings) if compute == "high" else None
+        # On the high-compute machine, in its shared folder (the same path on
+        # both machines), as a conversation there is.
+        where = Path(high.sessions_dir) / "safety" if high else self._settings.data_dir / "safety"
+        paths = SessionPaths(where / session_id)
+
         containers = self._containers(
             session_id,
             kind,
@@ -164,6 +185,7 @@ class SafetyCheck:
             # A data probe has the processed data's folder, as a conversation
             # using it does, with a canary file in it.
             processed=kind == "data",
+            engine=engine_for(self._settings, "high") if high else LOCAL,
         )
         token = self._tokens.issue(SessionAccess(session_id, kind, paths.oracle_results))
         paths.create()
@@ -563,7 +585,12 @@ class SafetyCheck:
         problems = []
         if host.get("Privileged"):
             problems.append("privileged")
-        if "ALL" not in (host.get("CapDrop") or []):
+        # From inside: no capability can ever be gained (an empty bounding
+        # set). Docker reports --cap-drop ALL as "ALL"; Podman lists each
+        # capability it dropped instead, so the setting alone doesn't say.
+        code, status = await probe.sh("grep '^CapBnd:' /proc/self/status")
+        bounding = status.split()[-1] if code == 0 and status.strip() else ""
+        if bounding.strip("0") or (not bounding and "ALL" not in (host.get("CapDrop") or [])):
             problems.append("capabilities not dropped")
         if not any("no-new-privileges" in o for o in host.get("SecurityOpt") or []):
             problems.append("no-new-privileges not set")
@@ -871,10 +898,17 @@ class _Probe:
         self.containers = containers
         self.paths = paths
 
+    @property
+    def _env(self) -> dict[str, str] | None:
+        """The engine its containers run on (high compute: the other machine's)."""
+        engine = getattr(self.containers, "engine", None)
+        return {**os.environ, **engine.env} if engine is not None and engine.env else None
+
     async def sh(self, command: str) -> tuple[int, str]:
         process = await asyncio.create_subprocess_exec(
             "docker", "exec", self.containers.agent, "sh", "-c", command,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            env=self._env,
         )  # fmt: skip
         out, _ = await process.communicate()
         return process.returncode or 0, out.decode(errors="replace")
@@ -912,7 +946,19 @@ class _Probe:
         return _HttpResult(int(code) if code.isdigit() else 0, text)
 
     async def inspect(self) -> dict:
-        return json.loads(await docker("inspect", self.containers.agent))[0]
+        engine = getattr(self.containers, "engine", None)
+        env = engine.env if engine is not None and engine.env else None
+        return json.loads(await docker("inspect", self.containers.agent, env=env))[0]
+
+
+def _on_high_compute(result: CheckResult) -> CheckResult:
+    """A data-session check, as run on the high-compute machine."""
+    return replace(
+        result,
+        id=f"high_compute_{result.id}",
+        label=f"{result.label} (high compute)",
+        detail=result.detail.replace("this computer", "DataLab's server"),
+    )
 
 
 _WORKER_NAME = "datalab-safety-db"

@@ -302,3 +302,100 @@ async def test_each_running_agent_gets_cores_of_its_own(settings):
     assert manager._containers(three, pin=True).cpuset == "0-15"
     standard = store.create(kind="data", mode="analysis", title="t", model="m")
     assert manager._containers(standard, pin=True).cpuset is None
+
+
+@pytest.mark.parametrize("with_high", [True, False])
+async def test_the_safety_check_runs_a_data_session_on_the_high_compute_machine(
+    settings, tmp_path, monkeypatch, with_high
+):
+    """The same data-session checks, on the other machine's engine, in its
+    shared folder, reported apart ("(high compute)"); none without it."""
+    from datalab.safety import CheckResult, SafetyCheck
+    from datalab.safety.canary import Canaries
+    from datalab.sessions.tokens import SessionTokens
+
+    started: list[tuple[str, SessionPaths]] = []
+
+    class Recorded(SessionContainers):
+        async def start(self, token):
+            started.append((self.engine.env.get("DOCKER_HOST", "local"), self.paths))
+
+        async def remove(self):
+            return None
+
+    high = replace(HIGH, sessions_dir=str(tmp_path / "compute-sessions")) if with_high else None
+    check = SafetyCheck(
+        server_settings(settings, high=high),
+        SessionTokens(),
+        Canaries(),
+        model_key=lambda: "",
+        containers=Recorded,
+    )
+
+    async def none(*_args, **_kwargs):
+        return []
+
+    async def one(*_args, **_kwargs):
+        return CheckResult("x", "p", "One check", "pass", "this computer is unreachable")
+
+    async def data_checks(probe):
+        return [CheckResult("internet_blocked", "p", "A data session can't", "pass", "")]
+
+    monkeypatch.setattr(check, "_database_checks", none)
+    monkeypatch.setattr(check, "_research_session_checks", none)
+    monkeypatch.setattr(check, "_data_session_checks", data_checks)
+    for name in ("_image_check", "_browser_policy_check", "_preview_check"):
+        monkeypatch.setattr(check, name, one)
+    report = await check.run()
+    ids = [r.id for r in report.results]
+    if not with_high:
+        assert "high_compute_internet_blocked" not in ids
+        assert all(where == "local" for where, _ in started)
+        return
+    assert "internet_blocked" in ids and "high_compute_internet_blocked" in ids
+    label = next(r.label for r in report.results if r.id == "high_compute_internet_blocked")
+    assert label.endswith("(high compute)")
+    where, paths = started[-1]
+    assert where == HIGH.docker_host
+    assert paths.root.parent == tmp_path / "compute-sessions" / "safety"
+
+
+@pytest.mark.parametrize(
+    ("cap_drop", "bounding", "sealed"),
+    [
+        (["ALL"], "0000000000000000", True),  # Docker
+        (["CHOWN", "KILL", "SETUID"], "0000000000000000", True),  # Podman lists each one
+        (["CHOWN"], "00000000a80425fb", False),  # capabilities left in
+        (["ALL"], "00000000a80425fb", False),  # whatever the setting says
+    ],
+)
+async def test_capabilities_are_checked_from_inside_the_container(
+    settings, cap_drop, bounding, sealed
+):
+    from datalab.safety import SafetyCheck
+    from datalab.safety.canary import Canaries
+    from datalab.sessions.tokens import SessionTokens
+
+    class Probe:
+        containers = type("C", (), {"network": "net"})()
+
+        async def inspect(self):
+            return {
+                "HostConfig": {"CapDrop": cap_drop, "SecurityOpt": ["no-new-privileges"]},
+                "Config": {"User": "1000:1000"},
+                "Mounts": [
+                    {"Destination": d, "RW": d in ("/work", "/codex-home")}
+                    for d in ("/work", "/codex-home", "/codex-home/config.toml")
+                ],
+                "NetworkSettings": {"Networks": {"net": {}}},
+            }
+
+        async def sh(self, command):
+            if command.startswith("grep '^CapBnd:'"):
+                return 0, f"CapBnd:\t{bounding}\n"
+            return 1, ""  # the home folder isn't there; the config can't be changed
+
+    check = SafetyCheck(settings, SessionTokens(), Canaries(), model_key=lambda: "")
+    result = await check._locked_down(Probe(), kind="research")
+    assert (result.status == "pass") is sealed, result.detail
+    assert ("capabilities not dropped" in result.detail) is not sealed
