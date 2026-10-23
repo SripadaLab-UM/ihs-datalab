@@ -1,6 +1,11 @@
 name: Release
 
-# Push a tag like v0.1.0 to publish a release:
+# Push a tag like v0.1.0 to publish a release for people's computers, or one
+# like server-v0.4.0 for the lab's shared DataLab (a server). A computer's
+# DataLab never installs a server release: the tag isn't a version to it.
+# Server releases carry no installers and are never marked "latest".
+#
+# The steps:
 # 0. run all of CI on the tagged commit; stop if anything fails;
 # 1. build the agent image for Intel/AMD and Apple Silicon and push it to the
 #    GitHub Container Registry, unless images/agent is unchanged since an
@@ -37,7 +42,7 @@ name: Release
 #   If DataLab builds its own gateway image later, add it to the image jobs.
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "server-v*"]
 
 permissions:
   contents: write
@@ -66,7 +71,8 @@ jobs:
         # so each pre-release has its own version and updates can tell them apart.
         run: |
           version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/src/datalab/__init__.py)
-          tag=$(printf '%s' "${GITHUB_REF_NAME#v}" | sed -E \
+          name="${GITHUB_REF_NAME#server-}"
+          tag=$(printf '%s' "${name#v}" | sed -E \
             -e 's/-(alpha|a)\.?([0-9]+)$/a\2/' -e 's/-(beta|b)\.?([0-9]+)$/b\2/' -e 's/-rc\.?([0-9]+)$/rc\1/')
           test "$tag" = "$version" || { echo "Tag $GITHUB_REF_NAME doesn't match version $version"; exit 1; }
 
@@ -209,10 +215,15 @@ jobs:
           AGENT_IMAGE: ${{ needs.manifest.outputs.image }}
         run: |
           mkdir -p assets
-          cp installer/macos/install.sh assets/install-macos.sh
-          cp installer/macos/uninstall.sh assets/uninstall-macos.sh
-          cp installer/windows/install.ps1 assets/install-windows.ps1
-          cp installer/windows/uninstall.ps1 assets/uninstall-windows.ps1
+          case "$GITHUB_REF_NAME" in
+            server-*) ;;  # the server installs it with `datalab server install`
+            *)
+              cp installer/macos/install.sh assets/install-macos.sh
+              cp installer/macos/uninstall.sh assets/uninstall-macos.sh
+              cp installer/windows/install.ps1 assets/install-windows.ps1
+              cp installer/windows/uninstall.ps1 assets/uninstall-windows.ps1
+              ;;
+          esac
           cp backend/dist/*.whl backend/dist/requirements.txt assets/
           # Every image this release runs, pinned by digest. The gateway and
           # research proxy are upstream images pinned in the code.
@@ -304,9 +315,15 @@ jobs:
         run: |
           mv assets/notes.md notes.md
           prerelease=""
-          case "$GITHUB_REF_NAME" in *-*) prerelease="--prerelease" ;; esac
+          title="DataLab $GITHUB_REF_NAME"
+          case "$GITHUB_REF_NAME" in
+            # Never "latest": the install pages' links follow that.
+            server-*) prerelease="--prerelease --latest=false"
+              title="DataLab server ${GITHUB_REF_NAME#server-}" ;;
+            *-*) prerelease="--prerelease" ;;
+          esac
           gh release create "$GITHUB_REF_NAME" $prerelease \
             --repo "$GITHUB_REPOSITORY" \
-            --title "DataLab $GITHUB_REF_NAME" \
+            --title "$title" \
             --notes-file notes.md \
             assets/*

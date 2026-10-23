@@ -170,8 +170,18 @@ class Release:
         return (self.wheel, self.requirements, self.images)
 
 
-def releases_from(raw: Any, repository: str) -> tuple[list[Release], list[str]]:
-    """The releases GitHub listed that an update could install, and why each other was skipped."""
+# The lab's shared DataLab (a server) has releases of its own, tagged
+# "server-v0.4.0": a person's computer never installs them. Its DataLab, and
+# every older one, skips them, because the tag isn't a version (`_release`).
+SERVER_TAG_PREFIX = "server-"
+
+
+def releases_from(
+    raw: Any, repository: str, *, tag_prefix: str = ""
+) -> tuple[list[Release], list[str]]:
+    """The releases GitHub listed that an update could install, and why each
+    other was skipped. `tag_prefix`: only tags that start with it, read as the
+    version after it (SERVER_TAG_PREFIX: the server's own releases)."""
     found: list[Release] = []
     skipped: list[str] = []
     if not isinstance(raw, list):
@@ -182,7 +192,9 @@ def releases_from(raw: Any, repository: str) -> tuple[list[Release], list[str]]:
         tag = str(item.get("tag_name") or "")
         if item.get("draft"):
             continue
-        release, why = _release(item, tag, repository)
+        if tag_prefix and not tag.startswith(tag_prefix):
+            continue
+        release, why = _release(item, tag, repository, tag_prefix)
         if release is None:
             skipped.append(f"{tag or '(no tag)'}: {why}")
         else:
@@ -642,8 +654,10 @@ def _offered(result: CheckResult) -> tuple[str, str | None]:
 # ------------------------------------------------------------------ helpers
 
 
-def _release(item: dict[str, Any], tag: str, repository: str) -> tuple[Release | None, str]:
-    version = parse_version(tag)
+def _release(
+    item: dict[str, Any], tag: str, repository: str, tag_prefix: str = ""
+) -> tuple[Release | None, str]:
+    version = parse_version(tag.removeprefix(tag_prefix))
     if version is None:
         return None, "the tag isn't a version"
     assets: dict[str, Asset] = {}

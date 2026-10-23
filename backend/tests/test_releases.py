@@ -671,3 +671,18 @@ def test_stopping_ends_the_hourly_thread_at_once(tmp_path, github):
     hourly.stop(timeout=5)
     assert not thread.is_alive()
     assert github.requests == []
+
+
+def test_a_computer_never_sees_the_servers_releases(tmp_path, github):
+    """The lab's shared DataLab is released as server-v… (a separate line): a
+    computer's DataLab skips those, and `datalab server install` sees only them."""
+    github.release("v0.3.0-beta.13", prerelease=True, version="0.3.0b13")
+    github.release("server-v0.4.0", prerelease=True, version="0.4.0")
+    found = checker(tmp_path, github, current="0.3.0b12").check()
+    assert found.release is not None and found.release.version == "0.3.0b13"
+    raw = releases.ReleaseSource(REPO, http=github.client()).list()
+    desktop, skipped = releases.releases_from(raw, REPO)
+    assert [r.tag for r in desktop] == ["v0.3.0-beta.13"]
+    assert any(s.startswith("server-v0.4.0") for s in skipped)
+    server, _ = releases.releases_from(raw, REPO, tag_prefix=releases.SERVER_TAG_PREFIX)
+    assert [(r.tag, r.version) for r in server] == [("server-v0.4.0", "0.4.0")]

@@ -1208,6 +1208,21 @@ left it.
 
 ## For the maintainer: releasing
 
+**Two release lines (from 2026-10-23).**
+- **People's computers stay on 0.3.** The last release is `v0.3.0-beta.13`.
+  Its code is the `desktop-0.3` branch: fix it there, and tag `v0.3.0-…`
+  from there, if it needs a fix.
+- **`main` is the lab's shared DataLab, 0.4 on.** It's released as
+  `server-v0.4.0`, `server-v0.4.1`, …, which a computer's DataLab never
+  installs: to it the tag isn't a version, so its update check skips it.
+  - These releases carry no installers and are never marked "latest".
+  - The server installs one with `datalab server install --version 0.4.0`,
+    which reads only `server-v…` tags.
+- **Never tag `main` as `v…`.** Every computer on the beta channel would be
+  offered the server's code. This happened with `v0.3.0-beta.14` and `.15`,
+  whose releases were deleted. Releases are immutable once published: they
+  can be deleted, but not turned back into drafts or edited.
+
 - Tagging a release makes GitHub Actions:
   - run all checks, including the upgrade-and-rollback test;
   - build the app with the frontend included;
