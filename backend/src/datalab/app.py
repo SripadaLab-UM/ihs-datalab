@@ -67,6 +67,7 @@ from datalab.relay import build_relay_router
 from datalab.relay.policy import model_allowed
 from datalab.releases import HourlyCheck, UpdateChecker
 from datalab.repos.github import GitHubAuth
+from datalab.repos.sign_in_sync import RepoSyncOnSignIn
 from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions import helper
@@ -418,20 +419,19 @@ def create_app(
     access_log.who = _who(connection, conversations, app.state.playgrounds)
     app.include_router(sql_router)
     app.include_router(build_github_router(GitHubServices(settings, github)))
-    app.include_router(
-        build_knowledge_router(
-            KnowledgeServices(
-                settings,
-                connection,
-                conversations,
-                sessions,
-                auth=github,
-                suggestions=kb_suggestions,
-                # The catalog comes from the knowledge base: read again after a sync.
-                on_sync=catalog_source.refresh if catalog_source is not None else None,
-            )
+    knowledge_router = build_knowledge_router(
+        KnowledgeServices(
+            settings,
+            connection,
+            conversations,
+            sessions,
+            auth=github,
+            suggestions=kb_suggestions,
+            # The catalog comes from the knowledge base: read again after a sync.
+            on_sync=catalog_source.refresh if catalog_source is not None else None,
         )
     )
+    app.include_router(knowledge_router)
     app.include_router(workflows_router)
     app.include_router(pipelines)
     app.include_router(
@@ -587,7 +587,16 @@ def create_app(
     )
     if web_sessions is not None:
         mount_github_sign_in(
-            app, github_web, web_sessions, base=site_base, cookie=cookie, audit=access_log
+            app,
+            github_web,
+            web_sessions,
+            base=site_base,
+            cookie=cookie,
+            audit=access_log,
+            on_sign_in=RepoSyncOnSignIn(
+                knowledge_router.knowledge,  # type: ignore[attr-defined]
+                pipelines.pipelines,  # type: ignore[attr-defined]
+            ),
         )
     # Last, so the web UI's catch-all route never shadows the API.
     mount_web_ui(

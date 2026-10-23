@@ -1079,6 +1079,11 @@ Never the keychain or the environment: the systemd unit hands them over with
   can write to `access_repo` (re-checked as their sign-in is refreshed),
   and, while `open_to = "admins"`, only if they're in `admins`. The cookie
   is `Secure`, `HttpOnly`, `SameSite=Lax`, scoped to `base_path`.
+- **The lab's repos** (`[repos] knowledge`, `pipelines`) are cloned and
+  synced with the signed-in person's GitHub sign-in: the first sign-in
+  clones them, and later sign-ins sync them again (at most every 10
+  minutes), in the background (`repos/sign_in_sync.py`). A server has no
+  installer to do it.
 
 ### People, kept apart
 

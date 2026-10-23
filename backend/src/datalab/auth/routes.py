@@ -9,12 +9,14 @@ code, which the page explains (frontend SignedOut).
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse
 
 from datalab.auth.github_web import STATE_COOKIE, STATE_SECONDS, GitHubWebSignIn, Refused
 from datalab.auth.sessions import WebSessions
+from datalab.auth.users import User
 from datalab.data.access_log import AccessLog
 from datalab.web import CookieRules
 
@@ -29,9 +31,12 @@ def mount_github_sign_in(
     base: str,
     cookie: CookieRules,
     audit: AccessLog | None = None,
+    on_sign_in: Callable[[User], None] | None = None,
 ) -> None:
     """`sign_in` is None when the server's GitHub client secret or token key
-    isn't in place yet: the sign-in page says it isn't set up."""
+    isn't in place yet: the sign-in page says it isn't set up. `on_sign_in`
+    runs after each sign-in (it must return at once: it starts the lab
+    repos' sync in the background)."""
     state_rules = CookieRules(path=f"{base}/auth/", secure=cookie.secure, samesite="lax")
 
     def signed_out(reason: str) -> RedirectResponse:
@@ -72,6 +77,11 @@ def mount_github_sign_in(
         log.info("signed in with GitHub: %s", user.login)
         if audit is not None:
             audit.record_sign_in("sign_in", user.login, user.id, admin=user.admin)
+        if on_sign_in is not None:
+            try:
+                on_sign_in(user)
+            except Exception:
+                log.exception("after signing in %s", user.login)
         response = RedirectResponse(f"{base}/", status_code=303)
         response.delete_cookie(STATE_COOKIE, **state_rules.kwargs())  # type: ignore[arg-type]
         response.set_cookie(sessions.cookie_name, sessions.start(user), **cookie.kwargs())  # type: ignore[arg-type]
