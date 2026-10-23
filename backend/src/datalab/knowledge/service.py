@@ -475,10 +475,13 @@ class Knowledge:
         except Exception:  # the sync itself worked
             log.exception("couldn't read the catalog again after the sync")
 
-    def _fresh_token(self) -> None:
+    def _fresh_token(self) -> str | None:
+        """A fresh token for the next git command. On the lab's server git
+        gets it from here, for that one command (repos/git.py); on a person's
+        computer it's None, and git asks the credential helper."""
         if self.auth is None:
             raise SignInNeeded("Sign in to GitHub first.")
-        self.auth.token_for_git()
+        return self.auth.token_for_git()
 
     # The copy in each conversation ------------------------------------------
 
