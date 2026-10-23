@@ -91,8 +91,10 @@ export function Brand({ practice }: { practice: boolean }) {
  * hash as index.html names the real one's (brandIcons.ts), so a browser never
  * keeps an old icon after an update. */
 export function practiceIcon(href: string): string {
-  const path = href.split("?")[0].replace(/^\/(favicon|apple-touch-icon)(?!-practice)/, "/$1-practice");
-  return __BRAND_ICONS__[path] ?? path;
+  // "./favicon.svg?v=…" in a build (relative, for any base path), "/favicon.svg" in development.
+  const [, dot = "", path = ""] = /^(\.?)(.*)$/.exec(href.split("?")[0]) ?? [];
+  const practice = path.replace(/^\/(favicon|apple-touch-icon)(?!-practice)/, "/$1-practice");
+  return dot + (__BRAND_ICONS__[practice] ?? practice);
 }
 
 /** On practice, the tab's icon and title say so too, so a practice tab

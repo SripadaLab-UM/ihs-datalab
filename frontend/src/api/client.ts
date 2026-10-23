@@ -14,10 +14,13 @@ import { safetyApi } from "./safety";
 export { ApiError, type FeatureStatus, SIGNED_OUT } from "./http";
 export type { Health } from "./health";
 export type {
+  Compute,
+  ComputeChoice,
   Conversation,
   DataSource,
   Effort,
   FileLoad,
+  HighCompute,
   Mode,
   Models,
   PlanSchema,

@@ -7,10 +7,10 @@ from tests.conftest import FakeDatabase
 JSON = {"content-type": "application/json"}
 
 
-def make(settings, catalog, tmp_path):
+def make(settings, catalog, tmp_path, index="<html><head></head><body>DataLab</body></html>"):
     dist = tmp_path / "dist"
     (dist / "assets").mkdir(parents=True)
-    (dist / "index.html").write_text("<html>DataLab</html>")
+    (dist / "index.html").write_text(index)
     (dist / "assets" / "app.js").write_text("console.log(1)")
     (dist / "favicon.svg").write_text("<svg/>")
     (dist / "apple-touch-icon-practice.png").write_bytes(b"png")
@@ -89,7 +89,7 @@ def test_web_ui_serves_files_and_falls_back_to_index(settings, catalog, tmp_path
     with TestClient(app) as client:
         assert client.get("/assets/app.js").text == "console.log(1)"
         page = client.get("/workspace/c_123")
-        assert page.text == "<html>DataLab</html>"
+        assert "<body>DataLab</body>" in page.text
         # The page always revalidates, so an update shows on the next load.
         assert page.headers["cache-control"] == "no-cache"
         assert client.get("/index.html").headers["cache-control"] == "no-cache"
@@ -210,15 +210,18 @@ def test_streams_learn_the_session_ended(settings):
     from datalab.web import ended_since
 
     browser = BrowserSession(settings.port)
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(browser=browser)))
+    cookie = browser.redeem(browser.sign_in_path().split("token=")[1])
+    app = SimpleNamespace(state=SimpleNamespace(browser=browser))
+    request = SimpleNamespace(app=app, cookies={browser.cookie_name: cookie})
     ended = ended_since(request)  # type: ignore[arg-type]
     assert not ended()
     browser.end()
     assert ended()
-    # A stream opened after the end follows the new session.
-    assert not ended_since(request)()  # type: ignore[arg-type]
-    # No browser session (a router tested on its own): never ended.
-    assert not ended_since(SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace())))()  # type: ignore[arg-type]
+    # A stream that didn't open signed in (a router tested on its own) never ends.
+    assert not ended_since(SimpleNamespace(app=app, cookies={}))()  # type: ignore[arg-type]
+    # No browser session at all: never ended.
+    alone = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), cookies={})
+    assert not ended_since(alone)()  # type: ignore[arg-type]
 
 
 def test_session_activity_says_what_is_still_going(settings, catalog, tmp_path):
@@ -230,3 +233,38 @@ def test_session_activity_says_what_is_still_going(settings, catalog, tmp_path):
         }
         app.state.services.sessions._starting.add("c1")
         assert client.get("/api/session/activity").json()["agent_turn"] is True
+
+
+def test_on_the_labs_server_datalab_lives_under_its_base_path(settings, catalog, tmp_path):
+    from dataclasses import replace
+
+    from datalab.config import ServerSettings
+
+    server = ServerSettings(public_url="https://lab.example.edu")
+    app, browser = make(replace(settings, deployment="server", server=server), catalog, tmp_path)
+    with TestClient(app) as client:
+        # The page names where it lives, so its relative paths resolve there.
+        assert '<base href="/datalab/" />' in client.get("/workspace/c_1").text
+        signed_in = client.get(browser.sign_in_path(), follow_redirects=False)
+        assert signed_in.headers["location"] == "/datalab/"
+        cookie = signed_in.headers["set-cookie"].lower()
+        assert "path=/datalab/" in cookie and "secure" in cookie and "samesite=lax" in cookie
+        # On a server the practice link signs in the local user, as a server sign-in.
+        client.cookies.set("datalab_session", signed_in.cookies["datalab_session"])
+        assert client.get("/api/session/me").json() == {
+            "login": "local", "name": "local", "admin": True, "deployment": "server",
+        }  # fmt: skip
+        # Behind Apache the browser's origin is the site's, not what reaches DataLab.
+        local = {**JSON, "origin": "http://testserver"}
+        assert client.post("/api/session/end", headers=local).status_code == 403
+        site = {**JSON, "origin": "https://lab.example.edu"}
+        assert client.post("/api/session/end", headers=site).status_code == 204
+        # Signed out: that sign-in no longer works.
+        assert client.get("/api/conversations").status_code == 401
+        assert client.get("/api/conversations").json()["detail"] == "Sign in with GitHub."
+
+
+def test_a_desktop_page_has_its_base_at_the_root(settings, catalog, tmp_path):
+    app, _ = make(settings, catalog, tmp_path)
+    with TestClient(app) as client:
+        assert '<base href="/" />' in client.get("/").text

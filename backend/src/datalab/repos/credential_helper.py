@@ -20,6 +20,7 @@ fresh before it runs git.
 
 from __future__ import annotations
 
+import os
 import sys
 from collections.abc import Callable
 
@@ -54,6 +55,11 @@ def answer(operation: str, request: dict[str, str], token: Callable[[], str | No
 
 
 def _saved_token() -> str | None:
+    # The lab's server hands the acting person's token to this one git
+    # command (repos/git.py); a person's computer keeps it in the keychain.
+    given = os.environ.get("DATALAB_GIT_TOKEN")
+    if given:
+        return given
     tokens = TokenStore().load()
     return tokens.access_token if tokens else None
 

@@ -35,9 +35,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from datalab.api.access import mine
 from datalab.config import Settings
 from datalab.knowledge import check as kb
 from datalab.knowledge.edits import Edit, EditRefused
@@ -55,6 +56,7 @@ from datalab.knowledge.suggestions import KbSuggestions, SuggestionInvalid
 from datalab.repos.github import Account, GitHubAuth, GitHubUnavailable, SignInNeeded
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
+from datalab.web import current_user
 
 
 @dataclass(frozen=True)
@@ -416,9 +418,10 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         return [KbCommitOut(**vars(c)) for c in await run(lambda: knowledge.history(limit))]
 
     @router.get("/proposals")
-    async def proposals(conversation_id: str | None = None) -> list[ProposalOut]:
+    async def proposals(request: Request, conversation_id: str | None = None) -> list[ProposalOut]:
+        """The signed-in person's conversations' proposals (api/access.py)."""
         found = await run(lambda: knowledge.store.list(conversation_id))
-        return [_summary(p) for p in found]
+        return [_summary(p) for p in found if mine(request, p.conversation_id)]
 
     @router.get("/proposals/{proposal_id}")
     async def proposal(proposal_id: str) -> ProposalDetail:
@@ -451,8 +454,10 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         return _edit_out(knowledge, edit)
 
     @router.get("/edits")
-    async def open_edits() -> list[EditSummaryOut]:
-        found = await run(lambda: (knowledge.require_available(), edits.store.list_open())[1])
+    async def open_edits(request: Request) -> list[EditSummaryOut]:
+        """The signed-in person's own open edits."""
+        owner = current_user(request).id
+        found = await run(lambda: (knowledge.require_available(), edits.store.list_open(owner))[1])
         return [
             EditSummaryOut(
                 id=e.id,
@@ -466,8 +471,9 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         ]
 
     @router.post("/edits")
-    async def start_edit(body: StartEditIn) -> EditOut:
-        return await run(lambda: detail(edits.start(body.path, new=body.new)))
+    async def start_edit(body: StartEditIn, request: Request) -> EditOut:
+        owner = current_user(request).id
+        return await run(lambda: detail(edits.start(body.path, new=body.new, owner_id=owner)))
 
     @router.get("/edits/{edit_id}")
     async def get_edit(edit_id: str) -> EditOut:
@@ -522,7 +528,9 @@ def build_knowledge_router(services: KnowledgeServices) -> APIRouter:
         found = suggestions.get(conversation_id, suggestion_id)
         if found["status"] != "open":
             raise EditRefused(f"This suggestion was {found['status']} already.")
-        edit = edits.from_suggestion(conversation_id, found)
+        # The conversation's owner's: Remember in Knowledge accepts outside a request.
+        owner = services.conversations.owner_of(conversation_id) or 1
+        edit = edits.from_suggestion(conversation_id, found, owner_id=owner)
         suggestions.mark(conversation_id, suggestion_id, "accepted", edit_id=edit.id)
         return edit
 

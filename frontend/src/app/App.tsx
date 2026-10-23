@@ -1,7 +1,10 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from "react-router";
 
+import { api } from "@/api/client";
+import { GitHubSignIn } from "@/app/SignIn";
 import { HelpPage } from "@/features/help/HelpPage";
+import { BASE } from "@/lib/base";
 import { KnowledgePage } from "@/features/knowledge/KnowledgePage";
 import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
@@ -19,7 +22,7 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={BASE || undefined}>
         <Routes>
           {/* Outside the shell: after End session, nothing here may call the API. */}
           <Route path="session-ended" element={<SessionEnded />} />
@@ -43,6 +46,9 @@ export function App() {
 }
 
 function SignedOut() {
+  const health = useQuery({ queryKey: ["health"], queryFn: api.health });
+  const [params] = useSearchParams();
+  if (health.data?.deployment === "server") return <GitHubSignIn reason={params.get("reason")} />;
   return (
     <div className="flex h-full items-center justify-center text-muted">
       This sign-in link has already been used. Open DataLab from its launcher.

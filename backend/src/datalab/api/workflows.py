@@ -40,18 +40,20 @@ from pydantic import BaseModel, Field
 
 from datalab import export_folders, safeyaml
 from datalab.api.pipelines import PipelineFindingOut
+from datalab.auth.users import LOCAL
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, check_owner
 from datalab.data.catalog import Catalog
 from datalab.data.service import DataService
 from datalab.data.sqlcheck import MAX_SQL_BYTES
+from datalab.downloads import Downloads
 from datalab.exports import DestinationStore
 from datalab.pipelines.check import check as data_check
 from datalab.pipelines.service import NotActionable, NotAvailable, NotFound, Pipelines
 from datalab.repos.git import GitError
 from datalab.repos.github import GitHubUnavailable, SignInNeeded
 from datalab.sessions.containers import instance_of
-from datalab.web import ended_since
+from datalab.web import current_user, ended_since
 from datalab.workflows.drafts import (
     MAX_QUERIES,
     DraftQuery,
@@ -455,6 +457,11 @@ class _Mapping:
 # ------------------------------------------------------------------ router
 
 
+class DownloadOut(BaseModel):
+    url: str  # where the browser downloads it
+    name: str  # the .zip's name
+
+
 def build_workflows_router(services: WorkflowServices) -> APIRouter:
     settings = services.settings
     folder = workflows_folder(settings)
@@ -564,15 +571,27 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             valid=True, problems=[], workflow=_workflow_out("", workflow, runner, None)
         )
 
+    def claim(run_id: str, request: Request) -> None:
+        """A run this request started is the signed-in person's."""
+        user = current_user(request)
+        if user.id != LOCAL.id:
+            runner.store.claim(run_id, user.id, f"{user.display_name} (@{user.login})")
+
     @router.get("/runs")
-    def list_runs(path: str | None = None, limit: int = 100) -> list[WorkflowRunOut]:
-        rows = runner.store.list_runs(path, limit=max(1, min(limit, 500)))
+    def list_runs(
+        request: Request, path: str | None = None, limit: int = 100
+    ) -> list[WorkflowRunOut]:
+        """The signed-in person's own runs (api/access.py)."""
+        rows = runner.store.list_runs(
+            path, limit=max(1, min(limit, 500)), owner_id=current_user(request).id
+        )
         return [WorkflowRunOut.model_validate(_run_fields(r)) for r in rows]
 
     @router.post("/runs", status_code=201)
-    async def start(body: StartIn) -> WorkflowRunOut:
+    async def start(body: StartIn, request: Request) -> WorkflowRunOut:
         try:
             run_id = await runner.start(body.path, body.params, seed=body.seed)
+            claim(run_id, request)
         except SourceError as error:
             raise HTTPException(404, str(error)) from error
         except WorkflowInvalid as error:
@@ -623,11 +642,12 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         )
 
     @router.post("/runs/{run_id}/again", status_code=201)
-    async def run_again(run_id: str) -> WorkflowRunOut:
+    async def run_again(run_id: str, request: Request) -> WorkflowRunOut:
         """The current workflow file afresh: today's data, the same parameters and seed."""
         run_or_404(run_id)
         try:
             new_id = await runner.run_again(run_id)
+            claim(new_id, request)
         except SourceError as error:
             raise HTTPException(404, f"The workflow file isn't there any more: {error}") from error
         except WorkflowInvalid as error:
@@ -644,13 +664,14 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         return ReplayCheckOut(exact=check.exact, reasons=check.reasons, blocking=check.blocking)
 
     @router.post("/runs/{run_id}/replay", status_code=201)
-    async def replay(run_id: str, body: ReplayIn) -> WorkflowRunOut:
+    async def replay(run_id: str, body: ReplayIn, request: Request) -> WorkflowRunOut:
         """The original definition, extracts, image and seed, run again."""
         run_or_404(run_id)
         try:
             new_id = await runner.replay(
                 run_id, allow_inexact=body.allow_inexact, deliver=body.deliver
             )
+            claim(new_id, request)
         except ReplayNotExact as error:
             raise HTTPException(
                 409, {"message": "This Replay can't be exact.", "reasons": error.reasons}
@@ -660,6 +681,32 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         except RunRefused as error:
             raise HTTPException(409, str(error)) from error
         return WorkflowRunOut.model_validate(_run_fields(run_or_404(new_id)))
+
+    @router.post("/runs/{run_id}/download")
+    def download_delivery(run_id: str, request: Request) -> DownloadOut:
+        """The lab's server: a run's delivery, kept there, as a .zip for the browser."""
+        run_or_404(run_id)
+        kept = settings.data_dir / "deliveries"
+        delivered = [
+            d
+            for d in RunStore(services.database).deliveries(run_id)
+            if d.get("destination_name") == export_folders.SERVER_DELIVERIES_NAME
+        ]
+        folder = Path(delivered[-1]["folder"]) if delivered else None
+        if (
+            folder is None
+            or not folder.is_dir()
+            or not folder.resolve().is_relative_to(kept.resolve())
+        ):
+            raise HTTPException(404, "This run has no delivery on the lab's DataLab to download.")
+        made = Downloads(settings.data_dir).make(
+            current_user(request).id,
+            folder,
+            files=len(delivered[-1].get("files") or []),
+            session_id=run_id,
+            keep=True,
+        )
+        return DownloadOut(url=made.url, name=made.name)
 
     @router.get("/runs/{run_id}/delivery")
     def delivery(run_id: str) -> DeliveryStatusOut:
@@ -702,6 +749,11 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
     @router.put("/destinations/{key}", status_code=204)
     def set_destination_key(key: str, body: SetDestinationKey) -> None:
         """Map a destination key to one of this computer's export folders."""
+        if settings.on_server:
+            raise HTTPException(
+                409,
+                "On the lab's DataLab, every delivery is kept there, and downloaded from its run.",
+            )
         if practice:
             raise HTTPException(403, "Practice DataLab delivers only to its own practice folder.")
         if not _KEY.fullmatch(key):
@@ -1065,7 +1117,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
         await runner.forget_tests(name)
 
     @router.post("/test-runs", status_code=201)
-    async def test_run(body: TestRunIn) -> WorkflowRunOut:
+    async def test_run(body: TestRunIn, request: Request) -> WorkflowRunOut:
         """Run a draft on practice data, without saving it and without delivering."""
         if not practice:
             raise HTTPException(
@@ -1075,6 +1127,7 @@ def build_workflows_router(services: WorkflowServices) -> APIRouter:
             )
         try:
             run_id = await runner.start_test(body.text, body.params, seed=body.seed)
+            claim(run_id, request)
         except SourceError as error:
             raise HTTPException(422, str(error)) from error
         except WorkflowInvalid as error:

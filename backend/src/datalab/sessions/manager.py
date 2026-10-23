@@ -24,10 +24,15 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from datalab.config import Settings
+from datalab.sessions import compute as compute_module
 from datalab.sessions import modes, mounts, seeds, turns, workfiles
 from datalab.sessions.approvals import Approvals
 from datalab.sessions.checkpoints import CheckpointMissing, Checkpoints, RestoreResult
-from datalab.sessions.containers import SessionContainers, SessionPaths, instance_of
+from datalab.sessions.containers import (
+    SessionContainers,
+    SessionPaths,
+    instance_of,
+)
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.hooks import AfterTurnHook, MountProvider, TurnInfo, WorkspaceSeed
 from datalab.sessions.inputs import AttachmentStore
@@ -36,7 +41,7 @@ from datalab.sessions.plans import PlanStore
 from datalab.sessions.review import review_turn, trace_turn
 from datalab.sessions.runtime import SessionRuntime
 from datalab.sessions.seeds import Seed
-from datalab.sessions.store import Conversation, ConversationStore, Event
+from datalab.sessions.store import Compute, Conversation, ConversationStore, Event
 from datalab.sessions.tokens import SessionTokens, tools_for_sources
 from datalab.sessions.tracing import Source
 
@@ -118,6 +123,10 @@ class SessionManager:
         self._attachments = attachments
         self._idle_seconds = idle_seconds
         self._max_running = max_running
+        self._computes: dict[str, Compute] = {}
+        # High compute: which slot of the other machine's cores each running
+        # conversation's agent has (compute.HighComputeSettings.cpu_slots).
+        self._cpu_slots: dict[str, int] = {}
         self._runtimes: dict[str, SessionRuntime] = {}
         self._last_used: dict[str, float] = {}
         self._turns: dict[str, asyncio.Task[None]] = {}
@@ -181,7 +190,23 @@ class SessionManager:
         self._mount_providers.append((provider, tuple(roots)))
 
     def paths(self, conversation_id: str) -> SessionPaths:
-        return SessionPaths(self._settings.data_dir / "sessions" / conversation_id)
+        return SessionPaths(
+            compute_module.session_root(
+                self._settings, conversation_id, self._compute(conversation_id)
+            )
+        )
+
+    def _compute(self, conversation_id: str) -> Compute:
+        """Where the conversation runs. Set when it's made and never changed,
+        so remembered once known."""
+        known = self._computes.get(conversation_id)
+        if known is not None:
+            return known
+        conversation = self._store.get(conversation_id)
+        if conversation is None:
+            return "standard"
+        self._computes[conversation_id] = conversation.compute
+        return conversation.compute
 
     def checkpoints(self, conversation_id: str) -> Checkpoints:
         paths = self.paths(conversation_id)
@@ -436,7 +461,9 @@ class SessionManager:
         """Delete a conversation and its workspace. Only the user does this."""
         await self._shutdown(conversation_id)
         runtime_paths = self.paths(conversation_id)
-        await self._containers_for(conversation_id, "data").remove()
+        await self._containers_for(
+            conversation_id, "data", compute=self._compute(conversation_id)
+        ).remove()
         self._tokens.set_express(conversation_id, False)
         self._store.delete(conversation_id)
         shutil.rmtree(runtime_paths.root, ignore_errors=True)
@@ -465,24 +492,57 @@ class SessionManager:
 
     # ------------------------------------------------------------------------
 
-    def _containers(self, conversation: Conversation) -> SessionContainers:
+    def _containers(self, conversation: Conversation, *, pin: bool = False) -> SessionContainers:
+        """The conversation's containers. `pin`: for a runtime about to start
+        its agent, which then gets a slot of the cores, if there are any."""
         return self._containers_for(
-            conversation.id, conversation.kind, processed="dropbox" in self.sources_of(conversation)
+            conversation.id,
+            conversation.kind,
+            processed="dropbox" in self.sources_of(conversation),
+            compute=conversation.compute,
+            cpuset=self._cpu_slot(conversation) if pin else None,
         )
 
+    def _cpu_slot(self, conversation: Conversation) -> str | None:
+        """A free slot of the high-compute machine's cores for this
+        conversation's agent; None for a standard one, or when none is set
+        (or free: it then runs unpinned, within its CPU limit)."""
+        high = compute_module.high_compute(self._settings)
+        if conversation.compute != "high" or high is None or not high.cpu_slots:
+            return None
+        slot = self._cpu_slots.get(conversation.id)
+        if slot is None:
+            taken = set(self._cpu_slots.values())
+            free = [i for i in range(len(high.cpu_slots)) if i not in taken]
+            if not free:
+                log.warning("no free cores to pin %s to", conversation.id)
+                return None
+            slot = self._cpu_slots[conversation.id] = free[0]
+        return high.cpu_slots[slot]
+
     def _containers_for(
-        self, conversation_id: str, kind, *, processed: bool = False
+        self,
+        conversation_id: str,
+        kind,
+        *,
+        processed: bool = False,
+        compute: Compute = "standard",
+        cpuset: str | None = None,
     ) -> SessionContainers:
         return SessionContainers(
             conversation_id,
             kind,
-            self.paths(conversation_id),
+            SessionPaths(compute_module.session_root(self._settings, conversation_id, compute)),
             agent_image=self._settings.agent_image,
             host_port=self._settings.port,
             profile=self._settings.profile,
             instance=instance_of(self._settings.data_dir),
+            limits=compute_module.limits_for_compute(self._settings, compute),
             extra_mounts=lambda: self._extra_mounts(conversation_id),
             processed=processed,
+            engine=compute_module.engine_for(self._settings, compute),
+            agent_env=tuple(compute_module.limit_env(self._settings, compute)),
+            cpuset=cpuset,
         )
 
     def sources_of(self, conversation: Conversation) -> tuple[str, ...]:
@@ -559,14 +619,15 @@ class SessionManager:
                 conversation.id,
                 conversation.kind,
                 paths,
-                self._containers(conversation),
+                self._containers(conversation, pin=True),
                 self._tokens,
                 model=conversation.model,
                 developer_instructions=modes.instructions(
                     conversation.mode,
                     knowledge_base=self.seeds_into("kb", conversation.mode),
                     data_sources=sources,
-                ),
+                )
+                + compute_module.resources_note(self._settings, conversation.compute),
                 tool_timeout_seconds=int(self._settings.limits.deadline_seconds) + 60,
                 emit=emit,
                 approvals=self._approvals,
@@ -730,14 +791,20 @@ class SessionManager:
         await review_turn(self._store, self.plans, runtime, conversation_id, since, question)
 
     async def _make_room(self, keep: str) -> None:
-        """Stop the least recently used idle conversation if too many are running."""
-        running = [c for c in self._runtimes if c != keep]
-        while len(running) + 1 > self._max_running:
+        """Stop the least recently used idle conversation if too many are running.
+
+        Standard and high-compute conversations are counted apart: they run
+        on different machines, each with its own limit."""
+        mine = self._compute(keep)
+        high = compute_module.high_compute(self._settings)
+        limit = high.max_running if mine == "high" and high is not None else self._max_running
+        which = "high-compute conversations" if mine == "high" else "conversations"
+        running = [c for c in self._runtimes if c != keep and self._compute(c) == mine]
+        while len(running) + 1 > limit:
             idle = [c for c in running if not self.is_busy(c)]
             if not idle:
                 raise Busy(
-                    f"{self._max_running} conversations are already working. "
-                    "Wait for one to finish, or stop one."
+                    f"{limit} {which} are already working. Wait for one to finish, or stop one."
                 )
             oldest = min(idle, key=lambda c: self._last_used.get(c, 0))
             await self._shutdown(oldest)
@@ -761,5 +828,7 @@ class SessionManager:
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
         runtime = self._runtimes.pop(conversation_id, None)
+        # Its cores are free again once its agent has stopped (below).
+        self._cpu_slots.pop(conversation_id, None)
         if runtime:
             await runtime.close()

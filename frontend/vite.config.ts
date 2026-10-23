@@ -15,6 +15,11 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const backend = process.env.DATALAB_URL ?? "http://127.0.0.1:8766";
 
 export default defineConfig({
+  // Relative asset paths, so one build serves at the site's root (a person's
+  // computer) or under a path (the lab's server, /datalab/): the backend puts
+  // the matching <base href> in index.html (web.py), and src/lib/base.ts
+  // prefixes what DataLab asks for.
+  base: "./",
   plugins: [react(), tailwindcss(), brandIcons()],
   resolve: { alias: { "@": "/src" } },
   server: {

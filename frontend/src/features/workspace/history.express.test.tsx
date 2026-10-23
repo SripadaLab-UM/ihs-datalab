@@ -21,7 +21,7 @@ vi.mock("@/api/client", () => {
 
 const conversation: Conversation = {
   id: "c1", kind: "data", mode: "analysis", title: "t", model: "m",
-  created_at: "", updated_at: "", rigor_review: false, express: false, data_sources: ["database"], busy: false,
+  created_at: "", updated_at: "", rigor_review: false, express: false, data_sources: ["database"], compute: "standard", busy: false,
 }; // prettier-ignore
 
 it("labels the checkpoint after an Express turn", async () => {

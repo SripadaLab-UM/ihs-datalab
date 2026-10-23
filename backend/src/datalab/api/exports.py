@@ -19,12 +19,16 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from datalab import export_folders, exports
+from datalab.auth.acting import acting_user
+from datalab.auth.users import LOCAL_ID
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog
+from datalab.downloads import Download, Downloads
 from datalab.export_folders import Location, Provider, Status
 from datalab.exports import Destination, DestinationStore, ExportError, ExportSource
 from datalab.sessions import picker
@@ -34,6 +38,7 @@ from datalab.sessions.inputs import AttachmentStore, NotAttachable, _same
 from datalab.sessions.manager import SessionManager
 from datalab.sessions.store import ConversationStore
 from datalab.sessions.titles import scrub_title
+from datalab.web import current_user
 
 PRACTICE_DESTINATION = export_folders.PRACTICE_ID
 PRACTICE_WHY = (
@@ -141,6 +146,8 @@ class ExportOut(BaseModel):
     saved_to: str  # "Saved to Lab Dropbox (on this computer)"
     sync_provider: Provider | None
     sync_note: str | None  # "Dropbox will upload them when its app is running and signed in. …"
+    # The lab's server: where the browser downloads the export (a .zip).
+    download_url: str | None = None
 
 
 def destination_out(settings: Settings, destination: Destination) -> DestinationOut:
@@ -191,9 +198,52 @@ def practice_destination_out(settings: Settings) -> DestinationOut:
     )
 
 
-def export_out(target: export_folders.Target, result: exports.ExportResult) -> ExportOut:
+def server_destination_out(settings: Settings) -> DestinationOut:
+    """The lab's server's one destination: the browser's own downloads."""
+    return DestinationOut(
+        id=export_folders.DOWNLOAD_ID,
+        name=export_folders.DOWNLOAD_NAME,
+        path="",
+        where="Your browser's downloads",
+        available=True,
+        status="ready",
+        status_message=None,
+        warning=None,
+        location="this_computer",
+        sync_provider=None,
+        sync_provider_name=None,
+        location_note=(
+            "Saved as a .zip your browser downloads. DataLab keeps it for a day, for you only."
+        ),
+        offered=True,
+        workflow_keys=[],
+    )
+
+
+SERVER_WHY = "On the lab's DataLab, exports are downloaded to your computer, not saved to folders."
+
+
+def made_download(
+    settings: Settings, target: export_folders.Target, result: exports.ExportResult, session_id: str
+) -> Download | None:
+    """An export to the lab's server's Download destination, zipped for the browser."""
+    if target.id != export_folders.DOWNLOAD_ID:
+        return None
+    person = acting_user()
+    return Downloads(settings.data_dir).make(
+        person.id if person else LOCAL_ID,
+        result.folder,
+        files=len(result.files),
+        session_id=session_id,
+    )
+
+
+def export_out(
+    target: export_folders.Target, result: exports.ExportResult, download: Download | None = None
+) -> ExportOut:
     return ExportOut(
-        folder=str(result.folder),
+        download_url=download.url if download else None,
+        folder=download.name if download else str(result.folder),
         files=result.files,
         destination_id=target.id or PRACTICE_DESTINATION,
         destination_name=target.name,
@@ -232,8 +282,30 @@ def build_exports_router(
             raise HTTPException(409, f"Another export folder is already called {name}.")
         return name
 
+    def not_on_server() -> None:
+        if settings.on_server:
+            raise HTTPException(409, SERVER_WHY)
+
+    @router.get("/downloads/{download_id}")
+    def download(download_id: str, request: Request) -> FileResponse:
+        """An export, as a .zip: only the person who made it, for a day."""
+        found = Downloads(settings.data_dir).get(current_user(request).id, download_id)
+        if found is None:
+            raise HTTPException(404, "This download has expired or isn't yours. Export again.")
+        audit.record_transfer(
+            "download", session_id=found.session_id, files=found.files, size=found.bytes
+        )
+        return FileResponse(
+            found.path,
+            media_type="application/zip",
+            filename=found.name,
+            headers={"cache-control": "no-store", "x-content-type-options": "nosniff"},
+        )
+
     @router.get("/export-destinations")
     def list_destinations() -> list[DestinationOut]:
+        if settings.on_server:
+            return [server_destination_out(settings)]
         if practice:
             return [practice_destination_out(settings)]
         return [destination_out(settings, d) for d in destinations.list()]
@@ -241,6 +313,8 @@ def build_exports_router(
     @router.get("/export-destinations/places")
     def places() -> PlacesOut:
         """Sync apps' folders found on this computer, by name, for the picker to open in."""
+        if settings.on_server:
+            return PlacesOut(can_add=False, why_not=SERVER_WHY, places=[])
         if practice:
             return PlacesOut(can_add=False, why_not=PRACTICE_WHY, places=[])
         return PlacesOut(
@@ -265,6 +339,7 @@ def build_exports_router(
         The browser never names the path: it can only say which found sync
         folder the picker opens in, and give the folder a name.
         """
+        not_on_server()
         if practice:
             raise HTTPException(403, PRACTICE_WHY)
         body = body or AddDestination()
@@ -299,6 +374,7 @@ def build_exports_router(
     @router.patch("/export-destinations/{destination_id}")
     def change_destination(destination_id: str, body: ChangeDestination) -> DestinationOut:
         """Rename a folder, or turn it on or off as a destination."""
+        not_on_server()
         destination = find(destination_id)
         if body.name is not None:
             destinations.rename(destination.id, name_or_422(body.name, other_than=destination.id))
@@ -313,6 +389,7 @@ def build_exports_router(
         That shows DataLab can save there on this computer. It says nothing
         about whether a sync app has uploaded anything.
         """
+        not_on_server()
         if practice:
             if destination_id != PRACTICE_DESTINATION:
                 raise HTTPException(404, "No such export folder.")
@@ -349,6 +426,7 @@ def build_exports_router(
     @router.delete("/export-destinations/{destination_id}", status_code=204)
     def remove_destination(destination_id: str) -> None:
         """Forget a destination. The folder, and files already exported there, are untouched."""
+        not_on_server()
         if practice or not destinations.remove(destination_id):
             raise HTTPException(404, "No such export folder.")
 
@@ -386,13 +464,13 @@ def build_exports_router(
         }
         report = body.report
 
-        def run() -> exports.ExportResult:
+        def run() -> tuple[exports.ExportResult, Download | None]:
             extra = {}
             if report is not None:
                 extra["conversation.html"] = exports.report_document(title, report.html, report.css)
             # Written inside the very folder that was checked.
             with export_folders.open_target(target) as opened:
-                return exports.export(
+                done = exports.export(
                     opened,
                     title=title,
                     tag=conversation.id,
@@ -400,9 +478,10 @@ def build_exports_router(
                     extra_files=extra,
                     about=about,
                 )
+            return done, made_download(settings, target, done, conversation_id)
 
         try:
-            result = await asyncio.to_thread(run)
+            result, download = await asyncio.to_thread(run)
         except (ExportError, UnsafePath, OSError) as error:
             raise HTTPException(422, f"The export didn't finish: {error}") from error
         audit.record_export(
@@ -414,9 +493,12 @@ def build_exports_router(
         store.append(
             conversation_id,
             "exported",
-            {"folder": str(result.folder), "files": len(result.files)},
+            {
+                "folder": download.name if download else str(result.folder),
+                "files": len(result.files),
+            },
         )
-        return export_out(target, result)
+        return export_out(target, result, download)
 
     return router
 

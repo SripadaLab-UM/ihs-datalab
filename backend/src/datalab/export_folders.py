@@ -52,6 +52,11 @@ Status = Literal["ready", "missing", "not_a_folder", "not_writable", "refused"]
 
 PRACTICE_ID = "practice"
 PRACTICE_NAME = "Practice exports"
+# The lab's server: an export is a download (downloads.py), and a workflow's
+# delivery stays on the server, for its run's page to download.
+DOWNLOAD_ID = "download"
+DOWNLOAD_NAME = "Download"
+SERVER_DELIVERIES_NAME = "the lab's DataLab"
 NAME_MAX = 80
 
 # Folder names each sync app uses, in the home folder (all systems) and in
@@ -568,6 +573,10 @@ _CANT_WRITE = (
 
 def saved_to(name: str) -> str:
     """What an export, delivery or test says it did: never "synced"."""
+    if name == DOWNLOAD_NAME:
+        return "Ready to download"
+    if name == SERVER_DELIVERIES_NAME:
+        return "Kept on the lab's DataLab: download it from the run"
     return f"Saved to {name} (on this computer)"
 
 
@@ -592,8 +601,12 @@ def target(settings: Settings, destinations: DestinationStore, destination_id: s
 
     Every export (conversations, the SQL Playground) goes through here.
     Practice exports only to its own practice folder, so nothing from it can
-    end up somewhere real.
+    end up somewhere real. On the lab's server, every export is a download.
     """
+    if settings.on_server:
+        if destination_id != DOWNLOAD_ID:
+            raise LookupError("No such export folder.")
+        return download_target(settings)
     if settings.profile == "practice":
         if destination_id != PRACTICE_ID:
             raise LookupError("No such export folder.")
@@ -606,6 +619,12 @@ def target(settings: Settings, destinations: DestinationStore, destination_id: s
 
 def target_for_key(settings: Settings, destinations: DestinationStore, key: str) -> Target:
     """The folder a workflow's destination key names on this computer. Raises ExportError."""
+    if settings.on_server:
+        folder = settings.data_dir / "deliveries"
+        folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+        return Target(
+            None, SERVER_DELIVERIES_NAME, folder, None, exports.identity(os.lstat(folder))
+        )
     if settings.profile == "practice":
         return practice_target(settings)
     destination = destinations.by_key(key)
@@ -614,6 +633,17 @@ def target_for_key(settings: Settings, destinations: DestinationStore, key: str)
             f"No export folder is set for {key!r} on this computer. Choose one in Settings."
         )
     return _checked(settings, destination)
+
+
+def download_target(settings: Settings) -> Target:
+    """The person's own staging folder, on the lab's server: the export is
+    zipped from there for their browser (downloads.py)."""
+    from datalab.auth.acting import acting_user
+    from datalab.downloads import Downloads
+
+    person = acting_user()
+    folder = Downloads(settings.data_dir).staging(person.id if person else 1)
+    return Target(DOWNLOAD_ID, DOWNLOAD_NAME, folder, None, exports.identity(os.lstat(folder)))
 
 
 def practice_target(settings: Settings) -> Target:

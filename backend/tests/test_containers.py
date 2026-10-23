@@ -2,6 +2,7 @@
 
 import os
 import secrets
+from pathlib import Path
 
 import pytest
 
@@ -20,10 +21,10 @@ def fake_docker(monkeypatch, answers):
     """Answer `docker inspect` from a list; record other docker commands."""
     calls = []
 
-    async def status(*args):
+    async def status(*args, env=None):
         return answers.pop(0)
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         calls.append(args[0])
         return ""
 
@@ -72,7 +73,7 @@ async def test_stopping_removes_the_network_after_the_containers(tmp_path, monke
     """Networks left behind used up Docker's address pools after ~30 conversations."""
     calls = []
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         calls.append(args)
         return ""
 
@@ -103,7 +104,7 @@ async def test_cleanup_removes_only_this_instances_containers(monkeypatch, tmp_p
     (tmp_path / "sessions" / "c_old").mkdir(parents=True)
     removed: list[tuple[str, ...]] = []
 
-    async def docker(*args, check=True):
+    async def docker(*args, check=True, env=None):
         if args[0] == "ps":
             return f"aaa|{mine}|c_1\nbbb|other|c_2\nccc||c_old\nddd||c_elsewhere\n"
         if args[:2] == ("network", "ls"):
@@ -179,3 +180,69 @@ async def test_cleanup_finds_containers_named_before_instance_names(tmp_path):
             await module.docker("rm", "-f", name, check=False)
         for name in networks:
             await module.docker("network", "rm", name, check=False)
+
+
+@pytest.mark.parametrize("linux_user", [None, "1500:1500"])
+async def test_on_native_linux_the_agent_runs_as_datalabs_own_user(
+    tmp_path, monkeypatch, linux_user
+):
+    """There, folders keep their host owner: the image's own user (10004)
+    couldn't write /work or /codex-home."""
+    calls = []
+    env_files = []
+
+    async def docker(*args, check=True, env=None):
+        calls.append(args)
+        if args[0] == "run":
+            env_files.append(Path(args[args.index("--env-file") + 1]).read_text(encoding="utf-8"))
+        return ""
+
+    async def status(*args, env=None):
+        return "missing"
+
+    monkeypatch.setattr(module, "docker", docker)
+    monkeypatch.setattr(module, "docker_status", status)
+    monkeypatch.setattr(module, "host_user", lambda: linux_user)
+    containers = make(tmp_path)
+    containers.paths.create()
+    await containers._start_agent("token")
+    run = next(call for call in calls if call[0] == "run")
+    if linux_user:
+        assert run[run.index("--user") + 1] == linux_user and "HOME=/tmp" in env_files[0]
+    else:
+        assert "--user" not in run and "HOME=" not in env_files[0]
+
+
+def test_the_servers_limits_apply_to_each_agent(settings):
+    from dataclasses import replace
+
+    from datalab.config import ServerSettings
+    from datalab.sessions.containers import ContainerLimits, limits_for
+
+    assert limits_for(settings) == ContainerLimits()
+    server = ServerSettings(
+        public_url="https://lab.example.edu", agent_memory="1g", agent_cpus="0.5"
+    )
+    limits = limits_for(replace(settings, deployment="server", server=server))
+    assert (limits.memory, limits.cpus) == ("1g", "0.5")
+
+
+async def test_the_gateways_config_is_readable_whatever_the_umask(tmp_path, monkeypatch):
+    """On the lab's server DataLab runs with umask 0077, and the gateway's
+    nginx can't override file permissions (--cap-drop ALL)."""
+
+    async def docker(*args, check=True, env=None):
+        return ""
+
+    async def status(*args, env=None):
+        return (0, "")
+
+    monkeypatch.setattr(module, "docker", docker)
+    monkeypatch.setattr(module, "docker_status", status)
+    containers = make(tmp_path)
+    old = os.umask(0o077)
+    try:
+        await containers.start("token")
+    finally:
+        os.umask(old)
+    assert containers.paths.gateway_conf.stat().st_mode & 0o777 == 0o644

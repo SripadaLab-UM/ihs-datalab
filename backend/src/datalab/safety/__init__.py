@@ -694,13 +694,31 @@ class SafetyCheck:
             "agent_image_pinned", PROMISE_HOST, label, pinned in digests, f"Expected {pinned[:19]}…"
         )
 
+    def _own_page(self) -> tuple[httpx.AsyncClient, str, str]:
+        """A client for DataLab's own page as a browser reaches it: through
+        Apache's Unix socket on the lab's server ([server] socket), else its
+        port. Also where requests go, and the address its pages name."""
+        server = self._settings.server
+        if server is not None:
+            transport = httpx.AsyncHTTPTransport(uds=server.socket)
+            return (
+                httpx.AsyncClient(transport=transport, timeout=5),
+                "http://localhost",
+                server.site,
+            )
+        host = self._settings.host if self._settings.host not in ("0.0.0.0", "::") else "127.0.0.1"
+        host = f"[{host}]" if ":" in host else host  # an IPv6 address
+        own = f"http://{host}:{self._port}"
+        return httpx.AsyncClient(timeout=5), own, own
+
     async def _browser_policy_check(self) -> CheckResult:
         label = "The browser may only contact DataLab itself"
         problems = []
         try:
-            async with httpx.AsyncClient(timeout=5) as client:
+            client, at, _ = self._own_page()
+            async with client:
                 for path in ("/", "/api/health"):
-                    response = await client.get(f"http://127.0.0.1:{self._port}{path}")
+                    response = await client.get(f"{at}{path}")
                     header = response.headers.get("content-security-policy", "")
                     problems += [f"{path}: {p}" for p in policy.problems(header)]
         except httpx.HTTPError as error:
@@ -723,12 +741,12 @@ class SafetyCheck:
         canary = self._canaries.new("preview page")
         root = self._settings.data_dir / "safety" / f"preview_{secrets.token_hex(4)}"
         token = None
+        client, at, site = self._own_page()
         try:
             work = root / "work"
             (work / "outputs").mkdir(parents=True)
             (work / "outputs" / "page.html").write_text(
-                _HOSTILE_PAGE.replace("CANARY", f"http://127.0.0.1:{self._port}{canary}"),
-                encoding="utf-8",
+                _HOSTILE_PAGE.replace("CANARY", f"{site}{canary}"), encoding="utf-8"
             )
             checkpoints = Checkpoints(root / "store", work)
             latest = await asyncio.to_thread(checkpoints.take, "Safety check")
@@ -738,18 +756,13 @@ class SafetyCheck:
                 if rel.startswith("outputs/")
             }
             token = self._previews.share(checkpoints, entries, "outputs/")
-            host = (
-                self._settings.host if self._settings.host not in ("0.0.0.0", "::") else "127.0.0.1"
-            )
-            host = f"[{host}]" if ":" in host else host  # an IPv6 address
-            folder = f"http://{host}:{self._port}/preview/{token}/"
-            async with httpx.AsyncClient(timeout=5) as client:
-                framed = await client.get(
-                    folder + "page.html", headers={"sec-fetch-dest": "iframe"}
-                )
-                alone = await client.get(
-                    folder + "page.html", headers={"sec-fetch-dest": "document"}
-                )
+            # What the page's policy must name, and where the request goes
+            # (on a server, Apache's socket: the path without the base).
+            folder = f"{site}/preview/{token}/"
+            page = f"{at}/preview/{token}/page.html"
+            async with client:
+                framed = await client.get(page, headers={"sec-fetch-dest": "iframe"})
+                alone = await client.get(page, headers={"sec-fetch-dest": "document"})
         except (OSError, httpx.HTTPError) as error:
             return CheckResult(check_id, PROMISE_NETWORK, label, "skip", str(error))
         finally:

@@ -2,7 +2,7 @@
 title: Export results
 summary: Choose files and a folder, add the conversation as a report, and what the exported folder holds.
 order: 13
-keywords: export, report, download, share, folder, dropbox, destination, manifest, outputs, study data
+keywords: export, report, download, zip, share, folder, dropbox, destination, manifest, outputs, study data
 ---
 
 # Export results
@@ -94,6 +94,17 @@ act on your computer by themselves:
 
 Each export is recorded in DataLab's audit log: when, where to, how many
 files, and whether it may contain study data. The log holds no contents.
+
+## On the lab's shared DataLab
+
+On the DataLab you open in your browser and sign in to with GitHub, an
+export comes to you as a download: choose **Download** under **To** (it's
+the only choice), and your browser saves a `.zip` of the dated folder
+described above. **Save it again** works for a day; only you can download
+it. There are no export folders to set up.
+
+A workflow's delivery stays on the lab's DataLab, with its run: press
+**Download** on the run to save it.
 
 ## After you export
 

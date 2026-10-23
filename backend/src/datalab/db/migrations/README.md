@@ -21,3 +21,6 @@ after these for anything else.
 | 0013 | pipelines: a person's own edits (drafts kept on this computer until Save & share) | in use |
 | 0014 | `conversations.express`: the Express switch | in use |
 | 0015 | processed data (Dropbox): `conversations.data_sources`, the chosen folder, its file list, file loads | in use |
+| 0016 | the lab's shared DataLab: users, their browser sign-ins, their GitHub tokens (encrypted) | in use |
+| 0017 | the shared DataLab: who owns each conversation, run, query and draft | in use |
+| 0018 | the shared DataLab: `conversations.compute`, standard or high | in use |

@@ -170,16 +170,34 @@ class RunStore:
             row = self._db.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
         return _decode(row) if row else None
 
-    def list_runs(self, workflow_path: str | None = None, limit: int = 100) -> list[dict]:
+    def list_runs(
+        self, workflow_path: str | None = None, limit: int = 100, owner_id: int | None = None
+    ) -> list[dict]:
+        """Newest first: all runs, or of one workflow; everyone's, or `owner_id`'s."""
         query = "SELECT * FROM workflow_runs"
+        where: list[str] = []
         args: tuple[Any, ...] = ()
         if workflow_path is not None:
-            query += " WHERE workflow_path = ?"
-            args = (workflow_path,)
+            where.append("workflow_path = ?")
+            args += (workflow_path,)
+        if owner_id is not None:
+            where.append("owner_id = ?")
+            args += (owner_id,)
+        if where:
+            query += " WHERE " + " AND ".join(where)
         query += " ORDER BY started_at DESC, id DESC LIMIT ?"
         with self._lock:
             rows = self._db.execute(query, (*args, limit)).fetchall()
         return [_decode(r) for r in rows]
+
+    def claim(self, run_id: str, owner_id: int, started_by: str) -> None:
+        """A run just started, as the person's who started it (on the lab's
+        server; on a computer everything is the local user's)."""
+        with self._lock:
+            self._db.execute(
+                "UPDATE workflow_runs SET owner_id = ?, started_by = ? WHERE id = ?",
+                (owner_id, started_by, run_id),
+            )
 
     def steps(self, run_id: str) -> list[dict[str, Any]]:
         with self._lock:

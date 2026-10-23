@@ -68,11 +68,34 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Conversations */
+        /**
+         * List Conversations
+         * @description The signed-in person's own conversations (api/access.py).
+         */
         get: operations["list_conversations_api_conversations_get"];
         put?: never;
         /** Create Conversation */
         post: operations["create_conversation_api_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/compute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compute Choice
+         * @description Whether this person may choose high compute, and what it gives.
+         */
+        get: operations["compute_choice_api_conversations_compute_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -600,6 +623,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/conversations/{conversation_id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Upload
+         * @description An upload to send files into, one request each (`PUT .../files`).
+         */
+        post: operations["start_upload_api_conversations__conversation_id__uploads_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/uploads/{upload_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Upload File
+         * @description One file of an upload: the request's body, as it is.
+         */
+        put: operations["upload_file_api_conversations__conversation_id__uploads__upload_id__files_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/conversations/{conversation_id}/uploads/{upload_id}/attach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach Upload
+         * @description Attach what an upload holds: each file, or its folder.
+         */
+        post: operations["attach_upload_api_conversations__conversation_id__uploads__upload_id__attach_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/conversations/{conversation_id}/inputs/{attachment_id}": {
         parameters: {
             query?: never;
@@ -612,6 +695,26 @@ export interface paths {
         post?: never;
         /** Detach */
         delete: operations["detach_api_conversations__conversation_id__inputs__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/downloads/{download_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download
+         * @description An export, as a .zip: only the person who made it, for a day.
+         */
+        get: operations["download_api_downloads__download_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1155,7 +1258,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Proposals */
+        /**
+         * Proposals
+         * @description The signed-in person's conversations' proposals (api/access.py).
+         */
         get: operations["proposals_api_knowledge_proposals_get"];
         put?: never;
         post?: never;
@@ -1240,7 +1346,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Open Edits */
+        /**
+         * Open Edits
+         * @description The signed-in person's own open edits.
+         */
         get: operations["open_edits_api_knowledge_edits_get"];
         put?: never;
         /** Start Edit */
@@ -1449,7 +1558,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Runs */
+        /**
+         * List Runs
+         * @description The signed-in person's own runs (api/access.py).
+         */
         get: operations["list_runs_api_workflows_runs_get"];
         put?: never;
         /** Start */
@@ -1569,6 +1681,26 @@ export interface paths {
          * @description The original definition, extracts, image and seed, run again.
          */
         post: operations["replay_api_workflows_runs__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workflows/runs/{run_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Download Delivery
+         * @description The lab's server: a run's delivery, kept there, as a .zip for the browser.
+         */
+        post: operations["download_delivery_api_workflows_runs__run_id__download_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1834,7 +1966,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Proposals */
+        /**
+         * Proposals
+         * @description The signed-in person's conversations' proposals (api/access.py).
+         */
         get: operations["proposals_api_pipelines_proposals_get"];
         put?: never;
         post?: never;
@@ -1919,7 +2054,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Open Edits */
+        /**
+         * Open Edits
+         * @description The signed-in person's own edits.
+         */
         get: operations["open_edits_api_pipelines_edits_get"];
         put?: never;
         /** Start Edit */
@@ -2457,7 +2595,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Route */
+        /**
+         * List Route
+         * @description Saved reports. On the lab's server they're the administrators' to
+         *     read (api/access.py), until each records who saved it.
+         */
         get: operations["list_route_api_support_reports_get"];
         put?: never;
         /**
@@ -2677,6 +2819,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Who Am I */
+        get: operations["who_am_i_api_session_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/end": {
         parameters: {
             query?: never;
@@ -2686,7 +2845,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** End Session */
+        /**
+         * End Session
+         * @description End session on a person's computer (every window); sign out on
+         *     the lab's server (this browser, and the person's GitHub tokens).
+         */
         post: operations["end_session_api_session_end_post"];
         delete?: never;
         options?: never;
@@ -3113,6 +3276,10 @@ export interface components {
             /** Type */
             type: string | null;
         };
+        /** ComputeChoiceOut */
+        ComputeChoiceOut: {
+            high: components["schemas"]["HighComputeOut"] | null;
+        };
         /** ConnectionCheckOut */
         ConnectionCheckOut: {
             /** Ok */
@@ -3177,6 +3344,11 @@ export interface components {
             express: boolean;
             /** Data Sources */
             data_sources: ("database" | "dropbox")[];
+            /**
+             * Compute
+             * @enum {string}
+             */
+            compute: "standard" | "high";
             /** Busy */
             busy: boolean;
         };
@@ -3422,6 +3594,13 @@ export interface components {
             /** Admin Access Url */
             admin_access_url: string | null;
         };
+        /** DownloadOut */
+        DownloadOut: {
+            /** Url */
+            url: string;
+            /** Name */
+            name: string;
+        };
         /** DraftCheckIn */
         DraftCheckIn: {
             /** Text */
@@ -3651,6 +3830,8 @@ export interface components {
             sync_provider: ("dropbox" | "onedrive" | "box" | "google_drive" | "icloud") | null;
             /** Sync Note */
             sync_note: string | null;
+            /** Download Url */
+            download_url?: string | null;
         };
         /** ExtractStep */
         ExtractStep: {
@@ -3935,6 +4116,18 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * HighComputeOut
+         * @description What a high-compute conversation gets, for the New conversation choice.
+         */
+        HighComputeOut: {
+            /** Memory */
+            memory: string;
+            /** Cpus */
+            cpus: string;
+            /** Gpu */
+            gpu: boolean;
         };
         /** HistoryItem */
         HistoryItem: {
@@ -4221,6 +4414,12 @@ export interface components {
             model?: string | null;
             /** Data Sources */
             data_sources?: ("database" | "dropbox")[] | null;
+            /**
+             * Compute
+             * @default standard
+             * @enum {string}
+             */
+            compute: "standard" | "high";
         };
         /**
          * NewDropColumns
@@ -4289,6 +4488,14 @@ export interface components {
             path: string;
             /** Checkpoint */
             checkpoint?: number | null;
+        };
+        /** NewUpload */
+        NewUpload: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "files" | "folder";
         };
         /** NotebookOut */
         NotebookOut: {
@@ -5464,6 +5671,17 @@ export interface components {
             /** Workflow Run */
             workflow_run: boolean;
         };
+        /** SessionUserOut */
+        SessionUserOut: {
+            /** Login */
+            login: string;
+            /** Name */
+            name: string;
+            /** Admin */
+            admin: boolean;
+            /** Deployment */
+            deployment: string;
+        };
         /** SetDestinationKey */
         SetDestinationKey: {
             /** Destination Id */
@@ -6268,6 +6486,27 @@ export interface components {
             /** Latest Migration */
             latest_migration: string | null;
         };
+        /** UploadOut */
+        UploadOut: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "files" | "folder";
+            /** Max File Bytes */
+            max_file_bytes: number;
+            /** Room Bytes */
+            room_bytes: number;
+        };
+        /** UploadedFile */
+        UploadedFile: {
+            /** Path */
+            path: string;
+            /** Bytes */
+            bytes: number;
+        };
         /** ValidateIn */
         ValidateIn: {
             /** Path */
@@ -6556,6 +6795,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compute_choice_api_conversations_compute_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComputeChoiceOut"];
                 };
             };
         };
@@ -7499,6 +7758,112 @@ export interface operations {
             };
         };
     };
+    start_upload_api_conversations__conversation_id__uploads_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewUpload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_file_api_conversations__conversation_id__uploads__upload_id__files_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-datalab-path": string;
+            };
+            path: {
+                conversation_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadedFile"];
+                };
+            };
+            /** @description Too large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Refused */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    attach_upload_api_conversations__conversation_id__uploads__upload_id__attach_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+                upload_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     detach_api_conversations__conversation_id__inputs__attachment_id__delete: {
         parameters: {
             query?: never;
@@ -7517,6 +7882,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_api_downloads__download_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                download_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Validation Error */
             422: {
@@ -9207,6 +9603,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkflowRunOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_delivery_api_workflows_runs__run_id__download_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DownloadOut"];
                 };
             };
             /** @description Validation Error */
@@ -11031,6 +11458,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionActivityOut"];
+                };
+            };
+        };
+    };
+    who_am_i_api_session_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionUserOut"];
                 };
             };
         };

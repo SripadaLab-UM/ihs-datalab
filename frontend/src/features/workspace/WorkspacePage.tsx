@@ -3,7 +3,7 @@ import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 
-import { api, type Conversation, type DataSource, type Mode } from "@/api/client";
+import { api, type Compute, type Conversation, type DataSource, type HighCompute, type Mode } from "@/api/client";
 import { processedApi } from "@/api/processed";
 import { DockedChat } from "@/components/chat/DockedChat";
 import { SHOW_QUERY, showQuery, ShowQueryContext } from "@/components/chat/provenance";
@@ -322,6 +322,9 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const [mode, setMode] = useState("analysis");
   const [model, setModel] = useState("");
   const [sources, setSources] = useState<SourceChoice>("database");
+  const [compute, setCompute] = useState<Compute>("standard");
+  const computeChoice = useQuery({ queryKey: ["compute-choice"], queryFn: api.computeChoice, staleTime: 5 * 60_000 });
+  const high = computeChoice.data?.high ?? null;
   const [choosingModel, setChoosingModel] = useState(false);
   // The default is offered while the list loads, or if U-M can't be asked.
   const choices = !models.data
@@ -334,8 +337,12 @@ function NewConversation({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const create = useMutation({
-    mutationFn: () =>
-      api.createConversation(mode, model || undefined, offersProcessed ? SOURCE_LISTS[sources] : undefined),
+    mutationFn: () => {
+      const chosenSources = offersProcessed ? SOURCE_LISTS[sources] : undefined;
+      return high && compute === "high"
+        ? api.createConversation(mode, model || undefined, chosenSources, "high")
+        : api.createConversation(mode, model || undefined, chosenSources);
+    },
     onSuccess: (conversation) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       navigate(`/workspace/${conversation.id}`);
@@ -395,6 +402,7 @@ function NewConversation({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {offersProcessed && <SourcePicker value={sources} onChange={setSources} />}
+        {high && <ComputePicker value={compute} onChange={setCompute} high={high} />}
         {chosen && (
           <div
             className={clsx(
@@ -421,6 +429,54 @@ function NewConversation({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** The lab's shared DataLab: run on DataLab's own machine, or the lab's larger one. */
+function ComputePicker({
+  value,
+  onChange,
+  high,
+}: {
+  value: Compute;
+  onChange: (next: Compute) => void;
+  high: HighCompute;
+}) {
+  const options: { id: Compute; label: string; hint: string }[] = [
+    { id: "standard", label: "Standard", hint: "Most questions: queries, tables, charts" },
+    {
+      id: "high",
+      label: "High compute",
+      hint: `${high.cpus} CPUs, ${high.memory.replace(/g$/, " GB")} memory${high.gpu ? ", and a GPU" : ""}: models, big data, simulation`,
+    },
+  ];
+  return (
+    <fieldset>
+      <legend className="text-[11.5px] font-semibold uppercase tracking-[0.08em] text-faint">Compute</legend>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {options.map((option) => (
+          <label
+            key={option.id}
+            className={clsx(
+              "flex cursor-pointer flex-col gap-0.5 rounded-xl border p-2.5 text-left text-sm",
+              value === option.id ? "border-ink" : "border-line",
+            )}
+          >
+            <span className="flex items-center gap-1.5">
+              <input type="radio" name="compute" checked={value === option.id} onChange={() => onChange(option.id)} />
+              {option.label}
+            </span>
+            <span className="text-xs text-muted">{option.hint}</span>
+          </label>
+        ))}
+      </div>
+      {value === "high" && (
+        <p className="mt-1.5 text-xs text-muted">
+          Runs on the lab's high-compute server, and stays there for the whole conversation. Only a few run at once, so
+          use it when you need it.
+        </p>
+      )}
+    </fieldset>
   );
 }
 

@@ -39,7 +39,7 @@ from pydantic import BaseModel, SecretStr
 
 from datalab import __version__, db, diagnostics, setup, updates
 from datalab.config import Settings
-from datalab.credentials import model_api_key
+from datalab.credentials import SetOnServer, model_api_key
 from datalab.db import backups as backups_module
 from datalab.practice_db import Phase, PracticeDatabaseKeeper
 from datalab.relay.policy import model_allowed
@@ -417,6 +417,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             )
         try:
             setup.store_oracle_password(oracle, body.password.get_secret_value())
+        except SetOnServer as error:
+            raise HTTPException(409, str(error)) from None
         except setup.SecretRefused as refused:
             raise HTTPException(422, str(refused)) from None
         except KeyringError:
@@ -431,6 +433,8 @@ def build_settings_router(services: SettingsServices) -> APIRouter:
             raise HTTPException(403, "Practice DataLab uses the key the real DataLab saved.")
         try:
             setup.store_model_key(body.key.get_secret_value())
+        except SetOnServer as error:
+            raise HTTPException(409, str(error)) from None
         except setup.SecretRefused as refused:
             raise HTTPException(422, str(refused)) from None
         except KeyringError:

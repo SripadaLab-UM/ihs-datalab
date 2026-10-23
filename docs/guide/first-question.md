@@ -3,7 +3,7 @@ title: Ask your first question
 summary: Start a conversation, choose a mode, ask, and watch the agent work.
 order: 10
 screens: /workspace
-keywords: start, new conversation, ask, question, mode, starter, stop, attach, inputs, effort, model
+keywords: start, new conversation, ask, question, mode, starter, stop, attach, inputs, effort, model, compute, high compute, gpu
 ---
 
 # Ask your first question
@@ -26,7 +26,13 @@ keywords: start, new conversation, ask, question, mode, starter, stop, attach, i
    kind.
 3. The model is the recommended one. **Change** offers only models approved
    for study data.
-4. Press **Start**.
+4. On the lab's shared DataLab, if you may use it, **Compute** offers
+   **Standard** or **High compute**. High compute runs the conversation on
+   the lab's high-compute server, with many more CPUs and much more memory,
+   and a GPU. Choose it for heavy work: models, simulation, very large data.
+   It stays there for the whole conversation, which shows **High compute** in
+   its header. Only a few run at once, so use it when you need it.
+5. Press **Start**.
 
 ## Ask
 
@@ -78,6 +84,12 @@ whole, including files added to it later, and DataLab lists any credentials
 files it finds inside. Anything you attach to a research session may reach
 the internet. The practice DataLab can't attach your own files; it offers
 made-up sample files instead.
+
+On the lab's shared DataLab, the one you open in your browser and sign in
+to with GitHub, press **Upload files…** or **Upload folder…** instead. Your
+browser sends them (up to 500 MB a file, and 2 GB for a conversation), and
+they stay with that conversation, for you only, until you **Remove** them.
+Credentials files aren't uploaded.
 
 ## Keep track
 

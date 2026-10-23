@@ -12,7 +12,7 @@ import os
 import re
 import sys
 import tomllib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from types import UnionType
 from typing import Any, Literal, Union, get_args, get_origin, get_type_hints
@@ -236,11 +236,198 @@ class WindowsSettings:
             object.__setattr__(self, "admin_access_url", None)
 
 
+Deployment = Literal["desktop", "server"]
+
+
+def _cores(text: str) -> list[int]:
+    """A cpuset ("0-15,24,26-27") as its cores, in order."""
+    cores: list[int] = []
+    for part in text.split(","):
+        match = re.fullmatch(r"\s*([0-9]+)\s*(?:-\s*([0-9]+)\s*)?", part)
+        if match is None:
+            raise ValueError(f"server.high_compute.cpuset isn't a list of cores: {text!r}")
+        first, last = int(match[1]), int(match[2] or match[1])
+        if last < first:
+            raise ValueError(f"server.high_compute.cpuset has a backwards range: {part!r}")
+        cores += [c for c in range(first, last + 1) if c not in cores]
+    return cores
+
+
+def _ranges(cores: list[int]) -> str:
+    """Cores as a cpuset: [0, 1, 2, 5] -> "0-2,5"."""
+    runs: list[list[int]] = []
+    for core in cores:
+        if runs and core == runs[-1][-1] + 1:
+            runs[-1].append(core)
+        else:
+            runs.append([core])
+    return ",".join(f"{r[0]}-{r[-1]}" if len(r) > 1 else str(r[0]) for r in runs)
+
+
+@dataclass(frozen=True)
+class HighComputeSettings:
+    """`[server.high_compute]`: conversations whose containers run on a larger
+    machine (docs/DISTRIBUTION.md, "High compute"). DataLab drives that
+    machine's container engine (Podman or Docker) through a socket here, which
+    an SSH tunnel forwards; the conversation's folders live there, and are
+    mounted here at the same path (sshfs), so every path means the same file
+    on both machines. The gateway there reaches DataLab through a socket the
+    same tunnel forwards back.
+    """
+
+    # The engine's API, forwarded here: "unix:///run/datalab-compute/podman.sock".
+    docker_host: str = ""
+    # The same engine's API whose containers get the GPU by default ("" for
+    # none): Podman's Docker-compatible API drops GPU requests, so a second
+    # API service adds it (CDI) to everything it starts.
+    gpu_docker_host: str = ""
+    # Where high-compute conversations' folders live, on both machines.
+    sessions_dir: str = ""
+    # On the other machine: the socket that reaches DataLab's gateway listener.
+    relay_socket: str = ""
+    # Each high-compute agent's container.
+    agent_memory: str = "64g"
+    agent_cpus: str = "16"
+    # High-compute conversations running at once, for everyone together.
+    max_running: int = 2
+    # Who may choose it: "admins", or "lab" (anyone who may sign in).
+    open_to: str = "admins"
+    # The other machine's cores DataLab may use, such as "0-31" ("" leaves
+    # agents unpinned). They're split into slots of `agent_cpus` cores, in
+    # order, and each running agent gets a slot to itself (`--cpuset-cpus`),
+    # so `nproc` there says what it may use. Name them so a slot is one
+    # processor's (NUMA node's) cores.
+    cpuset: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("docker_host", "sessions_dir", "relay_socket"):
+            if not getattr(self, name):
+                raise ValueError(f"server.high_compute.{name} is needed")
+        for name in ("docker_host", "gpu_docker_host"):
+            value = getattr(self, name)
+            if value and not value.startswith("unix:///"):
+                raise ValueError(f"server.high_compute.{name} must be a unix:/// socket")
+        for name in ("sessions_dir", "relay_socket"):
+            if not getattr(self, name).startswith("/"):
+                raise ValueError(f"server.high_compute.{name} must be an absolute path")
+        if not re.fullmatch(r"[1-9][0-9]*[kmg]", self.agent_memory):
+            raise ValueError("server.high_compute.agent_memory must be a size such as 64g")
+        if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", self.agent_cpus) or float(self.agent_cpus) <= 0:
+            raise ValueError("server.high_compute.agent_cpus must be a number of CPUs")
+        if self.max_running < 1:
+            raise ValueError("server.high_compute.max_running must be at least 1")
+        if self.open_to not in ("admins", "lab"):
+            raise ValueError('server.high_compute.open_to must be "admins" or "lab"')
+        if self.cpuset:
+            if not self.agent_cpus.isdigit():
+                raise ValueError(
+                    "server.high_compute.agent_cpus must be a whole number with a cpuset"
+                )
+            if len(self.cpu_slots) < self.max_running:
+                raise ValueError(
+                    f"server.high_compute.cpuset has room for {len(self.cpu_slots)} agents of "
+                    f"{self.agent_cpus} CPUs, fewer than max_running ({self.max_running})"
+                )
+
+    @property
+    def cpu_slots(self) -> tuple[str, ...]:
+        """`cpuset` in slots of `agent_cpus` cores, each as `--cpuset-cpus` takes it."""
+        if not self.cpuset:
+            return ()
+        cores = _cores(self.cpuset)
+        size = int(self.agent_cpus)
+        chunks = [cores[i : i + size] for i in range(0, len(cores) - size + 1, size)]
+        return tuple(_ranges(chunk) for chunk in chunks)
+
+
+@dataclass(frozen=True)
+class ServerSettings:
+    """`[server]`: DataLab run once for the whole lab on a server, behind
+    Apache (`deployment = "server"`), rather than on each person's computer.
+
+    People sign in with GitHub; the server's own secrets come from systemd
+    credentials, never the keychain (credentials.py). See docs/DISTRIBUTION.md,
+    "The lab's shared DataLab".
+    """
+
+    # The site's address, without a path: "https://datalab.example.edu".
+    public_url: str = ""
+    # Where DataLab lives on that site: "/datalab". Apache strips it before
+    # passing a request on, so DataLab's own routes stay /api/..., /sign-in.
+    base_path: str = "/datalab"
+    # GitHub numeric user ids of the administrators. Ids, not logins: a
+    # login can be renamed, and an old one taken by someone else.
+    admins: tuple[int, ...] = ()
+    # Who may sign in with GitHub: "admins" while the shared DataLab is set
+    # up, then "lab": anyone who may write to `access_repo`.
+    open_to: str = "admins"
+    # The repository whose writers are the lab (the datalab-users team's):
+    # "owner/name". Empty: `[repos] knowledge`.
+    access_repo: str = ""
+    # Where Apache reaches DataLab: a Unix socket, so nobody else on the
+    # server can. DataLab's TCP port then answers only session gateways.
+    socket: str = "/run/datalab/web.sock"
+    # The group that may open it: the web server's ("" leaves it as made).
+    socket_group: str = "apache"
+    # Where the session gateways reach DataLab (its TCP port answers only
+    # them, server_listen.py): "docker-bridge" for this host's Docker bridge,
+    # or an address (a compute server's containers, one day).
+    gateway_listen: str = "docker-bridge"
+    # Each conversation's agent container, and how many run at once: the
+    # server's memory is shared by everyone.
+    agent_memory: str = "1536m"
+    agent_cpus: str = "1"
+    max_running: int = 3
+    max_running_per_user: int = 1
+    idle_minutes: int = 10
+    # How long a sign-in lasts: at most `session_hours`, and ends after
+    # `session_idle_minutes` without a request.
+    session_hours: float = 8
+    session_idle_minutes: int = 60
+    # The systemd unit that runs this DataLab: `datalab server install` and
+    # `rollback` stop and start it.
+    service: str = "datalab.service"
+    # `[server.high_compute]`: a larger machine for conversations that need it.
+    high_compute: HighComputeSettings | None = None
+
+    def __post_init__(self) -> None:
+        if self.open_to not in ("admins", "lab"):
+            raise ValueError('server.open_to must be "admins" or "lab"')
+        _check_repo("server.access_repo", self.access_repo or None)
+        if not re.fullmatch(r"https://[a-z0-9.-]+(:[0-9]+)?", self.public_url):
+            raise ValueError(
+                "server.public_url must be the site's https:// address with no path, such as "
+                "https://datalab.example.edu"
+            )
+        if not re.fullmatch(r"(/[a-z0-9-]+)+", self.base_path):
+            raise ValueError(
+                'server.base_path must be a path such as "/datalab", with no "/" at the end'
+            )
+        if not self.socket.startswith("/"):
+            raise ValueError("server.socket must be an absolute path")
+        if not re.fullmatch(r"[1-9][0-9]*[kmg]", self.agent_memory):
+            raise ValueError("server.agent_memory must be a size such as 1536m or 2g")
+        if not re.fullmatch(r"[0-9]+(\.[0-9]+)?", self.agent_cpus) or float(self.agent_cpus) <= 0:
+            raise ValueError("server.agent_cpus must be a number of CPUs, such as 1")
+        if not 1 <= self.max_running_per_user <= self.max_running:
+            raise ValueError("server.max_running_per_user must be between 1 and server.max_running")
+        if self.idle_minutes < 1 or self.session_idle_minutes < 1 or self.session_hours <= 0:
+            raise ValueError("server idle and session times must be more than 0")
+
+    @property
+    def site(self) -> str:
+        """DataLab's own address: public_url + base_path."""
+        return self.public_url + self.base_path
+
+
 @dataclass(frozen=True)
 class Settings:
     profile: Profile
     data_dir: Path
     oracle: OracleSettings | None
+    # "desktop" (one person's computer, the default) or "server" (`[server]`).
+    deployment: Deployment = "desktop"
+    server: ServerSettings | None = None
     limits: QueryLimits = field(default_factory=QueryLimits)
     # Folder of catalog YAML files (the knowledge base's generated/schema).
     catalog_dir: Path | None = None
@@ -259,6 +446,10 @@ class Settings:
     updates: UpdateSettings = field(default_factory=UpdateSettings)
     windows: WindowsSettings = field(default_factory=WindowsSettings)
     dropbox: DropboxSettings = field(default_factory=DropboxSettings)
+
+    @property
+    def on_server(self) -> bool:
+        return self.deployment == "server"
 
     @property
     def settings_file(self) -> Path:
@@ -399,10 +590,13 @@ def load_settings(profile: Profile | None = None) -> Settings:
         oracle = _oracle_from(raw["oracle"]) if "oracle" in raw else None
 
     catalog_dir = raw.get("catalog_dir") or os.environ.get("DATALAB_CATALOG_DIR")
+    deployment, server = _deployment(raw)
     settings = Settings(
         profile=profile,
         data_dir=data_dir,
         oracle=oracle,
+        deployment=deployment,
+        server=server,
         limits=QueryLimits(**raw.get("limits", {})),
         catalog_dir=Path(catalog_dir) if catalog_dir else None,
         agent_image=_agent_image(profile, raw),
@@ -460,6 +654,38 @@ def _fits(hint: Any, value: Any) -> bool:
     if hint is str:
         return isinstance(value, str)
     raise TypeError(f"settings of type {hint!r} aren't supported in sections yet")
+
+
+def _deployment(raw: dict) -> tuple[Deployment, ServerSettings | None]:
+    """`deployment` and its `[server]` table. Desktop is the default, and
+    `[server]` belongs only to a server: a desktop with one is a mistake."""
+    deployment = raw.get("deployment", "desktop")
+    if deployment not in ("desktop", "server"):
+        raise ValueError(
+            f"deployment in settings.toml must be 'desktop' or 'server', not {deployment!r}"
+        )
+    if deployment == "desktop":
+        if "server" in raw:
+            raise ValueError('[server] in settings.toml needs deployment = "server"')
+        return "desktop", None
+    table = dict(raw.get("server", {})) if isinstance(raw.get("server", {}), dict) else None
+    if table is None:
+        raise ValueError("[server] in settings.toml must be a table")
+    high = table.pop("high_compute", None)
+    if high is not None and not isinstance(high, dict):
+        raise ValueError("[server.high_compute] in settings.toml must be a table")
+    admins = table.pop("admins", [])
+    if not isinstance(admins, list) or not all(
+        isinstance(a, int) and not isinstance(a, bool) and a > 0 for a in admins
+    ):
+        raise ValueError("server.admins must be a list of GitHub user ids (numbers)")
+    server = _section(ServerSettings, {"server": table}, "server")
+    if high is not None:
+        computing = _section(
+            HighComputeSettings, {"server.high_compute": high}, "server.high_compute"
+        )
+        server = replace(server, high_compute=computing)
+    return "server", replace(server, admins=tuple(admins))
 
 
 def _allowed_models(raw: dict) -> tuple[str, ...] | None:

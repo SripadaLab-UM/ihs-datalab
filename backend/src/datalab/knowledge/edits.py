@@ -110,7 +110,9 @@ class EditStore:
         self._db = db
         self._lock = threading.Lock()
 
-    def add(self, path: str, base: str, text: str, *, new_page: bool, origin: dict) -> Edit:
+    def add(
+        self, path: str, base: str, text: str, *, new_page: bool, origin: dict, owner_id: int = 1
+    ) -> Edit:
         now = _now()
         edit = Edit(
             id=f"ke_{secrets.token_hex(8)}",
@@ -127,8 +129,18 @@ class EditStore:
             try:
                 self._db.execute(
                     "INSERT INTO kb_edits (id, path, base, new_page, text, status, origin_json, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)",
-                    (edit.id, path, base, int(new_page), text, json.dumps(origin), now, now),
+                    "created_at, updated_at, owner_id) VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)",
+                    (
+                        edit.id,
+                        path,
+                        base,
+                        int(new_page),
+                        text,
+                        json.dumps(origin),
+                        now,
+                        now,
+                        owner_id,
+                    ),
                 )
             except sqlite3.IntegrityError:
                 raise EditRefused(f"There's already an edit of {path} on this computer.") from None
@@ -139,19 +151,24 @@ class EditStore:
             row = self._db.execute("SELECT * FROM kb_edits WHERE id = ?", (edit_id,)).fetchone()
         return _edit(row) if row else None
 
-    def open_for(self, path: str) -> Edit | None:
+    def open_for(self, path: str, owner_id: int = 1) -> Edit | None:
+        """The person's open edit of `path` (each person has their own drafts)."""
         with self._lock:
             row = self._db.execute(
-                "SELECT * FROM kb_edits WHERE path = ? AND status NOT IN ('saved', 'discarded')",
-                (path,),
+                "SELECT * FROM kb_edits WHERE path = ? AND owner_id = ? "
+                "AND status NOT IN ('saved', 'discarded')",
+                (path, owner_id),
             ).fetchone()
         return _edit(row) if row else None
 
-    def list_open(self) -> list[Edit]:
+    def list_open(self, owner_id: int | None = None) -> list[Edit]:
+        """Open edits, newest first: everyone's, or `owner_id`'s."""
+        mine = "" if owner_id is None else "AND owner_id = ? "
         with self._lock:
             rows = self._db.execute(
-                "SELECT * FROM kb_edits WHERE status NOT IN ('saved', 'discarded') "
-                "ORDER BY updated_at DESC"
+                f"SELECT * FROM kb_edits WHERE status NOT IN ('saved', 'discarded') {mine}"
+                "ORDER BY updated_at DESC",
+                () if owner_id is None else (owner_id,),
             ).fetchall()
         return [_edit(r) for r in rows]
 
@@ -216,15 +233,16 @@ class PageEdits:
         new: bool = False,
         text: str | None = None,
         origin: dict[str, Any] | None = None,
+        owner_id: int = 1,
     ) -> Edit:
-        """The open edit of `path`, or a new one from the page as last synced.
+        """The person's open edit of `path`, or a new one from the page as last synced.
         `new`: a page that isn't in the knowledge base yet. `text`: the draft
         to start with (a suggested update), else the page as it is."""
         self._knowledge.require_available()
         if problem := editable_problem(path):
             raise EditRefused(problem)
         with self._lock:
-            found = self.store.open_for(path)
+            found = self.store.open_for(path, owner_id)
             if found is not None:
                 if text is not None:
                     raise EditRefused(
@@ -246,9 +264,13 @@ class PageEdits:
                 raise EditRefused(f"There's no {path} in the knowledge base as last synced.")
             start = text if text is not None else current if current is not None else template(path)
             _check_text(path, start)
-            return self.store.add(path, head, start, new_page=current is None, origin=origin or {})
+            return self.store.add(
+                path, head, start, new_page=current is None, origin=origin or {}, owner_id=owner_id
+            )
 
-    def from_suggestion(self, conversation_id: str, suggestion: dict[str, Any]) -> Edit:
+    def from_suggestion(
+        self, conversation_id: str, suggestion: dict[str, Any], owner_id: int = 1
+    ) -> Edit:
         """A suggested update, accepted: an edit of its page with the text
         added as a section (or a new draft page holding it). Nothing is
         shared until the person saves it."""
@@ -270,7 +292,7 @@ class PageEdits:
             "reason": suggestion.get("reason", ""),
             "evidence": suggestion.get("evidence", []),
         }
-        return self.start(path, new=current is None, text=draft, origin=origin)
+        return self.start(path, new=current is None, text=draft, origin=origin, owner_id=owner_id)
 
     def get(self, edit_id: str) -> Edit:
         edit = self.store.get(edit_id)

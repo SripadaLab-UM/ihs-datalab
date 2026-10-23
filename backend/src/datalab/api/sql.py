@@ -20,23 +20,26 @@ same SQL check, limits and logging as the agent's, and list with
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import dataclass
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from datalab import export_folders, exports
-from datalab.api.exports import ExportOut, export_out, export_target
+from datalab.api.exports import ExportOut, export_out, export_target, made_download
 from datalab.config import Settings
 from datalab.data.access_log import AccessLog, QueryRecord
 from datalab.data.catalog import Catalog, TableInfo
 from datalab.data.service import DataService
 from datalab.data.sql_drafts import SqlDrafts, TurnProposal
 from datalab.data.sqlcheck import MAX_SQL_BYTES
+from datalab.downloads import Download
 from datalab.exports import DestinationStore, ExportError, ExportSource
 from datalab.playground import Diagnostic, Playground, PlaygroundBusy, Run
 from datalab.sessions.checkpoints import UnsafePath, open_workspace_file
+from datalab.web import current_user
 
 
 @dataclass(frozen=True)
@@ -224,28 +227,63 @@ class ExportIn(BaseModel):
     destination_id: str
 
 
+class Playgrounds:
+    """One Playground per person, made the first time they use it: their
+    runs, history and results only. Someone else's ids aren't found in it."""
+
+    def __init__(self, services: SqlServices) -> None:
+        self._services = services
+        self._made: dict[int, Playground] = {}
+        self._lock = threading.Lock()
+
+    def user_of(self, playground_id: str) -> int | None:
+        """Whose Playground an id is (the access log's `who`)."""
+        with self._lock:
+            made = list(self._made.values())
+        return next((p.user_id for p in made if p.id == playground_id), None)
+
+    def for_user(self, user_id: int) -> Playground:
+        with self._lock:
+            if user_id not in self._made:
+                s = self._services
+                self._made[user_id] = Playground(
+                    s.settings, s.data, s.catalog, s.access_log, user_id=user_id
+                )
+            return self._made[user_id]
+
+
+def _own_playground(request: Request) -> Playground:
+    playgrounds: Playgrounds = request.app.state.playgrounds
+    return playgrounds.for_user(current_user(request).id)
+
+
+# The signed-in person's own Playground (app.state.playgrounds, set by the app).
+OwnPlayground = Annotated[Playground, Depends(_own_playground)]
+
+
 def build_sql_router(services: SqlServices) -> APIRouter:
     router = APIRouter(prefix="/api/sql", tags=["sql"])
     settings = services.settings
     catalog = services.catalog
-    playground = Playground(settings, services.data, catalog, services.access_log)
+    playgrounds = Playgrounds(services)
+    router.playgrounds = playgrounds  # type: ignore[attr-defined]  # app.state.playgrounds
     # Made when DataLab starts: nothing half-written from a previous run stays.
-    playground.remove_leftovers()
+    Playground(settings, services.data, catalog, services.access_log).remove_leftovers()
 
-    def find_run(run_id: str) -> Run:
+    def find_run(playground: Playground, run_id: str) -> Run:
         run = playground.get(run_id)
         if run is None:
             raise HTTPException(404, "No such run. Runs are forgotten when DataLab restarts.")
         return run
 
-    def find_record(query_id: str) -> QueryRecord:
+    def find_record(playground: Playground, query_id: str) -> QueryRecord:
         record = playground.record(query_id)
         if record is None:
             raise HTTPException(404, "No such Playground query.")
         return record
 
     @router.get("/status")
-    def status() -> SqlStatus:
+    def status(playground: OwnPlayground) -> SqlStatus:
         return SqlStatus(
             available=True,
             database_configured=settings.oracle is not None,
@@ -256,7 +294,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         )
 
     @router.post("/check")
-    def check(body: SqlIn) -> CheckOut:
+    def check(body: SqlIn, playground: OwnPlayground) -> CheckOut:
         """The SQL check's verdict, for the editor. Nothing is run or logged."""
         report = playground.check(body.sql)
         return CheckOut(
@@ -268,7 +306,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         )
 
     @router.post("/runs", status_code=202)
-    async def start_run(body: RunIn) -> RunOut:
+    async def start_run(body: RunIn, playground: OwnPlayground) -> RunOut:
         """Start a query. It runs in the background; follow it with GET /runs/{id}."""
         try:
             run = playground.start(body.sql, body.binds)
@@ -279,16 +317,20 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         return _run_out(run)
 
     @router.get("/runs/{run_id}")
-    async def get_run(run_id: str, wait: float = Query(default=0, ge=0, le=30)) -> RunOut:
+    async def get_run(
+        run_id: str,
+        playground: OwnPlayground,
+        wait: float = Query(default=0, ge=0, le=30),
+    ) -> RunOut:
         """A run's state. With `wait`, answers when it finishes or after that many seconds."""
-        run = find_run(run_id)
+        run = find_run(playground, run_id)
         await playground.wait(run, wait)
         return _run_out(run)
 
     @router.post("/runs/{run_id}/stop")
-    async def stop_run(run_id: str) -> RunOut:
+    async def stop_run(run_id: str, playground: OwnPlayground) -> RunOut:
         """Stop a query: it's cancelled in the database, and no result is kept."""
-        run = find_run(run_id)
+        run = find_run(playground, run_id)
         if run.state != "running":
             raise HTTPException(409, "That query has already finished.")
         await playground.stop(run)
@@ -297,12 +339,13 @@ def build_sql_router(services: SqlServices) -> APIRouter:
     @router.get("/results/{query_id}")
     def result(
         query_id: str,
+        playground: OwnPlayground,
         offset: int = Query(default=0, ge=0),
         limit: int = Query(default=100, ge=1, le=500),
     ) -> ResultPageOut:
         """A page of a result. Only its first `preview_rows` rows can be shown;
         the whole result is in its file, and can be exported."""
-        page = playground.page(find_record(query_id), offset, limit)
+        page = playground.page(find_record(playground, query_id), offset, limit)
         if page is None:
             raise HTTPException(404, "That query has no result to show.")
         return ResultPageOut(
@@ -316,7 +359,10 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         )
 
     @router.get("/history")
-    def history(limit: int = Query(default=100, ge=1, le=1000)) -> list[HistoryItem]:
+    def history(
+        playground: OwnPlayground,
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> list[HistoryItem]:
         """This Playground's own queries, newest first."""
         return [
             HistoryItem(
@@ -367,9 +413,9 @@ def build_sql_router(services: SqlServices) -> APIRouter:
         ]
 
     @router.post("/results/{query_id}/export", status_code=201)
-    async def export(query_id: str, body: ExportIn) -> ExportOut:
+    async def export(query_id: str, body: ExportIn, playground: OwnPlayground) -> ExportOut:
         """Export a result's file to an export folder, with a manifest saying what it is."""
-        record = find_record(query_id)
+        record = find_record(playground, query_id)
         path = playground.result_file(record)
         if path is None:
             raise HTTPException(404, "That query has no result to export.")
@@ -399,14 +445,15 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             container_path=f"playground/results/{path.name}",
         )
 
-        def run() -> exports.ExportResult:
+        def run() -> tuple[exports.ExportResult, Download | None]:
             with export_folders.open_target(target) as opened:
-                return exports.export(
+                done = exports.export(
                     opened, title="SQL Playground", tag=record.id, sources=[source], about=about
                 )
+            return done, made_download(settings, target, done, playground.id)
 
         try:
-            done = await asyncio.to_thread(run)
+            done, download = await asyncio.to_thread(run)
         except (ExportError, UnsafePath, OSError) as error:
             raise HTTPException(422, f"The export didn't finish: {error}") from error
         services.access_log.record_export(
@@ -416,7 +463,7 @@ def build_sql_router(services: SqlServices) -> APIRouter:
             contains_study_data=not practice,
             query_id=record.id,
         )
-        return export_out(target, done)
+        return export_out(target, done, download)
 
     @router.get("/proposals/{conversation_id}")
     def proposals(conversation_id: str) -> list[SqlProposalOut]:

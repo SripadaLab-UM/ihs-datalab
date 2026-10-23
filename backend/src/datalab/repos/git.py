@@ -85,7 +85,15 @@ _CONFIG = (
 ATTRIBUTES = "* -filter -diff merge -text -eol -ident -working-tree-encoding\n"
 # Environment variables git would read that no command of ours should
 # inherit, besides every GIT_* one.
-_DROPPED_ENV = ("SSH_ASKPASS", "DATALAB_MODEL_API_KEY", "DATALAB_ORACLE_PASSWORD")
+_DROPPED_ENV = (
+    "SSH_ASKPASS",
+    "DATALAB_MODEL_API_KEY",
+    "DATALAB_ORACLE_PASSWORD",
+    "DATALAB_GIT_TOKEN",
+)
+# On the lab's server, the acting person's GitHub token, for one git command
+# that talks to GitHub (credential_helper.py reads it); never inherited.
+GIT_TOKEN_ENV = "DATALAB_GIT_TOKEN"
 
 
 class GitError(RuntimeError):
@@ -404,7 +412,9 @@ class Clone:
         remote: str,
         *,
         # Called before every command that talks to the remote: DataLab
-        # makes sure the GitHub token is fresh there (it may raise).
+        # makes sure the GitHub token is fresh there (it may raise). On the
+        # lab's server it returns the acting person's token, which that one
+        # command gets (GIT_TOKEN_ENV) instead of the keychain's.
         before_network: Callable[[], object] = lambda: None,
         python: str | None = None,
         # Tests only: a remote that's a folder on this computer.
@@ -433,7 +443,9 @@ class Clone:
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[bytes]:
         if network:
-            self._before_network()
+            token = self._before_network()
+            if isinstance(token, str) and token:
+                env = {**(env or {}), GIT_TOKEN_ENV: token}
         config = (*_CONFIG, *(("protocol.file.allow=always",) if self._allow_local else ()))
         options = [part for setting in config for part in ("-c", setting)]
         if mac_tools_missing():

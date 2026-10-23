@@ -1,5 +1,7 @@
 // A conversation's workspace files: outputs, inputs attached to it, and the
 // checkpoints its files can be restored to.
+import { at } from "@/lib/base";
+
 import { ApiError, request } from "./http";
 import type { components } from "./schema";
 
@@ -10,11 +12,15 @@ export type Checkpoint = Schemas["CheckpointOut"];
 export type RestoreResult = Schemas["RestoreOut"];
 export type Attachment = Schemas["AttachmentOut"];
 export type AttachResult = Schemas["AttachResult"];
+export type Upload = Schemas["UploadOut"];
+export type UploadedFile = Schemas["UploadedFile"];
 
 /** Where the viewer loads a file from (images are shown straight from this), as of one checkpoint. */
 const fileUrl = (id: string, root: FileRoot, path: string, checkpoint?: number | null) =>
-  `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}` +
-  (checkpoint != null ? `?checkpoint=${checkpoint}` : "");
+  at(
+    `/api/conversations/${id}/files/${root}/${path.split("/").map(encodeURIComponent).join("/")}` +
+      (checkpoint != null ? `?checkpoint=${checkpoint}` : ""),
+  );
 
 export const filesApi = {
   files: (id: string, root: FileRoot = "outputs") =>
@@ -23,7 +29,10 @@ export const filesApi = {
   fileText: async (id: string, root: FileRoot, path: string, checkpoint?: number | null) => {
     const response = await fetch(fileUrl(id, root, path, checkpoint));
     if (!response.ok) throw new ApiError(response.status, "This file can't be shown.");
-    return { text: await response.text(), truncated: response.headers.get("x-datalab-truncated") === "1" };
+    return {
+      text: await response.text(),
+      truncated: response.headers.get("x-datalab-truncated") === "1",
+    };
   },
   preview: (id: string, root: FileRoot, path: string, checkpoint?: number | null) =>
     request<{ url: string; checkpoint: number }>(`/api/conversations/${id}/previews`, {
@@ -40,6 +49,28 @@ export const filesApi = {
       method: "POST",
       body: JSON.stringify({ source, sample }),
     }),
+  // The lab's server: files from the person's computer, sent by the browser.
+  startUpload: (id: string, kind: "files" | "folder") =>
+    request<Upload>(`/api/conversations/${id}/uploads`, {
+      method: "POST",
+      body: JSON.stringify({ kind }),
+    }),
+  /** One file, as it is. `path` is its name, or `<folder>/<path inside it>`. */
+  uploadFile: (id: string, upload: string, path: string, file: Blob) =>
+    request<UploadedFile>(`/api/conversations/${id}/uploads/${upload}/files`, {
+      method: "PUT",
+      body: file,
+      headers: {
+        "content-type": "application/octet-stream",
+        "x-datalab-path": encodeURIComponent(path),
+      },
+    }),
+  attachUpload: (id: string, upload: string) =>
+    request<AttachResult>(`/api/conversations/${id}/uploads/${upload}/attach`, {
+      method: "POST",
+    }),
   detach: (id: string, attachmentId: string) =>
-    request<void>(`/api/conversations/${id}/inputs/${attachmentId}`, { method: "DELETE" }),
+    request<void>(`/api/conversations/${id}/inputs/${attachmentId}`, {
+      method: "DELETE",
+    }),
 };

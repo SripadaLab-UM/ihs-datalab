@@ -33,13 +33,15 @@ export function brandIconUrls(publicDir: string = PUBLIC_DIR): Record<string, st
   );
 }
 
-/** index.html with each `data-brand` link's icon named by its hash. */
+/** index.html with each `data-brand` link's icon named by its hash. The
+ * build writes them relative ("./favicon.svg", Vite's `base: "./"`); that
+ * stays, so the page finds them under any base path. */
 export function hashBrandLinks(html: string, urls: Record<string, string>): string {
   return html.replace(/<link\b[^>]*\bdata-brand\b[^>]*>/g, (link) =>
-    link.replace(/\bhref="([^"?]+)(?:\?[^"]*)?"/, (_whole, path: string) => {
+    link.replace(/\bhref="(\.?)([^"?]+)(?:\?[^"]*)?"/, (_whole, dot: string, path: string) => {
       const hashed = urls[path];
-      if (!hashed) throw new Error(`index.html names a brand icon brandIcons.ts doesn't know: ${path}`);
-      return `href="${hashed}"`;
+      if (!hashed) throw new Error(`index.html names a brand icon brandIcons.ts doesn't know: ${dot}${path}`);
+      return `href="${dot}${hashed}"`;
     }),
   );
 }

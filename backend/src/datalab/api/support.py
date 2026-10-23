@@ -43,6 +43,7 @@ from datalab.config import Settings
 from datalab.exports import DestinationStore, ExportError
 from datalab.repos.github import GitHubAuth
 from datalab.sessions.titles import normalize_title, scrub_title
+from datalab.web import current_user
 
 log = logging.getLogger(__name__)
 
@@ -399,7 +400,11 @@ def build_support_router(services: SupportServices) -> APIRouter:
         )
 
     @router.get("/reports")
-    def list_route() -> list[SupportReportOut]:
+    def list_route(request: Request) -> list[SupportReportOut]:
+        """Saved reports. On the lab's server they're the administrators' to
+        read (api/access.py), until each records who saved it."""
+        if not current_user(request).admin:
+            return []
         found = []
         for report_id in store.ids():
             try:
@@ -444,6 +449,8 @@ def build_support_router(services: SupportServices) -> APIRouter:
     async def save_to_folder_route(report_id: str, body: SupportSaveToFolderIn) -> SupportReportOut:
         """Copy the ZIP to an export folder (practice: its own) as <report-id>.zip.
         Trying again never makes a second copy."""
+        if settings.on_server:
+            raise HTTPException(409, "On the lab's DataLab, download the report instead.")
         find(report_id)
         try:
             target = export_target(settings, services.destinations, body.destination_id)

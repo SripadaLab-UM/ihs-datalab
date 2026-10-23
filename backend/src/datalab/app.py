@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 import sqlite3
 import threading
 import time
@@ -13,11 +15,12 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel
 
 from datalab import __version__, datalock, db, updates
+from datalab.api.access import RequireOwner, owner_rules
 from datalab.api.code import build_code_router
 from datalab.api.conversations import build_conversations_router
 from datalab.api.docker import build_docker_router
@@ -35,8 +38,19 @@ from datalab.api.sql import SqlServices, build_sql_router
 from datalab.api.support import SupportServices, build_support_router
 from datalab.api.textguard import RefuseNonText
 from datalab.api.workflows import WorkflowServices, build_workflows_router
+from datalab.auth.github_web import GitHubWebSignIn, PerPersonGitHub
+from datalab.auth.routes import mount_github_sign_in
+from datalab.auth.sessions import WebSessions
+from datalab.auth.tokens import token_key
+from datalab.auth.users import User, Users
 from datalab.config import Settings
-from datalab.credentials import model_api_key, oracle_password
+from datalab.credentials import (
+    SERVER_GITHUB_CLIENT_SECRET,
+    SERVER_TOKEN_KEY,
+    model_api_key,
+    oracle_password,
+    server_secret,
+)
 from datalab.data.access_log import AccessLog
 from datalab.data.agent_tools import AgentTokenMiddleware, build_agent_tools
 from datalab.data.autocatalog import CatalogAutoBuild, CatalogState
@@ -57,6 +71,7 @@ from datalab.safety import SafetyCheck
 from datalab.safety.canary import Canaries
 from datalab.sessions import helper
 from datalab.sessions.approvals import Approvals
+from datalab.sessions.compute import engine_for, high_compute
 from datalab.sessions.containers import remove_all_session_containers
 from datalab.sessions.helper import ResearchHelper
 from datalab.sessions.inputs import AttachmentStore
@@ -70,11 +85,15 @@ from datalab.updater import Updater, busy_reason
 from datalab.web import (
     ApiProtection,
     BrowserSession,
+    CookieRules,
     SessionActivityOut,
+    SignInGate,
     add_session_routes,
     mount_web_ui,
 )
 from datalab.windows_vm import DockerDoctor
+
+log = logging.getLogger(__name__)
 
 VERSION = __version__
 
@@ -152,8 +171,23 @@ def create_app(
     conversations = ConversationStore(connection)
     attachments = AttachmentStore(connection)
     approvals = Approvals()
+    # On the lab's server everyone shares its memory: fewer conversations
+    # working at once, stopped sooner when idle ([server]).
+    server_limits = (
+        {
+            "max_running": settings.server.max_running,
+            "idle_seconds": settings.server.idle_minutes * 60,
+        }
+        if settings.server
+        else {}
+    )
     sessions = SessionManager(
-        settings, conversations, tokens, attachments=attachments, approvals=approvals
+        settings,
+        conversations,
+        tokens,
+        attachments=attachments,
+        approvals=approvals,
+        **server_limits,
     )
     services = Services(settings, data, catalog, tokens, access_log, conversations, sessions)
 
@@ -182,8 +216,20 @@ def create_app(
     processed = ProcessedData(settings, connection, access_log)
     sessions.processed = processed
     # One GitHub sign-in for both lab repos: only one object may refresh its
-    # tokens, since each refresh replaces the refresh token.
-    github = GitHubAuth(settings.repos.client_id) if settings.repos.client_id else None
+    # tokens, since each refresh replaces the refresh token. On the lab's
+    # server, each person's own, from their sign-in to DataLab: the services
+    # hold a stand-in that acts as whoever the request is for (auth/).
+    users = Users(connection) if settings.server is not None else None
+    if users is not None:
+        users.ensure_local()
+    github_web = _github_sign_in(settings, connection, users) if users is not None else None
+    github: GitHubAuth | None = None
+    if settings.repos.client_id:
+        github = (
+            PerPersonGitHub(github_web, settings.repos.client_id)
+            if settings.server is not None
+            else GitHubAuth(settings.repos.client_id)
+        )
     # Built here, before the agent tools, whose check_workflow uses the
     # workflows' check (they're included below, in their place).
     pipelines = build_pipelines_router(
@@ -230,6 +276,12 @@ def create_app(
         if manage_containers:
             # Containers from a previous run that didn't shut down cleanly.
             await remove_all_session_containers(settings.profile, settings.data_dir)
+            if high_compute(settings) is not None:
+                # And on the high-compute machine (its tunnel may be down: then later).
+                with contextlib.suppress(Exception):
+                    await remove_all_session_containers(
+                        settings.profile, settings.data_dir, engine_for(settings, "high")
+                    )
             await helper.remove_leftovers(settings)
         # Turns the last run stopped in the middle of, if it didn't close cleanly.
         sessions.end_cut_off_turns()
@@ -262,7 +314,13 @@ def create_app(
         await model_http.aclose()
         connection.close()
 
-    app = FastAPI(title="DataLab", version=VERSION, lifespan=lifespan)
+    # Every route's ids are checked against who owns them (api/access.py).
+    app = FastAPI(
+        title="DataLab",
+        version=VERSION,
+        lifespan=lifespan,
+        dependencies=[Depends(RequireOwner(owner_rules(connection)))],
+    )
     app.state.services = services
     app.state.sql_drafts = sql_drafts
     app.state.kb_suggestions = kb_suggestions
@@ -318,15 +376,25 @@ def create_app(
             titles=titles,
             processed_ready=lambda: processed.status().problem,
             processed_offered=lambda: processed.status().source != "off",
+            settings=settings,
         )
     )
     app.include_router(build_processed_router(processed))
     previews = Previews()
     app.state.previews = previews
-    app.include_router(build_files_router(conversations, sessions, previews))
-    app.include_router(build_preview_router(previews))
+    server = settings.server
+    app.include_router(
+        build_files_router(
+            conversations, sessions, previews, base=server.base_path if server else ""
+        )
+    )
+    app.include_router(
+        build_preview_router(previews, (server.public_url, server.base_path) if server else None)
+    )
     app.include_router(build_code_router(conversations, sessions))
-    app.include_router(build_inputs_router(settings, conversations, attachments, sessions))
+    app.include_router(
+        build_inputs_router(settings, conversations, attachments, sessions, access_log)
+    )
     destinations = DestinationStore(connection)
     app.include_router(
         build_exports_router(
@@ -342,11 +410,13 @@ def create_app(
     # The areas still being built. Each gets what it needs here, once, and
     # otherwise changes only its own module (and registers any session hooks
     # or mounts from there).
-    app.include_router(
-        build_sql_router(
-            SqlServices(settings, data, catalog, access_log, destinations, drafts=sql_drafts)
-        )
+    sql_router = build_sql_router(
+        SqlServices(settings, data, catalog, access_log, destinations, drafts=sql_drafts)
     )
+    # Each person's own SQL Playground (api/sql.py OwnPlayground).
+    app.state.playgrounds = sql_router.playgrounds  # type: ignore[attr-defined]
+    access_log.who = _who(connection, conversations, app.state.playgrounds)
+    app.include_router(sql_router)
     app.include_router(build_github_router(GitHubServices(settings, github)))
     app.include_router(
         build_knowledge_router(
@@ -437,8 +507,32 @@ def create_app(
     app.add_middleware(AgentTokenMiddleware, tokens=tokens)
     app.add_middleware(UpdateGateMiddleware, gate=gate)
     browser = browser or BrowserSession(settings.port)
-    app.state.browser = browser
-    app.add_middleware(ApiProtection, session=browser, enforce=protect_api)
+    # On the lab's server, people sign in with GitHub and each browser's
+    # sign-in is kept (auth/); on a person's computer, the launcher's link.
+    sign_in_gate: SignInGate = browser
+    web_sessions: WebSessions | None = None
+    if settings.server is not None and users is not None:
+        web_sessions = WebSessions(
+            connection,
+            users,
+            hours=settings.server.session_hours,
+            idle_minutes=settings.server.session_idle_minutes,
+        )
+        sign_in_gate = web_sessions
+    app.state.browser = sign_in_gate
+    if settings.on_server:
+        from datalab.server_listen import ListenerSplit
+
+        # Added before ApiProtection, so it runs after it: a refused route
+        # still gets the security headers.
+        app.add_middleware(ListenerSplit, bridge_port=settings.port)
+    app.add_middleware(
+        ApiProtection,
+        session=sign_in_gate,
+        enforce=protect_api,
+        public_origin=settings.server.public_url if settings.server else None,
+        **({"signed_out": "Sign in with GitHub."} if settings.server else {}),
+    )
 
     @app.get("/api/health")
     def health() -> dict[str, Any]:
@@ -446,6 +540,8 @@ def create_app(
             "status": "ok",
             "version": VERSION,
             "profile": settings.profile,
+            # "desktop" or "server": the signed-out page offers GitHub on a server.
+            "deployment": settings.deployment,
             "database_configured": settings.oracle is not None,
             "catalog_tables": len(catalog),
             "catalog_schemas": catalog.schemas,
@@ -475,10 +571,91 @@ def create_app(
             run = None
         return SessionActivityOut(agent_turn=sessions.any_busy(), workflow_run=run is not None)
 
-    add_session_routes(app, browser, activity)
+    site_base = settings.server.base_path if settings.server else ""
+    cookie = (
+        CookieRules(path=f"{site_base}/", secure=True, samesite="lax")
+        if settings.server
+        else CookieRules()
+    )
+    add_session_routes(
+        app,
+        sign_in_gate,
+        activity,
+        cookie=cookie,
+        deployment=settings.deployment,
+        on_sign_out=_on_sign_out(github_web, access_log) if settings.server else None,
+    )
+    if web_sessions is not None:
+        mount_github_sign_in(
+            app, github_web, web_sessions, base=site_base, cookie=cookie, audit=access_log
+        )
     # Last, so the web UI's catch-all route never shadows the API.
-    mount_web_ui(app, browser, web_dist)
+    mount_web_ui(
+        app,
+        browser,
+        web_dist,
+        base=site_base,
+        # The real server's only way in is GitHub; practice keeps the
+        # one-time link (in its service log) for testing.
+        link=settings.server is None or settings.profile == "practice",
+        web_sessions=web_sessions,
+        cookie=cookie,
+    )
     return app
+
+
+def _on_sign_out(github_web: GitHubWebSignIn | None, audit: AccessLog) -> Callable[[User], None]:
+    """Signing out of the lab's shared DataLab: logged, and the person's
+    GitHub tokens forgotten (they sign in again next time)."""
+
+    def signed_out(user: User) -> None:
+        audit.record_sign_in("sign_out", user.login, user.id)
+        if github_web is not None:
+            github_web.sign_out(user)
+
+    return signed_out
+
+
+def _who(
+    connection: sqlite3.Connection, conversations: ConversationStore, playgrounds
+) -> Callable[[str], tuple[int, str] | None]:
+    """Whose a query's session is (the access log's `who`): a conversation's
+    owner, a Playground's person, or a workflow run's starter."""
+
+    def who(session_id: str) -> tuple[int, str] | None:
+        owner = conversations.owner_of(session_id)
+        if owner is None and session_id.startswith("pg_"):
+            owner = playgrounds.user_of(session_id)
+        if owner is None:
+            row = connection.execute(
+                "SELECT owner_id FROM workflow_runs WHERE id = ?", (session_id,)
+            ).fetchone()
+            owner = row[0] if row else None
+        if owner is None:
+            return None
+        row = connection.execute("SELECT login FROM users WHERE id = ?", (owner,)).fetchone()
+        return (owner, row[0]) if row else None
+
+    return who
+
+
+def _github_sign_in(
+    settings: Settings, connection: sqlite3.Connection, users: Users
+) -> GitHubWebSignIn | None:
+    """The server's GitHub sign-in, once its client secret and token key are
+    in place (credentials.py); until then, the sign-in page says so."""
+    secret = server_secret(SERVER_GITHUB_CLIENT_SECRET)
+    key = server_secret(SERVER_TOKEN_KEY)
+    if not (secret and key and settings.repos.client_id):
+        log.warning("GitHub sign-in isn't set up: client id, client secret or token key missing")
+        return None
+    try:
+        return GitHubWebSignIn(
+            settings, connection, users, client_secret=secret, token_key=token_key(key)
+        )
+    except ValueError as error:
+        log.warning("GitHub sign-in isn't set up: %s", error)
+        return None
 
 
 def catalog_folder(settings: Settings) -> Path:

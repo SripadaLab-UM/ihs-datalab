@@ -178,8 +178,10 @@ def kind_of(path: str) -> Kind:
 
 
 def build_files_router(
-    store: ConversationStore, sessions: SessionManager, previews: Previews
+    store: ConversationStore, sessions: SessionManager, previews: Previews, base: str = ""
 ) -> APIRouter:
+    """`base`: where DataLab lives on its site ("" at the root, "/datalab"
+    on the lab's server), which the preview links it hands out start with."""
     router = APIRouter(prefix="/api/conversations/{conversation_id}", tags=["files"])
 
     def conversation_or_404(conversation_id: str):
@@ -310,7 +312,7 @@ def build_files_router(
         if number is None or body.path not in files:
             raise HTTPException(404, "No such file (files appear here after each turn).")
         token = previews.grant(_Grant(files, checkpoints, prefix(body.root)))
-        return PreviewOut(url=f"/preview/{token}/{quote(body.path)}", checkpoint=number)
+        return PreviewOut(url=f"{base}/preview/{token}/{quote(body.path)}", checkpoint=number)
 
     @router.get("/checkpoints")
     def list_checkpoints(conversation_id: str) -> list[CheckpointOut]:
@@ -351,8 +353,12 @@ def build_files_router(
     return router
 
 
-def build_preview_router(previews: Previews) -> APIRouter:
-    """Serves previewed HTML and the files it uses. No cookie needed: the link is the key."""
+def build_preview_router(previews: Previews, site: tuple[str, str] | None = None) -> APIRouter:
+    """Serves previewed HTML and the files it uses. No cookie needed: the link is the key.
+
+    `site`: on the lab's server, its public origin and base path ("https://…",
+    "/datalab"), which the page's own policy names. Behind Apache the request
+    itself says neither."""
     router = APIRouter(include_in_schema=False)
 
     @router.get("/preview/{token}/{path:path}")
@@ -375,8 +381,8 @@ def build_preview_router(previews: Previews) -> APIRouter:
             data = source.read()
         if page:
             data = clean_html(data.decode("utf-8", "replace")).encode()
-        origin = f"{request.url.scheme}://{request.url.netloc}"
-        folder = f"{origin}/preview/{token}/"
+        origin, base = site or (f"{request.url.scheme}://{request.url.netloc}", "")
+        folder = f"{origin}{base}/preview/{token}/"
         policy = "; ".join(
             [
                 # Sandboxed with no allowances: no scripts, forms, popups, or
