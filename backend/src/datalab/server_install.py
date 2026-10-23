@@ -57,6 +57,7 @@ from datalab.config import Settings
 from datalab.releases import (
     MAX_SIGNATURE_BYTES,
     MAX_SUMS_BYTES,
+    SERVER_TAG_PREFIX,
     CheckProblem,
     ChecksumMismatch,
     ReleaseSource,
@@ -243,7 +244,10 @@ class ServerInstaller:
             raise InstallFailed("This DataLab trusts no release key, so it installs no release.")
         source = self._source or ReleaseSource(self.settings.updates.repository)
         try:
-            releases, _ = releases_from(source.list(), source.repository)
+            # The server's own releases (server-v…), never a computer's.
+            releases, _ = releases_from(
+                source.list(), source.repository, tag_prefix=SERVER_TAG_PREFIX
+            )
             release = next((r for r in releases if parse_version(r.version) == wanted), None)
             if release is None:
                 raise InstallFailed(f"There's no release {version} of {source.repository}.")
