@@ -585,7 +585,12 @@ class SafetyCheck:
         problems = []
         if host.get("Privileged"):
             problems.append("privileged")
-        if "ALL" not in (host.get("CapDrop") or []):
+        # From inside: no capability can ever be gained (an empty bounding
+        # set). Docker reports --cap-drop ALL as "ALL"; Podman lists each
+        # capability it dropped instead, so the setting alone doesn't say.
+        code, status = await probe.sh("grep '^CapBnd:' /proc/self/status")
+        bounding = status.split()[-1] if code == 0 and status.strip() else ""
+        if bounding.strip("0") or (not bounding and "ALL" not in (host.get("CapDrop") or [])):
             problems.append("capabilities not dropped")
         if not any("no-new-privileges" in o for o in host.get("SecurityOpt") or []):
             problems.append("no-new-privileges not set")

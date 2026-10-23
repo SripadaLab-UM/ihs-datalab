@@ -358,3 +358,44 @@ async def test_the_safety_check_runs_a_data_session_on_the_high_compute_machine(
     where, paths = started[-1]
     assert where == HIGH.docker_host
     assert paths.root.parent == tmp_path / "compute-sessions" / "safety"
+
+
+@pytest.mark.parametrize(
+    ("cap_drop", "bounding", "sealed"),
+    [
+        (["ALL"], "0000000000000000", True),  # Docker
+        (["CHOWN", "KILL", "SETUID"], "0000000000000000", True),  # Podman lists each one
+        (["CHOWN"], "00000000a80425fb", False),  # capabilities left in
+        (["ALL"], "00000000a80425fb", False),  # whatever the setting says
+    ],
+)
+async def test_capabilities_are_checked_from_inside_the_container(
+    settings, cap_drop, bounding, sealed
+):
+    from datalab.safety import SafetyCheck
+    from datalab.safety.canary import Canaries
+    from datalab.sessions.tokens import SessionTokens
+
+    class Probe:
+        containers = type("C", (), {"network": "net"})()
+
+        async def inspect(self):
+            return {
+                "HostConfig": {"CapDrop": cap_drop, "SecurityOpt": ["no-new-privileges"]},
+                "Config": {"User": "1000:1000"},
+                "Mounts": [
+                    {"Destination": d, "RW": d in ("/work", "/codex-home")}
+                    for d in ("/work", "/codex-home", "/codex-home/config.toml")
+                ],
+                "NetworkSettings": {"Networks": {"net": {}}},
+            }
+
+        async def sh(self, command):
+            if command.startswith("grep '^CapBnd:'"):
+                return 0, f"CapBnd:\t{bounding}\n"
+            return 1, ""  # the home folder isn't there; the config can't be changed
+
+    check = SafetyCheck(settings, SessionTokens(), Canaries(), model_key=lambda: "")
+    result = await check._locked_down(Probe(), kind="research")
+    assert (result.status == "pass") is sealed, result.detail
+    assert ("capabilities not dropped" in result.detail) is not sealed
