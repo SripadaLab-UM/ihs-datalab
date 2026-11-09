@@ -59,15 +59,21 @@ export function SessionMenu({ onEnded = () => leaveApp(SESSION_ENDED_PATH) }: { 
   );
 }
 
-/** The lab's shared DataLab: who's signed in, and Sign out (no restart needed to sign in again). */
-function SignOutMenu({ name, login }: { name: string; login: string }) {
-  const out = useMutation({
+/** The lab's shared DataLab: sign out of it in this browser (it forgets the
+ *  person's GitHub sign-in too), then the page with Sign in with GitHub. */
+export function useSignOut() {
+  return useMutation({
     mutationFn: sessionApi.end,
     onSuccess: () => {
       clearAllDrafts(); // plan edits in this tab go with the sign-in
       leaveApp(SESSION_ENDED_PATH);
     },
   });
+}
+
+/** The lab's shared DataLab: who's signed in, and Sign out (no restart needed to sign in again). */
+function SignOutMenu({ name, login }: { name: string; login: string }) {
+  const out = useSignOut();
   return (
     <Shortcut kind="menu" icon="user" label="Session" title={`Signed in as ${name}`} width="w-64">
       {(close) => (

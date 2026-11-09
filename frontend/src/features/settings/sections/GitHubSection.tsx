@@ -8,6 +8,7 @@ import { pipelinesApi } from "@/api/pipelines";
 import { Button, Chip, Icon } from "@/components/ui";
 import { ago, devicePage, repoState, type RepoStatusLike } from "@/features/knowledge/repoState";
 import { refreshCatalog } from "@/features/sql/catalogRefresh";
+import { useSignOut } from "@/features/toolbar/SessionMenu";
 
 import { GITHUB_ANCHOR } from "../sectionIds";
 import { FixedOnPractice, Part } from "./Section";
@@ -23,6 +24,10 @@ const ASK_TO_SIGN_IN = "Sign in to GitHub to use it.";
  * one sign-in for whichever of them this DataLab has set up. GitHub's device flow:
  * DataLab shows a code, the person enters it on github.com, and DataLab asks GitHub
  * every few seconds until it's done.
+ *
+ * On the lab's shared DataLab (a server) the GitHub sign-in is the sign-in to DataLab
+ * itself, on GitHub's own page: Sign out here signs out of DataLab, and there's no
+ * code to enter.
  */
 export function GitHubSection() {
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
@@ -59,6 +64,8 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
   const queryClient = useQueryClient();
   const health = useQuery({ queryKey: ["health"], queryFn: api.health });
   const noCatalog = health.data?.catalog_state === "empty";
+  const server = health.data?.deployment === "server";
+  const leave = useSignOut();
   // Only when the catalog comes from the knowledge base: a folder in settings is the maintainer's.
   const catalog = useQuery({ queryKey: ["catalog-status", "github"], queryFn: () => api.catalogStatus(), enabled: noCatalog });
   const areas = new Set(github.repos.map((r) => r.area));
@@ -101,7 +108,13 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
   const flow = signIn.data;
   usePolling(flow, settle);
   const error =
-    start.error ?? cancel.error ?? signOut.error ?? switchAccount.error ?? syncKnowledge.error ?? syncPipelines.error;
+    start.error ??
+    cancel.error ??
+    signOut.error ??
+    switchAccount.error ??
+    leave.error ??
+    syncKnowledge.error ??
+    syncPipelines.error;
   const rows: RepoRowProps[] = [];
   if (areas.has("knowledge"))
     rows.push({ what: "the knowledge base", status: knowledge.data, onSync: () => syncKnowledge.mutate(), syncing: syncKnowledge.isPending });
@@ -120,11 +133,28 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
       <SignedIn
         github={github}
         rows={rows}
-        onSignOut={() => signOut.mutate()}
+        server={server}
+        onSignOut={() => (server ? leave.mutate() : signOut.mutate())}
         onSwitch={() => switchAccount.mutate()}
-        busy={signOut.isPending || switchAccount.isPending}
+        busy={signOut.isPending || switchAccount.isPending || leave.isPending}
         note={flow?.message}
       />
+    );
+  } else if (server) {
+    // Signed in to DataLab with GitHub, but that sign-in ran out or was revoked on GitHub.
+    body = (
+      <div className="mt-3 flex flex-col gap-3">
+        <p className="text-sm text-muted">
+          Your GitHub sign-in has ended, so DataLab can't read the lab's {what} (
+          <span className="font-mono text-[12.5px]">{names.join(", ")}</span>) or share your changes. Sign out, then sign
+          in again with GitHub.
+        </p>
+        <div>
+          <Button variant="primary" onClick={() => leave.mutate()} disabled={leave.isPending}>
+            {leave.isPending ? "Signing out…" : "Sign out and sign in again"}
+          </Button>
+        </div>
+      </div>
     );
   } else {
     // Why not, if there's a reason: the code expired, GitHub said no, or the sign-in ran out.
@@ -165,7 +195,10 @@ function SignInOrOut({ github }: { github: GitHubStatus }) {
       {areas.has("knowledge") && noCatalog && catalog.data?.source === "knowledge" && (
         <p className="mt-2 flex items-baseline gap-1.5 text-sm text-attn" role="status">
           <Icon name="alert" size={13} className="translate-y-[2px]" /> DataLab has no catalog of the cohorts' tables
-          yet. It comes from the knowledge base: sign in and sync it, and queries can be checked and run.
+          yet.{" "}
+          {server
+            ? "It comes from the knowledge base, which DataLab fetches when you sign in: this note goes once it's here. If it stays, press Sync on the knowledge base."
+            : "It comes from the knowledge base: sign in and sync it, and queries can be checked and run."}
         </p>
       )}
       {body}
@@ -252,6 +285,7 @@ interface RepoRowProps {
 function SignedIn({
   github,
   rows,
+  server,
   onSignOut,
   onSwitch,
   busy,
@@ -259,6 +293,7 @@ function SignedIn({
 }: {
   github: GitHubStatus;
   rows: RepoRowProps[];
+  server: boolean;
   onSignOut: () => void;
   onSwitch: () => void;
   busy: boolean;
@@ -274,9 +309,11 @@ function SignedIn({
           Signed in as <span className="font-medium">{github.account?.name || github.account?.login}</span>
           {github.account?.name && <span className="font-mono text-[12.5px] text-muted"> @{github.account.login}</span>}
         </p>
-        <Button onClick={onSwitch} disabled={busy}>
-          Switch account…
-        </Button>
+        {!server && (
+          <Button onClick={onSwitch} disabled={busy}>
+            Switch account…
+          </Button>
+        )}
         <Button onClick={onSignOut} disabled={busy}>
           Sign out
         </Button>
@@ -286,11 +323,20 @@ function SignedIn({
       {rows.map((row) => (
         <RepoRow key={row.what} {...row} />
       ))}
-      <p className="text-xs text-muted">
-        Signing out forgets the sign-in on this computer. To revoke DataLab's access altogether, use GitHub's Settings →
-        Applications. Switch account signs out, then asks GitHub for a new code: enter it while github.com is signed in
-        to the other account.
-      </p>
+      {server ? (
+        <p className="text-xs text-muted">
+          You signed in to DataLab with this GitHub account: the lab's repos are read, and your changes shared, as you.
+          Signing out signs you out of DataLab in this browser and forgets your GitHub sign-in. To use another GitHub
+          account, sign out, switch accounts on github.com, then sign in again. To revoke DataLab's access altogether, use
+          GitHub's Settings → Applications.
+        </p>
+      ) : (
+        <p className="text-xs text-muted">
+          Signing out forgets the sign-in on this computer. To revoke DataLab's access altogether, use GitHub's Settings →
+          Applications. Switch account signs out, then asks GitHub for a new code: enter it while github.com is signed in
+          to the other account.
+        </p>
+      )}
     </div>
   );
 }

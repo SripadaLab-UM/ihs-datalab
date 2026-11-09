@@ -1,4 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
@@ -17,6 +17,9 @@ vi.mock("@/api/github", () => ({
 })); // prettier-ignore
 vi.mock("@/api/knowledge", () => ({ knowledgeApi: { status: vi.fn(), sync: vi.fn() } }));
 vi.mock("@/api/pipelines", () => ({ pipelinesApi: { status: vi.fn(), sync: vi.fn() } }));
+// The server's Sign out leaves the page (SessionMenu.tsx): here it's only counted.
+const leaveDataLab = vi.hoisted(() => vi.fn());
+vi.mock("@/features/toolbar/SessionMenu", () => ({ useSignOut: () => useMutation({ mutationFn: leaveDataLab }) }));
 
 const KB = { area: "knowledge" as const, name: "SripadaLab-UM/ihs-knowledge" };
 const PIPES = { area: "pipelines" as const, name: "SripadaLab-UM/ihs-pipelines" };
@@ -232,4 +235,41 @@ it("a poll still out when the page closes changes nothing", async () => {
   view.unmount();
   await act(async () => answer({ ...out, state: "signed in", account: me }));
   expect(knowledgeApi.sync).not.toHaveBeenCalled();
+});
+
+const SERVER = { profile: "real", version: "0.4.0", status: "ok", database_configured: true, deployment: "server" } as const;
+
+it("on the lab's server, Sign out signs out of DataLab, and there's no code to switch accounts", async () => {
+  vi.mocked(api.health).mockResolvedValue({ ...SERVER, catalog_tables: 909, catalog_state: "ready" });
+  vi.mocked(githubApi.status).mockResolvedValue(github({ signed_in: true, account: me }));
+  vi.mocked(knowledgeApi.status).mockResolvedValue(signedIn);
+  vi.mocked(githubApi.signIn).mockResolvedValue({ ...out, state: "signed in", account: me });
+  leaveDataLab.mockReset().mockResolvedValue(undefined);
+  show();
+  expect(await screen.findByText(/signs you out of DataLab in this browser/)).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Switch account…" })).toBeNull();
+  expect(screen.queryByText(/on this computer/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+  await waitFor(() => expect(leaveDataLab).toHaveBeenCalled());
+  expect(githubApi.signOut).not.toHaveBeenCalled();
+});
+
+it("on the lab's server, an ended GitHub sign-in means signing in to DataLab again, not a code", async () => {
+  vi.mocked(api.health).mockResolvedValue({ ...SERVER, catalog_tables: 909, catalog_state: "ready" });
+  leaveDataLab.mockReset().mockResolvedValue(undefined);
+  show();
+  fireEvent.click(await screen.findByRole("button", { name: "Sign out and sign in again" }));
+  await waitFor(() => expect(leaveDataLab).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: "Sign in with GitHub" })).toBeNull();
+  expect(githubApi.startSignIn).not.toHaveBeenCalled();
+});
+
+it("on the lab's server, with no catalog yet, says the sign-in fetches it", async () => {
+  vi.mocked(api.health).mockResolvedValue({ ...SERVER, catalog_tables: 0, catalog_state: "empty" });
+  vi.mocked(api.catalogStatus).mockResolvedValue({ state: "empty", tables: 0, detail: "x", source: "knowledge" });
+  vi.mocked(githubApi.status).mockResolvedValue(github({ signed_in: true, account: me }));
+  vi.mocked(knowledgeApi.status).mockResolvedValue(signedIn);
+  show();
+  expect(await screen.findByText(/which DataLab fetches when you sign in/)).toBeTruthy();
+  expect(screen.queryByText(/sign in and sync it/)).toBeNull();
 });

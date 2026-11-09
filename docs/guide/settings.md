@@ -79,7 +79,11 @@ do about it.
   it can't be reached, check that first.
 - **GitHub**: who is signed in, and each lab repository's state (in sync,
   behind, no access...), with **Sign in with GitHub**, **Switch account** and
-  **Sign out**. See [Sign in to GitHub](github-sign-in.md).
+  **Sign out**. See [Sign in to GitHub](github-sign-in.md). On the lab's
+  shared DataLab your GitHub sign-in is your sign-in to DataLab, and DataLab
+  fetches the repositories each time someone signs in: **Sign out** signs you
+  out of DataLab, and there's no **Switch account** (switch accounts on
+  github.com, then sign in again).
 - **Processed data (Dropbox)**: the lab's cleaned files, with **Connect
   Dropbox**, the folder chosen (**Use this folder**, **Change folder…**), how
   many files it lists, **Refresh list** and **Disconnect**. See
