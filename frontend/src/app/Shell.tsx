@@ -11,6 +11,7 @@ import { DockerBanner } from "@/features/docker/DockerBanner";
 import { HelpLink } from "@/features/help/HelpLink";
 import { TourProvider } from "@/features/help/Tour";
 import { UpdatePill, UpdatingBanner } from "@/features/settings/UpdatePill";
+import { useCatalogAfterSignIn } from "@/features/sql/catalogRefresh";
 import { AttentionMenu } from "@/features/toolbar/AttentionMenu";
 import { MoreMenu } from "@/features/toolbar/MoreMenu";
 import { SessionMenu } from "@/features/toolbar/SessionMenu";
@@ -31,6 +32,8 @@ export function Shell() {
   const practice = health.data?.profile === "practice";
   const server = health.data?.deployment === "server";
   usePracticeTab(practice);
+  // The server pulls the knowledge base after a sign-in: show its catalog once it comes.
+  useCatalogAfterSignIn();
   const [signedOut, setSignedOut] = useState(false);
   // On a narrow window the tabs scroll: keep the one you're on in view.
   const nav = useRef<HTMLElement>(null);
