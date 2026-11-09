@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { api, type Health } from "@/api/client";
@@ -47,7 +47,9 @@ it("on the server, asks again until the sign-in's pull brings the catalog, then 
   await act(() => vi.advanceTimersByTimeAsync(CATALOG_CHECK_MS));
   expect(keys()).toEqual([]);
   await act(() => vi.advanceTimersByTimeAsync(CATALOG_CHECK_MS));
-  expect(keys()).toEqual(expect.arrayContaining(["catalog-status", "sql-catalog", "knowledge-status", "pipelines-status"]));
+  await waitFor(() =>
+    expect(keys()).toEqual(expect.arrayContaining(["catalog-status", "sql-catalog", "knowledge-status", "pipelines-status"])),
+  );
   const asked = vi.mocked(api.health).mock.calls.length;
   await act(() => vi.advanceTimersByTimeAsync(10 * CATALOG_CHECK_MS));
   expect(vi.mocked(api.health).mock.calls.length).toBe(asked); // it's there: no more asking
